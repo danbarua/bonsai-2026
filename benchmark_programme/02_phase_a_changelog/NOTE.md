@@ -1,0 +1,1 @@
+Phase A's test suite was captured together with Phase B in a single combined checkpoint tarball -- see 03_phase_b_changelog for the code (predictive_hebbian.py and the full combined test suite), which supersedes this phase in isolation.

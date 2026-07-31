@@ -179,3 +179,10 @@ cython_debug/
 plots/**/*.png
 tests/plots/**/*.png
 output/**
+
+# Bonsai-specific: raw datasets and cached experiment results are large
+# binary artifacts, regenerable from code + downloaded data. Keep folder
+# structure via .gitkeep, exclude actual content.
+datasets/*/
+!datasets/.gitkeep
+*.pkl

@@ -1,0 +1,1 @@
+This checkpoint's code (complex_hebbian_training.py, complex_hopf_field.py, test_complex_hopf_field.py) is identical to what is already captured in 06_complex_hopf_findings -- not duplicated here. This doc is the planning/briefing prompt that kicked off the audio pivot, not a distinct code milestone.
