@@ -186,3 +186,4 @@ output/**
 datasets/*/
 !datasets/.gitkeep
 *.pkl
+*.npz
