@@ -154,20 +154,53 @@ def run_one_trial(W, replica_state, node, sign, amplitude, k_coupling=1.0):
     tau_star = t_eval[tau_star_idx]
     event_aligned_valid = E_arr[tau_star_idx] >= E_MIN
 
+    def source_energy_fraction(disp):
+        """f_source(tau): fraction of total displacement energy sitting
+        at the directly-perturbed node -- diagnostic for identity
+        retention vs. genuine redistribution elsewhere in the graph."""
+        total = np.sum(disp ** 2)
+        if total < 1e-15:
+            return None
+        return float(disp[node] ** 2 / total)
+
+    def q_excluding_node(disp, exclude_idx):
+        """q^(-i): normalized energy distribution over all nodes EXCEPT
+        the stimulated one -- tests whether input identity predicts
+        response structure elsewhere, not just at the input site."""
+        mask = np.ones(len(disp), dtype=bool)
+        mask[exclude_idx] = False
+        sub = disp[mask]
+        norm = np.linalg.norm(sub)
+        if norm < Q_NORM_THRESHOLD:
+            return None
+        return sub ** 2 / np.sum(sub ** 2)
+
     def get_outputs_at(idx):
         shift = np.angle(np.mean(np.exp(1j * (theta_pert_tau[:, idx] - theta_base_tau[:, idx]))))
         actual_disp = P @ np.angle(np.exp(1j * (theta_pert_tau[:, idx] - theta_base_tau[:, idx] - shift)))
         tangent_disp = epsilon * (P @ delta_tau[:, idx])
+        residual_disp = actual_disp - tangent_disp  # z_eps(tau): finite-minus-tangent, the cleanest nonlinear object
+
         q_finite = normalized_energy(actual_disp)
         q_tangent = normalized_energy(tangent_disp)
+        q_residual = normalized_energy(residual_disp)
+        q_finite_excl = q_excluding_node(actual_disp, node)
         r_finite = signed_direction(actual_disp)
+        f_source = source_energy_fraction(actual_disp)
+
         J_tan = None
         if q_finite is not None and q_tangent is not None:
-            J_tan = float(jensenshannon(q_finite, q_tangent) ** 2)  # jensenshannon returns sqrt(JSD); square back to JSD
-        return {'q': q_finite, 'r': r_finite, 'J_tan': J_tan}
+            J_tan = float(jensenshannon(q_finite, q_tangent) ** 2)
 
-    event_aligned = get_outputs_at(tau_star_idx) if event_aligned_valid else {'q': None, 'r': None, 'J_tan': None}
+        return {'q': q_finite, 'q_tangent': q_tangent, 'q_residual': q_residual,
+                'q_excl_node': q_finite_excl, 'r': r_finite, 'J_tan': J_tan,
+                'f_source': f_source}
+
+    empty = {'q': None, 'q_tangent': None, 'q_residual': None, 'q_excl_node': None,
+             'r': None, 'J_tan': None, 'f_source': None}
+    event_aligned = get_outputs_at(tau_star_idx) if event_aligned_valid else empty
     fixed_time = get_outputs_at(len(t_eval) - 1)  # tau = T
+    initial = get_outputs_at(0)  # tau = 0, for f_source baseline
 
     return {
         'tau_star': tau_star,
@@ -176,8 +209,17 @@ def run_one_trial(W, replica_state, node, sign, amplitude, k_coupling=1.0):
         'event_aligned_q': event_aligned['q'],
         'event_aligned_r': event_aligned['r'],
         'event_aligned_J_tan': event_aligned['J_tan'],
+        'event_aligned_q_tangent': event_aligned['q_tangent'],
+        'event_aligned_q_residual': event_aligned['q_residual'],
+        'event_aligned_q_excl_node': event_aligned['q_excl_node'],
+        'event_aligned_f_source': event_aligned['f_source'],
         'fixed_time_q': fixed_time['q'],
         'fixed_time_r': fixed_time['r'],
         'fixed_time_J_tan': fixed_time['J_tan'],
+        'fixed_time_q_tangent': fixed_time['q_tangent'],
+        'fixed_time_q_residual': fixed_time['q_residual'],
+        'fixed_time_q_excl_node': fixed_time['q_excl_node'],
+        'fixed_time_f_source': fixed_time['f_source'],
+        'initial_f_source': initial['f_source'],
         'peak_C': float(np.nanmin(C_arr)),  # most negative = strongest directional reversal
     }
