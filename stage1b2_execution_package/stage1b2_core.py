@@ -170,10 +170,20 @@ def run_one_trial(W, replica_state, node, sign, amplitude, k_coupling=1.0):
     def q_excluding_node(disp, exclude_idx):
         """q^(-i): normalized energy distribution over all nodes EXCEPT
         the stimulated one -- tests whether input identity predicts
-        response structure elsewhere, not just at the input site."""
-        mask = np.ones(len(disp), dtype=bool)
-        mask[exclude_idx] = False
-        sub = disp[mask]
+        response structure elsewhere, not just at the input site.
+
+        CRITICAL: the source coordinate is ZEROED, not deleted, so every
+        trial's output vector remains defined over the same full,
+        globally-aligned node coordinate system regardless of which node
+        was stimulated. Physically deleting the coordinate (e.g. via
+        boolean masking that shortens the vector) would misalign node
+        identity across trials that stimulated different nodes -- index j
+        in one shortened vector would not correspond to the same graph
+        node as index j in another, and JSD/d_q comparisons between them
+        would be comparing different node identities, not the same
+        node's response under different inputs."""
+        sub = disp.copy()
+        sub[exclude_idx] = 0.0
         norm = np.linalg.norm(sub)
         if norm < Q_NORM_THRESHOLD:
             return None
