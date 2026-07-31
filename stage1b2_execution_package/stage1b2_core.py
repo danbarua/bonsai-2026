@@ -16,6 +16,10 @@ from bonsai_stage1b_pilot_findings.md:
   unit-normalized) both computed and retained
 - J_tan(tau) = JSD(q_finite(tau), q_tangent(tau)) kept separate from
   d_q(a,b) = sqrt(JSD(q_a,q_b)), the output-map distance
+- Raw residual norm ||z_eps(tau)|| retained alongside the normalized
+  q_residual, so the residual mapping's absolute materiality (not just
+  its normalized geometric shape) can be reported and checked against
+  the numerical-validity and nonlinear-departure thresholds.
 """
 import numpy as np
 from scipy.integrate import solve_ivp
@@ -180,6 +184,7 @@ def run_one_trial(W, replica_state, node, sign, amplitude, k_coupling=1.0):
         actual_disp = P @ np.angle(np.exp(1j * (theta_pert_tau[:, idx] - theta_base_tau[:, idx] - shift)))
         tangent_disp = epsilon * (P @ delta_tau[:, idx])
         residual_disp = actual_disp - tangent_disp  # z_eps(tau): finite-minus-tangent, the cleanest nonlinear object
+        residual_norm = float(np.linalg.norm(residual_disp))  # ABSOLUTE materiality, not just normalized shape
 
         q_finite = normalized_energy(actual_disp)
         q_tangent = normalized_energy(tangent_disp)
@@ -194,10 +199,10 @@ def run_one_trial(W, replica_state, node, sign, amplitude, k_coupling=1.0):
 
         return {'q': q_finite, 'q_tangent': q_tangent, 'q_residual': q_residual,
                 'q_excl_node': q_finite_excl, 'r': r_finite, 'J_tan': J_tan,
-                'f_source': f_source}
+                'f_source': f_source, 'residual_norm': residual_norm}
 
     empty = {'q': None, 'q_tangent': None, 'q_residual': None, 'q_excl_node': None,
-             'r': None, 'J_tan': None, 'f_source': None}
+             'r': None, 'J_tan': None, 'f_source': None, 'residual_norm': None}
     event_aligned = get_outputs_at(tau_star_idx) if event_aligned_valid else empty
     fixed_time = get_outputs_at(len(t_eval) - 1)  # tau = T
     initial = get_outputs_at(0)  # tau = 0, for f_source baseline
@@ -213,6 +218,7 @@ def run_one_trial(W, replica_state, node, sign, amplitude, k_coupling=1.0):
         'event_aligned_q_residual': event_aligned['q_residual'],
         'event_aligned_q_excl_node': event_aligned['q_excl_node'],
         'event_aligned_f_source': event_aligned['f_source'],
+        'event_aligned_residual_norm': event_aligned['residual_norm'],
         'fixed_time_q': fixed_time['q'],
         'fixed_time_r': fixed_time['r'],
         'fixed_time_J_tan': fixed_time['J_tan'],
@@ -220,6 +226,7 @@ def run_one_trial(W, replica_state, node, sign, amplitude, k_coupling=1.0):
         'fixed_time_q_residual': fixed_time['q_residual'],
         'fixed_time_q_excl_node': fixed_time['q_excl_node'],
         'fixed_time_f_source': fixed_time['f_source'],
+        'fixed_time_residual_norm': fixed_time['residual_norm'],
         'initial_f_source': initial['f_source'],
         'peak_C': float(np.nanmin(C_arr)),  # most negative = strongest directional reversal
     }
