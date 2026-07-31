@@ -85,7 +85,30 @@ where a shared, hardened library actually earns its cost.
 - **`tarballs/`** -- the original packaged deliverables (one per major
   milestone across the whole project) that `benchmark_programme/` and
   parts of `experiments/` were decanted from. Kept for provenance; not
-  needed for day-to-day work once decanted.
+  needed for day-to-day work once decanted. A newer sub-pattern,
+  `tarballs/*_handoff/` (e.g. `lattice_construction_handoff/`,
+  `random_control_handoff/`), holds small recovery/verification
+  packages -- a design-doc excerpt plus historical cached data, used to
+  reconstruct or verify already-committed `src/bonsai/` code against a
+  known result -- distinct from the frozen milestone deliverables above.
+  The large binary data in these (`.pkl`/`.npz`) is gitignored and kept
+  local only; only the small provenance document gets committed. This
+  data is for verification of existing, committed code, not a shortcut
+  for generating new, independently-unreproducible claims -- see
+  `docs/PROJECT_MEMORY.md` Part 2, principle 16.
+- **`tests/`** -- pytest verification of specific, already-documented
+  quantitative claims (a `FINDINGS.md` claim, a construction's byte-exact
+  match against a historical cached artifact), not a general test suite
+  for `src/bonsai/` in the ordinary sense. Two-tier convention,
+  established starting with `test_stage0_simulator_calibration.py`: Tier
+  1 is self-contained structural tests on small synthetic data, always
+  run; Tier 2 is historical-artifact verification, using
+  `pytest.mark.skipif` to skip cleanly when the needed local-only data
+  (gitignored `.pkl`/`.npz` files, or `datasets/*/` itself) isn't
+  present, rather than failing or fabricating a result. Slow, full-grid
+  reproduction checks (minutes, not seconds) are tagged
+  `@pytest.mark.slow` and excluded by default
+  (`pytest -m "not slow"`); omit that flag for the full suite.
 
 ## Running things
 

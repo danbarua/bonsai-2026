@@ -151,6 +151,37 @@ combination benefit survived duplicate/random/shuffled controls.
     fully (including reversing its own prior recommendations when a
     reviewer's counter-argument was sound) rather than defend earlier
     work reflexively.
+15. **A diff confirming a code consolidation lost nothing establishes
+    completeness, not behavioral equivalence.** Two `NOTE.md` files
+    (`stage0_simulator_calibration/`, `stage1a_infinitesimal_response/`)
+    stated the consolidation into `src/bonsai/dynamics/` was "confirmed
+    by diff... not assumed," phrased in a way that read as uniform
+    behavioral verification across all three consolidated files. Checked
+    file by file: `graph_oscillator_field.py` and
+    `degree_preserving_rewiring.py` were independently verified
+    (multistability/spectral-gap/solver-cross-validation reproduction;
+    byte-exact rewired-construction reproduction, respectively);
+    `matched_sparsity_ablation.py` was not, and turned out to actively
+    disagree with the historical cached result it had been assumed
+    equivalent to. A completeness check (nothing lost) and a behavioral
+    check (still does the same thing) are different claims and need
+    separate verification, not one standing in for the other.
+16. **Historical data recovered specifically to verify an
+    already-committed claim must not be repurposed as generative input
+    for a new, unverified one.** Caught mid-session: after recovering
+    `stage1a_all_classes.pkl` and `kmnist_class_topologies_200.pkl`
+    (sandbox-originated, explicitly scoped by their own handoff README
+    as "for independent verification only -- keep local, do not
+    commit") to check the newly-written `lattice_construction.py`
+    against a historical number, the same files were about to be used to
+    generate a NEW, seemingly-official "Stage 1B pilot across all 10
+    classes" result -- exactly the "inline code / hand-fed external
+    data, nobody else can reproduce it" pattern this project's whole
+    restructuring exists to close, recreated fresh rather than avoided.
+    Interrupted before any such result was produced. The distinction
+    that matters is verification of existing, committed code versus
+    generation of a new claim -- not merely whether the data happens to
+    be gitignored.
 
 ## Part 3: The dynamics-as-computation programme
 
@@ -359,14 +390,47 @@ Full details: `stage1b2_execution_package/STAGE1B2_FINDINGS.md`.
   numbered seeds per permutation test for reproducible, non-overlapping
   streams).
 
-**Known gap, deliberately left for stress-testing**: this PyCharm
-project does not have the cached intermediate pickle files (topology
-models, etc.) that exist in Claude's own sandbox environment.
-Regenerating those from the datasets here, using the code now properly
-organized in `experiments/` and `benchmark_programme/`, is a planned
-stress test of whether a fresh, context-less agent can actually
-reproduce the pipeline from raw data using only what's in this
-repository -- which is the whole point of this restructuring.
+**Construction-pipeline reproducibility, substantially closed for class
+0 (stress test largely passed)**: the cached intermediate pickle files
+(topology models, etc.) from Claude's own sandbox environment were never
+committed to this PyCharm project by design -- the open question was
+whether a fresh, context-less agent could reconstruct the pipeline from
+raw data using only what's in this repository. For KMNIST class 0, this
+is now settled for three of the four matched graph constructions:
+`src/bonsai/dynamics/learned_topology_construction.py` (T),
+`degree_preserving_rewiring.py` (rewired), and `lattice_construction.py`
+(lattice) all reconstruct their respective constructions from
+`datasets/kmnist/` byte-exact (to float64 machine epsilon) against the
+historical cached artifact, confirmed by
+`tests/test_learned_topology_construction.py`,
+`tests/test_construction_driver.py`, and
+`tests/test_lattice_construction.py`'s Tier-2 tests.
+`matched_sparsity_ablation.py` (random) is the exception: the
+currently-in-use code implements a different, intentional algorithm that
+does not match the historical cached 'random' construction, and a
+separate reconstruction attempt (`historical_matched_sparsity_random.py`)
+is only partially successful -- see the open items below.
+`src/bonsai/dynamics/construction_bundle.py` ties all four together into
+one per-class bundle, but has only been built and verified for class 0.
+
+**Construction-recovery effort, open items** (priority order):
+1. Extend `construction_bundle.py` past class 0 to all 10 KMNIST
+   classes -- not yet attempted; explicitly deferred pending review each
+   time the scope question has come up.
+2. `random`'s exact historical edge-count rule and RNG seed remain
+   unrecovered. Two known realizations (552 and 545 unique edges, out of
+   T's 1051) don't exactly match any deterministic candidate rule
+   tested (floor/round/ceil of half T's edge count, a fixed fraction of
+   the eligible pool, a count tied to ink-active-node count). Structural
+   equivalence IS established (the correct rescaling formula, an
+   independently-sampled support, values drawn from T's own weight
+   pool) -- byte-exact reproduction is not, despite a 600-way
+   seed/call-order sweep against the known raw artifact. Full account in
+   `historical_matched_sparsity_random.py`'s docstring.
+3. Whether Stage 1A's own T-vs-random comparison specifically needs
+   re-running against the now-verified code, given `random`'s
+   consolidation is confirmed NOT equivalent to history (see
+   `stage1a_infinitesimal_response/NOTE.md`) -- not yet decided.
 
 ## How to use this document
 
