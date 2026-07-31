@@ -160,3 +160,58 @@ a longer window.
 class 0's topology and its active-node set, normalized to equal mean
 weighted degree, saved to `kmnist_c0_controls_normalized.npz`. Linearity
 check results in `kmnist_c0_linearity_check.npz`.
+
+## Independent verification (post-consolidation)
+
+This stage's original driver code was consolidated into
+`src/bonsai/dynamics/graph_oscillator_field.py` (see `NOTE.md`), confirmed
+via diff at the time to not have lost any code -- but that check never
+confirmed the consolidated code still produces this stage's own
+quantitative claims. It has now been verified directly, using only
+`bonsai.dynamics.graph_oscillator_field`'s importable functions and KMNIST
+class 0's T topology (the same construction described above; no
+stage-0-specific topology cache exists in the current checkout, so this
+reused `class0_constructions.pkl`'s `T` matrix, generated for Stage
+1B.2). Verification code: `tests/test_stage0_simulator_calibration.py`.
+
+**Multistability, reproduced.** Five seeds (0-4 -- chosen for no reason
+beyond being the first five non-negative integers; the original run's
+seeds are not recorded anywhere in this document or in
+`docs/PROJECT_MEMORY.md`) via `find_equilibrium_lbfgs`, deduplicated with
+the same residual-after-rotational-alignment rule used throughout this
+project (`< 0.05`, the threshold `stage1b_taxonomy.py`'s
+`same_attractor()` cites as matching this stage's rule): **5 of 5
+distinct**. This reproduces the finding (5 distinct equilibria from 5
+initializations of T) but not necessarily the same 5 equilibria as the
+original run, since the original seeds are unrecorded -- the same class
+of caveat already noted for Stage 1B's topology-cache substitution.
+
+**Stability confirmed, and the spectral gap now has an actual number.**
+Every one of the 5 recovered equilibria was confirmed via
+`GraphOscillatorField.jacobian_at`: exactly one near-zero eigenvalue (the
+global rotation mode), zero negative eigenvalues -- genuine stable
+equilibria, not artifacts, matching the qualitative description already
+given in `docs/PROJECT_MEMORY.md`. The spectral gap itself (smallest
+positive eigenvalue -- distance from the zero mode) had never been given
+a number anywhere in this project before this check: **5.3x10^-3 to
+5.8x10^-3 across the five equilibria**, against a largest eigenvalue of
+~13.27 -- genuinely small in relative terms (roughly three orders of
+magnitude below the spectrum's upper end), replacing the previously
+qualitative-only "small spectral gap" language (e.g.
+`find_equilibrium_lbfgs`'s own docstring, and the
+`FORCE_CONVERGED_THRESHOLD` justification in `stage1b_taxonomy.py`) with
+a measured range.
+
+**RK45 vs. DOP853, reproduced -- and a gap closed in how it was checked.**
+`joint_tangent_matrix_response`'s `method=` parameter has carried a
+docstring since it was written stating it is "exposed so an independent
+solver family (e.g. DOP853) can be substituted for cross-validation
+without duplicating this function" -- but a repository-wide search
+confirms `method='DOP853'` was never actually passed anywhere in this
+codebase before this verification. The claim itself was true and is now
+genuinely exercised, not just asserted: running the identical
+tangent-matrix response (KMNIST class-0 T, seed=2000 initial condition,
+node 0, t in [0, 2.5]) under both `method='RK45'` and `method='DOP853'`
+(rtol=1e-8, atol=1e-10) gives a maximum absolute difference in S(t) of
+1.4x10^-9 -- agreement to roughly 9 decimal places, comfortably exceeding
+the originally claimed 4.

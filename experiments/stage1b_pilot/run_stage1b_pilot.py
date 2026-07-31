@@ -10,11 +10,19 @@ import time
 import sys
 import os
 
-sys.path.insert(0, '/home/claude/oscillator_field')
-os.chdir('/home/claude/oscillator_field')
+sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 from stage1b_taxonomy import classify_one_trial
 
-with open('stage1a_all_classes.pkl', 'rb') as f:
+# NOTE: the original 'stage1a_all_classes.pkl' (produced in Claude's sandbox
+# environment) does not exist in this repo checkout. Substituted with
+# class0_constructions.pkl (cached under stage1b2_structured_transformation/
+# results/), which is structurally identical for class 0 (same keys:
+# data['n_active'], data['constructions']['T']) and is the same KMNIST
+# class-0 topology used throughout the dynamics-as-computation lineage.
+# Only class 0 is used below, so this is a full substitute for this script's
+# purposes, not merely a partial one.
+with open(os.path.join(os.path.dirname(os.path.abspath(__file__)),
+                        '../stage1b2_structured_transformation/results/class0_constructions.pkl'), 'rb') as f:
     all_data = pickle.load(f)
 
 CLASS = 0

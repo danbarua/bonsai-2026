@@ -775,3 +775,63 @@ table.
 (classification machinery, integration-structure fix applied). Full
 results in `stage1b_pilot_results.pkl`, per-trial log in
 `stage1b_pilot_progress.log`.
+
+## Reproducibility note (independent re-run)
+
+This pilot was independently re-executed against a separate checkout of
+this codebase. The original script's sandbox-specific paths
+(`/home/claude/oscillator_field`, from Claude's ephemeral development
+environment) do not exist outside that sandbox and were replaced with
+paths relative to the script's own location -- a portability fix, not a
+change to the classification logic or trial grid.
+
+**Topology input.** The original `stage1a_all_classes.pkl` (produced in
+that sandbox) is not present in the re-run's checkout. Substituted
+`experiments/stage1b2_structured_transformation/results/class0_constructions.pkl`,
+confirmed structurally identical for class 0 (`data['n_active']`,
+`data['constructions']['T']`) via the same access pattern already used
+by `run_stage1b2.py`. Since this pilot only ever uses class 0
+(`CLASS = 0`), this is a complete substitute for this run, not a partial
+one.
+
+**Continuous dynamics: fully reproduced.** All 72 peak-amplification
+values in the amplitude-response map above matched the reported figures
+to the same decimal place, across every (IC, node, sign, amplitude)
+combination -- including the most extreme case, IC=2000/median/-eps,
+where the reported 865.7, 2860.4, 1025.1, 266.8, 70.6, 18.1 reproduced as
+865.68, 2860.44, 1025.11, 266.76, 70.63, 18.08.
+
+**Discrete outcome taxonomy: did not fully reproduce.**
+
+| Outcome | This document | Independent re-run |
+|---|---|---|
+| Decayed to same attractor | 44 | 39 |
+| Persistent transient, same attractor | 25 | 23 |
+| Baseline-only converged (asymmetric) | 3 | 10 |
+| Different equilibria | 0 | 0 |
+| No equilibrium recovered within horizon | 0 | 0 |
+
+The mechanism is precisely identifiable, not merely a mismatch: every one
+of the re-run's 10 `baseline_only_converged` trials has a perturbed-
+trajectory force norm between 1.0x and 1.6x `FORCE_CONVERGED_THRESHOLD`
+(1e-5) -- exactly the boundary `classify_terminal_state`'s own docstring
+already flags as marginal ("relaxed from 1e-6 after direct diagnostic:
+L-BFGS reports genuine convergence... at force~1.5e-6 for this system's
+small-spectral-gap graphs -- 1e-6 was stricter than the optimizer's own
+achievable precision here"). This is environment-sensitive boundary
+fragility -- scipy/BLAS/platform-dependent differences in L-BFGS's
+achieved force norm on these flat, slow-converging potential landscapes
+-- not a bug in either the original run or this reproduction: the
+underlying trajectories are the same trajectories, as the exactly-
+reproduced peak-amplification values confirm. Only the pass/fail call
+against a threshold sitting within the solver's own noise floor differs.
+
+**What this does not touch.** The finding load-bearing for this
+document's conclusions is unaffected: both runs agree exactly on 0
+`different_equilibria` and 0 `no_equilibrium_recovered_within_horizon` --
+no trial, in either run, produced two recovered but distinct phase-locked
+equilibria, and no trial failed to converge on both sides. The specific
+3-vs-10 count of asymmetric convergence, and the per-IC breakdowns built
+on it (22/12/2 and 32/3/1), should be read as sensitive to solver/
+environment precision at this specific threshold, not as a stable,
+environment-independent property of the pilot.
