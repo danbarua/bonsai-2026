@@ -21,7 +21,7 @@ caught as degenerate before any inferential result was drawn from it).
 | Response representation | Delta_map | p_MC |
 |---|---:|---:|
 | Finite response | 0.3505 | 1/10,001 ~ 0.00010 |
-| Stimulated node excluded | 0.3418 | 1/10,001 ~ 0.00010 |
+| Stimulated node excluded (common-support mask across all trials) | 0.3418 | 1/10,001 ~ 0.00010 |
 | Tangent-only response | 0.3248 | 1/10,001 ~ 0.00010 |
 | Nonlinear residual (finite minus tangent) | 0.3896 | 1/10,001 ~ 0.00010 |
 
@@ -121,29 +121,41 @@ residuals remain physically small.
 ## What this establishes, precisely
 
 **The mapping is not reducible to the directly stimulated coordinate.**
-Excluding the perturbed node from the output representation entirely
-barely moves the effect (0.3505 -> 0.3418), with identical
-floor-level significance. If the result were merely "the poked node
-still shows the biggest signal," removing that node should have gutted
-it. It didn't.
 
-Stimulated-node exclusion was implemented by setting the source
-coordinate to zero and renormalizing over the remaining nodes while
-preserving the common global node coordinate system across all trials
--- not by physically deleting the coordinate, which would misalign node
-identity across trials that stimulated different nodes (a coordinate
-appearing at index j in one shortened vector would not correspond to the
-same graph node as index j in another, and the d_q/JSD comparisons would
-then be comparing different node identities rather than the same node's
-response under different inputs). This was verified directly on the
-implementation (vector length preserved, source coordinate exactly
-zeroed, all other coordinates unchanged) before the 432 trials were
-re-run under the corrected version. The corrected result reproduces the
-original exactly (Delta_map=0.3418, p_MC~0.00010) -- the coordinate-
-alignment issue did not, in this instance, change the substantive
-finding, but confirming that required actually fixing and re-running the
-analysis rather than assuming the original implementation was already
-correct.
+An earlier version of this exclusion test zeroed only the *actually
+stimulated* coordinate in each trial -- which, even with correct
+coordinate alignment (the previous correction), leaked node identity
+through a different channel: the *position* of the forced zero was
+itself a deterministic, input-specific signature (a low-node trial's
+zero always sits at index 17, a median-node trial's at 363, a high-node
+trial's at 129), detectable by JSD without any genuine propagated
+response elsewhere in the graph. This was caught before being reported
+as a clean result.
+
+The corrected construction uses a **common exclusion mask, identical
+across every trial regardless of which node was actually stimulated**:
+all three candidate source coordinates {i_low, i_median, i_high} = {17,
+363, 129} are zeroed in every trial's output vector, and the remainder
+renormalized over the shared support. No trial's exclusion pattern
+differs from any other's, so the output cannot reveal which node was
+stimulated merely through which coordinates are missing -- only through
+the actual response pattern over the common remaining nodes. This is a
+deterministic post-processing correction on the already-saved
+event_aligned_q vectors (verified directly: all three source coordinates
+exactly zero in every checked trial, renormalization sums to 1
+correctly) -- no re-integration of the 432 trajectories was needed.
+
+**Result: Delta_map = 0.3418, p_MC = 1/10,001 ~ 0.00010** -- still at the
+permutation floor, and numerically close to both prior (uncorrected and
+partially-corrected) versions. Excluding all three candidate source
+nodes from every trial's output -- not just the one actually stimulated,
+and with no deterministic exclusion-pattern signature left for JSD to
+exploit -- still leaves a significant, reproducible node-discriminative
+mapping over the remaining nodes. **The source-retention objection is
+now resolved cleanly**: displacement energy redistributes substantially
+away from the stimulated node (see below), and the resulting spatial
+pattern over nodes other than any of the three candidate sources still
+reproducibly encodes which node was stimulated.
 
 **Source energy genuinely redistributes over the response window**, though
 mean and median diverge substantially at the two later time points (the
@@ -258,6 +270,12 @@ corrected permutation scheme, parallelized), `analyze_stage1b2_diagnostics.py`
 (the four diagnostic decompositions plus Holm-corrected factor-specific
 tests, parallelized), `analyze_stage1b2_residual_materiality.py`
 (residual validity and magnitude summary by amplitude and perturbation
-time). Raw results in `stage1b2_results.pkl`; primary analysis in
+time), `analyze_stage1b2_common_support_exclusion.py` (the corrected
+source-exclusion diagnostic -- a common exclusion mask across all three
+candidate source nodes, applied identically to every trial regardless of
+which node was actually stimulated, run as deterministic post-processing
+on the already-saved event_aligned_q vectors, no re-integration needed).
+Raw results in `stage1b2_results.pkl`; primary analysis in
 `stage1b2_final_analysis.pkl`; diagnostic decomposition in
-`stage1b2_diagnostics.pkl`.
+`stage1b2_diagnostics.pkl`; common-support exclusion result in
+`stage1b2_common_support_exclusion.pkl`.
