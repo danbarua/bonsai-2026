@@ -22,3 +22,8 @@ packages = ["src/bonsai"]
 dev = [
     "pytest>=9.1.1",
 ]
+
+[tool.pytest.ini_options]
+markers = [
+    "slow: full-grid reproduction checks (minutes, not seconds); deselect with -m \"not slow\"",
+]
