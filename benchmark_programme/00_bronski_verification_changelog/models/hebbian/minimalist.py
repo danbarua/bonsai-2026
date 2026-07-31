@@ -1,8 +1,6 @@
-from beartype import beartype
 import numpy as np
 from numpy.typing import NDArray
 
-@beartype
 def update_hebbian_kuramoto(phases: NDArray[np.float64], 
                             weights: NDArray[np.float64], 
                             frequencies: NDArray[np.float64], 

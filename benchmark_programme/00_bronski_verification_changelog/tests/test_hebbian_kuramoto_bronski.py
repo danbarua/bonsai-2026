@@ -20,10 +20,8 @@ small frequency differences, breaking the degeneracy.
 import unittest
 import numpy as np
 
-from dynamics.oscillators import LayeredOscillatorState
-from models.hebbian import HebbianKuramotoOperator
-from models.hebbian.minimalist import update_hebbian_kuramoto
-from maths.graphs import GraphLaplacian
+from .. import maths
+from ..models import HebbianKuramotoOperator, LayeredOscillatorState, update_hebbian_kuramoto
 
 
 class TestMinimalistHebbianKuramoto(unittest.TestCase):
@@ -180,7 +178,7 @@ class TestHebbianKuramotoBronskiStability(unittest.TestCase):
 
     def _bronski_predicts_stable(self, phi_star: float) -> bool:
         phases = np.array([0.0, phi_star])
-        gl = GraphLaplacian.from_bronski_stability_matrix(phases, alpha=self.alpha)
+        gl = maths.GraphLaplacian.from_bronski_stability_matrix(phases, alpha=self.alpha)
         return gl.is_bronski_stable
 
     def _simulate_from_perturbation(self, phi_star: float, perturbation: float,
@@ -233,7 +231,7 @@ class TestHebbianKuramotoBronskiStability(unittest.TestCase):
         a stable fixed point for positive coupling (the trivial classical result)."""
         n = 4
         phases_arr = np.zeros(n)
-        gl = GraphLaplacian.from_bronski_stability_matrix(phases_arr, alpha=self.alpha)
+        gl = maths.GraphLaplacian.from_bronski_stability_matrix(phases_arr, alpha=self.alpha)
         self.assertTrue(gl.is_bronski_stable)
 
         # Confirm against real simulated dynamics too, from a small perturbation.

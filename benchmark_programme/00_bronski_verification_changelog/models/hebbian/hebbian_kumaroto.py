@@ -2,8 +2,7 @@ import numpy as np
 from dataclasses import dataclass, field
 from typing import Any, Optional, Protocol, TypeVar, Generic
 from numpy.typing import NDArray
-from beartype import beartype
-from dynamics.oscillators import StateMutation, LayeredOscillatorState
+from ...dynamics import *
 
 @dataclass
 class HebbianKuramotoOperator(StateMutation[LayeredOscillatorState]):
