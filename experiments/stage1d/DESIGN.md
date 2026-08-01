@@ -68,14 +68,15 @@ being folded into the primary Delta_map comparison alone:
   above).
 - **Stability**: within-graph SD of Delta_map across the matched
   trajectories is the formal stability measure, always reported. CV
-  (SD/mean) is reported only when a graph's mean Delta_map exceeds a
-  prespecified positive floor (proposed: 0.05, roughly T's own between-
-  trajectory SD from Stage 1C -- confirm before locking) -- CV becomes
-  unstable or misleading as the mean approaches zero, which a construction
-  showing weak or no structured mapping plausibly could. Between-
-  realization variance (stochastic controls) and within-trajectory SD
-  are measured at different levels and are reported with that level
-  labeled explicitly, not treated as directly comparable numbers.
+  (SD/mean) is reported only when a graph's mean Delta_map exceeds
+  **0.05** (locked -- roughly T's own between-trajectory SD from
+  Stage 1C, chosen so CV is only computed where the mean is comfortably
+  away from zero) -- CV becomes unstable or misleading as the mean
+  approaches zero, which a construction showing weak or no structured
+  mapping plausibly could. Between-realization variance (stochastic
+  controls) and within-trajectory SD are measured at different levels
+  and are reported with that level labeled explicitly, not treated as
+  directly comparable numbers.
 - **Linear vs. nonlinear composition**: tangent-only and residual
   Delta_map, checking whether any topology-specific effect lives in the
   linear or nonlinear part of the response.
@@ -123,6 +124,15 @@ producing many exact ties), role-matched intervention is declared
 selecting three tied nodes and calling them "low/median/high" would
 manufacture a role distinction that doesn't actually exist, not measure
 one.
+
+**If lattice's role-matched condition is degenerate, the role-matched
+Holm family contains 3 tests, not 4 padded slots.** Holm correction
+operates over the p-values actually produced; a degenerate comparison
+produces no p-value to correct, so it is excluded from the family
+rather than retained as an empty placeholder. Report this explicitly
+(e.g. "role-matched family: 3 of 4 planned comparisons, lattice
+degenerate") so the reduced family size is never mistaken for 4 tests
+having been run.
 
 Report both. If they agree, that's a robust specificity finding either
 way. If they disagree, that disagreement is itself the finding --
@@ -208,32 +218,37 @@ theta_g = E_r[d_bar_gr]
 from control family g, conditional on class 0 and the tested
 intervention protocol.
 
-**Primary test: mean-effect route, chosen to match the stated estimand
-directly.** theta_g is explicitly an expectation, not a median or
-location parameter -- a signed-rank or sign-flip test targets the
-latter under a symmetry assumption, which doesn't test theta_g itself.
-Primary analysis: the mean realization-level difference
-mean_r(d_bar_gr), with a one-sample t-test or studentized bootstrap
-interval across graph realizations as the primary test. Wilcoxon
-signed-rank and exact sign-flip tests on {d_bar_gr} are retained as
-robustness analyses, not primary.
+**Primary test: two-sided one-sample t-test, locked as the single
+primary decision rule.** theta_g is explicitly an expectation, not a
+median or location parameter -- a signed-rank or sign-flip test targets
+the latter under a symmetry assumption, which doesn't test theta_g
+itself. **Locked primary test**: two-sided one-sample t-test on the
+realization-level mean differences mean_r(d_bar_gr), Holm-corrected
+across the four fixed-coordinate comparisons. Two-sided, not one-sided:
+the Stage 1D question explicitly allows T to be stronger, weaker, or
+simply different from a control -- not only "T is stronger" -- so a
+one-sided test would silently narrow the question being asked. The
+studentized bootstrap interval, Wilcoxon signed-rank test, and exact
+sign-flip test on {d_bar_gr} are retained as robustness analyses, not
+as alternative primary tests to choose between after seeing the data.
 
 **Primary reporting**, for each stochastic construction g:
 - every realization-level d_bar_gr value, not just the test statistic
 - mean realization-level difference (primary estimate) and median
   (robustness)
-- the studentized bootstrap interval (primary) and, for comparison, the
-  interval implied by the robustness tests
+- the two-sided t-test result (primary), plus the studentized bootstrap
+  interval, signed-rank, and sign-flip results (robustness)
 - proportion of control realizations outperforming T (d_bar_gr < 0)
 - within-realization trajectory variability (SD of d_grk across the K
   matched k's, per realization), reported using the crossed variance
   decomposition described in "Pilot vs. confirmatory" below, not a
   naive per-realization SD
 
-**Robustness**: Wilcoxon signed-rank and exact sign-flip tests on
-{d_bar_gr} (see above), plus a hierarchical bootstrap resampling both
-graph realizations and matched trajectory seeds, analogous to the
-Stage 1A re-verification's bootstrap.
+**Robustness**: studentized bootstrap interval, Wilcoxon signed-rank,
+and exact sign-flip tests on {d_bar_gr} (see above), plus a
+hierarchical bootstrap resampling both graph realizations and matched
+trajectory seeds, analogous to the Stage 1A re-verification's
+bootstrap.
 
 **Lattice is different: deterministic, so pair directly.** T and
 lattice both require no seed -- there is no realization dimension to
@@ -305,17 +320,17 @@ substantive claims.
 **The pilot-to-confirmatory allocation rule, locked before the pilot is
 run, not decided after seeing its results:**
 
-1. Prespecify a minimum scientifically meaningful difference
-   `delta_min` in Delta_map (proposed: 0.05, informed by Stage 1C's own
-   between-trajectory SD for T of ~0.017 -- confirm before locking,
-   this is a substantive judgment call, not a statistical one).
-2. Prespecify desired power (proposed: 80%).
-3. Prespecify the familywise alpha for the primary (fixed-coordinate)
-   family of 4 comparisons under Holm correction (proposed: overall
-   FWER 0.05).
-4. Prespecify a candidate grid of (realizations R, trajectories-per-
-   realization K) pairs -- proposed starting grid: R in {10, 15, 20, 25},
-   K in {3, 5, 7, 10}.
+1. Minimum scientifically meaningful difference `delta_min` in
+   Delta_map: **0.05**, locked -- informed by Stage 1C's own
+   between-trajectory SD for T of ~0.017 (delta_min set at roughly 3x
+   that SD, so the design targets a difference clearly outside T's own
+   observed trajectory noise, not merely detectable in principle).
+2. Desired power: **80%**, locked.
+3. Familywise alpha for the primary (fixed-coordinate) family of
+   comparisons under Holm correction: **overall FWER 0.05**, locked.
+4. Candidate grid of (realizations R, trajectories-per-realization K)
+   pairs: **R in {10, 15, 20, 25}, K in {3, 5, 7, 10}**, locked as the
+   starting grid.
 5. **Selection rule**: using the crossed variance components estimated
    from the pilot (conservatively -- prefer the upper confidence bound
    over the point estimate where feasible), simulate the planned
@@ -342,6 +357,17 @@ which asks, per trajectory: does *this* graph and trajectory contain a
 structured mapping at all? Do not combine per-trajectory permutation
 p-values into the topology-family test; the family-level test consumes
 Delta_map point estimates, not permutation significance.
+
+**A trajectory remains in the topology comparison regardless of its own
+permutation test's outcome.** The 10,000-permutation test is reported
+alongside every trajectory as a validation check, not used as a filter
+-- a trajectory whose own mapping test is non-significant still
+contributes its Delta_map value to the topology-family comparison
+exactly like any other. Silently dropping non-significant trajectories
+would turn a disclosed validation check into an undocumented exclusion
+step, biasing the comparison toward whichever construction happens to
+produce more individually-significant trajectories rather than
+measuring the actual quantity of interest (the Delta_map advantage).
 
 **Every trajectory in the confirmatory run (T, lattice, and all
 stochastic-control realizations) gets the full 10,000-permutation test**,
@@ -443,7 +469,7 @@ until the first implementation commit.
 
 ## Review status
 
-Two rounds of external statistical review, both incorporated.
+Three rounds of external statistical review, all incorporated.
 
 **Round 1** flagged the primary test's core inferential error (comparing
 T's 10 trajectory-level values against realization-level control means
@@ -452,26 +478,25 @@ via unpaired Mann-Whitney, conflating inferential levels). Verdict:
 revision before lock." Addressed via the matched-trajectory-seed design,
 realization-level aggregation, and paired lattice comparison.
 
-**Round 2** (this revision) resolved seven remaining points: (1) aligned
-the primary test with the stated mean estimand (t-test/studentized
-bootstrap primary, signed-rank/sign-flip as robustness, not the reverse);
-(2) locked an explicit pilot-to-confirmatory budget-selection rule
-(delta_min, power, familywise alpha, candidate grid, lowest-cost
-selection) rather than leaving the final realization/trajectory counts
-to post-pilot judgment; (3) corrected the pilot's variance language to a
-crossed model (shared trajectory-seed blocks, not naive nested variance);
-(4) added an explicit degenerate-role-matching rule for constructions
-lacking genuine degree strata; (5) defined the common-support mask
-separately for each intervention protocol, referencing this project's
-own prior exclusion-mask leak; (6) added a CV instability safeguard
-(SD as the formal stability measure, CV only above a positive floor);
-(7) clarified that the topology-family test consumes Delta_map values
-directly, not combined permutation p-values, and locked that every
-confirmatory trajectory still gets the full 10,000-permutation test as
-a validation check.
+**Round 2** resolved seven remaining points: aligning the primary test
+with the mean estimand, a pilot-to-confirmatory allocation rule, a
+crossed variance model, a degenerate-role-matching rule, per-protocol
+common-support masking, a CV instability safeguard, and clarifying the
+permutation test's role. Verdict: "scientifically approved. Lock after
+specifying the primary mean-effect test, the pilot-to-confirmatory
+allocation rule, and the treatment of degenerate role matching."
 
-Round 2 verdict on the reviewed design: "scientifically approved. Lock
-after specifying the primary mean-effect test, the pilot-to-confirmatory
-allocation rule, and the treatment of degenerate role matching." This
-revision addresses all three. Considered locked pending any further
-review.
+**Round 3** (this revision) closed the remaining operational gaps Round
+2's fixes had introduced: (1) the primary test was locked to a single
+choice (two-sided one-sample t-test, not "t-test or bootstrap") --
+two-sided specifically because the Stage 1D question allows T to be
+weaker or merely different, not only stronger; (2) all "proposed/confirm
+before locking" values (delta_min=0.05, power=80%, FWER=0.05, the R/K
+candidate grid, the CV floor=0.05) were adopted as final, locked values;
+(3) made explicit that a trajectory stays in the topology comparison
+regardless of its own permutation test's significance, so the
+validation check cannot become an undocumented exclusion filter; (4)
+specified that a degenerate lattice role-matching condition reduces the
+role-matched Holm family to 3 tests, not 4 padded slots.
+
+Considered fully locked. No further review points outstanding.
