@@ -1,13 +1,13 @@
 # Follow-up note: when does the response relocate to one other node vs. spread broadly?
 
 **Status: a scoped follow-up observation on already-frozen Stage 1B.2
-data, not a revision of `FINDINGS.md`.** `FINDINGS.md` and Stage 1B.2's
+data, not a revision of [Stage 1B.2 findings](FINDINGS.md).** `FINDINGS.md` and Stage 1B.2's
 own conclusions are unchanged by this note. This document exists
 separately and should be read as an addendum, not an update.
 
 ## Where this came from
 
-While building a plain-language report visual
+While building a plain-language report visual 
 (`docs/report_visuals/generate_report_visuals.py`), two trial choices --
 amplitude=0.8 at t_p=0, and amplitude=0.2 at t_p=0 -- showed the
 final-timepoint response energy relocating almost entirely onto a single

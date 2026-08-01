@@ -310,3 +310,11 @@ common-support test in `results/stage1b2_common_support_node_test.pkl`.
 All code now lives in `experiments/stage1b2_structured_transformation/`,
 with the shared, reusable dynamics/stats modules consolidated into
 `src/bonsai/` as part of the project's broader restructuring.
+
+## Addendum
+
+[A follow-up addendum](CONCENTRATION_REGIME_NOTE.md) characterises a 
+deterministic, sign/amplitude-dependent routing regime specific to 
+(highest-degree node, t_p=0) — confirmed as first-order linear routing 
+(reproduced by q_tangent alone), not nonlinear attractor-switching. 
+Does not alter the frozen finding above.

@@ -320,6 +320,13 @@ see Stage 1C, immediately below):
 
 Full details: `experiments/stage1b2_structured_transformation/FINDINGS.md`.
 
+A follow-up addendum characterises a deterministic, sign/amplitude-dependent 
+routing regime specific to (highest-degree node, t_p=0) — confirmed as 
+first-order linear routing (reproduced by q_tangent alone), not nonlinear 
+attractor-switching. Does not alter the frozen finding above.
+See: `experiments/stage1b2_structured_transformation/CONCENTRATION_REGIME_NOTE.md` 
+
+
 ### Stage 1C (trajectory generalization, CONFIRMED -- resolves Stage 1B.2 open item 1)
 
 Tests whether Stage 1B.2's structured internal transformation is
