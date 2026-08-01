@@ -185,3 +185,9 @@ more impressive ones, correct multiplicity within prespecified families,
 unit-test any new statistical machinery on synthetic data before running
 it on real results, and treat a second independent review (human or AI)
 as a first-class part of the method, not a formality.
+
+# IntelliJ MCP Server Companion
+This project is open in Pycharm IDE (IntelliJ IDEA platform). 
+Call `get_mcp_companion_overview` to discover available tools and how to use them.
+
+
