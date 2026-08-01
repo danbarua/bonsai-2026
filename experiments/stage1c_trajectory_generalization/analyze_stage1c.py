@@ -15,7 +15,10 @@ needed. All other seeds (3010-3090) are Stage 1C's own freshly-run,
 independently-cached trajectories.
 
 Usage: python3 analyze_stage1c.py [seed1 [seed2 ...]]
-       (defaults to all 10 trajectories in run_stage1c.py's ALL_BASELINE_SEEDS)
+       (defaults to all 10 trajectories in run_stage1c.py's ALL_BASELINE_SEEDS
+       -- unlike run_stage1c.py itself, whose own default excludes seed=3000;
+       this script is the one place that legitimately reads all 10, since it
+       never re-simulates the seed=3000 leg)
 """
 import sys
 import os

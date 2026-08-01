@@ -8,12 +8,23 @@ Imports directly from stage1b2_structured_transformation/stage1b2_core.py
 (get_degree_stratified_nodes, generate_reference_baseline,
 generate_fixed_replica_directions, run_one_trial) rather than copying it --
 same design (Option A: 3 nodes x 2 signs x 3 amplitudes x 4 t_p x 6
-replicas = 432 trials), applied to 10 independent baseline trajectories:
-seed=3000 (Stage 1B2's own reference, re-run here to give Stage 1C its own
-self-contained, independent results cache -- NOT reusing Stage 1B2's
-cached trial results) plus 9 new seeds (3010, 3020, ..., 3090), each
-paired with a replica-direction seed of baseline+1 (matching Stage 1B2's
-BASELINE_SEED=3000 / REPLICA_DIRECTION_SEED=3001 offset convention).
+replicas = 432 trials), applied to 9 new independent baseline trajectories
+(3010, 3020, ..., 3090), each paired with a replica-direction seed of
+baseline+1 (matching Stage 1B2's BASELINE_SEED=3000 /
+REPLICA_DIRECTION_SEED=3001 offset convention).
+
+seed=3000 is Stage 1B2's own frozen reference trajectory and is
+deliberately NOT one of this script's seeds: this script refuses to run
+it at all (see STAGE1B2_REFERENCE_SEED / run_trajectory's guard below).
+analyze_stage1c.py reads its 432 trials read-only from Stage 1B2's own
+already-committed results/stage1b2_results.pkl instead, keeping Stage 1B2
+genuinely frozen and avoiding a redundant re-run. An earlier version of
+this docstring incorrectly described seed=3000 as "re-run here" -- it
+never actually was (no results/stage1c_results_seed3000.pkl was ever
+produced by any historical run of this script), but the code did not
+enforce that, so a bare `python3 run_stage1c.py` with no arguments would
+have silently attempted it. Corrected here, not just in prose: the
+default seed list below excludes 3000, and passing it explicitly raises.
 
 Does not read or write anything under
 experiments/stage1b2_structured_transformation/ except a read-only load
@@ -25,7 +36,9 @@ Checkpointed per trajectory (results/stage1c_results_seed<N>.pkl), so
 individual trajectories can be timed, resumed, or re-run independently.
 
 Usage: python3 run_stage1c.py <seed1> [<seed2> ...]
-       (each argument a baseline seed, e.g. `python3 run_stage1c.py 3010`)
+       (each argument a baseline seed, e.g. `python3 run_stage1c.py 3010`;
+       with no arguments, runs all of NEW_BASELINE_SEEDS. Passing 3000
+       explicitly raises ValueError -- see STAGE1B2_REFERENCE_SEED.)
 """
 import sys
 import os
@@ -49,7 +62,10 @@ CLASS0_CONSTRUCTIONS_PATH = os.path.join(
 RESULTS_DIR = os.path.join(_THIS_DIR, "results")
 LOG_FILE = os.path.join(_THIS_DIR, "stage1c_progress.log")
 
-ALL_BASELINE_SEEDS = [3000, 3010, 3020, 3030, 3040, 3050, 3060, 3070, 3080, 3090]
+STAGE1B2_REFERENCE_SEED = 3000  # frozen; this script must never regenerate it (see run_trajectory)
+NEW_BASELINE_SEEDS = [3010, 3020, 3030, 3040, 3050, 3060, 3070, 3080, 3090]  # this script's own work
+ALL_BASELINE_SEEDS = [STAGE1B2_REFERENCE_SEED] + NEW_BASELINE_SEEDS  # the full 10-trajectory family;
+# exported for analyze_stage1c.py's default -- NOT this script's own default (see __main__ below)
 
 
 def log(msg):
@@ -94,6 +110,11 @@ def _worker(args):
 
 
 def run_trajectory(W, n, baseline_seed):
+    if baseline_seed == STAGE1B2_REFERENCE_SEED:
+        raise ValueError(
+            f"seed={STAGE1B2_REFERENCE_SEED} is Stage 1B2's frozen reference trajectory -- "
+            f"this script must never regenerate it. analyze_stage1c.py reads it read-only "
+            f"from Stage 1B2's own results/stage1b2_results.pkl instead.")
     replica_direction_seed = baseline_seed + 1
     out_path = checkpoint_path(baseline_seed)
 
@@ -152,5 +173,5 @@ def main(seeds):
 
 
 if __name__ == "__main__":
-    seeds_arg = [int(s) for s in sys.argv[1:]] if len(sys.argv) > 1 else ALL_BASELINE_SEEDS
+    seeds_arg = [int(s) for s in sys.argv[1:]] if len(sys.argv) > 1 else NEW_BASELINE_SEEDS
     main(seeds_arg)
