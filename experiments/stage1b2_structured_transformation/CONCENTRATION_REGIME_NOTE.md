@@ -283,9 +283,11 @@ strongest first hop of the three trajectories -- a bottleneck invisible
 from $W$ alone. Seed=3090's relay pathway fails at the first hop
 instead, but a different, structurally-real pathway (the direct edge to
 152) happens to be strong at that trajectory's phase state and wins.
-This is a complete, quantitative account of "an emergent property of the
-state-dependent network propagator, not static graph geometry" -- not
-just a qualitative characterization of it.
+This is a direct quantitative account of the initial pathway gating that
+distinguishes the three observed outcomes. It supports the conclusion
+that concentration is "an emergent property of the state-dependent
+network propagator, not static graph geometry," without claiming that
+the full time-ordered propagator has been decomposed.
 
 **One technical detail carried through all of the above, not previously
 noted in this document**: the perturbation is not a pure delta at the
