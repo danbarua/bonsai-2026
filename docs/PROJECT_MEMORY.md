@@ -469,20 +469,38 @@ default), but has only been built and verified for class 0.
    pool) -- byte-exact reproduction is not, despite a 600-way
    seed/call-order sweep against the known raw artifact. Full account in
    `historical_matched_sparsity_random.py`'s docstring.
-3. Stage 1A's own T-vs-random comparison still needs re-running against
-   verified code -- the class-0 multi-seed pilot (the first concrete
-   step, above) is now complete: both random controls showed T-vs-random
-   direction instability across seeds (7 of 20 seeds flipped sign under
-   the historical half-edge control, 2 of 20 under the current
-   edge-count-matched control), consistent with but not confirming Stage
-   1A's original null conclusion -- see
-   `stage1a_infinitesimal_response/FINDINGS.md`'s "Post-hoc robustness
-   note". A full statistical design for proper re-verification (25 seeds
-   per class per stochastic control, mean aggregation before testing,
-   paired Wilcoxon with Holm correction across four planned comparisons,
-   plus sign-flip and bootstrap robustness checks) is written and
-   reviewer-approved at `experiments/stage1a_re_verification/DESIGN.md`
-   -- ready for implementation, not yet built.
+3. **Done.** The 10-class re-verification ran
+   (`experiments/stage1a_re_verification/DESIGN.md`, 770 instances: T +
+   lattice deterministic, 3 stochastic controls x 25 seeds x 10 classes).
+   Primary mean-aggregated analysis showed 2 of 4 Holm-corrected
+   comparisons nominally significant (historical random, rewiring), but
+   this was traced to raw-scale AUC's heavy right tail (a single seed
+   draw more than doubling a 20-seed-converged class mean in one
+   documented case) and did not survive median aggregation or the
+   design's own MCSE gate -- correctly, per the pre-registered decision
+   rule, the tertiary mixed model was skipped for those.
+
+   A second, separately pre-registered log-scale iteration
+   (`DESIGN_v2_log_scale.md`, pure re-analysis of the same 770 values, no
+   new simulation) resolved 2 of the 3 stochastic comparisons cleanly: T
+   vs. historical random and T vs. current random both show no
+   significant difference under log-mean aggregation, confirmed
+   consistent across primary, median, sign-flip, and
+   (now consistency-gated-in) mixed model, with 95% CIs bracketing 1.0 on
+   the multiplicative scale. T vs. rewiring remains genuinely
+   inconclusive even under log scale (p=0.037 vs p=0.084, narrowed from
+   v1 but not resolved) -- per the design's explicit pre-commitment, no
+   third transformation was attempted; this is reported as an honest open
+   result, not chased further.
+
+   Overall: none of the four original Stage 1A controls shows a
+   Holm-significant difference from T surviving this project's full
+   robustness battery. Two of three stochastic comparisons now rest on a
+   trustworthy null (not merely an untested one); T-vs-rewiring and
+   T-vs-lattice's status is otherwise unchanged from the original Stage
+   1A finding. This effort is now closed -- any further pursuit of the
+   rewiring comparison specifically (e.g. extending seed count) would be
+   a new, separately-justified follow-up, not a continuation of this one.
 
 ## How to use this document
 
