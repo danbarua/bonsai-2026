@@ -288,6 +288,32 @@ grid, and not evidence about any other cell of the design. Code:
 `analyze_stage1b2_time_resolved_propagator.py`; plot:
 `results/stage1b2_time_resolved_propagator.png`.
 
+**Why the naive time-integral (Section 11) was never guaranteed to
+work.** The full propagator is $\Phi(T,0) =
+\mathcal{T}\exp(\int_0^T J(t)\,dt)$ -- a *time-ordered* exponential.
+Because $J(t_1)J(t_2) \neq J(t_2)J(t_1)$ in general (the Jacobian at
+different times doesn't commute with itself), this does not reduce to a
+function of each entry's scalar time-integral, even in principle.
+Section 11's finding that the naive integral didn't track the outcome
+wasn't a surprising empirical failure -- it's the expected consequence
+of noncommutativity. The order in which pathways open and close, not
+just their accumulated exposure, determines the outcome.
+
+**Closing this investigation.** Static topology determines which
+pathways are structurally available (the 105-relay, the direct edge to
+152). The evolving phase configuration continuously gates those
+pathways through the state-dependent Jacobian. The final routed
+response is determined by their time-ordered interaction -- which can
+involve transient leaders, pathway bottlenecks, relay activity, and
+late overtaking, as Part 3 showed concretely for these three
+trajectories. No compact predictor (static adjacency, $J(0)$ snapshot,
+integrated exposure, or early leadership) reduces this to a simple
+rule, and that is the substantive finding, not a gap in the
+investigation. This does not decompose $\Phi(T,0)$ into rigorous
+pathwise contributions -- the node-105 transient is consistent with,
+but not formal proof of, relay transmission. This thread is closed; it
+does not alter Stage 1B.2's frozen `FINDINGS.md`.
+
 ## What this establishes, and what it doesn't
 
 **Establishes**: for this class-0 learned topology, under Stage 1B.2's
