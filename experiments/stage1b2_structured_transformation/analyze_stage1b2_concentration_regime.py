@@ -43,10 +43,24 @@ AMPLITUDE_RANK = {0.025: 1, 0.2: 2, 0.8: 3}
 TP_RANK = {0: 1, 0.833: 2, 1.667: 3, 2.5: 4}
 
 
+def _stimulated_node_lookup():
+    """node_label -> graph node index, from the same class0_constructions.pkl /
+    get_degree_stratified_nodes(W) pairing every trial in results/stage1b2_results.pkl
+    was generated against -- needed to check argmax_is_source."""
+    import sys
+    sys.path.insert(0, str(_THIS_DIR))
+    from stage1b2_core import get_degree_stratified_nodes
+    with open(_THIS_DIR / "results" / "class0_constructions.pkl", "rb") as f:
+        data = pickle.load(f)[0]
+    W = data["constructions"]["T"]
+    return get_degree_stratified_nodes(W)
+
+
 def load_table():
     with open(RESULTS_PATH, "rb") as f:
         results = pickle.load(f)
     assert len(results) == 432, f"expected 432 trials, got {len(results)}"
+    node_lookup = _stimulated_node_lookup()
 
     rows = []
     for (t_p, replica, node_label, sign, amplitude), trial in results.items():
@@ -56,11 +70,103 @@ def load_table():
         top2 = float(sorted_q[0] + sorted_q[1])
         ipr = float(np.sum(q ** 2))
         effective_n = 1.0 / ipr
+        argmax_node = int(np.argmax(q))
+        stimulated_node = node_lookup[node_label]
         rows.append({
             "t_p": t_p, "replica": replica, "node_label": node_label, "sign": sign,
             "amplitude": amplitude, "top1": top1, "top2": top2, "effective_n": effective_n,
+            "argmax_node": argmax_node, "stimulated_node": stimulated_node,
+            "argmax_is_source": argmax_node == stimulated_node,
         })
     return rows
+
+
+def _q_stats(q, stimulated_node):
+    if q is None:
+        return None
+    q = np.asarray(q)
+    argmax_node = int(np.argmax(q))
+    return {"argmax_node": argmax_node, "top1": float(q[argmax_node]),
+            "argmax_is_source": argmax_node == stimulated_node}
+
+
+def part1_precision_breakdown_high_tp0_cell():
+    """Precise, non-probabilistic breakdown of the (node_label='high', t_p=0) cell:
+    destination-node frequency, per-(sign,amplitude) concentration status across all
+    6 replicas, and whether the dominant node is ever the source itself."""
+    with open(RESULTS_PATH, "rb") as f:
+        results = pickle.load(f)
+    node_lookup = _stimulated_node_lookup()
+    stim = node_lookup["high"]
+
+    cell = {k: v for k, v in results.items() if k[0] == 0 and k[2] == "high"}
+    assert len(cell) == 36
+
+    print(f"\n{'=' * 70}\nPart 1: precision breakdown of the (node='high', t_p=0) cell "
+          f"(stimulated node index={stim})\n{'=' * 70}")
+
+    destination_counts = {}
+    condition_results = {}  # (sign, amplitude) -> list of (replica, argmax_node, top1)
+    for (t_p, replica, node_label, sign, amplitude), trial in sorted(cell.items()):
+        stats = _q_stats(trial["fixed_time_q"], stim)
+        destination_counts[stats["argmax_node"]] = destination_counts.get(stats["argmax_node"], 0) + 1
+        condition_results.setdefault((sign, amplitude), []).append(
+            (replica, stats["argmax_node"], stats["top1"], stats["argmax_is_source"]))
+
+    print(f"Destination-node frequency across all 36 trials: {destination_counts}")
+    any_source = any(v["argmax_is_source"] for v in
+                      [_q_stats(t["fixed_time_q"], stim) for t in cell.values()])
+    print(f"Dominant node is ever the stimulated node itself: {any_source}")
+
+    print("\nPer (sign, amplitude) condition, across all 6 replicas:")
+    n_concentrated_conditions = 0
+    n_concentrated_trials = 0
+    for (sign, amplitude), vals in sorted(condition_results.items()):
+        top1s = [v[2] for v in vals]
+        dests = set(v[1] for v in vals)
+        concentrated_flags = [t > 0.5 for t in top1s]
+        n_this_condition_concentrated = sum(concentrated_flags)
+        n_concentrated_trials += n_this_condition_concentrated
+        uniform = n_this_condition_concentrated in (0, 6)
+        if n_this_condition_concentrated == 6:
+            n_concentrated_conditions += 1
+        print(f"  sign={sign:+d}, amplitude={amplitude}: destination(s)={dests}, "
+              f"top1 range=[{min(top1s):.3f}, {max(top1s):.3f}], "
+              f"concentrated (top1>0.5) in {n_this_condition_concentrated}/6 replicas "
+              f"({'uniform across replicas' if uniform else 'MIXED within condition'})")
+
+    print(f"\nSummary: {n_concentrated_conditions}/6 (sign, amplitude) conditions are "
+          f"concentrated in ALL 6 of their replicas; the rest are concentrated in NONE "
+          f"of their replicas (checked above -- no condition was found 'mixed' within "
+          f"itself). Total concentrated trials: {n_concentrated_trials}/36.")
+    return condition_results, destination_counts
+
+
+def part2_tangent_vs_finite_vs_residual_high_tp0_cell():
+    """For the same (node='high', t_p=0) cell, checks whether the concentration +
+    destination pattern already exists in the pure first-order (tangent-only) response,
+    or is specific to the finite/nonlinear-residual response."""
+    with open(RESULTS_PATH, "rb") as f:
+        results = pickle.load(f)
+    node_lookup = _stimulated_node_lookup()
+    stim = node_lookup["high"]
+    cell = {k: v for k, v in results.items() if k[0] == 0 and k[2] == "high"}
+
+    print(f"\n{'=' * 70}\nPart 2: tangent vs. finite vs. residual, same cell\n{'=' * 70}")
+
+    for field, label in [("fixed_time_q_tangent", "q_tangent (first-order only)"),
+                          ("fixed_time_q", "q_finite (actual, already reported in Part 1)"),
+                          ("fixed_time_q_residual", "q_residual (finite - tangent, nonlinear part)")]:
+        print(f"\n-- {label} --")
+        by_condition = {}
+        for (t_p, replica, node_label, sign, amplitude), trial in sorted(cell.items()):
+            stats = _q_stats(trial[field], stim)
+            by_condition.setdefault((sign, amplitude), []).append((stats["argmax_node"], stats["top1"]))
+        for cond, vals in sorted(by_condition.items()):
+            dests = set(v[0] for v in vals)
+            top1s = [v[1] for v in vals]
+            print(f"  sign={cond[0]:+d}, amplitude={cond[1]}: destination(s)={dests}, "
+                  f"top1 range=[{min(top1s):.3f}, {max(top1s):.3f}]")
 
 
 def group_summary(rows, key):
@@ -128,6 +234,9 @@ def main():
             frac = np.mean(vals > 0.5) if len(vals) else float("nan")
             parts.append(f"amp={amp}: {frac:.2f} ({(vals>0.5).sum()}/{len(vals)})")
         print(line + ", ".join(parts))
+
+    part1_precision_breakdown_high_tp0_cell()
+    part2_tangent_vs_finite_vs_residual_high_tp0_cell()
 
     return rows
 

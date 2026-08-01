@@ -28,11 +28,18 @@ concentration measures:
 - `top2`: fraction held by the two largest nodes combined
 - `effective_n = 1 / sum(q_i^2)` (inverse participation ratio, inverted
   so larger = more spread out)
+- `argmax_node`: which node holds the largest share, and
+  `argmax_is_source`: whether that's the same node that was stimulated
 
 then checked whether these vary systematically with amplitude, t_p
 (perturbation time), sign, or stimulated node, versus being roughly
-uniform across all 432 trials. Code:
-`analyze_stage1b2_concentration_regime.py`.
+uniform across all 432 trials (below); once a specific (node, t_p) cell
+was identified as the locus of the effect, did two focused follow-ups on
+that cell specifically: a precise (not aggregate) breakdown of exactly
+which trials concentrate (Part 1), and a check of whether the same
+concentration-and-destination pattern already exists in the purely
+linear (tangent-only) response or is specific to the nonlinear part
+(Part 2). Code: `analyze_stage1b2_concentration_regime.py`.
 
 This is descriptive/correlational characterization of an already-
 collected dataset, not a new confirmatory hypothesis test -- no
@@ -83,16 +90,86 @@ jump happens.
 
 **This cell is cleanly separated from everything else, not a fuzzy
 tendency.** Restricting to the (t_p=0, high-degree-node) cell (36 trials,
-spanning all combinations of sign and amplitude): `top1` ranges from
-0.181 to 0.976, mean 0.622, with 24 of 36 trials (67%) exceeding 0.5
-(i.e., a single node holding more than half the total response energy).
-**Across the other 396 trials in the entire design, `top1` never exceeds
-0.415** -- there is a hard gap between this one cell and every other
-combination of factors. The two dead-end trial examples were both drawn
-from exactly this cell (node='high', t_p=0), which is why they looked
-the way they did -- but they weren't an unrepresentative pair; they were
-two ordinary draws from a genuinely distinct, reliably-reproduced regime
-that shows up in 67% of that cell's 36 trials.
+spanning all combinations of sign, amplitude, and replica): `top1` ranges
+from 0.181 to 0.976, with 24 of 36 trials exceeding 0.5 (i.e., a single
+node holding more than half the total response energy). **Across the
+other 396 trials in the entire design, `top1` never exceeds 0.415** --
+there is a hard gap between this one cell and every other combination of
+factors.
+
+## Part 1: precise breakdown of the (high-degree-node, t_p=0) cell
+
+The "24 of 36 trials" figure above understates how structured this cell
+actually is -- it is not 24 trials scattered probabilistically among 36;
+it is **exactly 4 of the 6 (sign, amplitude) combinations, each
+concentrated in all 6 of their replicas, and the other 2 combinations,
+each concentrated in none of their 6 replicas.** No condition was mixed
+(i.e., no (sign, amplitude) pair had some replicas concentrate and
+others not) -- replica identity (which nearby-state direction the
+perturbation is added to) plays essentially no role in whether a trial
+concentrates; only (sign, amplitude) does:
+
+| sign | amplitude | destination node(s) | `top1` range | concentrated in |
+|---|---|---|---|---|
+| −1 | 0.025 | {103} | 0.616–0.670 | 6/6 replicas |
+| −1 | 0.2 | {103} | 0.387–0.446 | 0/6 replicas |
+| −1 | 0.8 | **{152}** | 0.181–0.188 | 0/6 replicas |
+| +1 | 0.025 | {103} | 0.671–0.720 | 6/6 replicas |
+| +1 | 0.2 | {103} | 0.818–0.851 | 6/6 replicas |
+| +1 | 0.8 | {103} | 0.976–0.976 | 6/6 replicas |
+
+**Destination-node frequency across all 36 trials: node 103 in 30, node
+152 in the remaining 6 (exactly the sign=−1, amplitude=0.8 condition,
+consistently across all 6 of its replicas). The dominant node is never
+the stimulated node itself, in any of the 36 trials.**
+
+So: five of the six (sign, amplitude) conditions route to the same
+destination (node 103); the sixth (sign=−1, amplitude=0.8) routes
+consistently to a different node (152) instead, never to the source, and
+never inconsistently across its own replicas. "24 of 36 trials"
+concentrate, but the correct description is **4 of 6 (sign, amplitude)
+conditions, deterministically, not a 67% probability**.
+
+## Part 2: is this linear routing or a nonlinear effect?
+
+Computed the same measures on `q_tangent` (the pure first-order/linear
+response, already saved per trial) and `q_residual` (`q_finite` minus
+`q_tangent`, the nonlinear correction term, also already saved) for the
+same 36-trial cell.
+
+**`q_tangent` alone already reproduces the destination (node 103) in all
+36 of 36 trials**, with `top1` in a narrow band (0.644–0.696) that does
+not vary with sign or amplitude at all -- expected, since `q_tangent` is
+built from `normalized_energy(epsilon * tangent_direction)`, and
+normalizing by total energy removes epsilon's scale and sign entirely.
+**`q_residual` also favors node 103 in all 36 of 36 trials**, even more
+strongly (`top1` in 0.945–0.961).
+
+**Per the pre-committed decision rule: since `q_tangent` alone already
+reproduces the core concentration-and-destination pattern in every trial
+of this cell, the core phenomenon is first-order, state-dependent graph
+routing -- not evidence of anything nonlinear.** The purely linear
+response already "points toward" node 103 with moderate concentration
+(~0.65–0.70) before any nonlinear term is added. Per the decision rule
+as specified, this result does NOT motivate the attractor-redirection
+hypothesis or a comparison against Stage 0's known equilibria, and
+neither was run.
+
+**One real, secondary pattern is layered on top, worth naming but not
+worth the held-in-reserve further test.** The nonlinear residual
+amplifies the linear routing's concentration for sign=+1 as amplitude
+increases (0.71 → 0.85 → 0.98) and attenuates it for sign=−1 as
+amplitude increases (0.65 → 0.42 → 0.18) -- and at the single most
+extreme combination (sign=−1, amplitude=0.8), this attenuation is strong
+enough that the actual (finite) response's destination flips away from
+node 103 to node 152, even though `q_tangent` and `q_residual`
+individually *each still favor node 103* at that same combination. That
+implies a partial cancellation between the linear and nonlinear terms
+specifically in that one corner of the design, not a case where the
+nonlinear part independently "chooses" a different target. This is a
+real, secondary effect, but it modulates an already-linear routing
+tendency rather than creating a new one -- it does not, on its own, meet
+the bar the decision rule set for pursuing attractor redirection further.
 
 ## What this establishes, and what it doesn't
 
@@ -100,22 +177,25 @@ that shows up in 67% of that cell's 36 trials.
 exact design, perturbing the highest-weighted-degree node at the very
 start of the baseline trajectory (t_p=0) produces a qualitatively
 different final-timepoint response -- energy relocating onto one other
-specific node rather than spreading broadly -- reliably (67% of the
-time) and specifically to that one (node, t_p) combination. This does
-not happen for the low- or median-degree nodes at any t_p, or for the
-high-degree node at any t_p other than 0. Amplitude and sign play no
-detectable role in which regime a trial falls into.
+specific node (almost always node 103, deterministically dependent on
+sign and amplitude, never the source) rather than spreading broadly.
+This does not happen for the low- or median-degree nodes at any t_p, or
+for the high-degree node at any t_p other than 0. The routing itself is
+present already in the linear (tangent) response; sign and amplitude
+modulate its strength and, in one specific combination, its destination,
+but do not create it.
 
-**Does not establish**: *why* this happens. One plausible, but untested,
-interpretation: t_p=0 perturbations act on the baseline trajectory
-before it has had time to settle toward an attractor (consistent with
-Stage 0's own multistability finding -- the system takes time to
-converge from a fresh random initial condition), so a large-amplitude
-disturbance to the most-connected node at that moment may be more able
-to redirect the trajectory toward a different attractor's basin than the
-same disturbance would be once the trajectory has already settled. This
+**Does not establish**: *why* the high-degree node specifically routes
+to node 103 at t_p=0 and not at other t_p values. One plausible, but
+untested, interpretation: t_p=0 perturbations act on the baseline
+trajectory before it has had time to settle toward an attractor
+(consistent with Stage 0's own multistability finding -- the system
+takes time to converge from a fresh random initial condition), which
+could plausibly change the local linearization's routing structure
+compared to a perturbation applied once the trajectory has settled. This
 note does not test that mechanism -- it is offered as a plausible
-reading of the pattern, not a confirmed explanation.
+reading, not a confirmed explanation, and per Part 2's result, does not
+need to invoke nonlinear attractor-switching to explain the core pattern.
 
 This also does not extend beyond Stage 1B.2's own existing scope
 limits: one class, one topology (T only, no graph controls), and the
@@ -130,5 +210,9 @@ aggregate (source-energy-fraction over time). This note adds a
 *where*-and-*when* characterization that FINDINGS.md's aggregate
 treatment did not attempt: most trials genuinely spread broadly, but one
 specific, reliably-reproduced (node, t_p) combination instead
-concentrates the response onto a single other node. This refines, but
-does not contradict or require reopening, the frozen finding.
+concentrates the response deterministically onto a single other node
+(or, for one sign/amplitude combination within that cell, a different
+single node) -- and that routing is already present in the purely linear
+part of the response, with the nonlinear part modulating but not
+creating it. This refines, but does not contradict or require reopening,
+the frozen finding.
