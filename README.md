@@ -14,6 +14,7 @@ The core of Bonsai involves:
 
 For a detailed history and methodological principles, see `docs/PROJECT_MEMORY.md`.
 
+
 ## Requirements
 
 - **Python**: >= 3.14
