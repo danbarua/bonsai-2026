@@ -258,10 +258,15 @@ aggregate over. Use the same 10 matched trajectory seeds directly:
 d_k = Delta_map(T, k) - Delta_map(lattice, k),  k = 1..10
 ```
 
-tested via exact paired signed-rank or exact sign-flip across these 10
-matched seeds (T's values already exist via Stage 1C; lattice needs its
-own 10 trajectories on the identical seeds). An unpaired test here would
-discard a naturally available, more powerful paired block for no
+**Primary test, locked to a single choice, aligned with the same
+mean-effect logic as the stochastic-control comparisons**: two-sided
+paired t-test on the 10 d_k values (T's values already exist via
+Stage 1C; lattice needs its own 10 trajectories on the identical
+seeds). Exact sign-flip and exact signed-rank tests on the same 10
+values are retained as robustness, not as alternative primary tests to
+choose between after seeing the data -- the same "or" ambiguity already
+fixed for the stochastic-control primary test. An unpaired test here
+would discard a naturally available, more powerful paired block for no
 reason. The resulting claim stays bounded: this class-0 learned graph
 differs, or does not differ, from this deterministic lattice across the
 10 sampled initial trajectories -- not a population-level claim about
@@ -339,6 +344,32 @@ run, not decided after seeing its results:**
    the total trajectory-runs needed) that achieves at least the
    prespecified power for `delta_min` under Holm-adjusted alpha.
 
+**Deterministic tie-breaks for the selection rule, closing the
+remaining operational ambiguity:**
+- **One common (R, K) across all three stochastic-control families**,
+  not a separately-optimized allocation per family -- selected using
+  whichever of the three families' pilot variance estimates is most
+  demanding (i.e. requires the largest (R, K) to hit the power target).
+- **If multiple candidate designs tie on minimum cost**, choose the one
+  with the larger R -- graph realization is the inferential unit, so
+  more realizations is the more informative tie-break direction over
+  more trajectories per realization.
+- **Conservative variance estimate, defined precisely**: use a
+  prespecified 95% upper confidence bound on the relevant variance
+  component where it's estimable from the 3x3 pilot; where it isn't
+  reliably estimable at that sample size, use the larger of the point
+  estimate and a named conservative fallback (proposed: 2x the point
+  estimate) rather than leaving "where feasible" undefined.
+- **Power under Holm, made executable**: "Holm-adjusted alpha" alone
+  isn't a uniquely executable target, since Holm's per-comparison
+  threshold depends on the ordering of the realized p-values, not a
+  fixed alpha per test. Either (a) simulate the complete four-comparison
+  Holm procedure jointly across candidate (R, K) pairs, or (b) as a
+  simpler, more conservative approximation, power each stochastic
+  comparison individually at alpha=0.0125 (0.05/4, the Bonferroni bound
+  Holm can only improve on). Prefer (a) if the simulation is tractable
+  within the pilot's timeframe; document which was used either way.
+
 Given Stage 1C's own finding of low trajectory-to-trajectory variance
 for T (CV ~5.2%), more graph realizations are plausibly more valuable
 than more trajectories per realization -- but this is an expectation the
@@ -380,7 +411,7 @@ not as an input to the topology-family test itself, which is answered
 by the mean-effect analysis above regardless of each trajectory's own
 permutation result.
 
-## Additional details to lock before implementation
+## Implementation invariants
 
 **Identical experimental randomness across constructions, wherever
 mathematically possible.** Same baseline initial-phase seeds, same
@@ -486,17 +517,28 @@ permutation test's role. Verdict: "scientifically approved. Lock after
 specifying the primary mean-effect test, the pilot-to-confirmatory
 allocation rule, and the treatment of degenerate role matching."
 
-**Round 3** (this revision) closed the remaining operational gaps Round
-2's fixes had introduced: (1) the primary test was locked to a single
-choice (two-sided one-sample t-test, not "t-test or bootstrap") --
-two-sided specifically because the Stage 1D question allows T to be
-weaker or merely different, not only stronger; (2) all "proposed/confirm
+**Round 3** closed the remaining operational gaps Round 2's fixes had
+introduced: the primary test was locked to a single choice (two-sided
+one-sample t-test, not "t-test or bootstrap"); all "proposed/confirm
 before locking" values (delta_min=0.05, power=80%, FWER=0.05, the R/K
 candidate grid, the CV floor=0.05) were adopted as final, locked values;
-(3) made explicit that a trajectory stays in the topology comparison
-regardless of its own permutation test's significance, so the
-validation check cannot become an undocumented exclusion filter; (4)
-specified that a degenerate lattice role-matching condition reduces the
-role-matched Holm family to 3 tests, not 4 padded slots.
+made explicit that a trajectory stays in the topology comparison
+regardless of its own permutation test's significance; specified that a
+degenerate lattice role-matching condition reduces the role-matched
+Holm family to 3 tests, not 4 padded slots.
 
-Considered fully locked. No further review points outstanding.
+**Round 4** (this revision) closed three remaining operational
+ambiguities the design was scientifically locked but not yet fully
+executable on: (1) the lattice primary test was pinned to a single
+choice (two-sided paired t-test, matching the same mean-effect logic as
+the stochastic-control comparisons, not "signed-rank or sign-flip"); (2)
+the pilot-to-confirmatory allocation rule was given deterministic
+tie-breaks -- one common (R, K) across all three stochastic families
+selected from the most demanding one, larger-R as the cost-tie
+preference, a precisely-defined conservative variance estimate, and an
+executable Holm-power rule; (3) the "Additional details to lock before
+implementation" heading was renamed "Implementation invariants," since
+its contents are now locked prescriptions, not open decisions.
+
+Considered fully locked, operationally executable. No further review
+points outstanding.

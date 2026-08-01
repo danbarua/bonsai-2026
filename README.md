@@ -12,7 +12,7 @@ The core of Bonsai involves:
 - **Causal Ablation**: Using various controls (random, rewired, lattice) to verify that performance depends on specific learned connectivity and dynamics.
 - **Dynamics-as-Computation**: Analyzing structured responses to perturbations as a form of computation. Established at Level 2 (structured internal transformation) across independent trajectories.
 
-For a detailed history and methodological principles, see `docs/PROJECT_MEMORY.md`.
+For a detailed history and methodological principles, see `docs/PROJECT_MEMORY.md`. For definitions of project-specific terms (trajectory, baseline seed, replica, t_p, tau, finite/tangent/residual response, etc.), see `docs/GLOSSARY.md`.
 
 
 ## Requirements

@@ -448,9 +448,12 @@ def plot8_concentration_landscape():
     etc. values cell-for-cell; median does not, 0.67 vs 0.622 for
     high/t_p=0). Existing cached stage1b2_results.pkl only, no new
     simulation. Confirms the concentration regime is a single sharp cell
-    (high-degree node, t_p=0), not a smooth gradient -- amplitude and
-    sign are pooled over since CONCENTRATION_REGIME_NOTE.md already
-    established neither has a detectable effect."""
+    (high-degree node, t_p=0), not a smooth gradient -- sign and amplitude
+    are pooled here to display the node-by-time interaction; their
+    deterministic within-cell effects (4 of 6 conditions always
+    concentrate, 2 never; amplitude sign/magnitude further modulates
+    strength -- see CONCENTRATION_REGIME_NOTE.md) are analysed separately,
+    not absent globally."""
     with open(STAGE1B2_RESULTS_PATH, "rb") as f:
         results = pickle.load(f)
 

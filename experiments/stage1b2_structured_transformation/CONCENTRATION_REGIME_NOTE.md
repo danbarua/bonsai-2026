@@ -419,10 +419,9 @@ tests LINEAR overtaking.**
 | 3090 | 35 | 35/35 |
 
 Aggregate 35/87 -- an identical, clean per-seed split to Part 4's
-headline result. This confirms the mismatch Part 4 reported is entirely a
-**linear** phenomenon: whatever overtaking happens, happens within the
-tangent solution itself, before tau=T is even reached by the nonlinear
-system.
+headline result. This confirms the mismatch Part 4 reported is entirely
+a **linear** phenomenon: the argmax change happens within the tangent
+solution's own time evolution, evaluated between tau=0.95 and tau=T.
 
 **Transition (b): final tangent (tau=T) vs. final finite (tau=T) --
 tests NONLINEAR destination modification.**
@@ -435,18 +434,31 @@ tests NONLINEAR destination modification.**
 | 3080 | 5 | 5/5 |
 | 3090 | 35 | 35/35 |
 
-Aggregate 87/87 -- a perfect match, zero mismatches. The nonlinear step
-never flips the destination among these 87 concentrated trials, for any
-seed.
+Aggregate 87/87 -- a perfect match, zero mismatches. The final tangent
+and finite argmax identities agree in all 87 selected trials.
 
-**Conclusion: Part 4's early-leader failure is entirely a linear
-(tangent-dynamics) phenomenon, not evidence of nonlinear rerouting.**
-Whatever mechanism makes the early tangent leader a poor predictor --
-time-ordered overtaking of the kind Part 3 showed concretely for
-seed=3000 -- operates entirely within the linear tangent system, before
-the nonlinear correction is even applied. The nonlinear step, once
-applied, never changes which node the trial concentrates onto, for any
+**Conclusion: within these 87 selected trials, all changes in endpoint
+argmax identity relative to the early tangent leader are already
+present in the tangent solution.** Whatever mechanism makes the early
+tangent leader a poor predictor -- time-ordered overtaking of the kind
+Part 3 showed concretely for seed=3000 -- is fully accounted for by the
+tangent system's own evolution between tau=0.95 and tau=T. At tau=T,
+tangent and finite responses select the same argmax node in every one
 of these 87 trials.
+
+**Scope, stated precisely rather than generalized:** this establishes
+that nonlinearity does not change *endpoint argmax identity* in these
+87 trials -- it does not establish that nonlinearity leaves the full
+routing behavior untouched. The comparison above only checks
+`argmax(q_tangent)` against `argmax(q_finite)`; it says nothing about
+whether their full spatial distributions agree, whether concentration
+*strength* (top1) agrees, or how much the residual redistributes
+non-winning energy. A broader claim like "nonlinearity does not alter
+routing" is not established by this analysis. A low-cost extension,
+using data already available for these same 87 trials, would report
+`top1(q_tangent)`, `top1(q_finite)`, and `sqrt(JSD(q_tangent, q_finite))`
+side by side -- not done here, but a natural next step if the full
+routing behavior (not just destination identity) becomes the question.
 
 **One clarification, not a contradiction: the Part 1 seed=3000/sign=-1/
 amplitude=0.8 destination flip (node 103 -> node 152) does not appear

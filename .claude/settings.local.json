@@ -11,5 +11,11 @@
         ]
       }
     ]
+  },
+  "permissions": {
+    "allow": [
+      "Bash(claude agents *)",
+      "Bash(claude mcp *)"
+    ]
   }
 }
