@@ -133,9 +133,11 @@ conditions, deterministically, not a 67% probability**.
 ## Part 2: is this linear routing or a nonlinear effect?
 
 Computed the same measures on `q_tangent` (the pure first-order/linear
-response, already saved per trial) and `q_residual` (`q_finite` minus
-`q_tangent`, the nonlinear correction term, also already saved) for the
-same 36-trial cell.
+response, already saved per trial) and `q_residual` (the normalized energy
+of the vector residual $z = x_{\text{finite}} - x_{\text{tangent}}$, also
+already saved) for the same 36-trial cell. In other words,
+$q_{\text{residual}} = \operatorname{normalized\_energy}(z)$, not
+`q_finite` minus `q_tangent`.
 
 **`q_tangent` alone already reproduces the destination (node 103) in all
 36 of 36 trials**, with `top1` in a narrow band (0.644–0.696) that does
