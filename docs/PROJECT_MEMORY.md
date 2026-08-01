@@ -293,13 +293,21 @@ floor-level mapping (p_MC ~ 0.0001).** Critically:
 
 **Capability hierarchy, current status**:
 - Level 1 (nonlinear behavior): established.
-- Level 2 (structured internal transformation): **established, locally**.
+- Level 2 (structured internal transformation): **established, across
+  ten independent baseline trajectories** on one class-specific learned
+  topology (Stage 1B.2 established it on one trajectory; Stage 1C, below,
+  confirmed it generalizes across nine further independent trajectories
+  -- see that subsection for the numbers).
 - Level 3 (useful computation): not established.
 
-**Scope, essential**: one baseline trajectory, one class, four repeated
-states along that single trajectory (not four independent trajectories),
-T only (no graph controls yet compared for Stage 1B.2 specifically), no
-external task.
+**Scope, essential** (Stage 1B.2's own scope, as originally run -- the
+trajectory-count dimension is superseded by Stage 1C, immediately below;
+the rest still holds): one baseline trajectory [**superseded by Stage
+1C's ten**], one class, four repeated states along that single trajectory
+(not four independent trajectories), T only (no graph controls yet
+compared within the Stage 1B.2/1C mapping design specifically -- distinct
+from Stage 1A's own T-vs-controls comparison, which used a different
+design and is now closed, see Part 4), no external task.
 
 **What remains open, in priority order** (generalization across
 independent trajectories -- the original item 1 here -- is now resolved;

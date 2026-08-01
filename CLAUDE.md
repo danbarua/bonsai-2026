@@ -147,23 +147,34 @@ Two closed programmes, one open one:
    retired from the benchmark feature vector -- not because they don't
    work, but because generic, non-oscillator controls matched or beat
    them on every test that was run. Full detail in `PROJECT_MEMORY.md`
-   Part 1, and `stage00/docs/22` through `38`.
+   Part 1, and `benchmark_programme/docs/22` through `38`.
 
 2. **Dynamics-as-computation programme (open, active)**: does the
    oscillator system perform structured computation through its own
    evolving state, independent of any exported feature? Currently at
-   **Level 2 of 3 established, locally**: structured internal
-   transformation confirmed along one prespecified trajectory, following
-   a three-round correction process to close a subtle information-
-   leakage bug in the source-node-exclusion diagnostic. Full detail in
-   `PROJECT_MEMORY.md` Part 3, and `stage1b2_execution_package/STAGE1B2_FINDINGS.md`.
+   **Level 2 of 3 established, across ten independent baseline
+   trajectories** on the KMNIST class-0 learned topology (Stage 1B.2
+   established it on one prespecified trajectory, following a
+   three-round correction process to close a subtle information-leakage
+   bug in the source-node-exclusion diagnostic; Stage 1C then confirmed
+   it generalizes across nine further independent trajectories, mean
+   Delta_map=0.3296, CV~5.2%, all ten significant at the Monte Carlo
+   floor). Full detail in `PROJECT_MEMORY.md` Part 3, and
+   `experiments/stage1b2_structured_transformation/FINDINGS.md` /
+   `experiments/stage1c_trajectory_generalization/FINDINGS.md`.
 
-   **The three open questions, in priority order, are the natural next
-   work**: does this generalize across independent baseline
-   trajectories; does learned topology T show any advantage over the
-   matched graph controls (rewired/random/lattice) already built and
-   validated for this exact purpose in the E/R/Stage-1A work; and can
-   the structured mapping be connected to any externally defined task.
+   **The two remaining open questions, in priority order, are the
+   natural next work** (trajectory generalization is resolved, per
+   Stage 1C, and is no longer one of them): does learned topology T show
+   any advantage over the matched graph controls (rewired/random/
+   lattice) already built and validated for this exact purpose in the
+   E/R/Stage-1A work -- Stage 1A's own re-verification (raw-scale and
+   log-scale) found no such advantage survives its robustness battery
+   for historical-random or current-random, and remains genuinely
+   inconclusive for rewiring; this question is about T-vs-controls
+   specifically within the Stage 1B.2/1C mapping design, not a repeat of
+   Stage 1A -- and whether the structured mapping can be connected to
+   any externally defined task.
 
 ## Methodological discipline this project holds itself to
 
