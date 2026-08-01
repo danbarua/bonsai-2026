@@ -3,10 +3,11 @@
 **Status: a scoped follow-up observation on already-frozen Stage 1B.2
 data, not a revision of [Stage 1B.2 findings](FINDINGS.md).** `FINDINGS.md` and Stage 1B.2's
 own conclusions are unchanged by this note. This document exists
-separately and should be read as an addendum, not an update. Parts 1-2 and
-the "Further follow-up" section are pure re-analysis of already-cached
-data (no new simulation); **Part 3 is the one exception** and is flagged
-as new simulation at the point it's introduced.
+separately and should be read as an addendum, not an update. Parts 1-2,
+Part 5, and the "Further follow-up" section are pure re-analysis of
+already-cached data (no new simulation); **Parts 3 and 4 are the
+exceptions** and are each flagged as new simulation at the point they're
+introduced.
 
 ## Where this came from
 
@@ -378,6 +379,95 @@ investigation. This does not decompose $\Phi(T,0)$ into rigorous
 pathwise contributions -- the node-105 transient is consistent with,
 but not formal proof of, relay transmission. This thread is closed; it
 does not alter Stage 1B.2's frozen `FINDINGS.md`.
+
+## Part 5: decomposing the early-leader failure into its two component transitions
+
+**Motivated by Part 4's finding** that the early tangent leader (argmax of
+`q_tangent` at tau=0.95) fails to predict the final winner in 4 of 5
+concentrating seeds (35/87 aggregate match) -- itself built from a single
+comparison that conflates two genuinely different transitions: (a) time
+evolution *within* the linear tangent system itself (early tangent
+tau=0.95 -> final tangent tau=T, from `fixed_time_q_tangent`), and (b)
+the nonlinear step at the same fixed timepoint (final tangent tau=T ->
+final finite tau=T, from `fixed_time_q`). Part 3 already demonstrated
+genuine tangent-system overtaking directly for seed=3000 (node 152 leads
+until roughly tau=1.35-1.40 before node 103 overtakes it); this part
+checks whether that same linear-overtaking account holds for all 4
+mismatching seeds, or whether some of Part 4's mismatch is instead
+attributable to the nonlinear step.
+
+**Pure re-analysis of already-cached data -- no new simulation.** Reuses
+`stage1b2_frontier_visuals_data.pkl`'s `q_tangent_full` (already computed
+for Part 4 / `docs/report_visuals/generate_report_visuals.py`'s plot10)
+for the early tangent leader, and each trial's own already-cached
+`fixed_time_q_tangent` and `fixed_time_q` (both already saved per trial
+in `stage1b2_results.pkl` / the Stage 1C result files -- plot9 already
+reads `fixed_time_q_tangent` the same way) for the two final states.
+Code: `analyze_stage1b2_early_leader_decomposition.py`. Covers the
+identical 87 concentrated trials across the same 5 concentrating seeds as
+Part 4.
+
+**Transition (a): early tangent (tau=0.95) vs. final tangent (tau=T) --
+tests LINEAR overtaking.**
+
+| Seed | Concentrated trials | Match |
+|---|---|---|
+| 3000 | 24 | 0/24 |
+| 3010 | 21 | 0/21 |
+| 3020 | 2 | 0/2 |
+| 3080 | 5 | 0/5 |
+| 3090 | 35 | 35/35 |
+
+Aggregate 35/87 -- an identical, clean per-seed split to Part 4's
+headline result. This confirms the mismatch Part 4 reported is entirely a
+**linear** phenomenon: whatever overtaking happens, happens within the
+tangent solution itself, before tau=T is even reached by the nonlinear
+system.
+
+**Transition (b): final tangent (tau=T) vs. final finite (tau=T) --
+tests NONLINEAR destination modification.**
+
+| Seed | Concentrated trials | Match |
+|---|---|---|
+| 3000 | 24 | 24/24 |
+| 3010 | 21 | 21/21 |
+| 3020 | 2 | 2/2 |
+| 3080 | 5 | 5/5 |
+| 3090 | 35 | 35/35 |
+
+Aggregate 87/87 -- a perfect match, zero mismatches. The nonlinear step
+never flips the destination among these 87 concentrated trials, for any
+seed.
+
+**Conclusion: Part 4's early-leader failure is entirely a linear
+(tangent-dynamics) phenomenon, not evidence of nonlinear rerouting.**
+Whatever mechanism makes the early tangent leader a poor predictor --
+time-ordered overtaking of the kind Part 3 showed concretely for
+seed=3000 -- operates entirely within the linear tangent system, before
+the nonlinear correction is even applied. The nonlinear step, once
+applied, never changes which node the trial concentrates onto, for any
+of these 87 trials.
+
+**One clarification, not a contradiction: the Part 1 seed=3000/sign=-1/
+amplitude=0.8 destination flip (node 103 -> node 152) does not appear
+among this section's 87 trials.** That trial's finite `top1` is
+0.181-0.188 (see Part 1's table), which never crosses the 0.5
+concentration threshold used to define the 87-trial set analyzed
+throughout Part 4 and this section -- it is excluded by construction (it
+isn't a "concentrated" trial by this note's own definition), not because
+the flip stopped happening. Part 2 already established that flip is a
+partial linear/nonlinear cancellation specific to that one (sign,
+amplitude) corner; nothing here supersedes that finding, since this
+section's transition (b) is scoped to the disjoint set of trials that do
+cross the concentration threshold.
+
+**Scope**: identical to Part 4 -- the (node=high, t_p=0) cell across all
+replicas, the same 5 concentrating seeds, the same 87-trial set. Not a
+re-run of the full 432-trial grid. Code:
+`analyze_stage1b2_early_leader_decomposition.py`; the corresponding plot
+(`docs/report_visuals/generate_report_visuals.py`'s plot10) now shows
+both transitions side by side rather than the single conflated
+comparison it originally reported.
 
 ## What this establishes, and what it doesn't
 
