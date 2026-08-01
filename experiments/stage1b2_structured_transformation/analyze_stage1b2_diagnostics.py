@@ -165,9 +165,20 @@ if __name__ == '__main__':
     # Check 2: source energy fraction (descriptive, no permutation needed)
     report_source_energy_fraction(results)
 
-    # Check 1: omnibus test excluding the stimulated node
+    # Check 1: omnibus test excluding the stimulated node. NOTE: this diagnostic is now
+    # known to be INVALID for source-exclusion inference (the position of the forced zero
+    # leaks node identity by itself -- see stage1b2_core.py's q_excluding_node() docstring
+    # and FINDINGS.md's "What this establishes, precisely" section for the full account,
+    # and analyze_stage1b2_common_support_exclusion.py for the corrected diagnostic). Kept
+    # here only as the audit-trail comparison FINDINGS.md references, not as a result to
+    # draw new conclusions from. The key name below is the OLD, pre-rename field as it
+    # actually exists in the frozen results/stage1b2_results.pkl (stage1b2_core.py's live
+    # code now calls this field 'legacy_q_excl_actual_source_do_not_use_for_mapping_inference'
+    # for any NEW run -- this script only reads the already-frozen cache, so it correctly
+    # keeps using the old name that's actually serialized there).
     result_excl = run_omnibus_on_field(results, nodes, 'event_aligned_q_excl_node',
-                                         'q EXCLUDING stimulated node', n_workers=n_workers, seed=101)
+                                         'q EXCLUDING stimulated node (INVALID diagnostic, audit only)',
+                                         n_workers=n_workers, seed=101)
 
     # Check 3: omnibus test on tangent-only response
     result_tangent = run_omnibus_on_field(results, nodes, 'event_aligned_q_tangent',

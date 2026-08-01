@@ -20,6 +20,22 @@ from bonsai_stage1b_pilot_findings.md:
   q_residual, so the residual mapping's absolute materiality (not just
   its normalized geometric shape) can be reported and checked against
   the numerical-validity and nonlinear-departure thresholds.
+
+Schema note: run_one_trial()'s output dict includes a field named
+'event_aligned_legacy_q_excl_actual_source_do_not_use_for_mapping_inference'
+(and its 'fixed_time_' counterpart) -- kept for audit history only, NOT a
+valid source-exclusion diagnostic (see q_excluding_node()'s docstring
+below for why). This field was renamed from the shorter
+'event_aligned_q_excl_node' / 'fixed_time_q_excl_node' specifically to
+stop a future cold-context read from mistaking it for the corrected
+common-support-exclusion diagnostic. The already-frozen
+results/stage1b2_results.pkl (and Stage 1C's already-cached trajectory
+results, which also call run_one_trial) were generated before this
+rename and still use the OLD short key names -- analyze_stage1b2_diagnostics.py
+correctly still reads those old names, since it only ever reads that
+frozen cache, never re-runs run_one_trial. Any NEW run of this function
+(a future Stage 1D, or re-running an existing stage) produces the new,
+explicit name.
 """
 import numpy as np
 from scipy.integrate import solve_ivp
@@ -169,19 +185,39 @@ def run_one_trial(W, replica_state, node, sign, amplitude, k_coupling=1.0):
 
     def q_excluding_node(disp, exclude_idx):
         """q^(-i): normalized energy distribution over all nodes EXCEPT
-        the stimulated one -- tests whether input identity predicts
-        response structure elsewhere, not just at the input site.
+        the stimulated one.
 
-        CRITICAL: the source coordinate is ZEROED, not deleted, so every
-        trial's output vector remains defined over the same full,
-        globally-aligned node coordinate system regardless of which node
-        was stimulated. Physically deleting the coordinate (e.g. via
-        boolean masking that shortens the vector) would misalign node
-        identity across trials that stimulated different nodes -- index j
-        in one shortened vector would not correspond to the same graph
-        node as index j in another, and JSD/d_q comparisons between them
-        would be comparing different node identities, not the same
-        node's response under different inputs."""
+        CRITICAL (coordinate alignment): the source coordinate is
+        ZEROED, not deleted, so every trial's output vector remains
+        defined over the same full, globally-aligned node coordinate
+        system regardless of which node was stimulated. Physically
+        deleting the coordinate (e.g. via boolean masking that shortens
+        the vector) would misalign node identity across trials that
+        stimulated different nodes -- index j in one shortened vector
+        would not correspond to the same graph node as index j in
+        another, and JSD/d_q comparisons between them would be comparing
+        different node identities, not the same node's response under
+        different inputs.
+
+        CRITICAL (source-exclusion validity -- DO NOT USE THIS FOR
+        SOURCE-EXCLUSION INFERENCE): fixing coordinate alignment does
+        NOT make this a valid "does the response persist away from the
+        input site" test. The POSITION of the forced zero is itself a
+        deterministic, input-specific signature -- a low-node trial's
+        zero always sits at the same index, a median-node trial's at
+        another, a high-node trial's at a third -- so which coordinate
+        is missing leaks node identity through a channel that has
+        nothing to do with genuine propagated response elsewhere in the
+        graph. This was caught before being reported as a clean result;
+        see stage1b2_structured_transformation/FINDINGS.md's "What this
+        establishes, precisely" section for the full account. The valid
+        corrected diagnostic uses a COMMON exclusion mask (all three
+        candidate source nodes zeroed in every trial, regardless of
+        which one was actually stimulated) -- see
+        analyze_stage1b2_common_support_exclusion.py, not this function.
+        This function and the 'legacy_q_excl_...' fields it feeds are
+        kept only for audit history (to show the corrected q genuinely
+        differs from this leakier construction), not for new inference."""
         sub = disp.copy()
         sub[exclude_idx] = 0.0
         norm = np.linalg.norm(sub)
@@ -208,10 +244,12 @@ def run_one_trial(W, replica_state, node, sign, amplitude, k_coupling=1.0):
             J_tan = float(jensenshannon(q_finite, q_tangent) ** 2)
 
         return {'q': q_finite, 'q_tangent': q_tangent, 'q_residual': q_residual,
-                'q_excl_node': q_finite_excl, 'r': r_finite, 'J_tan': J_tan,
+                'legacy_q_excl_actual_source_do_not_use_for_mapping_inference': q_finite_excl,
+                'r': r_finite, 'J_tan': J_tan,
                 'f_source': f_source, 'residual_norm': residual_norm}
 
-    empty = {'q': None, 'q_tangent': None, 'q_residual': None, 'q_excl_node': None,
+    empty = {'q': None, 'q_tangent': None, 'q_residual': None,
+             'legacy_q_excl_actual_source_do_not_use_for_mapping_inference': None,
              'r': None, 'J_tan': None, 'f_source': None, 'residual_norm': None}
     event_aligned = get_outputs_at(tau_star_idx) if event_aligned_valid else empty
     fixed_time = get_outputs_at(len(t_eval) - 1)  # tau = T
@@ -226,7 +264,8 @@ def run_one_trial(W, replica_state, node, sign, amplitude, k_coupling=1.0):
         'event_aligned_J_tan': event_aligned['J_tan'],
         'event_aligned_q_tangent': event_aligned['q_tangent'],
         'event_aligned_q_residual': event_aligned['q_residual'],
-        'event_aligned_q_excl_node': event_aligned['q_excl_node'],
+        'event_aligned_legacy_q_excl_actual_source_do_not_use_for_mapping_inference':
+            event_aligned['legacy_q_excl_actual_source_do_not_use_for_mapping_inference'],
         'event_aligned_f_source': event_aligned['f_source'],
         'event_aligned_residual_norm': event_aligned['residual_norm'],
         'fixed_time_q': fixed_time['q'],
@@ -234,7 +273,8 @@ def run_one_trial(W, replica_state, node, sign, amplitude, k_coupling=1.0):
         'fixed_time_J_tan': fixed_time['J_tan'],
         'fixed_time_q_tangent': fixed_time['q_tangent'],
         'fixed_time_q_residual': fixed_time['q_residual'],
-        'fixed_time_q_excl_node': fixed_time['q_excl_node'],
+        'fixed_time_legacy_q_excl_actual_source_do_not_use_for_mapping_inference':
+            fixed_time['legacy_q_excl_actual_source_do_not_use_for_mapping_inference'],
         'fixed_time_f_source': fixed_time['f_source'],
         'fixed_time_residual_norm': fixed_time['residual_norm'],
         'initial_f_source': initial['f_source'],
