@@ -1,28 +1,28 @@
 """
 Ties the four matched graph constructions (learned topology T,
-degree-preserving rewiring, matched-sparsity random, regular lattice)
-into one per-class bundle, matching class0_constructions.pkl's format:
-{'constructions': {'T', 'rewired', 'random', 'lattice'}, 'n_active'}.
+degree-preserving rewiring, current edge-count-matched random, regular
+lattice) into one per-class bundle, matching class0_constructions.pkl's
+format: {'constructions': {'T', 'rewired', 'random', 'lattice'},
+'n_active'}.
 
 Class 0 only, for now (scope explicitly agreed) -- this function is
 dataset/class-agnostic (any per-class image batch), but has only been
 run and verified against class 0.
 
-Known limitation, confirmed not a seed issue: 'random' does not reproduce
-the historical cached artifact for any of 10 candidate seeds swept (0-9).
-The cached class0_constructions.pkl's 'random' has roughly half T's edge
-count (1090 vs 2102) and per-edge values scaled up so its mean weighted
-degree is bit-identical to T's own (3.8811482995463593) -- a different
-edge-count target and an equal-total-weighted-degree rescaling that the
-current generate_matched_sparsity_topology (same edge count as T, T's own
-values redistributed onto new positions, no rescaling) does not produce
-under any seed. Most likely explanation: stage1a_infinitesimal_response's
-NOTE.md already discloses matched_sparsity_ablation.py's consolidated
-version is a later (Stage 1B.2-era), "strictly more complete" version
-superseding whatever code originally built this specific cache entry --
-evidently a different algorithm, not merely a different seed. This bundle
-still uses the current function as instructed; the mismatch is reported,
-not papered over.
+'random' here uses matched_sparsity_ablation.py's **current
+edge-count-matched random** (same edge count as T, T's own values
+redistributed onto new positions, no rescaling) -- confirmed NOT to
+reproduce the historical cached artifact under any of 10 candidate seeds
+swept (0-9), and the mismatch is structural (edge count, value scale),
+not a seed problem: the cached class0_constructions.pkl's 'random' has
+roughly half T's edge count (1090 vs 2102) and per-edge values scaled up
+so its mean weighted degree is bit-identical to T's own
+(3.8811482995463593). A separate, structurally-verified reconstruction
+of that historical construction -- **historical half-edge random,
+coupling-budget normalized** -- lives in
+historical_matched_sparsity_random.py, not wired into this bundle by
+default; callers wanting the historically-faithful control should build
+it directly from that module instead of this bundle's 'random' key.
 
 'rewired', by contrast, DOES reproduce exactly -- at seed=1 (confirmed
 byte-exact for class 0). This is therefore no longer an undocumented

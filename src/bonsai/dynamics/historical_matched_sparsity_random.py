@@ -1,4 +1,14 @@
 """
+Label for unambiguous reference in reports: **historical half-edge
+random, coupling-budget normalized** -- an independently-placed, sparser
+random support (~half the real topology's edge count), values drawn from
+the real topology's own weight pool, then rescaled so its mean weighted
+degree matches the real topology's exactly. Distinct from
+matched_sparsity_ablation.py's **current edge-count-matched random**
+(same edge count as the real topology, no rescaling). Do not call both
+"matched-sparsity random" without qualification -- that's an actively
+different null model, not a naming detail.
+
 Reconstruction of the historical "matched-sparsity random" construction
 used to build class0_constructions.pkl's cached 'random' -- NOT the same
 algorithm as the current matched_sparsity_ablation.py (preserved

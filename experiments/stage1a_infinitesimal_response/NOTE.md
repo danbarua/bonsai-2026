@@ -18,25 +18,34 @@ file by file:
   reproduces the historical cached `class0_constructions.pkl`'s
   `rewired` construction byte-exact at seed=1 (confirmed by a 0-9 seed
   sweep; see `tests/test_construction_driver.py`).
-- `matched_sparsity_ablation.py`: **not verified, and now confirmed to
-  disagree**. `generate_matched_sparsity_topology` does not reproduce
-  the cached `random` construction at any of 10 candidate seeds swept,
-  and the mismatch is structural, not a seed problem: the cached
-  artifact has roughly half the learned topology's edge count, with
-  per-edge values rescaled so its mean weighted degree matches the
-  learned topology's own exactly -- properties the current function's
-  algorithm (same edge count as the learned topology, its own values
-  redistributed, no rescaling) cannot produce under any seed. This is an
-  open, unresolved discrepancy between whatever code originally built
-  the historical `random` construction and the code now living in
-  `src/bonsai/dynamics/`, not a settled equivalence -- see
+- `matched_sparsity_ablation.py` (**current edge-count-matched random**):
+  **not verified, and now confirmed to disagree** with the historical
+  `random` construction. `generate_matched_sparsity_topology` does not
+  reproduce the cached `random` construction at any of 10 candidate
+  seeds swept, and the mismatch is structural, not a seed problem: the
+  cached artifact has roughly half the learned topology's edge count,
+  with per-edge values rescaled so its mean weighted degree matches the
+  learned topology's own exactly -- properties this algorithm (same edge
+  count as the learned topology, its own values redistributed, no
+  rescaling) cannot produce under any seed. This is a deliberately
+  different, intentional design (not a dropped consolidation step -- see
+  its own docstring), not a settled equivalence -- see
   `tests/test_construction_driver.py`'s Tier-2 test, which asserts this
   non-match explicitly so it stays documented rather than silently
-  assumed away. Stage 1A's own T-vs-controls comparison (below) includes
-  `random` as one of the three matched controls -- this discrepancy
-  means that specific comparison has not been independently re-verified
-  against the consolidated code, unlike the T-vs-rewired and
-  T-vs-lattice comparisons.
+  assumed away. A separate reconstruction of the actual historical
+  algorithm -- **historical half-edge random, coupling-budget
+  normalized** -- lives in `historical_matched_sparsity_random.py`,
+  structurally verified (correct rescaling formula, independently-
+  sampled support, values from the real topology's own weight pool) but
+  with its exact historical edge-count rule and RNG seed unrecovered
+  (see that module's docstring and
+  `tests/test_historical_random_construction.py`). Stage 1A's own
+  T-vs-controls comparison (below) includes `random` as one of the three
+  matched controls -- per the reviewer's guidance, re-verification of
+  that specific comparison should use the historical reconstruction as
+  the primary control (structurally closer to the original experiment),
+  with the current edge-count-matched algorithm retained as a separate
+  robustness check, not a replacement.
 
 See `FINDINGS.md` for this stage's actual results; the code that
 produced them now lives in the shared package.

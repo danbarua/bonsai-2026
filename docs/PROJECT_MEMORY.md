@@ -405,21 +405,27 @@ historical cached artifact, confirmed by
 `tests/test_learned_topology_construction.py`,
 `tests/test_construction_driver.py`, and
 `tests/test_lattice_construction.py`'s Tier-2 tests.
-`matched_sparsity_ablation.py` (random) is the exception: the
-currently-in-use code implements a different, intentional algorithm that
-does not match the historical cached 'random' construction, and a
-separate reconstruction attempt (`historical_matched_sparsity_random.py`)
-is only partially successful -- see the open items below.
+`matched_sparsity_ablation.py` ("current edge-count-matched random") is
+the exception: it implements a different, intentional algorithm that
+does not match the historical cached 'random' construction. A separate
+reconstruction, `historical_matched_sparsity_random.py` ("historical
+half-edge random, coupling-budget normalized"), is structurally verified
+but not byte-exact -- see the open items below. Report and docstring
+usage should always use one of these two explicit labels, not "random"
+or "matched-sparsity random" unqualified -- they are different null
+models, not two names for the same thing (Part 2, principle 16-adjacent
+naming discipline).
 `src/bonsai/dynamics/construction_bundle.py` ties all four together into
-one per-class bundle, but has only been built and verified for class 0.
+one per-class bundle (using the current edge-count-matched random by
+default), but has only been built and verified for class 0.
 
 **Construction-recovery effort, open items** (priority order):
 1. Extend `construction_bundle.py` past class 0 to all 10 KMNIST
    classes -- not yet attempted; explicitly deferred pending review each
    time the scope question has come up.
-2. `random`'s exact historical edge-count rule and RNG seed remain
-   unrecovered. Two known realizations (552 and 545 unique edges, out of
-   T's 1051) don't exactly match any deterministic candidate rule
+2. The historical half-edge random's exact edge-count rule and RNG seed
+   remain unrecovered. Two known realizations (552 and 545 unique edges,
+   out of T's 1051) don't exactly match any deterministic candidate rule
    tested (floor/round/ceil of half T's edge count, a fixed fraction of
    the eligible pool, a count tied to ink-active-node count). Structural
    equivalence IS established (the correct rescaling formula, an
@@ -427,10 +433,17 @@ one per-class bundle, but has only been built and verified for class 0.
    pool) -- byte-exact reproduction is not, despite a 600-way
    seed/call-order sweep against the known raw artifact. Full account in
    `historical_matched_sparsity_random.py`'s docstring.
-3. Whether Stage 1A's own T-vs-random comparison specifically needs
-   re-running against the now-verified code, given `random`'s
+3. Stage 1A's own T-vs-random comparison specifically needs re-running
+   against verified code, given the current edge-count-matched random's
    consolidation is confirmed NOT equivalent to history (see
-   `stage1a_infinitesimal_response/NOTE.md`) -- not yet decided.
+   `stage1a_infinitesimal_response/NOTE.md`). Reviewer's guidance,
+   accepted: use the historical half-edge random (structurally closer to
+   the original experiment) as the primary control for re-verification,
+   with the current edge-count-matched random retained as a separate
+   robustness check, not a replacement -- two distinct questions, not
+   one. A class-0-only pilot (multi-seed sweep of both controls against
+   Stage 1A's actual tangent-linear methodology, before deciding whether
+   to extend to all 10 classes) is the first concrete step.
 
 ## How to use this document
 

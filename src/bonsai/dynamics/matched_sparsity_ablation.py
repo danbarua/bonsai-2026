@@ -1,4 +1,12 @@
 """
+Label for unambiguous reference in reports: **current edge-count-matched
+random** -- same edge count as the real topology, no final coupling-budget
+rescaling. Distinct from `historical_matched_sparsity_random.py`'s
+**historical half-edge random, coupling-budget normalized**, which
+reconstructs a different, earlier design (see that module's docstring).
+Do not call both "matched-sparsity random" without qualification --
+that's an actively different null model, not a naming detail.
+
 Matched-sparsity random topology ablation: for each class, generate a
 random topology with the SAME edge count, drawn from the SAME eligible
 candidate pool (ink-involving pairs only, background-background excluded,
