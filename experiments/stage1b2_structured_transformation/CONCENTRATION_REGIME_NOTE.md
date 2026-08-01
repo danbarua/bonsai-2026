@@ -3,7 +3,10 @@
 **Status: a scoped follow-up observation on already-frozen Stage 1B.2
 data, not a revision of [Stage 1B.2 findings](FINDINGS.md).** `FINDINGS.md` and Stage 1B.2's
 own conclusions are unchanged by this note. This document exists
-separately and should be read as an addendum, not an update.
+separately and should be read as an addendum, not an update. Parts 1-2 and
+the "Further follow-up" section are pure re-analysis of already-cached
+data (no new simulation); **Part 3 is the one exception** and is flagged
+as new simulation at the point it's introduced.
 
 ## Where this came from
 
@@ -173,6 +176,118 @@ real, secondary effect, but it modulates an already-linear routing
 tendency rather than creating a new one -- it does not, on its own, meet
 the bar the decision rule set for pursuing attractor redirection further.
 
+## Part 3: does the winning pathway lead the whole way, or overtake late? (time-resolved tangent energy share)
+
+**This part is genuine new simulation, not pure re-analysis of the frozen
+cache -- disclosed plainly, unlike Parts 1-2 and everything above.**
+`stage1b2_results.pkl` only ever saved `fixed_time_q` at the single
+tau=T=2.5 endpoint (plus one event-aligned snapshot); it never retained the
+intermediate timepoints of the tangent solution. Answering "does the
+eventual winner build up monotonically, or does it overshoot/reverse along
+the way" requires the actual time series, so this part re-integrates the
+same tangent ODE `run_one_trial` (`stage1b2_core.py`) already solves for
+these trials, but keeps all 51 evaluated timepoints in [0, 2.5] instead of
+discarding everything but the endpoint. It does not re-solve the separate
+nonlinear perturbed-theta system, since `q_tangent(t)` depends only on the
+tangent solution `delta_tau(t)` -- see the header docstring of
+`analyze_stage1b2_time_resolved_propagator.py` for why this also means the
+result is independent of sign and amplitude, depending only on
+(baseline_seed, node, replica). It does not touch, modify, or regenerate
+`results/stage1b2_results.pkl` or any Stage 1C cache; output lives in a new
+`results/stage1b2_time_resolved_propagator.pkl` /
+`results/stage1b2_time_resolved_propagator.png`.
+
+This follows directly from the notebook's Sections 10-11 (dynamical
+geometry) -- Section 10 found that $J(0)$ alone plausibly explains, for
+three trajectories, which of two candidate pathways (a 105-relay into node
+103, or a direct edge into node 152) is initially open; Section 11 found
+that checking the full interval complicates that story -- several Jacobian
+entries flip sign across $[0,2.5]$, and a naive time-integral of individual
+entries doesn't cleanly predict the winner either (seed=3000's direct
+source->152 edge has the *largest* integrated exposure of its three
+candidate edges, yet 3000 still concentrates onto 103). This part goes one
+level further: instead of the edge-level Jacobian, it tracks the actual
+per-node energy share $q_i(\tau) = \delta_\tau(\tau)_i^2 / \sum_j
+\delta_\tau(\tau)_j^2$ throughout the interval, for the three nodes
+Sections 8-10 identified as relevant (103, 105, 152), across the same
+three trajectories (seed=3000, 3030, 3090), at the same concrete trial
+already tabulated in Part 1 (node=high, t_p=0, sign=+1, amplitude=0.025,
+replica=0).
+
+**Result: the three trajectories tell three genuinely different stories --
+this does not resolve into a single tidy rule.**
+
+- **Seed=3000 (winner: node 103): does NOT lead throughout. It is
+  overtaken partway through, in the other direction.** Node 152 rises
+  first and faster, reaching q=0.353 at tau=0.95 -- comfortably higher
+  than node 103's q at that time (0.180) -- then *declines* for the rest
+  of the interval. Node 103 rises more slowly at first but never reverses,
+  overtaking node 152 between tau=1.35 (q_103=0.282 vs q_152=0.304) and
+  tau=1.40 (q_103=0.305 vs q_152=0.293), then continues to climb to
+  q=0.682 by tau=2.5. So the actual final winner spends roughly the first
+  half of the interval *behind* the eventual loser, not ahead of it -- a
+  genuine overtake, not a monotonic buildup. Node 105 (the relay
+  identified in Section 8) shows a separate, small, early transient bump
+  (peaking at q=0.095 at tau=0.4) that decays to near-zero by tau=1.0 and
+  stays there -- consistent with being a transit point energy passes
+  through early, not a node that itself accumulates share.
+
+- **Seed=3090 (winner: node 152): DOES lead essentially the whole way, no
+  reversal.** Node 152's share rises from the start and never gives up
+  ground to either of the other two nodes (monotonically non-decreasing
+  across all 51 timepoints), reaching q=0.751 by tau=2.5. There is a
+  visible change in the growth rate around tau=1.5-2.0 (the curve
+  accelerates rather than plateauing), but no dip and no competing
+  overshoot from node 103 or 105 at any point -- node 103 never exceeds
+  q=0.0025 the entire interval, ruling out anything resembling seed=3000's
+  crossover for this trajectory. Node 105 shows the same kind of small,
+  early, decaying transient bump as in the other two trajectories (peak
+  q=0.044 at tau=0.55), again consistent with a transit point rather than
+  a competing destination.
+
+- **Seed=3030 (no concentration): a real but insufficient late-arriving
+  trend in the direction Section 11's Jacobian result suggested, not
+  nothing.** Section 11 found this trajectory's relay edge J(105,103)
+  starts weak (+0.074 at t=0, the basis for calling it "bottlenecked") but
+  grows to +0.905 by t=2.5. Consistent with that, node 103's share here
+  does rise late -- from near zero to q=0.086 by tau=2.4 -- but the
+  *node* 105 itself does not show a late buildup (it peaks early, q=0.101
+  at tau=0.5, then decays to a low plateau, the same early-transient
+  shape seen in the other two trajectories) -- so "the relay strengthens
+  late" shows up as a late rise specifically in the *downstream* node
+  (103), not in the relay node's own energy share, which is the more
+  precise way to state it. Either way, the magnitude never approaches
+  concentration: the largest of the three tracked nodes' final shares is
+  node 103's 0.085 (using the actual final-timepoint argmax over ALL
+  nodes, not just these three: node 153, at 0.176 -- still far below the
+  \>0.5 threshold used throughout this note). Node 152 in this trajectory
+  is essentially flat and negligible throughout (never exceeds 0.029).
+
+**What this changes about the emerging picture.** Section 10's initial-
+gating account and Section 11's "neither a snapshot nor a naive integral
+fully explains the winner" finding both stand -- this part adds a third
+angle (the actual time-resolved share, not an edge-level proxy) and it
+does not converge on a simpler story either. If anything it complicates
+the picture further: the two genuinely concentrating trajectories
+(3000, 3090) reach the same qualitative endpoint (one node winning
+decisively) via visibly different routes -- one with a clean monotonic
+buildup, the other with a lead change roughly halfway through the window.
+There is no evidence here that "the eventual winner is ahead from early
+on" is a general rule; seed=3000 is a direct counterexample to it. This
+is reported as a genuine, still-open complication, not smoothed into a
+single mechanism -- consistent with Section 11's own conclusion that the
+full time-ordered propagator is doing something these simpler diagnostics
+(now including this one) can't fully capture.
+
+**Scope of this part specifically**: three trajectories, one fixed trial
+selection (node=high, t_p=0, replica=0; sign/amplitude do not affect
+`q_tangent(t)`, see above), three tracked nodes (103, 105, 152) chosen
+because Sections 8-10 already identified them as the relevant candidates
+for this specific (node, t_p) cell -- not a re-run of the full 432-trial
+grid, and not evidence about any other cell of the design. Code:
+`analyze_stage1b2_time_resolved_propagator.py`; plot:
+`results/stage1b2_time_resolved_propagator.png`.
+
 ## What this establishes, and what it doesn't
 
 **Establishes**: for this class-0 learned topology, under Stage 1B.2's
@@ -187,17 +302,35 @@ present already in the linear (tangent) response; sign and amplitude
 modulate its strength and, in one specific combination, its destination,
 but do not create it.
 
-**Does not establish**: *why* the high-degree node specifically routes
-to node 103 at t_p=0 and not at other t_p values. One plausible, but
-untested, interpretation: t_p=0 perturbations act on the baseline
-trajectory before it has had time to settle toward an attractor
-(consistent with Stage 0's own multistability finding -- the system
-takes time to converge from a fresh random initial condition), which
-could plausibly change the local linearization's routing structure
-compared to a perturbation applied once the trajectory has settled. This
-note does not test that mechanism -- it is offered as a plausible
-reading, not a confirmed explanation, and per Part 2's result, does not
-need to invoke nonlinear attractor-switching to explain the core pattern.
+**Does not establish**: *why* t_p=0 specifically is where this happens,
+versus other perturbation times. One plausible, but untested,
+interpretation: t_p=0 perturbations act on the baseline trajectory before
+it has had time to settle toward an attractor (consistent with Stage 0's
+own multistability finding -- the system takes time to converge from a
+fresh random initial condition), which could plausibly change the local
+linearization's routing structure compared to a perturbation applied once
+the trajectory has settled. This note does not test that mechanism -- it
+is offered as a plausible reading, not a confirmed explanation, and per
+Part 2's result, does not need to invoke nonlinear attractor-switching to
+explain the core pattern.
+
+*Why node 103 specifically, for seed=3000*, is addressed further down
+("Further follow-up" section, from `concentration_regime_notebook.ipynb`
+Sections 8-11): a static-graph 2-hop relay (source->105->103) explains
+seed=3000's destination, but does not generalize across Stage 1C's other
+nine trajectories (destinations vary: 103, 130, 35, 55, 152, or nothing).
+The phase-dependent Jacobian $J(t)=W\cos(\theta_j-\theta_i)$, not the
+static graph, gates which pathway is open at a given trajectory's t_p=0
+state, and its individual entries account for the three-trajectory
+comparison (seed=3000/3030/3090) at $t=0$ specifically. But Part 3 above
+shows even that account is incomplete: several of the same Jacobian
+entries flip sign across the full interval, a naive time-integral of
+them doesn't track the outcome either, and the actual time-resolved
+energy share shows seed=3000's winner is behind for roughly the first
+half of the window before overtaking -- so the *why*, at the level of
+the full time-ordered propagator, remains genuinely open rather than
+resolved by any of the diagnostics tried so far (snapshot, naive
+integral, or the per-node share curves in Part 3).
 
 This also does not extend beyond Stage 1B.2's own existing scope
 limits: one class, one topology (T only, no graph controls), and the
