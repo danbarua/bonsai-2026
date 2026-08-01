@@ -66,9 +66,16 @@ qualitatively different" -- each gets its own named estimand rather than
 being folded into the primary Delta_map comparison alone:
 - **Strength**: mean trajectory-level Delta_map (the primary comparison
   above).
-- **Stability**: within-graph SD/CV of Delta_map across the 10 matched
-  trajectories, plus (for stochastic controls) the between-realization
-  variance sigma^2_between-graphs estimated by the pilot.
+- **Stability**: within-graph SD of Delta_map across the matched
+  trajectories is the formal stability measure, always reported. CV
+  (SD/mean) is reported only when a graph's mean Delta_map exceeds a
+  prespecified positive floor (proposed: 0.05, roughly T's own between-
+  trajectory SD from Stage 1C -- confirm before locking) -- CV becomes
+  unstable or misleading as the mean approaches zero, which a construction
+  showing weak or no structured mapping plausibly could. Between-
+  realization variance (stochastic controls) and within-trajectory SD
+  are measured at different levels and are reported with that level
+  labeled explicitly, not treated as directly comparable numbers.
 - **Linear vs. nonlinear composition**: tangent-only and residual
   Delta_map, checking whether any topology-specific effect lives in the
   linear or nonlinear part of the response.
@@ -103,6 +110,19 @@ These test different things and must not be conflated into one number.
    so the comparison is "does T's structure matter under equivalent
    structural roles" rather than "does T's structure matter at these
    specific pixels."
+
+**Degenerate role-matching, locked explicitly rather than papered over
+with tie-breaking.** A deterministic tie-break is appropriate for
+choosing among several nodes *within* a genuine degree stratum -- it is
+not a substitute for that stratum existing. If a construction's degree
+distribution doesn't support three distinguishable strata (a real risk
+for the lattice construction specifically, whose uniform edge weights
+mean weighted degree reduces to simple connectivity count, plausibly
+producing many exact ties), role-matched intervention is declared
+**degenerate** for that construction and reported as such -- arbitrarily
+selecting three tied nodes and calling them "low/median/high" would
+manufacture a role distinction that doesn't actually exist, not measure
+one.
 
 Report both. If they agree, that's a robust specificity finding either
 way. If they disagree, that disagreement is itself the finding --
@@ -151,26 +171,30 @@ realization-level value per graph. That's an inconsistent comparison
 across inferential levels, not just a suboptimal test choice. Replaced
 below with a matched design that fixes this.
 
-**Matched trajectory seeds.** Use the identical 10 baseline trajectory
-seeds (3000, 3010, ..., 3090, Stage 1C's own convention) for T and for
-every stochastic control's graph realizations -- not independently
-re-randomized per construction. This makes trajectory-to-trajectory
-variation a controllable, paired nuisance factor rather than an
-uncontrolled source of noise contaminating the between-construction
-comparison.
+**Matched trajectory seeds.** Use the same baseline trajectory seeds for
+T and for every stochastic control's graph realizations -- not
+independently re-randomized per construction. This makes trajectory-to-
+trajectory variation a controllable, paired nuisance factor rather than
+an uncontrolled source of noise contaminating the between-construction
+comparison. The confirmatory run uses **K matched trajectory seeds**,
+where K is determined by the pilot-driven allocation rule below, not
+fixed at 10 in advance -- drawn as the first K of Stage 1C's 10 seeds
+(3000, 3010, 3020, ...) in order, for direct comparability with T's
+already-computed values. (T and lattice, both deterministic, still use
+the full 10 -- see below.)
 
 **Definitions.** For stochastic construction g, graph realization r,
-and trajectory seed k (k = 1..10, shared across all constructions):
+and trajectory seed k (k = 1..K, shared across all constructions):
 
 ```
 d_grk = Delta_map(T, k) - Delta_map(g, r, k)
 ```
 
-Aggregate within realization first (mean over the 10 matched
+Aggregate within realization first (mean over the K matched
 trajectories):
 
 ```
-d_bar_gr = (1/10) * sum_k(d_grk)
+d_bar_gr = (1/K) * sum_k(d_grk)
 ```
 
 The **graph realization**, not the trajectory, is the inferential unit
@@ -184,24 +208,32 @@ theta_g = E_r[d_bar_gr]
 from control family g, conditional on class 0 and the tested
 intervention protocol.
 
-**Primary test**: one-sample exact signed-rank test (or exact sign-flip
-test, whichever is more appropriate given the realization count decided
-by the pilot -- see below) on the set of {d_bar_gr} values across
-realizations r. Not Mann-Whitney against T's raw trajectory values --
-that comparison is exactly what the review correctly identified as
-invalid.
+**Primary test: mean-effect route, chosen to match the stated estimand
+directly.** theta_g is explicitly an expectation, not a median or
+location parameter -- a signed-rank or sign-flip test targets the
+latter under a symmetry assumption, which doesn't test theta_g itself.
+Primary analysis: the mean realization-level difference
+mean_r(d_bar_gr), with a one-sample t-test or studentized bootstrap
+interval across graph realizations as the primary test. Wilcoxon
+signed-rank and exact sign-flip tests on {d_bar_gr} are retained as
+robustness analyses, not primary.
 
 **Primary reporting**, for each stochastic construction g:
 - every realization-level d_bar_gr value, not just the test statistic
-- mean and median realization-level difference
-- an interval estimate across graph realizations
+- mean realization-level difference (primary estimate) and median
+  (robustness)
+- the studentized bootstrap interval (primary) and, for comparison, the
+  interval implied by the robustness tests
 - proportion of control realizations outperforming T (d_bar_gr < 0)
-- within-realization trajectory variability (SD of d_grk across the 10
-  matched k's, per realization)
+- within-realization trajectory variability (SD of d_grk across the K
+  matched k's, per realization), reported using the crossed variance
+  decomposition described in "Pilot vs. confirmatory" below, not a
+  naive per-realization SD
 
-**Robustness**: a hierarchical bootstrap resampling both graph
-realizations and matched trajectory seeds, analogous to the Stage 1A
-re-verification's bootstrap.
+**Robustness**: Wilcoxon signed-rank and exact sign-flip tests on
+{d_bar_gr} (see above), plus a hierarchical bootstrap resampling both
+graph realizations and matched trajectory seeds, analogous to the
+Stage 1A re-verification's bootstrap.
 
 **Lattice is different: deterministic, so pair directly.** T and
 lattice both require no seed -- there is no realization dimension to
@@ -249,22 +281,78 @@ treated explicitly as:
 > **Runtime and variance-allocation pilot. No confirmatory
 > topology-specificity inference will be drawn from this run.**
 
-Its actual purpose is estimating two variance components:
-- sigma^2_between-graphs (variance of d_bar_gr across realizations r)
-- sigma^2_within-graph-across-trajectories (variance of d_grk across
-  the 10 matched k's, within one realization)
+**Variance decomposition, corrected: the pilot's data are crossed, not
+simply nested.** Because the same 3 trajectory seeds are shared across
+every graph realization (per the matched-seed design above), a naive
+variance of the 3 realization-level means conflates true between-graph
+variance with residual trajectory-sampling noise. The correct model is:
 
-These estimates determine where the real computational budget belongs.
+```
+d_grk = mu_g + b_gr + tau_k + epsilon_grk
+```
+
+where `b_gr` is the graph-realization effect, `tau_k` is the shared
+trajectory-seed block effect (the same k represents the same baseline
+trajectory identity across every realization), and `epsilon_grk` is the
+graph-by-trajectory remainder. Fit this via a crossed variance
+decomposition or mixed model (realization and trajectory-seed as
+crossed random effects) for pilot allocation -- not the raw variance of
+`d_bar_gr` across the 3 realizations, which is not a pure estimate of
+`sigma^2_between-graphs`. With only 3x3 data, all resulting variance
+estimates will be rough -- suitable for budget allocation, not
+substantive claims.
+
+**The pilot-to-confirmatory allocation rule, locked before the pilot is
+run, not decided after seeing its results:**
+
+1. Prespecify a minimum scientifically meaningful difference
+   `delta_min` in Delta_map (proposed: 0.05, informed by Stage 1C's own
+   between-trajectory SD for T of ~0.017 -- confirm before locking,
+   this is a substantive judgment call, not a statistical one).
+2. Prespecify desired power (proposed: 80%).
+3. Prespecify the familywise alpha for the primary (fixed-coordinate)
+   family of 4 comparisons under Holm correction (proposed: overall
+   FWER 0.05).
+4. Prespecify a candidate grid of (realizations R, trajectories-per-
+   realization K) pairs -- proposed starting grid: R in {10, 15, 20, 25},
+   K in {3, 5, 7, 10}.
+5. **Selection rule**: using the crossed variance components estimated
+   from the pilot (conservatively -- prefer the upper confidence bound
+   over the point estimate where feasible), simulate the planned
+   realization-level analysis (the mean-effect test above) over every
+   candidate (R, K) pair. Select the lowest-*cost* design (cost = R x K,
+   the total trajectory-runs needed) that achieves at least the
+   prespecified power for `delta_min` under Holm-adjusted alpha.
+
 Given Stage 1C's own finding of low trajectory-to-trajectory variance
 for T (CV ~5.2%), more graph realizations are plausibly more valuable
-than more trajectories per realization -- but this is an expectation to
-be checked empirically by the pilot, not assumed in advance. A
-plausible final shape, subject to revision once the pilot's variance
-estimates are in hand, is roughly **10-20 graph realizations with 3-5
-matched trajectories each**, rather than the inverse (3 realizations
-with 10 trajectories each). Lock the final realization/trajectory
-counts from the pilot's variance estimates *before* looking at any
-confirmatory-run results.
+than more trajectories per realization -- but this is an expectation the
+pilot's crossed variance decomposition should confirm empirically, not
+assume. Lock the final (R, K) from this rule's output *before* looking
+at any confirmatory-run results -- "10 to 20 realizations, 3 to 5
+trajectories" is a plausible range this rule might land on, not itself
+the rule.
+
+## What the permutation test does and does not answer
+
+The topology-specificity comparison above operates directly on
+Delta_map *values* (the d_grk differences and their aggregates) -- it
+is a separate question from Stage 1B.2/1C's own 10,000-permutation test,
+which asks, per trajectory: does *this* graph and trajectory contain a
+structured mapping at all? Do not combine per-trajectory permutation
+p-values into the topology-family test; the family-level test consumes
+Delta_map point estimates, not permutation significance.
+
+**Every trajectory in the confirmatory run (T, lattice, and all
+stochastic-control realizations) gets the full 10,000-permutation test**,
+matching Stage 1B.2/1C's own convention exactly, so significance is
+assessed identically across every construction. This is reported as a
+validation check (confirming each construction/trajectory combination
+that enters the comparison actually shows a structured mapping in the
+first place, the same precondition Stage 1B.2/1C established for T) --
+not as an input to the topology-family test itself, which is answered
+by the mean-effect analysis above regardless of each trajectory's own
+permutation result.
 
 ## Additional details to lock before implementation
 
@@ -288,7 +376,29 @@ This matters especially for constructions with compressed or heavily
 tied degree distributions -- the lattice construction in particular,
 which has uniform edge weights and is likely to produce many degree
 ties, making low/median/high selection ambiguous without a disclosed,
-deterministic tie-break.
+deterministic tie-break (see the degenerate-role-matching rule above,
+which takes precedence if a construction's ties are severe enough that
+no genuine stratification exists).
+
+**Common-support mask, defined separately for each intervention
+protocol -- this project has already been burned once by an exclusion
+mask that leaked input identity through its own position (Stage 1B.2's
+three-round q_excl_node fix; see `docs/PROJECT_MEMORY.md` principle 11),
+so this is worth stating explicitly rather than assuming it carries over
+correctly.**
+- **Fixed-coordinate protocol**: straightforward -- the mask removes the
+  same three T-defined candidate coordinates from every trial, in every
+  construction, identically.
+- **Role-matched protocol**: each graph realization has its *own* three
+  candidate source coordinates (that realization's own low/median/high-
+  degree nodes). The mask must be (a) identical across every trial
+  *within* that realization -- all three of that realization's own
+  candidates zeroed regardless of which was actually stimulated in a
+  given trial, exactly matching the common-support principle already
+  established for Stage 1B.2 -- and (b) explicitly documented as
+  graph-realization-specific when comparing across realizations, since
+  different realizations' masks cover different coordinate positions.
+  Do not reuse one realization's mask for another's trials.
 
 ## Files to create
 
@@ -333,12 +443,35 @@ until the first implementation commit.
 
 ## Review status
 
-Reviewed and revised per external statistical review (this revision).
-Verdict on the reviewed design: "scientifically approved; statistical
-test structure requires one revision before lock" -- the experimental
-question, controls, intervention definitions, endpoints, and scope were
-assessed as correct; the primary test structure (matched trajectory
-seeds, realization-level aggregation, paired lattice comparison,
-explicit pilot/confirmatory separation) has been revised accordingly
-in this version. Considered locked pending any further review of this
-revision.
+Two rounds of external statistical review, both incorporated.
+
+**Round 1** flagged the primary test's core inferential error (comparing
+T's 10 trajectory-level values against realization-level control means
+via unpaired Mann-Whitney, conflating inferential levels). Verdict:
+"scientifically approved; statistical test structure requires one
+revision before lock." Addressed via the matched-trajectory-seed design,
+realization-level aggregation, and paired lattice comparison.
+
+**Round 2** (this revision) resolved seven remaining points: (1) aligned
+the primary test with the stated mean estimand (t-test/studentized
+bootstrap primary, signed-rank/sign-flip as robustness, not the reverse);
+(2) locked an explicit pilot-to-confirmatory budget-selection rule
+(delta_min, power, familywise alpha, candidate grid, lowest-cost
+selection) rather than leaving the final realization/trajectory counts
+to post-pilot judgment; (3) corrected the pilot's variance language to a
+crossed model (shared trajectory-seed blocks, not naive nested variance);
+(4) added an explicit degenerate-role-matching rule for constructions
+lacking genuine degree strata; (5) defined the common-support mask
+separately for each intervention protocol, referencing this project's
+own prior exclusion-mask leak; (6) added a CV instability safeguard
+(SD as the formal stability measure, CV only above a positive floor);
+(7) clarified that the topology-family test consumes Delta_map values
+directly, not combined permutation p-values, and locked that every
+confirmatory trajectory still gets the full 10,000-permutation test as
+a validation check.
+
+Round 2 verdict on the reviewed design: "scientifically approved. Lock
+after specifying the primary mean-effect test, the pilot-to-confirmatory
+allocation rule, and the treatment of degenerate role matching." This
+revision addresses all three. Considered locked pending any further
+review.
