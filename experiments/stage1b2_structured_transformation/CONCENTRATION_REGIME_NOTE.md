@@ -288,6 +288,71 @@ grid, and not evidence about any other cell of the design. Code:
 `analyze_stage1b2_time_resolved_propagator.py`; plot:
 `results/stage1b2_time_resolved_propagator.png`.
 
+## Part 4: does the early-leader failure generalize beyond seed=3000?
+
+Part 3 found one striking fact about a single trajectory: seed=3000's
+early tangent leader (node 152, dominant by tau=0.95) is NOT the eventual
+finite winner (node 103) -- a genuine overtake, not a monotonic buildup.
+Prompted by the obvious follow-up question (is this one anecdote, or does
+it generalize to the other seeds that concentrate?), this part checks
+"early leader vs. final winner" across ALL 5 baseline seeds that
+concentrate anywhere in the (node=high, t_p=0) cell, not just seed=3000.
+
+**This required additional new simulation**, disclosed same as Part 3:
+`generate_frontier_visuals_data.py` (in
+`docs/report_visuals/`'s companion data-generation step) computes the
+tangent solve at every (seed, replica) combination where at least one
+trial actually concentrates -- found by reading the already-cached result
+files (`find_concentrating_non_zero_replicas()`), not guessed -- giving
+full coverage of all 87 concentrated trials across the 5 concentrating
+seeds (3000: 24, 3010: 21, 3020: 2, 3080: 5, 3090: 35), rather than only
+the 14 that happen to fall at replica=0 (an earlier pass covered only
+that subset and silently dropped seeds 3020/3080 entirely, since neither
+ever concentrates at replica=0).
+
+**Result: seed=3000's overtake is not an anecdote -- it is the norm, and
+seed=3090's clean buildup is the outlier.** Comparing the early tangent
+leader (argmax of `q_tangent` at tau=0.95) against the actual final
+winner (argmax of `fixed_time_q`), for every concentrated trial in each
+seed:
+
+| Seed | Concentrated trials | Early leader | Final winner(s) | Match? |
+|---|---|---|---|---|
+| 3000 | 24 | node 152 | node 103 | **0/24 -- never** |
+| 3010 | 21 | node 129 | node 130 | **0/21 -- never** |
+| 3020 | 2 | node 152 | node 35 | **0/2 -- never** |
+| 3080 | 5 | node 154 | node 55 | **0/5 -- never** |
+| 3090 | 35 | node 152 | node 152 | **35/35 -- always** |
+
+This is not a mixed 35/87 (~40%) probability spread across trials -- it
+is a clean, deterministic **per-seed** split: within every single seed,
+either 100% of its concentrated trials match or 0% do (no seed shows a
+mix). 4 of the 5 concentrating seeds show total early-leader failure; only
+seed=3090 -- the same trajectory Part 3 already found builds up
+monotonically with no reversal -- shows total early-leader success. The
+early tangent leader is a poor predictor of the eventual winner for the
+large majority of trajectories that concentrate at all, not just for the
+one trajectory (3000) that happened to be picked as illustrative.
+
+**What this does and doesn't establish.** This generalizes Part 3's
+"overtake, not buildup" finding from one trajectory to 4 of 5 -- a real
+strengthening of the case that a tau=0.95 snapshot (or any single
+early-time read of the tangent solution) cannot be used to predict the
+eventual winner, consistent with Section 11's conclusion that only the
+full time-ordered propagator determines the outcome. It does NOT explain
+*why* seed=3090 is the exception, or what distinguishes a trajectory whose
+early tangent leader holds up from one whose leader gets overtaken -- that
+remains open, same as Part 3 and Section 11 already left it. It also
+does not extend to the 5 non-concentrating seeds (3030, 3040-3070), which
+contribute no rows here by construction (no trial in their cell exceeds
+the top1>0.5 threshold).
+
+**Scope**: covers the (node=high, t_p=0) cell across all replicas, for the
+5 seeds that concentrate anywhere in it -- not a re-run of the full
+432-trial grid, and not evidence about any other cell. Code:
+`docs/report_visuals/generate_report_visuals.py`'s `plot10_early_leader_vs_final_winner`;
+plot: `docs/report_visuals/10_early_leader_vs_final_winner.png`.
+
 **Why the naive time-integral (Section 11) was never guaranteed to
 work.** The full propagator is $\Phi(T,0) =
 \mathcal{T}\exp(\int_0^T J(t)\,dt)$ -- a *time-ordered* exponential.

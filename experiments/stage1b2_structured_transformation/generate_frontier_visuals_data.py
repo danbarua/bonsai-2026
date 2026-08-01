@@ -35,6 +35,19 @@ at 3 selected nodes, for 3 seeds), this script adds:
      second ODE solve of the nonlinear perturbed-theta system, exactly
      matching run_one_trial's second solve_ivp call, but retaining every
      timepoint.
+  4. The tangent solve at every additional non-zero replica where ANY
+     trial in the (node=high, t_p=0) cell concentrates (top1>0.5), for
+     any of the 5 seeds that concentrate at all (3000, 3010, 3020, 3080,
+     3090) -- found programmatically by find_concentrating_non_zero_replicas()
+     reading the already-cached result files, not guessed or hand-
+     enumerated. Without this, plot10's early-leader-vs-final-winner
+     comparison would silently cover only the subset of concentrated
+     trials whose replica happens to be 0 (an earlier version of this
+     script did exactly that: 14 of 87 actually-concentrated trials in
+     this cell family, with seeds 3020/3080 -- which never concentrate
+     at replica=0 -- entirely absent). This adds 19 more tangent solves
+     (~30s at the per-solve cost already observed above), giving full
+     coverage of all 87 concentrated trials across all 5 seeds.
 
 Everything here reuses stage1b2_core.py's and
 analyze_stage1b2_time_resolved_propagator.py's own building blocks
@@ -72,6 +85,35 @@ ILLUSTRATIVE_SEEDS = [3000, 3030, 3090]  # already-characterized in CONCENTRATIO
 SIGN = 1
 AMPLITUDE = 0.025
 STIM_NODE_LABEL = NODE_LABEL  # "high"
+
+STAGE1B2_RESULTS_PATH = _THIS_DIR / "results" / "stage1b2_results.pkl"
+STAGE1C_RESULTS_DIR = _THIS_DIR / ".." / "stage1c_trajectory_generalization" / "results"
+
+
+def find_concentrating_non_zero_replicas():
+    """Every (seed, replica) pair, replica != 0, where at least one trial in
+    the (node=high, t_p=0) cell concentrates (top1>0.5) -- read directly
+    from the already-cached stage1b2_results.pkl / Stage 1C result files,
+    not guessed or hand-enumerated. replica=0 is excluded here because
+    main()'s primary per-seed pass already covers it for every seed.
+
+    Exists so plot10 (early-leader-vs-final-winner) can cover ALL
+    concentrated trials in this cell, not just the ones whose seed's
+    replica=0 happens to concentrate -- an earlier version of that plot
+    covered only 14 of the 87 actually-concentrated trials in this cell
+    family for exactly that reason (seeds 3020 and 3080 concentrate only
+    at replicas 1 and 3, never 0, and were being silently dropped)."""
+    pairs = []
+    for seed in ALL_BASELINE_SEEDS:
+        path = STAGE1B2_RESULTS_PATH if seed == 3000 else STAGE1C_RESULTS_DIR / f"stage1c_results_seed{seed}.pkl"
+        with open(path, "rb") as f:
+            results = pickle.load(f)
+        cell = {k: v for k, v in results.items() if k[0] == 0 and k[2] == "high"}
+        replicas = sorted({k[1] for k, t in cell.items()
+                            if k[1] != 0 and float(np.max(np.asarray(t["fixed_time_q"]))) > 0.5})
+        pairs.extend((seed, r) for r in replicas)
+    return pairs
+
 
 EDGE_PAIRS = [
     (129, 105, "source -> relay"),
@@ -189,6 +231,20 @@ def main():
             print(f"  finite (nonlinear) solve done ({time.time()-t0:.1f}s elapsed total)")
 
         cache["per_seed"][seed] = entry
+
+    extra_seed_replicas = find_concentrating_non_zero_replicas()
+    print(f"\n{len(extra_seed_replicas)} additional (seed, replica) pairs need a tangent solve "
+          f"(non-zero replicas with a concentrated trial): {extra_seed_replicas}")
+    cache["extra_tangent_by_seed_replica"] = {}
+    for seed, replica in extra_seed_replicas:
+        print(f"\n=== seed={seed}, replica={replica} (extra, non-zero replica) ===")
+        replica_state = reconstruct_replica_state_at_tp0(W, seed, replica)
+        t_eval, theta_base_tau, delta_tau, P, delta0 = run_joint_tangent_full(W, replica_state, stim_node)
+        q_tangent_full = q_tangent_from_delta(delta_tau, SIGN * AMPLITUDE, P)
+        cache["extra_tangent_by_seed_replica"][(seed, replica)] = {
+            "t_eval": t_eval, "q_tangent_full": q_tangent_full,
+        }
+        print(f"  tangent solve done ({time.time()-t0:.1f}s elapsed total)")
 
     with open(CACHE_PATH, "wb") as f:
         pickle.dump(cache, f)

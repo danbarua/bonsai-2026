@@ -565,47 +565,79 @@ def plot9_destination_consistency_map():
 
 
 def plot10_early_leader_vs_final_winner():
-    """EXTRA_VISUALS_DESIGN.md item 6: for every concentrated (seed, sign,
-    amplitude) trial in the high-degree/t_p=0 cell (replica=0), compares
-    the EARLY tangent leader (argmax of q_tangent at tau=0.95 -- the time
-    node 152 peaked for seed=3000 in CONCENTRATION_REGIME_NOTE.md Part 3)
-    against the FINAL finite winner (argmax of the cached fixed_time_q).
-    Early-leader identity needs stage1b2_frontier_visuals_data.pkl's
-    tangent solve -- DISCLOSED NEW SIMULATION; final-winner identity comes
-    from already-cached stage1b2_results.pkl / Stage 1C files, no new
-    simulation for that half.
+    """EXTRA_VISUALS_DESIGN.md item 6: for every concentrated (seed, replica,
+    sign, amplitude) trial in the high-degree/t_p=0 cell, compares the EARLY
+    tangent leader (argmax of q_tangent at tau=0.95 -- the time node 152
+    peaked for seed=3000 in CONCENTRATION_REGIME_NOTE.md Part 3) against the
+    FINAL finite winner (argmax of the cached fixed_time_q). Early-leader
+    identity needs stage1b2_frontier_visuals_data.pkl's tangent solve --
+    DISCLOSED NEW SIMULATION; final-winner identity comes from already-
+    cached stage1b2_results.pkl / Stage 1C files, no new simulation for
+    that half.
 
-    Same replica=0 scope limitation as plot9: seeds 3020 and 3080 each
-    have a few concentrating trials among their 36 (2 and 5
-    respectively), but none at replica=0, so neither contributes any
-    point here -- this scatter covers only the 3 seeds (3000, 3010, 3090)
-    whose replica=0 trials happen to concentrate, not all 5 seeds that
-    concentrate somewhere in their full 36-trial cell."""
+    Covers ALL 87 concentrated trials across all 5 seeds that concentrate
+    anywhere in their 36-trial cell (3000, 3010, 3020, 3080, 3090) -- not
+    just the 14 whose replica happens to be 0 (an earlier version of this
+    plot covered only that replica=0 subset, silently dropping seeds
+    3020/3080 entirely since neither ever concentrates at replica=0;
+    fixed by generate_frontier_visuals_data.py's
+    find_concentrating_non_zero_replicas(), which reads the cache to find
+    exactly which extra (seed, replica) tangent solves are needed).
+
+    Resolves into a clean per-seed split, not a mixed fraction: 4 of the 5
+    seeds (3000, 3010, 3020, 3080) mismatch in EVERY one of their
+    concentrated trials; only seed=3090 -- the one Part 3 already found
+    builds up with no reversal -- matches in every one of its trials.
+    Reported as such in the title, not just the aggregate 35/87."""
     with open(STAGE1B2_FRONTIER_DATA_PATH, "rb") as f:
         frontier = pickle.load(f)
 
     seeds = frontier["all_baseline_seeds"]
-    conditions = [(sign, amp) for sign in (1, -1) for amp in (0.025, 0.2, 0.8)]
+    extra_tangent = frontier["extra_tangent_by_seed_replica"]
     early_tau = 0.95
 
-    rows = []
-    for seed in seeds:
-        entry = frontier["per_seed"][seed]
+    def early_leader_for(seed, replica):
+        if replica == 0:
+            entry = frontier["per_seed"][seed]
+        else:
+            entry = extra_tangent.get((seed, replica))
+            if entry is None:
+                return None  # tangent solve not available at this (seed, replica)
         t = entry["t_eval"]
         idx = int(np.argmin(np.abs(t - early_tau)))
-        early_leader = int(np.argmax(entry["q_tangent_full"][:, idx]))
+        return int(np.argmax(entry["q_tangent_full"][:, idx]))
 
+    rows = []
+    skipped_no_tangent = 0
+    for seed in seeds:
         cell = _load_high_tp0_cell(seed)
-        for sign, amp in conditions:
-            trial = cell[(0, 0, "high", sign, amp)]
+        for (t_p, replica, node_label, sign, amp), trial in cell.items():
             q_f = np.asarray(trial["fixed_time_q"])
             top1_f, final_winner = float(q_f.max()), int(np.argmax(q_f))
-            if top1_f > 0.5:
-                rows.append({"seed": seed, "early_leader": early_leader,
-                             "final_winner": final_winner, "match": early_leader == final_winner})
+            if top1_f <= 0.5:
+                continue
+            early_leader = early_leader_for(seed, replica)
+            if early_leader is None:
+                skipped_no_tangent += 1
+                continue
+            rows.append({"seed": seed, "replica": replica, "early_leader": early_leader,
+                         "final_winner": final_winner, "match": early_leader == final_winner})
 
     n_match = sum(r["match"] for r in rows)
     n_total = len(rows)
+
+    # Precision fix, same convention as CONCENTRATION_REGIME_NOTE.md's earlier
+    # "67% of the time" correction: report the per-seed breakdown, not just the
+    # aggregate fraction, since it turns out to be a clean per-seed split (every
+    # trial within a seed agrees), not a probabilistic mix within seeds.
+    seed_match_status = {}
+    for seed in sorted({r["seed"] for r in rows}):
+        seed_rows = [r for r in rows if r["seed"] == seed]
+        n_seed_match = sum(r["match"] for r in seed_rows)
+        seed_match_status[seed] = "all match" if n_seed_match == len(seed_rows) else (
+            "none match" if n_seed_match == 0 else f"{n_seed_match}/{len(seed_rows)} match")
+    n_all_match_seeds = sum(1 for v in seed_match_status.values() if v == "all match")
+    n_seeds = len(seed_match_status)
 
     fig, ax = plt.subplots(figsize=(7.5, 6.5))
     seed_list = sorted({r["seed"] for r in rows})
@@ -624,19 +656,21 @@ def plot10_early_leader_vs_final_winner():
     ax.set_xlabel(r"early leader node ($q_{\mathrm{tangent}}$ argmax at $\tau$=0.95)")
     ax.set_ylabel(r"final winner node ($q_{\mathrm{finite}}$ argmax at $\tau=T$)")
     ax.set_title(f"Does the early tangent leader predict the final winner?\n"
+                 f"{n_all_match_seeds}/{n_seeds} seeds match in ALL their trials, "
+                 f"{n_seeds - n_all_match_seeds}/{n_seeds} in NONE -- not a mixed fraction\n"
                  f"{n_match}/{n_total} concentrated trials match (o), {n_total - n_match} don't (x)", fontsize=11)
     for seed, color in seed_colors.items():
         ax.scatter([], [], color=color, label=f"seed={seed}", s=40)
     ax.legend(fontsize=7.5, loc="best", ncol=2)
-    fig.text(0.5, 0.01,
-             "Covers only seeds whose replica=0 trials concentrate (3000, 3010, 3090); "
-             "seeds 3020/3080 concentrate elsewhere in their 36-trial cell but not at replica=0, so excluded here.",
-             ha="center", fontsize=8, color=GREY, wrap=True)
+    caption = "Covers all 5 seeds that concentrate anywhere in their 36-trial cell (3000/3010/3020/3080/3090)."
+    if skipped_no_tangent:
+        caption += f" {skipped_no_tangent} concentrated trial(s) skipped -- no tangent solve at that replica."
+    fig.text(0.5, 0.01, caption, ha="center", fontsize=8, color=GREY, wrap=True)
     fig.tight_layout(rect=(0, 0.04, 1, 1))
     out_path = os.path.join(_THIS_DIR, "10_early_leader_vs_final_winner.png")
     fig.savefig(out_path, dpi=150, bbox_inches="tight")
     plt.close(fig)
-    print(f"Saved {out_path} ({n_match}/{n_total} matches)")
+    print(f"Saved {out_path} ({n_match}/{n_total} matches, {skipped_no_tangent} skipped)")
 
 
 def plot11_stage1c_consistency_extended():
