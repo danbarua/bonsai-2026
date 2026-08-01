@@ -241,3 +241,58 @@ constructions built fresh (seed=1, distinct from the calibration panel's
 seed=0) and normalized to equal mean weighted degree per class, saved in
 `stage1a_all_classes.pkl`. Verified results in
 `stage1a_results_verified_p{1,2}.pkl`.
+
+## Post-hoc robustness note
+
+A class-0-only pilot (scope deliberately not extended to the other nine
+classes) tested how sensitive the T-vs-random leg of this comparison is
+to the random construction's own randomness, using this document's exact
+methodology (`joint_tangent_matrix_response`, t=[0,2.5] on a 51-point
+grid, low/median/high-degree nodes, class-level AUC as the mean of the
+three nodewise AUCs, all constructions rescaled to T's own mean weighted
+degree) against a fresh initial condition (not this document's original,
+unrecorded one).
+
+**Fixed constructions, stable across seeds by construction**: T_AUC =
+1.83, rewired_AUC = 5.12, lattice_AUC = 3.03.
+
+**random_AUC, 20-seed sweep, under both available random-control
+definitions**: 0.59 to 198.21 (CV = 2.37) under the historical half-edge
+random, coupling-budget normalized reconstruction; 1.13 to 41.56 (CV =
+1.08) under the current edge-count-matched random. The sign of
+log(T/random) -- which of T or random shows higher perturbation
+persistence -- flipped in 7 of 20 seeds under the historical control and
+2 of 20 under the current one.
+
+**This document's original design used exactly one random-construction
+seed per class.** This pilot shows that single draw's result was not a
+stable estimate for class 0: a different draw could plausibly have
+produced the opposite direction, by one to two orders of magnitude.
+
+**This is consistent with, and reinforces, this document's original null
+conclusion -- it does not contradict it.** A control this seed-sensitive
+would struggle to produce a robust aggregate signal even where classes
+agreed with each other, which the class-level table above already shows
+they didn't. This adds a previously undocumented layer of *within-class*
+noise underneath the *across-class* inconsistency this document already
+reports.
+
+**The Q1/Q2 difference is informative, not noise in the comparison
+itself.** The historical (sparser, ~half-edge) control is structurally
+more volatile than the current (denser, edge-count-matched) one --
+CV 2.37 vs. 1.08 -- because with fewer edges, each individual edge
+placement carries more leverage on the outcome. That's a real property
+of the two control constructions, not a failure of either reconstruction.
+
+**What this pilot does not do**: it does not re-run the original 10-class
+Wilcoxon test above, and cannot directly confirm or disconfirm this
+document's conclusion. It is a robustness observation on one class's
+contribution to that test, not a replacement for it.
+
+**What a properly powered re-verification would require**: multiple
+random-construction seeds per class with explicit across-seed
+aggregation -- not merely extending the current single-seed-per-class
+design to all ten classes, which would still leave the within-class
+instability found here unaddressed. This is a design question, not a
+build-out question, and is deferred pending a decision on whether it's
+worth pursuing.
