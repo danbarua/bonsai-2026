@@ -3,9 +3,10 @@
 *A durable reference for this project. Written to be readable cold, by a
 future session, agent, or collaborator with no other context. This is a
 LIVING document -- update it when findings materially change, not just
-when convenient. It lives in `docs/`, separate from `stage00/docs/`,
-which is a fixed, sequentially-numbered historical record (00-42) of
-findings documents in the order they were produced.*
+when convenient. It lives in `docs/`, separate from
+`benchmark_programme/docs/`, which is a fixed, sequentially-numbered
+historical record (00-42) of findings documents in the order they were
+produced.*
 
 ## What Bonsai is
 
@@ -300,16 +301,44 @@ states along that single trajectory (not four independent trajectories),
 T only (no graph controls yet compared for Stage 1B.2 specifically), no
 external task.
 
-**What remains open, in priority order**:
-1. Generalization across independent trajectories (different seeds) --
-   does this reproduce, or is it specific to this one?
-2. Topology specificity -- does T produce this mapping more strongly,
+**What remains open, in priority order** (generalization across
+independent trajectories -- the original item 1 here -- is now resolved;
+see Stage 1C, immediately below):
+1. Topology specificity -- does T produce this mapping more strongly,
    efficiently, or differently than the matched controls established
    throughout the E/R/Stage-1A closures? Not yet tested for Stage 1B.2.
-3. External usefulness (Level 3) -- can the structured mapping be linked
+2. External usefulness (Level 3) -- can the structured mapping be linked
    to an externally defined task?
 
-Full details: `stage1b2_execution_package/STAGE1B2_FINDINGS.md`.
+Full details: `experiments/stage1b2_structured_transformation/FINDINGS.md`.
+
+### Stage 1C (trajectory generalization, CONFIRMED -- resolves Stage 1B.2 open item 1)
+
+Tests whether Stage 1B.2's structured internal transformation is
+specific to its one baseline trajectory (seed=3000) or generalizes
+across independent trajectories on the same topology. Identical design
+to Stage 1B.2 (432 trials: 3 nodes x 2 signs x 3 amplitudes x 4 t_p x 6
+replicas, same permutation test), applied to 10 baseline trajectories:
+seed=3000 (Stage 1B.2's own frozen reference, read from its already-
+committed results, not re-run) plus 9 new, independent seeds
+(3010-3090).
+
+**Result: consistent generalization, not partial and not
+trajectory-dependent.** All 10 trajectories hit the Monte Carlo
+permutation floor (p_MC = 0.00010, the smallest attainable value at
+10,000 permutations) -- zero failures. Pooled Delta_map: mean 0.3296,
+range 0.2964-0.3505, coefficient of variation ~5.2%. Every one of the 40
+individual per-trajectory, per-t_p Delta_map values is positive and
+comfortably significant; no t_p in any trajectory weakens to
+non-significance or reverses direction.
+
+**Scope, unchanged from Stage 1B.2**: one class (KMNIST class 0), T only
+(topology specificity vs. matched controls still untested for this
+design), no external task (Level 3 still untested). What Stage 1C adds
+is trajectory-generalization evidence for T on this class specifically --
+not a broader capability claim.
+
+Full details: `experiments/stage1c_trajectory_generalization/FINDINGS.md`.
 
 ## Part 4: Infrastructure and execution environment
 
@@ -420,9 +449,16 @@ one per-class bundle (using the current edge-count-matched random by
 default), but has only been built and verified for class 0.
 
 **Construction-recovery effort, open items** (priority order):
-1. Extend `construction_bundle.py` past class 0 to all 10 KMNIST
-   classes -- not yet attempted; explicitly deferred pending review each
-   time the scope question has come up.
+1. **Done.** `experiments/stage0_simulator_calibration/build_all_class_topologies.py`
+   extended `construction_bundle.py` to all 10 KMNIST classes (seed=1
+   for both rewired and random, n_per_class=200 for T, matching the
+   historically recovered hyperparameters). Verified: all 10 classes
+   present with correct structure, class 0's T/rewired/lattice
+   byte-exact against the historical cache, n_active per class matching
+   the real historical `stage1a_all_classes.pkl` exactly. Cached to
+   `experiments/stage0_simulator_calibration/results/stage1a_all_classes.pkl`
+   (gitignored, regenerable in ~15 seconds). Tested in
+   `tests/test_build_all_class_topologies.py`.
 2. The historical half-edge random's exact edge-count rule and RNG seed
    remain unrecovered. Two known realizations (552 and 545 unique edges,
    out of T's 1051) don't exactly match any deterministic candidate rule
@@ -433,23 +469,26 @@ default), but has only been built and verified for class 0.
    pool) -- byte-exact reproduction is not, despite a 600-way
    seed/call-order sweep against the known raw artifact. Full account in
    `historical_matched_sparsity_random.py`'s docstring.
-3. Stage 1A's own T-vs-random comparison specifically needs re-running
-   against verified code, given the current edge-count-matched random's
-   consolidation is confirmed NOT equivalent to history (see
-   `stage1a_infinitesimal_response/NOTE.md`). Reviewer's guidance,
-   accepted: use the historical half-edge random (structurally closer to
-   the original experiment) as the primary control for re-verification,
-   with the current edge-count-matched random retained as a separate
-   robustness check, not a replacement -- two distinct questions, not
-   one. A class-0-only pilot (multi-seed sweep of both controls against
-   Stage 1A's actual tangent-linear methodology, before deciding whether
-   to extend to all 10 classes) is the first concrete step.
+3. Stage 1A's own T-vs-random comparison still needs re-running against
+   verified code -- the class-0 multi-seed pilot (the first concrete
+   step, above) is now complete: both random controls showed T-vs-random
+   direction instability across seeds (7 of 20 seeds flipped sign under
+   the historical half-edge control, 2 of 20 under the current
+   edge-count-matched control), consistent with but not confirming Stage
+   1A's original null conclusion -- see
+   `stage1a_infinitesimal_response/FINDINGS.md`'s "Post-hoc robustness
+   note". A full statistical design for proper re-verification (25 seeds
+   per class per stochastic control, mean aggregation before testing,
+   paired Wilcoxon with Holm correction across four planned comparisons,
+   plus sign-flip and bootstrap robustness checks) is written and
+   reviewer-approved at `experiments/stage1a_re_verification/DESIGN.md`
+   -- ready for implementation, not yet built.
 
 ## How to use this document
 
 Read this first in any future session touching Bonsai, before reading
-any individual findings document in `stage00/docs/` or
-`stage1b2_execution_package/`. It should answer "what has been
+any individual findings document in `benchmark_programme/docs/` or
+`experiments/`. It should answer "what has been
 established, what hasn't, why we're not still testing E/R/Stage-1A, and
 what the current frontier is" without needing to reconstruct the
 reasoning from conversation history. If new findings materially change
