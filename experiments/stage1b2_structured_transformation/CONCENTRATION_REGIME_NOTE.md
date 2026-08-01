@@ -134,9 +134,9 @@ conditions, deterministically, not a 67% probability**.
 
 Computed the same measures on `q_tangent` (the pure first-order/linear
 response, already saved per trial) and `q_residual` (the normalized energy
-of the vector residual $z = x_{\text{finite}} - x_{\text{tangent}}$, also
+of the vector residual `z = x_{\text{finite}} - x_{\text{tangent}}`, also
 already saved) for the same 36-trial cell. In other words,
-$q_{\text{residual}} = \operatorname{normalized\_energy}(z)$, not
+`q_{\text{residual}} = \operatorname{normalized\_energy}(z)`, not
 `q_finite` minus `q_tangent`.
 
 **`q_tangent` alone already reproduces the destination (node 103) in all
@@ -218,3 +218,87 @@ single node) -- and that routing is already present in the purely linear
 part of the response, with the nonlinear part modulating but not
 creating it. This refines, but does not contradict or require reopening,
 the frozen finding.
+
+## Further follow-up: mechanism of the destination, and why it doesn't generalize
+
+Worked interactively in `concentration_regime_notebook.ipynb` (committed
+alongside this note); summarized here for the permanent record.
+
+**Is the destination explained by direct adjacency in `T`?** Checked
+directly: node 152 is a genuine, if weak, direct neighbor of the
+high-degree source (rank 6 of its 7 real edges). Node 103 -- the
+dominant destination, in 5 of the 6 concentrated (sign, amplitude)
+conditions for seed=3000 -- is **not a meaningful direct neighbor at
+all**: rank #201 of ~505 possible nodes, when the source has only 7
+nonzero edges. Direct adjacency does not explain the dominant case.
+
+**Is it explained by a 2-hop relay in the static graph?** Yes, for
+seed=3000 specifically: of the source's 7 direct neighbors, exactly one
+(node 105) has any nonzero edge to 103, and it's strong (0.909, close to
+the source's own strongest direct edges). All 6 other neighbors have
+zero weight to 103. So seed=3000's routing is a clean two-edge chain,
+source(129) -> relay(105) -> destination(103), not a diffuse
+convergence.
+
+**Does this 2-hop pathway generalize across trajectories?** No.
+Checked the identical (high-degree-node, t_p=0) cell across all 10 of
+Stage 1C's baseline trajectories (seed=3000 plus the 9 independent
+trajectories Stage 1C added). `T`'s edges -- including this 2-hop bridge
+-- are identical across every trajectory, yet the outcome varies wildly:
+
+| Trajectory | Concentrated (of 36) | Destination |
+|---|---|---|
+| 3000 | 24 | 103 |
+| 3010 | 21 | 130 |
+| 3020 | 2 | 35 |
+| 3030-3070 (5 trajectories) | 0 | -- |
+| 3080 | 5 | 55 |
+| 3090 | 35 | 152 |
+
+Five of the nine new trajectories show no concentration at all; the four
+that do land on four different destinations, never 103 again. Since the
+static graph can't change between trajectories, the 105-relay pathway is
+best read as explaining *this one trajectory's* outcome specifically,
+not a fixed pathway the topology always routes through.
+
+**What actually explains the trajectory-to-trajectory difference: the
+phase-dependent Jacobian, not the static graph.** The tangent dynamics
+are governed by $J_{ij}(t) = W_{ij}\cos(\theta_j(t)-\theta_i(t))$
+(`force_jacobian` in `graph_oscillator_field.py`), not by $W$ alone.
+Comparing $J(0)$ across three trajectories -- seed=3000 (->103, 24/36),
+seed=3090 (->152, 35/36), seed=3030 (no concentration, 0/36) -- along
+the two candidate pathways (source->relay->103, and source->152 direct):
+
+| Trajectory | J[129,105] | J[105,103] | J[129,152] | Outcome |
+|---|---|---|---|---|
+| 3000 | -0.727 (strong) | -0.710 (strong) | +0.643 | Both legs of the 105-relay open -> routes to 103 |
+| 3030 | +0.906 (strong) | **+0.074 (weak)** | -0.531 | First leg open, second leg bottlenecked -> no concentration |
+| 3090 | **+0.141 (weak)** | -0.865 (strong) | -0.747 (strong) | First leg bottlenecked, but direct edge to 152 strong -> routes to 152 instead |
+
+The same static graph produces three different outcomes because the
+phase-dependent cosine term opens or closes different edges of the same
+candidate pathways at each trajectory's own $t_p=0$ phase state.
+Seed=3030's relay pathway fails at the second hop despite having the
+strongest first hop of the three trajectories -- a bottleneck invisible
+from $W$ alone. Seed=3090's relay pathway fails at the first hop
+instead, but a different, structurally-real pathway (the direct edge to
+152) happens to be strong at that trajectory's phase state and wins.
+This is a complete, quantitative account of "an emergent property of the
+state-dependent network propagator, not static graph geometry" -- not
+just a qualitative characterization of it.
+
+**One technical detail carried through all of the above, not previously
+noted in this document**: the perturbation is not a pure delta at the
+source node. `stage1b2_core.py` projects the initial impulse through the
+rotation-removal projector $P$ before use (`delta0 = P @ e_{node}`, then
+renormalized), so every node receives some small component, not only the
+stimulated one. This doesn't change any of the findings above, but "the
+input" throughout this document and `concentration_regime_notebook.ipynb`
+should be understood as a rotation-free projected impulse, not a literal
+single-node spike.
+
+**Still not established**: why seed=3000's and seed=3090's specific
+phase states happen to open the pathways they do -- i.e., whether
+there's a deeper pattern to which trajectories open which pathways, or
+whether this is effectively idiosyncratic per-trajectory phase
+alignment with no further structure to find. Not pursued here.
