@@ -1,16 +1,17 @@
 # Stage 2A: Does Runtime Oscillator Evolution Improve Classification?
 
-*Fourth draft, revised per a third external review round (the first
-review's ten corrections and the second review's five corrections
-already incorporated into the second and third drafts respectively;
-this round's own one substantive correction and three operational
-closures incorporated below, plus a wording fix). The reviewer's own
-verdict on the third draft: "scientifically approved. Lock after
-correcting the active-support prior statement and specifying
-standardization, the encoder-seed robustness subset, and mechanical
-go/no-go thresholds." Not yet locked -- follow this project's
-established convention (Stage 1D's own path through four review rounds
-before any code ran).*
+*LOCKED (fourth draft, final). Three prior review rounds (ten
+corrections, five corrections, one substantive correction plus three
+operational closures) are incorporated across drafts two through four;
+this final pass folds in a fourth review round's two engineering
+clarifications (an executable non-convergence stop-gate; a corrected
+ODE-recovery policy) and one representational note (the reference
+node's own two constant feature columns, dropped, effective feature
+dimension 1008 not 1010). The reviewer's verdict: "design approved and
+ready to lock... no further conceptual redesign needed." Locking follows
+this project's established convention (Stage 1D's own path through four
+review rounds before any code ran) -- implementation of feasibility
+stage 1 begins from this document.*
 
 ## The question, precisely -- corrected framing
 
@@ -195,6 +196,21 @@ representations disagree materially on the confirmatory result, that
 disagreement is reported as a finding about gauge sensitivity, not
 resolved by picking whichever was significant.
 
+**Correction from a fourth review round, load-bearing: the reference
+node's own two features are trivially constant.** By construction,
+`cos(theta_363 - theta_363) = 1` and `sin(theta_363 - theta_363) = 0`
+for every image, every condition, always -- these two columns carry
+zero variance and zero information. **Locked**: these two constant
+columns are dropped deterministically (not left to whatever a
+standardization/scaling library does with a zero-variance column, which
+can differ silently across platforms or versions) before features reach
+the classifier. **Effective feature dimension is therefore 1008, not
+1010** (`2*505 - 2`), for both the reference-node representation and
+the parameter counts below that depend on it. This is expected, not a
+defect in the representation -- covered by a unit test asserting the
+two dropped columns are identically `(1, 0)` before removal, for every
+image.
+
 ## Data: official KMNIST split, not a fresh custom one
 
 **Correction from review**: the prior draft specified "fixed train/test
@@ -261,10 +277,18 @@ deferred to implementation time:
   convergence status, or is logged as a failure -- none may fail
   silently and be treated as a success.
 - **Recoverable solver failure rate**: a solver call that fails but is
-  recoverable (e.g. a retry with tighter tolerance succeeds) is
-  tolerated up to **0.1%** of calls at any stage; **above 0.1%, scaling
-  to the next stage stops pending investigation** -- this is not itself
-  a Stage 2A finding, it is a pipeline-health gate.
+  recoverable is tolerated up to **0.1%** of calls at any stage; **above
+  0.1%, scaling to the next stage stops pending investigation** -- this
+  is not itself a Stage 2A finding, it is a pipeline-health gate.
+  **Correction from a fourth review round**: the example recovery policy
+  ("retry with tighter tolerance") was backwards -- a tighter tolerance
+  demands *more* of the solver, making recovery less likely, not more.
+  **Locked recovery policy, tried in order**: (1) retry with a smaller
+  `MAX_STEP`; (2) retry with an increased `max_steps` allowance; (3) fall
+  back to a prespecified alternative solver (`Radau`, for stiffness). The
+  exact retry sequence actually used is coded once and logged
+  consistently for every recovered failure -- this is pipeline
+  engineering, not a further design fork.
 - **Runtime and storage**: stage 2's measured per-image cost is
   extrapolated to the full 60,000-image stage-3 set; this projection is
   documented and must be explicitly approved before stage 3 is launched
@@ -440,12 +464,15 @@ depend on topology; only the evolution step does).
 
 ## Baselines: parameter-matched AND separately, a competent ordinary network
 
-The oscillator readout has `2*505*10 + 10 = 10,110` trainable parameters
-(circular-embedding input dimension x 10 classes + bias). A parameter-
-matched MLP (`R^784 -> Linear(784,H) -> ReLU -> Linear(H,10)`) needs
-`795*H + 10` parameters; matching to 10,110 gives `H ≈ 12.7`, so
+The oscillator readout has `1008*10 + 10 = 10,090` trainable parameters
+(**corrected from `2*505*10 + 10 = 10,110`** -- the reference node's own
+two constant columns are dropped, per the effective-feature-dimension
+correction above, so the true input dimension is 1008, not 1010). A
+parameter-matched MLP (`R^784 -> Linear(784,H) -> ReLU -> Linear(H,10)`)
+needs `795*H + 10` parameters; matching to 10,090 gives `H ≈ 12.68`, so
 **H=13** (10,345 parameters, verified by direct calculation, not just
-estimated).
+estimated) -- the same locked value as before this correction, since
+12.68 and the earlier 12.7 both round to 13.
 
 **Correction from review**: H=13 is a very narrow MLP -- a valid
 parameter-matched control, but not a fair test of "does this do as well
@@ -511,9 +538,10 @@ defaults from silently becoming part of the experiment**:
   defaults to).
 - Convergence tolerance: `tol=1e-4`.
 - Maximum iterations: `max_iter=1000` (higher than scikit-learn's own
-  default of 100, since 10-class multinomial fits with 505-1010
-  features can need more iterations to converge cleanly, especially at
-  weak regularization).
+  default of 100, since 10-class multinomial fits with 784-1008
+  features (raw pixels through the reference-node representation) can
+  need more iterations to converge cleanly, especially at weak
+  regularization).
 - Class weighting: uniform (`class_weight=None`) -- KMNIST's 10 classes
   are balanced by construction, so no reweighting is applied.
 - Random seed: `random_state=42` wherever the solver accepts one (governs
@@ -524,7 +552,13 @@ defaults from silently becoming part of the experiment**:
   explicitly (which combination, at what iteration count) -- not
   silently accepted or silently re-run with a larger `max_iter`. A
   pattern of non-convergence concentrated in one condition or one
-  `C` region is itself a reportable diagnostic.
+  `C` region is itself a reportable diagnostic. **Correction from a
+  fourth review round: logging alone does not satisfy the "converges
+  successfully in every condition" go/no-go gate above.** Locked, the
+  unambiguous operational consequence: **any non-converged fit during a
+  required fold/`C` combination stops advancement to the next stage,
+  pending investigation** -- logging and stopping are both required, not
+  logging as a substitute for stopping.
 
 ## Named watched-for outcomes (unchanged from the first draft)
 
@@ -624,9 +658,31 @@ three operational closures**, on a third draft the reviewer judged
    graph instances" throughout -- a single draw is prospectively fixed,
    not a demonstrated statistical representative of its family.
 
-The reviewer's own verdict on this draft: "scientifically approved.
-Lock after correcting the active-support prior statement and specifying
-standardization, the encoder-seed robustness subset, and mechanical
-go/no-go thresholds... no further conceptual redesign is needed."
-Whether this fourth draft is now ready to lock is a decision for a
-separate step -- not made here.
+**A fourth review round confirmed this draft closes every substantive
+issue**, requesting only two engineering clarifications and one
+representational note, none requiring further scientific review:
+
+1. **Non-convergence stop-gate made unambiguous**: logging a
+   non-converged fit no longer stands alone -- it now explicitly stops
+   advancement to the next stage, pending investigation (the classifier-
+   implementation section, above).
+2. **ODE-recovery policy corrected**: the earlier "retry with tighter
+   tolerance" example was backwards (tighter tolerance demands more of
+   the solver, not less); the locked recovery policy now tries a smaller
+   `MAX_STEP`, then an increased `max_steps` allowance, then a
+   prespecified alternative solver (`Radau`), in that order (the
+   feasibility-ladder go/no-go section, above).
+3. **Reference-node representation note**: `theta_ref`'s own two
+   circular features are trivially constant (`cos(0)=1`, `sin(0)=0`)
+   for every image -- dropped deterministically, effective feature
+   dimension **1008**, not 1010 (the feature-representation section,
+   above, with the oscillator-readout parameter count in "Baselines"
+   corrected to match: 10,090, not 10,110 -- `H=13` remains the locked
+   parameter-matched MLP width regardless).
+
+**Reviewer's final verdict: "design approved and ready to lock. Begin
+Stage 2A feasibility stage 1."** This document is now **LOCKED**.
+Feasibility stage 1 (1,000 training images, end-to-end mechanical
+correctness only -- explicitly not an early scientific result, per this
+document's own feasibility-ladder section) is the next step, implemented
+directly against this locked design.
