@@ -300,10 +300,12 @@ deferred to implementation time:
   trigger -- per the locked single reference-node rule above, `R(theta)`
   is never used to change which feature representation is computed.
 - **Classifier convergence**: the linear readout converges (per the
-  classifier-implementation lock above) in every condition at every
-  stage; any non-convergence is reported explicitly, per that section's
-  own requirement, not silently absorbed as a routine stage-advancement
-  blocker.
+  classifier-implementation lock in "Linear readout," below) in every
+  condition at every stage. **Same rule, stated identically here as
+  there, not a second phrasing of it**: any non-converged fit during a
+  required fold/`C` combination stops advancement to the next stage,
+  pending investigation -- this is a blocker, not merely something that
+  gets logged.
 
 Three conditions per the original design (raw pixels -> linear; encoded
 pre-evolution -> linear; evolved on T -> linear) at every ladder stage,
