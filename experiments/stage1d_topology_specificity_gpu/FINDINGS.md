@@ -172,7 +172,9 @@ calling the real, already-imported one):
   `extract_pre_computed_class0_lattice.py`: trivial load/re-save
   scripts, no simulation logic, not applicable.
 - `experiment.ipynb`: unrelated (Colab session-info inspector).
-- **`bonsai real pilot gpu benchmark.ipynb`: NOT clean.** Cell 15 defines
+- **`DO_NOT_USE_bonsai_real_pilot_gpu_benchmark.ipynb`
+  (renamed from `bonsai real pilot gpu benchmark.ipynb` -- see below):
+  NOT clean.** Cell 15 defines
   an entirely separate, cruder JAX reimplementation
   (`run_one_trial_jax`, with its own inline `force_jacobian_jax`/`rhs`)
   that does not compute event-alignment (`tau_star`, `E`/`C`, q/r/residual)
@@ -189,10 +191,15 @@ calling the real, already-imported one):
   event-alignment logic this whole pipeline depends on) -- deciding
   whether to finish, fix, or discard this notebook is a scope decision
   for whoever continues this thread, not something to silently patch.
+  Renamed with a `DO_NOT_USE_` prefix (was `bonsai real pilot gpu
+  benchmark.ipynb`, same directory) so it doesn't read as a runnable
+  entry point to a future cold-context agent -- the file's contents are
+  otherwise untouched.
 
 ## Status
 
 Fixed, CPU-sanity-checked, and now GPU-re-verified end-to-end. The
 Stage 1D GPU pilot's Delta_map figures can be trusted going forward. The
-one open item is the stale notebook above -- not blocking, but not
-cleaned up either.
+stale notebook above has been renamed with a `DO_NOT_USE_` prefix rather
+than fixed or deleted -- finishing, fixing, or discarding it outright
+remains a scope decision for whoever continues this thread.
