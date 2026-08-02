@@ -389,9 +389,8 @@ fit on only 2 of 3 realizations (one, seed=2, excluded for a fixed-
 coordinate degeneracy -- an isolated intervention node with zero
 weighted degree in that realization; see `PILOT_RESULTS.md`, "A real
 finding surfaced by the pilot itself"), giving df_r=1, below this
-project's own reliability threshold (df_r>=3)
-for a proper confidence bound on the between-realization variance
-component.
+project's own reliability threshold (df_r>=3) for a proper confidence
+bound on the between-realization variance component.
 
 A follow-up (`PILOT_RESULTS.md`, "Follow-up: hist_random variance
 re-estimation (seeds 3, 4)") drew two further hist_random realizations,
