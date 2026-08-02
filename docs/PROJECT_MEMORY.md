@@ -167,7 +167,27 @@ combination benefit survived duplicate/random/shuffled controls.
     equivalent to. A completeness check (nothing lost) and a behavioral
     check (still does the same thing) are different claims and need
     separate verification, not one standing in for the other.
-16. **Historical data recovered specifically to verify an
+16. **A component verified field-by-field against its trusted reference
+    can still feed a wrong result, if the caller-side glue code around it
+    quietly reimplements something instead of calling the already-imported
+    real function.** Stage 1D's GPU/JAX port of `run_one_trial` was
+    verified correct to 1e-6-1e-8 precision, per-field, against the numpy
+    reference -- and the bug was still real: the benchmark script's batch
+    construction redrew replica directions via raw `uniform(-1,1)` instead
+    of calling the already-imported `generate_fixed_replica_directions()`
+    (which draws normal, projects out the rotation-invariant component,
+    and unit-normalizes), and separately dropped the E_min validity gate
+    when reformatting results for the real analysis functions. Confirmed
+    via a 4-way factorial (correct/buggy directions x correct/buggy
+    gating) that the direction bug alone fully reproduced the
+    discrepancy. The same reimplemented-uniform-directions bug was found
+    independently, a second time, in an unrelated draft notebook in the
+    same folder -- not a one-off typo but a recurring failure mode worth
+    naming: reimplementing a helper instead of importing it is a distinct
+    risk from the helper itself being wrong, and passing per-field
+    verification of the simulator does not clear the glue code around it.
+    Full account: `experiments/stage1d_topology_specificity_gpu/FINDINGS.md`.
+17. **Historical data recovered specifically to verify an
     already-committed claim must not be repurposed as generative input
     for a new, unverified one.** Caught mid-session: after recovering
     `stage1a_all_classes.pkl` and `kmnist_class_topologies_200.pkl`
@@ -355,9 +375,58 @@ not a broader capability claim.
 
 Full details: `experiments/stage1c_trajectory_generalization/FINDINGS.md`.
 
+### Stage 1D (topology specificity, IN PROGRESS -- resolves Stage 1B.2/1C open item 1)
+
+Tests whether learned topology T shows any advantage over the matched
+graph controls (lattice, rewired, historical-random, current-random)
+under the Stage 1B.2/1C mapping design specifically -- distinct from
+Stage 1A's own T-vs-controls comparison (different design, already
+closed, Part 4 below).
+
+**Part 1 (T vs. lattice), complete and confirmatory**: no detectable
+difference across T's 10 Stage-1C-matched trajectories (paired t-test
+p=0.28, exact sign-flip p=0.29, Wilcoxon p=0.43 -- all agree). Lattice's
+point estimate is nominally slightly higher, well within trajectory-to-
+trajectory noise. Consistent with Stage 1A's re-verification (no
+surviving advantage for historical- or current-random; rewiring
+genuinely inconclusive) -- lattice now joins the "no detected advantage"
+side using this design instead. Full detail:
+`experiments/stage1d_topology_specificity/FINDINGS.md`.
+
+**Part 2 (T vs. the three stochastic controls -- rewired, hist_random,
+curr_random), still a sizing pilot, not yet a confirmatory result.**
+A 3-realization x 3-trajectory pilot (plus a follow-up refit of
+hist_random on 2 more realizations) locked a common design of R=15
+realizations x K=3 trajectories (80% power, delta_min=0.05,
+alpha=0.0125/comparison) for rewired and curr_random -- but hist_random's
+own reliably-refit requirement is (R=25, K=3), larger than the locked
+common design. Whether to raise the common design to (25,3) or handle
+hist_random separately is an **explicit open decision, not yet made**.
+The pilot also surfaced a real, disclosed phenomenon: hist_random can
+(rarely, ~20% of draws so far) isolate one of T's own fixed low-degree
+intervention nodes, degenerating Delta_map for that realization -- not a
+code bug, a genuine construction-density effect. Full detail:
+`experiments/stage1d_topology_specificity/PILOT_RESULTS.md`.
+
+**The confirmatory run itself (T vs. all three stochastic controls, at
+whatever (R,K) gets locked) has not yet been executed.** A JAX/GPU port
+of `run_one_trial` was built to make this computationally feasible at
+scale (a locked (25,3) design across 3 controls is 225 trajectories x
+432 trials each -- hours on CPU, minutes on GPU). The port itself is
+verified correct (field-by-field vs. numpy, 1e-6 to 1e-8 precision) and
+delivers a real, confirmed 112x speedup over the measured CPU baseline
+(32.67s vs. 3660s for a 37-trajectory pilot workload, A100 vs. this
+project's 10-core M1 Max). One nontrivial bug was found and fixed in the
+surrounding batch-construction code (not the simulator itself) along the
+way -- see Part 2, principle 16. **This is infrastructure for the still-
+open confirmatory run, not a topology-specificity finding in itself** --
+no claim about T vs. the stochastic controls should be drawn from the
+GPU work to date. Full detail:
+`experiments/stage1d_topology_specificity_gpu/FINDINGS.md`.
+
 ## Part 4: Infrastructure and execution environment
 
-**This project now runs in two places, and the distinction matters:**
+**This project now runs in three places, and the distinction matters:**
 
 1. **Claude's own sandboxed computer-use environment** (ephemeral,
    resets between sessions, single CPU core). Used for initial
@@ -370,6 +439,40 @@ Full details: `experiments/stage1c_trajectory_generalization/FINDINGS.md`.
    `execute_terminal_command`, file-editing tools, etc.). Used for
    Stage 1B.2 onward -- genuine multi-core parallelism (10 cores) made
    previously slow analyses (hours single-threaded) complete in minutes.
+3. **Ephemeral cloud GPU sessions via `mighty-colab`** (an MCP server
+   wrapping a Colab-runtime CLI), introduced for Stage 1D's GPU/JAX port.
+   New failure modes relative to the first two environments, learned the
+   hard way in the session that fixed Stage 1D's Delta_map bug:
+   - **A session (and the agent driving it) can die mid-task, silently,
+     with nothing recoverable.** An ephemeral Claude Code instance
+     spawned to run the GPU pilot lost its session (and was itself torn
+     down) before writing any findings anywhere -- not on the VM, not
+     locally, not to git. Evidence trail: the VM's own execution-history
+     timestamp showed a script had run; the local `.pyc` import cache
+     showed a second, local fallback attempt had *started*; no results
+     file existed anywhere. The actual diagnosis had to be re-derived
+     from scratch by a second, independent session, not recovered.
+   - **`mighty-colab`'s read tools have different scopes -- don't assume
+     they all see the same thing.** `sessions`/`status` query the
+     backend/API directly (visible across any client on the account).
+     `log`/`ls`/`exec` operate through *this local process's own*
+     session tracking (`~/.config/colab-cli/sessions.json`) -- a
+     session created or driven by a different agent process is invisible
+     to these until explicitly `adopt`-ed, even though `status` already
+     shows it. A `File or directory not found` from `ls` on an otherwise-
+     valid-looking session can mean the local tracking never had it, not
+     that the remote path doesn't exist -- confirmed by an `exec` call
+     that got a definitive `Session appears to be lost (404/401)` rather
+     than a path error.
+   - **A local, throwaway "ephemeral instance" is not the same filesystem
+     as the Colab VM.** A path like `/tmp/gpu_experiment/` reported by
+     `status` as "last execution" is local to whichever machine is
+     running the CLI, not the remote VM's `/content/` -- conflating the
+     two wastes time searching the wrong side.
+   - **Nothing survives on a dead session except what was explicitly
+     committed to git before it died.** Treat any ephemeral-GPU-session
+     finding as provisional and unsaved until it's actually in a commit
+     -- not "will write it up at the end," since there may be no end.
 
 **Practical lessons from operating across both**:
 - `execute_terminal_command` with `reuseExistingTerminalWindow=true` can

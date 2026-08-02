@@ -178,7 +178,7 @@ Two closed programmes, one open one:
 
 ## Methodological discipline this project holds itself to
 
-Summarized in `PROJECT_MEMORY.md` Part 2 (14 numbered principles) --
+Summarized in `PROJECT_MEMORY.md` Part 2 (17 numbered principles) --
 read them before designing any new experiment. The short version: verify
 before trusting, prefer narrower and more precisely scoped claims over
 more impressive ones, correct multiplicity within prespecified families,
