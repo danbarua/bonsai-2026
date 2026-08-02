@@ -1,10 +1,14 @@
 # Stage 2A: Does Runtime Oscillator Evolution Improve Classification?
 
-*Third draft, revised per a second external review round (the first
-review's ten corrections already incorporated into the second draft;
-this round's own five load-bearing corrections incorporated below).
-The reviewer's own verdict on the second draft: "scientifically
-approved, not yet locked." Not yet locked -- follow this project's
+*Fourth draft, revised per a third external review round (the first
+review's ten corrections and the second review's five corrections
+already incorporated into the second and third drafts respectively;
+this round's own one substantive correction and three operational
+closures incorporated below, plus a wording fix). The reviewer's own
+verdict on the third draft: "scientifically approved. Lock after
+correcting the active-support prior statement and specifying
+standardization, the encoder-seed robustness subset, and mechanical
+go/no-go thresholds." Not yet locked -- follow this project's
 established convention (Stage 1D's own path through four review rounds
 before any code ran).*
 
@@ -51,20 +55,41 @@ class 0's T for the primary run, chosen for continuity with the rest of
 this project, arbitrarily but consistently. The confirmatory expansion
 tests whether that pinned choice matters.
 
-**Disclosure, worth stating plainly rather than leaving implicit**: T
-was learned from class-0 images drawn from the official training
-population. This is **not test leakage** -- the official test set
-remains untouched regardless -- but it does mean the fixed feature
-extractor (T's own edge structure) carries a class-0-derived prior
-before any classifier ever sees a single image. This may benefit class 0
-differently from the other nine classes under evolution on T
-specifically (though not under the pre-evolution or raw-pixel
-conditions, which do not depend on T's structure). **Per-class recall
-and the full confusion matrix are therefore particularly important
-outputs**, not optional detail, for the confirmatory result -- an
-aggregate accuracy or log-loss number alone could mask a class-0-specific
-effect that has nothing to do with graph evolution being generically
-useful.
+**Disclosure, worth stating plainly rather than leaving implicit --
+corrected by a fourth review round, load-bearing**: T was learned from
+class-0 images drawn from the official training population. This is
+**not test leakage** -- the official test set remains untouched
+regardless -- but the previous statement that "the pre-evolution
+condition does not depend on T's structure" was only partly true.
+`active_indices` -- the 505-node support the pre-evolution feature
+vector is restricted to (see "Encoding," below) -- is itself a product
+of the class-0 topology-construction pipeline. The pre-evolution
+condition does not use T's *edge weights* or graph evolution, but it
+does inherit T's class-0-derived *active-pixel support*. The correct,
+three-way distinction:
+
+- **Raw pixels**: no class-0-derived topology prior at all.
+- **Encoded pre-evolution**: class-0-derived active-node *support*, but
+  no T edges and no graph evolution.
+- **Evolved T**: that same support, plus class-0-derived *edge
+  structure*, plus graph evolution.
+
+**The encoded-pre-evolution condition already inherits class 0's
+active-node support, because its 505 features are selected using T's
+`active_indices`. The primary evolved-vs.-pre-evolution comparison
+therefore isolates the incremental contribution of graph evolution and
+T's edge structure specifically, while holding that class-0-derived
+support fixed across both conditions. Raw pixels alone contain neither
+prior.** This is, if anything, a cleaner causal design than the second
+draft's disclosure implied: the primary contrast was already isolating
+edge structure and evolution, not accidentally comparing "some
+class-0 prior" against "no class-0 prior."
+
+This still may benefit class 0 differently from the other nine classes,
+particularly under evolution on T (which carries both priors, not just
+support). **Per-class recall and the full confusion matrix remain
+particularly important outputs**, not optional detail -- an aggregate
+accuracy or log-loss number alone could mask a class-0-specific effect.
 
 ## Encoding: the full pipeline, dimensions made explicit
 
@@ -99,11 +124,28 @@ spatial noise pattern -- deterministic and reproducible, but a shared
 positional template across the whole dataset, not independent per-image
 noise. **Locked: seed 0 for every image**, as the primary condition --
 most faithfully reuses the encoder exactly as already established
-elsewhere in this project. **Robustness check, required before the
-confirmatory result is reported**: repeat with independent, deterministic
-per-image seeds (e.g. seed = image index) for a subset, confirming any
-classification difference found does not depend on that one fixed noise
-realization.
+elsewhere in this project.
+
+**Robustness check, fully specified -- correction from a fourth review
+round, load-bearing: "a subset," selection, and evaluation criterion
+were previously unfixed.** Locked:
+- **Subset**: the same fixed, training-derived validation subset already
+  used for feasibility stage 2 (up to 5,000 official-training images) --
+  reused, not redrawn, so this check adds no new data-selection
+  decision.
+- **Seeding**: recompute the encoded-pre-evolution and evolved-T features
+  for this subset with each image's encoder seed set to that image's
+  immutable dataset index, replacing the shared seed-0 noise template.
+- **Refit**: both readouts (pre-evolution, evolved T) refit on this
+  subset using the identical fold assignment and `C`-selection procedure
+  already locked above.
+- **Report**: the change in the validation-set log-loss difference
+  (independent-seed vs. seed-0) for this subset.
+- **Status of this check, stated explicitly**: this is a **descriptive
+  robustness result on training-derived validation data, computed before
+  the official test set is ever touched** -- it cannot replace, override,
+  or be substituted for the seed-0 primary analysis against the official
+  test set, and no formal inference test is attached to it.
 
 ## Feature representation: reference-node gauge, primary; circular-mean, secondary
 
@@ -207,16 +249,37 @@ a redesign-then-re-evaluate-on-the-real-test-set cycle.
 
 **Go/no-go criteria for advancing between stages 1-3, locked as
 mechanics, not as a promised effect direction** (a "no-go" on any of
-these is a real, reportable outcome, not a failure of the experiment):
-- no non-finite (NaN/inf) features at any pipeline stage;
-- solver failure rate (local-convergence or graph-evolution ODE) within
-  a prespecified acceptable bound;
-- runtime and storage extrapolation to the full dataset within stated
-  bounds;
-- `R(theta)` diagnostic distribution inspected for gross pathology (not
-  used to change the gauge, per the locked single reference-node rule
-  above -- purely a sanity check that dynamics look reasonable);
-- the linear readout converges successfully in every condition.
+these is a real, reportable outcome, not a failure of the experiment).
+**Correction from a fourth review round, load-bearing: these criteria
+must be executable thresholds, not placeholders** -- fixed here, not
+deferred to implementation time:
+- **Zero non-finite feature vectors** (NaN/inf) anywhere in the
+  pipeline, at any stage -- any occurrence is a stop, not a rate to
+  tolerate.
+- **Zero silent solver failures**: every local-convergence or
+  graph-evolution ODE solve either completes and reports its own
+  convergence status, or is logged as a failure -- none may fail
+  silently and be treated as a success.
+- **Recoverable solver failure rate**: a solver call that fails but is
+  recoverable (e.g. a retry with tighter tolerance succeeds) is
+  tolerated up to **0.1%** of calls at any stage; **above 0.1%, scaling
+  to the next stage stops pending investigation** -- this is not itself
+  a Stage 2A finding, it is a pipeline-health gate.
+- **Runtime and storage**: stage 2's measured per-image cost is
+  extrapolated to the full 60,000-image stage-3 set; this projection is
+  documented and must be explicitly approved before stage 3 is launched
+  (not silently assumed acceptable because stage 2 ran without error).
+- **`R(theta)` diagnostic**: the complete distribution of `R(theta)`
+  (pre- and post-evolution, every condition) is reported at every stage;
+  any noticeable mass at the numerical limits (`R` near 0 or near 1) is
+  flagged explicitly. This is a reporting requirement, not a gauge
+  trigger -- per the locked single reference-node rule above, `R(theta)`
+  is never used to change which feature representation is computed.
+- **Classifier convergence**: the linear readout converges (per the
+  classifier-implementation lock above) in every condition at every
+  stage; any non-convergence is reported explicitly, per that section's
+  own requirement, not silently absorbed as a routine stage-advancement
+  blocker.
 
 Three conditions per the original design (raw pixels -> linear; encoded
 pre-evolution -> linear; evolved on T -> linear) at every ladder stage,
@@ -304,24 +367,32 @@ estimate of a stochastic family's behavior.
 Two legitimate scopes, and this design must pick one explicitly rather
 than drift into the wrong claim by default:
 
-- **Fixed representative graphs** (cheaper): one prespecified realization
-  each of lattice, rewired, and one random construction, compared
-  alongside T. **The claim must stay explicitly graph-specific** -- "this
-  compares these four specific graphs," never "T vs. rewiring in
-  general" or any family-level language.
+- **Fixed, prespecified graph instances** (cheaper): one prespecified
+  realization each of lattice, rewired, and one random construction,
+  compared alongside T. **The claim must stay explicitly graph-specific**
+  -- "this compares these four specific graphs," never "T vs. rewiring
+  in general" or any family-level language.
 - **Topology-family comparison** (more expensive, Stage-1D-style):
   multiple realizations per stochastic control, aggregated at the
   realization level, supporting an actual family-level claim.
 
-**Locked for this first Level 3 result: fixed representative graphs.**
-Cheaper, and a first result doesn't need family-level generality to be
-informative -- but every reported claim about lattice/rewired/random
-in this design's confirmatory results must be phrased as being about
-that one specific realized graph, not the family it was drawn from.
-Escalating to a family-level design is a legitimate, separate future
-extension if this first result motivates it.
+**Locked for this first Level 3 result: fixed, prespecified graph
+instances.** Cheaper, and a first result doesn't need family-level
+generality to be informative -- but every reported claim about
+lattice/rewired/random in this design's confirmatory results must be
+phrased as being about that one specific realized graph, not the family
+it was drawn from. Escalating to a family-level design is a legitimate,
+separate future extension if this first result motivates it.
 
-**Correction from a third review round, load-bearing: "representative"
+**Wording correction from a fourth review round**: "representative
+graphs" is replaced with "prespecified graph instances" throughout this
+design -- a single draw was prospectively selected (named below, before
+any Stage 2A result exists), but one draw cannot establish that it is
+statistically *representative* of its family, only that it is a fixed,
+prespecified instance of it. This is a wording fix, not a scope change --
+the graph-specific-only claim above already stated this correctly.
+
+**Correction from a third review round, load-bearing: these instances
 must not become outcome-selected.** The exact rewired and random graphs
 are named here, before any Stage 2A result exists, reusing already-
 existing project artifacts rather than drawing fresh ones for this
@@ -340,7 +411,7 @@ design specifically:
   coupling-budget rescaling step and matches T's edge count exactly by
   construction, and because hist_random's own isolated-fixed-coordinate
   failure mode (DESIGN.md, Stage 1D) is a real complication this design
-  does not need to inherit for a single representative-graph choice.
+  does not need to inherit for a single prespecified-instance choice.
   Same seed=0, same rationale as rewired above.
 
 **Graph statistics, recorded for all four graphs (T, lattice, canonical
@@ -360,8 +431,8 @@ intervention node breaks the tangent/event-alignment machinery
 entirely), an isolated node under Stage 2A's plain unperturbed evolution
 simply never changes its phase during evolution (`dtheta_i/dt = 0` when
 every `W_ij` for that row is 0) -- not a pipeline failure, but a
-real, disclosed property of this specific representative graph, worth
-reporting alongside its results rather than silently absorbed.
+real, disclosed property of this specific prespecified graph instance,
+worth reporting alongside its results rather than silently absorbed.
 
 Per-topology conditions: encoded-pre-evolution and evolved, both using
 the shared 505-node encoding pipeline above (the encoding step doesn't
@@ -399,10 +470,6 @@ must be reported alongside the MLPs', not treated as free.
 **Correction from a third review round**: the regularization grid,
 selection procedure, and tie-break were left unspecified. **Locked**:
 - Classifier: multinomial logistic regression (softmax), L2-penalized.
-- Features standardized (zero mean, unit variance per dimension) only if
-  the identical, prespecified standardization is applied consistently
-  across every condition being compared -- no per-condition tuning of
-  whether or how to standardize.
 - Regularization grid: `C in {1e-4, 1e-3, 1e-2, 1e-1, 1, 1e1, 1e2, 1e3,
   1e4}` (9 values, log-spaced).
 - Selection: fixed 5-fold stratified cross-validation within the
@@ -415,6 +482,49 @@ selection procedure, and tie-break were left unspecified. **Locked**:
   T, and every secondary evolved graph) selects its own `C` independently**,
   using the identical grid and fold assignments -- not a single `C`
   shared across conditions.
+
+**Correction from a fourth review round, load-bearing: "standardized...
+only if" left whether standardization happens at all unresolved, and
+said nothing about fold-safe scaling.** Locked, precisely:
+- **Every logistic-regression condition uses per-feature standardization**
+  (zero mean, unit variance per dimension) -- not optional, not
+  per-condition discretion.
+- **Fold-safe fitting**: for each condition, during cross-validation, the
+  scaler is fit separately on only that fold's *training* partition and
+  applied, unchanged, to that fold's validation partition -- never fit on
+  validation data.
+- **After `C` selection**: a new scaler is fit on the complete official
+  training set for that condition, and applied unchanged to that
+  condition's official test features. This final scaler is fit once,
+  after the design and `C` are both already locked.
+- **Each condition (raw pixels, encoded-pre-evolution, evolved T, every
+  secondary evolved graph) gets its own independently-fit scaler** at
+  every stage above -- raw, pre-evolution, and evolved features have
+  different distributions, so "the same standardization" means the same
+  *procedure* applied consistently, never the same numerical means and
+  variances shared across conditions.
+
+**Classifier implementation, locked to prevent platform-dependent
+defaults from silently becoming part of the experiment**:
+- Solver: `lbfgs` (scikit-learn's default multinomial solver; stated
+  explicitly rather than left to whatever the installed version
+  defaults to).
+- Convergence tolerance: `tol=1e-4`.
+- Maximum iterations: `max_iter=1000` (higher than scikit-learn's own
+  default of 100, since 10-class multinomial fits with 505-1010
+  features can need more iterations to converge cleanly, especially at
+  weak regularization).
+- Class weighting: uniform (`class_weight=None`) -- KMNIST's 10 classes
+  are balanced by construction, so no reweighting is applied.
+- Random seed: `random_state=42` wherever the solver accepts one (governs
+  any internal stochastic tie-breaking; does not affect the CV fold
+  assignment, which is separately governed by `SEED=42` above).
+- **Non-convergence**: if a fit does not converge within `max_iter` for
+  any `(condition, fold, C)` combination, this is logged and reported
+  explicitly (which combination, at what iteration count) -- not
+  silently accepted or silently re-run with a larger `max_iter`. A
+  pattern of non-convergence concentrated in one condition or one
+  `C` region is itself a reportable diagnostic.
 
 ## Named watched-for outcomes (unchanged from the first draft)
 
@@ -438,8 +548,8 @@ selection procedure, and tie-break were left unspecified. **Locked**:
   encoding as primary -- named above as a well-motivated future
   extension, not required for this design's primary claim.
 - Does not support a topology-*family*-level claim under the locked
-  fixed-representative-graphs scope -- escalating to that is a separate,
-  larger future design if motivated by this one's results.
+  fixed-prespecified-graph-instances scope -- escalating to that is a
+  separate, larger future design if motivated by this one's results.
 - Does not treat any secondary graph-specific comparison (lattice,
   canonical rewired, canonical random, or evolved-T-vs-other-evolved-
   graphs) as capable of rescuing a null primary (T-evolved vs.
@@ -448,9 +558,12 @@ selection procedure, and tie-break were left unspecified. **Locked**:
 
 ## Status
 
-Third draft. The first review's ten corrections (incorporated into the
-second draft) plus a second review round's five further load-bearing
-corrections are now incorporated:
+Fourth draft. The first review's ten corrections (second draft) and the
+second review round's five load-bearing corrections (third draft,
+summarized below) are unchanged from the third draft; this draft
+incorporates a **third review round's one substantive correction and
+three operational closures**, on a third draft the reviewer judged
+"substantially improved... close to lock":
 
 1. **Sole primary comparison designated**: T-evolved vs. encoded-
    pre-evolution, with an explicit direction convention
@@ -477,16 +590,43 @@ corrections are now incorporated:
    (`C` in 9 log-spaced values, 5-fold stratified CV, deterministic
    tie-break toward stronger regularization, each condition selecting
    its own `C`), the competent-MLP width (`H=128`, fixed), and the exact
-   representative-graph seeds (rewired and curr_random, both seed=0,
-   reused from Stage 1D's own pilot artifacts, with graph statistics
-   recorded and one disclosed isolated node in curr_random's draw).
+   prespecified-graph-instance seeds (rewired and curr_random, both
+   seed=0, reused from Stage 1D's own pilot artifacts, with graph
+   statistics recorded and one disclosed isolated node in curr_random's
+   draw).
 
-Also added: an explicit disclosure that T's class-0-derived learning
-history is not test leakage but may create a class-0-specific prior,
-making per-class recall and the confusion matrix required outputs, not
-optional detail.
+**This draft's own corrections**:
 
-The reviewer's own verdict on the prior draft: "scientifically approved,
-not yet locked... no broader redesign needed." Whether this third draft
-is now ready to lock, or needs a further review pass, is a decision for
-a separate step -- not made here.
+1. **Corrected the class-0 prior disclosure**: the pre-evolution
+   condition is not prior-free -- it inherits T's class-0-derived
+   `active_indices` *support*, just not T's edge structure. The primary
+   comparison isolates evolution-and-edge-structure specifically, since
+   both conditions already share the same support -- a cleaner causal
+   design than the previous disclosure implied, not a weaker one.
+2. **Standardization fully locked**: per-feature, fold-safe (fit on
+   training-fold-only, applied to that fold's validation data; refit
+   once on the complete official training set after `C` selection,
+   applied unchanged to test), and independently fit per condition.
+   Classifier implementation (solver, tolerance, max iterations, class
+   weighting, random seed, non-convergence handling) locked alongside it
+   to prevent platform-dependent defaults from entering the experiment.
+3. **Encoder-RNG robustness check fully specified**: reuses the fixed
+   feasibility-stage-2 validation subset, seeds by each image's dataset
+   index, refits both readouts on identical folds/`C`-selection, reports
+   the validation log-loss-difference change -- explicitly descriptive,
+   never able to replace the seed-0 primary analysis.
+4. **Go/no-go thresholds made executable**: zero non-finite features,
+   zero silent solver failures, a named 0.1% recoverable-failure-rate
+   stop threshold, an explicitly-approved runtime/storage projection
+   before stage 3, and full `R(theta)` distribution reporting (never a
+   gauge trigger).
+5. **Wording**: "representative graphs" replaced with "prespecified
+   graph instances" throughout -- a single draw is prospectively fixed,
+   not a demonstrated statistical representative of its family.
+
+The reviewer's own verdict on this draft: "scientifically approved.
+Lock after correcting the active-support prior statement and specifying
+standardization, the encoder-seed robustness subset, and mechanical
+go/no-go thresholds... no further conceptual redesign is needed."
+Whether this fourth draft is now ready to lock is a decision for a
+separate step -- not made here.
