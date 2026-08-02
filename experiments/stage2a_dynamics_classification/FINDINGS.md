@@ -100,4 +100,112 @@ by re-running `run_feasibility_stage1.py`.
 
 Feasibility stage 2 (up to 5,000 official-training images, throughput
 measurement, and the encoder-seed robustness check), per `DESIGN.md`'s
-locked ladder -- not started here.
+locked ladder -- see below.
+
+# Stage 2A: Feasibility Stage 2
+
+**Status: HALTED on a real, disclosed non-convergence -- per DESIGN.md's
+own locked stop-gate ("any non-converged fit during a required fold/C
+combination stops advancement to the next stage, pending
+investigation"). The stage did not complete: the encoder-seed
+robustness check was not run, and this is not a scientific result any
+more than stage 1 was.**
+
+## What ran before halting
+
+5,000 official KMNIST training images (500/class, class-stratified,
+`SEED=42`) -- this is also "the fixed training-derived validation
+subset" `DESIGN.md` specifies is reused for every subsequent
+development decision and the encoder-seed robustness check. The
+official test set was never loaded.
+
+**Throughput**: 5,000 images in 328.3s (65.7 ms/image) -- identical
+per-image rate to stage 1 (also 65.7 ms/image), confirming linear
+scaling with no unexpected overhead at 5x the image count. Extrapolated
+stage-3 (60,000-image) pipeline runtime: **3,939s (65.7 minutes)** --
+this projection must be explicitly approved before stage 3 launches,
+per `DESIGN.md`'s locked go/no-go criteria; it is reported here, not yet
+approved.
+
+**Go/no-go mechanical checks, at 5,000-image scale**:
+- Solver failures: 0/5000 (0.0%). No recovery-policy step was ever
+  invoked.
+- Non-finite feature vectors: 0.
+- `R(theta)`: pre-evolution min 0.329, max 0.984, mean 0.731, median
+  0.737, 0 below 0.01, 0 above 0.99. Post-evolution min 0.532, max
+  0.995, mean 0.857, median 0.866, 0 below 0.01, **4 of 5000 above
+  0.99**. Proportionally consistent with stage 1's single boundary case
+  (1/1000) -- still a small tail, not a mass concentration, disclosed as
+  required.
+
+## The non-convergence, found and characterized
+
+**Primary CV fitting (seed=0) hit a real non-convergence**: the
+`evolved_T` condition (1008-dim, n=5000) failed to converge at
+`fold=0, C=100.0` (1000/1000 iterations used, `lbfgs` did not reach
+`tol=1e-4`). Per the locked stop-gate, this **halted the stage
+immediately** -- the script did not proceed to the encoder-seed
+robustness check. (An orchestration bug was caught and fixed in the
+same session: the driver script initially caught this exception
+per-condition and *did* continue on to the robustness check regardless,
+contradicting `DESIGN.md`'s "stops advancement to the next stage"
+requirement -- fixed before this was reported, not after.)
+
+**Diagnostic scan (not part of the locked pipeline -- exists solely to
+characterize this failure before deciding how to respond)**: every one
+of the 45 (fold, `C`) combinations for all three conditions was fit
+without stopping on the first failure. Result:
+
+| condition | non-convergent (fold, C) pairs out of 45 |
+|---|---|
+| raw pixels | 0 |
+| encoded, pre-evolution | 0 |
+| evolved on T | **15** -- all 5 folds, at exactly `C in {100, 1000, 10000}` |
+
+**The pattern is clean and fully explained, not mysterious**: only
+`evolved_T` is affected, and only at the three weakest-regularization
+values in the 9-value grid (the top third) -- every fold fails at
+exactly the same three `C` values, and no fold fails at `C <= 10`. This
+is the textbook signature of a high-dimensional (1008-feature),
+large-sample (~4000 per fold), near-unregularized multinomial fit: as
+`C` grows, the loss surface flattens and coefficient magnitudes grow
+essentially unbounded, so `lbfgs` genuinely needs more than 1000
+iterations to satisfy `tol=1e-4` -- not evidence of a data or pipeline
+defect. Consistent with this: at every `C` value observed so far across
+both stages (1 and 2), the CV-selected `C` has always been **0.01** for
+every condition, with mean validation log-loss rising sharply and
+monotonically for `C >= 1` -- the non-convergent region is nowhere near
+where `C` would ever actually be selected.
+
+**This does not resolve the stop-gate on its own.** `DESIGN.md`'s rule
+is deliberately strict regardless of whether the failing `C` would have
+been selected, specifically so "it doesn't matter, that C was never
+going to be picked anyway" cannot become a silent, undisclosed
+justification for continuing. The pattern is now fully characterized
+and disclosed; whether to raise `max_iter` for this condition (or
+region of the grid), narrow the grid, or handle it some other way is a
+locked-design-parameter decision, not something to change unilaterally
+mid-implementation -- left for a separate decision, not resolved here.
+
+## Not yet run because of the halt
+
+The encoder-seed robustness check (`DESIGN.md`'s locked requirement,
+reusing this same 5,000-image subset) has not been attempted -- it
+depends on the same CV procedure that just halted, and running it before
+resolving the non-convergence would risk hitting, and needing to
+re-characterize, the identical issue.
+
+## Code
+
+`diagnose_stage2_convergence.py` (diagnostic-only scan, not part of the
+locked pipeline), `stage2a_classifier.py`'s new
+`diagnose_convergence_full_grid()` (same caveat). `run_feasibility_stage2.py`
+now halts and saves partial results (`results/stage2_feasibility_results.pkl`,
+gitignored) rather than silently continuing past a non-convergence.
+
+## Next step
+
+A decision on how to handle the `evolved_T` high-`C` non-convergence
+(raise `max_iter`, narrow the grid, or another approach), then re-run
+stage 2's primary CV and the encoder-seed robustness check -- not done
+here.

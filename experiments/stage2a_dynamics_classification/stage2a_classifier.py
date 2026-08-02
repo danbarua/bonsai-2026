@@ -86,6 +86,32 @@ def select_C_via_cv(X_train, y_train, condition_label, n_folds=N_FOLDS, seed=SEE
     return best_C, mean_val_loss, non_convergence_log
 
 
+def diagnose_convergence_full_grid(X_train, y_train, condition_label, n_folds=N_FOLDS, seed=SEED):
+    """Diagnostic only -- NOT part of the locked pipeline procedure and
+    never used to select C or report a primary/secondary result. Scans
+    every (fold, C) combination WITHOUT stopping on the first failure,
+    to characterize whether a non-convergence is an isolated point or a
+    wider pattern -- DESIGN.md's own framing ("a pattern of non-
+    convergence concentrated in one condition or one C region is itself
+    a reportable diagnostic") requires this visibility before deciding
+    how to respond to a real stop-gate trigger. Returns a full
+    (fold, C) -> {converged, n_iter} table."""
+    skf = StratifiedKFold(n_splits=n_folds, shuffle=True, random_state=seed)
+    table = {}
+    for fold_idx, (train_idx, val_idx) in enumerate(skf.split(X_train, y_train)):
+        X_tr = X_train[train_idx]
+        y_tr = y_train[train_idx]
+        scaler = StandardScaler().fit(X_tr)
+        X_tr_s = scaler.transform(X_tr)
+        for C in C_GRID:
+            _clf, converged, n_iter = _fit_one(X_tr_s, y_tr, C)
+            table[(fold_idx, C)] = {"converged": converged, "n_iter": n_iter}
+    n_failed = sum(1 for v in table.values() if not v["converged"])
+    print(f"[diagnostic, {condition_label}] {n_failed}/{len(table)} (fold, C) "
+          f"combinations failed to converge within max_iter={CLASSIFIER_KWARGS['max_iter']}")
+    return table
+
+
 def fit_condition(X_train, y_train, X_test, condition_label, n_folds=N_FOLDS, seed=SEED):
     """Full locked procedure for one feature condition: CV-select C
     (fold-safe standardization throughout), then refit a fresh scaler on
