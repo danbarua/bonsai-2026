@@ -15,7 +15,16 @@
   "permissions": {
     "allow": [
       "Bash(claude agents *)",
-      "Bash(claude mcp *)"
+      "Bash(claude mcp *)",
+      "mcp__pycharm__*",
+      "mcp__pycharm-debugger__*",
+      "mcp__mighty-colab__*",
+      "mcp__claude-in-chrome__*",
+      "mcp__claude_ai_Gmail__*",
+      "mcp__claude_ai_Google_Calendar__*",
+      "mcp__claude_ai_Google_Drive__*",
+      "mcp__ide__*"
     ]
-  }
+  },
+  "enableAllProjectMcpServers": true
 }
