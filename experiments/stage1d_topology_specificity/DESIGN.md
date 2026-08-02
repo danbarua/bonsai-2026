@@ -415,6 +415,58 @@ same (25, 3) allocation despite their own lower individual requirement,
 per the one-common-design rule -- not because their own pilot estimates
 changed.
 
+## Historical-random: pre-screening and a conditional estimand
+
+The pilot surfaced a real, disclosed failure mode specific to
+historical-random (`PILOT_RESULTS.md`, "A real finding surfaced by the
+pilot itself"): because hist_random places edges by independent
+resampling at roughly half T's edge density, a nontrivial fraction of
+draws isolate one of T's three fixed intervention coordinates (zero
+weighted degree at that node in that realization) -- an isolated node's
+response is (near-)perfectly linear, so it fails the tangent-departure
+validity gate at every t_p except 0, making the fixed-coordinate mapping
+undefined for that realization. Of 5 pilot draws (seeds 0-4): 1 fully
+degenerate, 1 mildly degenerate (survived), 3 clean -- not frequent
+enough to call the protocol broken, but not a one-off either.
+
+**Rewired does not have this problem** -- degree-preserving rewiring
+holds each node's exact degree fixed by construction, so it can never
+isolate a node T itself didn't already have at that degree. This
+protocol is therefore specific to hist_random (and, in principle,
+curr_random, which showed one mild instance in the pilot but no full
+degeneracy); it is stated here for hist_random specifically since that
+is where the confirmatory run's sizing depends on it.
+
+**Protocol, locked before any confirmatory trajectory simulation runs:**
+
+1. **Pre-screen every candidate hist_random realization before
+   simulating anything.** Compute the weighted degree of all three of
+   `nodes_T`'s fixed coordinates (low/median/high) in the candidate
+   graph -- a cheap, static graph check, no simulation needed. If any of
+   the three is zero (isolated), reject the realization without running
+   any trajectory on it. This directly matches the already-confirmed
+   mechanism: an isolated node trivially fails `event_aligned_valid` at
+   every t_p except 0.
+2. **Draw replacement candidates until 25 evaluable realizations are
+   obtained for hist_random specifically.** Rewired and curr_random do
+   not need this replacement-draw step, since they do not show this
+   failure mode at a rate that warrants it.
+3. **Record every rejected candidate.** Report the rejection rate (with
+   a binomial confidence interval) as a disclosed secondary
+   characteristic of the hist_random family under this protocol -- not
+   silently discarded, and not folded into the primary estimate's
+   sample size.
+4. **The primary hist_random comparison is conditional on fixed-
+   coordinate evaluability.** State explicitly, in this document and in
+   whatever findings document reports the confirmatory result: the
+   estimand being tested for hist_random is `E[Delta_T - Delta_hist_random
+   | evaluable]`, not an unconditional claim about the full hist_random
+   family. The unconditional question -- how often hist_random even
+   produces a usable fixed-coordinate comparison at all -- is answered
+   separately, by the rejection rate from step 3, and must not be
+   folded into the primary theta_g estimate above.
+
+## What the permutation test does and does not answer
 
 The topology-specificity comparison above operates directly on
 Delta_map *values* (the d_grk differences and their aggregates) -- it
