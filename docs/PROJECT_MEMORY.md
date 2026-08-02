@@ -213,6 +213,11 @@ negative -- see that subsection, below). **External usefulness (Level
 task? -- is now the sole open item for the dynamics-as-computation
 programme's core capability hierarchy.**
 
+A first-draft design for the initial Level 3 test (does runtime
+oscillator evolution improve classification over the unevolved encoded
+state?) exists at `experiments/stage2a_dynamics_classification/DESIGN.md`
+-- status: **first draft, pending review, not yet implemented**.
+
 Full details: `experiments/stage1b2_structured_transformation/FINDINGS.md`.
 
 A follow-up addendum characterises a deterministic, sign/amplitude-dependent 
