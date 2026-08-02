@@ -204,14 +204,14 @@ compared within the Stage 1B.2/1C mapping design specifically -- distinct
 from Stage 1A's own T-vs-controls comparison, which used a different
 design and is now closed, see Part 4), no external task.
 
-**What remains open, in priority order** (generalization across
-independent trajectories -- the original item 1 here -- is now resolved;
-see Stage 1C, immediately below):
-1. Topology specificity -- does T produce this mapping more strongly,
-   efficiently, or differently than the matched controls established
-   throughout the E/R/Stage-1A closures? Not yet tested for Stage 1B.2.
-2. External usefulness (Level 3) -- can the structured mapping be linked
-   to an externally defined task?
+**What remains open**: of the two items originally listed here
+(generalization across independent trajectories, and topology
+specificity), both are now resolved -- generalization by Stage 1C
+(confirmed positive), topology specificity by Stage 1D (closed, in the
+negative -- see that subsection, below). **External usefulness (Level
+3) -- can the structured mapping be linked to an externally defined
+task? -- is now the sole open item for the dynamics-as-computation
+programme's core capability hierarchy.**
 
 Full details: `experiments/stage1b2_structured_transformation/FINDINGS.md`.
 
@@ -250,53 +250,70 @@ not a broader capability claim.
 
 Full details: `experiments/stage1c_trajectory_generalization/FINDINGS.md`.
 
-### Stage 1D (topology specificity, IN PROGRESS -- resolves Stage 1B.2/1C open item 1)
+### Stage 1D (topology specificity, CLOSED -- resolves Stage 1B.2/1C open item 1, in the negative)
 
-Tests whether learned topology T shows any advantage over the matched
+Tests whether learned topology T shows any difference from the matched
 graph controls (lattice, rewired, historical-random, current-random)
 under the Stage 1B.2/1C mapping design specifically -- distinct from
 Stage 1A's own T-vs-controls comparison (different design, already
 closed, Part 4 below).
 
-**Part 1 (T vs. lattice), complete and confirmatory**: no detectable
-difference across T's 10 Stage-1C-matched trajectories (paired t-test
-p=0.28, exact sign-flip p=0.29, Wilcoxon p=0.43 -- all agree). Lattice's
-point estimate is nominally slightly higher, well within trajectory-to-
-trajectory noise. Consistent with Stage 1A's re-verification (no
-surviving advantage for historical- or current-random; rewiring
-genuinely inconclusive) -- lattice now joins the "no detected advantage"
-side using this design instead. Full detail:
-`experiments/stage1d_topology_specificity/FINDINGS.md`.
+**Part 1 (T vs. lattice), complete**: no detectable difference across
+T's 10 Stage-1C-matched trajectories (paired t-test p=0.28, exact
+sign-flip p=0.29, Wilcoxon p=0.43 -- all agree). Lattice's point estimate
+is nominally slightly higher, well within trajectory-to-trajectory
+noise. Full detail: `experiments/stage1d_topology_specificity/FINDINGS.md`.
 
 **Part 2 (T vs. the three stochastic controls -- rewired, hist_random,
-curr_random), still a sizing pilot, not yet a confirmatory result.**
-A 3-realization x 3-trajectory pilot (plus a follow-up refit of
-hist_random on 2 more realizations) locked a common design of R=15
-realizations x K=3 trajectories (80% power, delta_min=0.05,
-alpha=0.0125/comparison) for rewired and curr_random -- but hist_random's
-own reliably-refit requirement is (R=25, K=3), larger than the locked
-common design. Whether to raise the common design to (25,3) or handle
-hist_random separately is an **explicit open decision, not yet made**.
-The pilot also surfaced a real, disclosed phenomenon: hist_random can
-(rarely, ~20% of draws so far) isolate one of T's own fixed low-degree
-intervention nodes, degenerating Delta_map for that realization -- not a
-code bug, a genuine construction-density effect. Full detail:
-`experiments/stage1d_topology_specificity/PILOT_RESULTS.md`.
+curr_random), now complete.** The locked (R=25, K=3) confirmatory
+design (80% power, delta_min=0.05, Holm-corrected across the 4-way
+fixed-coordinate family) ran on GPU: 225 trajectories, and all four
+fixed-coordinate comparisons (lattice, rewired, hist_random,
+curr_random) Holm-adjust to p=1.0 -- **no detectable difference between
+T and any of the four tested controls.** hist_random's own comparison
+is additionally scoped to the conditional estimand (evaluable
+realizations only; ~22% of candidate draws were rejected for an
+isolated fixed-coordinate node, a disclosed, separate characteristic of
+that construction at T's edge density, not folded into the primary
+result). Full detail: `experiments/stage1d_topology_specificity/FINDINGS.md`
+(Part 2), `PILOT_RESULTS.md` (the sizing pilot this design was locked
+from).
 
-**The confirmatory run itself (T vs. all three stochastic controls, at
-whatever (R,K) gets locked) has not yet been executed.** A JAX/GPU port
-of `run_one_trial` was built to make this computationally feasible at
-scale (a locked (25,3) design across 3 controls is 225 trajectories x
-432 trials each -- hours on CPU, minutes on GPU). The port itself is
-verified correct (field-by-field vs. numpy, 1e-6 to 1e-8 precision) and
-delivers a real, confirmed 112x speedup over the measured CPU baseline
-(32.67s vs. 3660s for a 37-trajectory pilot workload, A100 vs. this
-project's 10-core M1 Max). One nontrivial bug was found and fixed in the
-surrounding batch-construction code (not the simulator itself) along the
-way -- see CLAUDE.md's principle 16. **This is infrastructure for the still-
-open confirmatory run, not a topology-specificity finding in itself** --
-no claim about T vs. the stochastic controls should be drawn from the
-GPU work to date. Full detail:
+**The magnitude, not just the null result.** Mean Delta_map across all
+five constructions tested in Stage 1D sits in a tight cluster --
+T=0.3296, lattice=0.3381, rewired=0.3283, hist_random=0.3288,
+curr_random=0.3266 -- a spread of about 0.012 across all five, smaller
+than T's own between-trajectory SD (~0.017, Stage 1C). This is a
+materially different statement than "the test didn't reach
+significance": T sits comfortably inside a tight cluster that includes
+a generic 4-connectivity pixel lattice, not narrowly failing to
+separate from the pack.
+
+**What this does and does not mean**: the structured Delta_map
+transformation itself remains robustly real -- every trajectory across
+all five constructions hit the 10,000-permutation floor (p=0.00010).
+What is now closed, in the negative, is specifically whether *T's
+learned structure* adds detectable extra strength to that
+transformation, at this design's effect-size sensitivity, under
+fixed-coordinate intervention, on class 0. Role-matched intervention,
+other KMNIST classes, and Level 3 (external usefulness) remain
+untouched by this closure.
+
+This tight-cluster result is consistent with a reservoir-computing-style
+framing (rich, structured internal dynamics arising from generic
+recurrent coupling sharing a graph's broad statistics, largely
+independent of the specific learned wiring) -- motivation for why Level
+3 is the natural next question, not a settled conclusion.
+
+**GPU infrastructure used for the confirmatory run above**: a JAX/GPU
+port of `run_one_trial` made the 225-trajectory (25 realizations x 3
+matched trajectories x 3 controls) confirmatory design computationally
+feasible (minutes on an A100 vs. hours on this project's 10-core M1
+Max). The port itself is verified correct (field-by-field vs. numpy,
+1e-6 to 1e-8 precision) and delivered a confirmed 112x speedup over the
+measured CPU baseline. One nontrivial bug was found and fixed in the
+surrounding batch-construction code (not the simulator itself) before
+this confirmatory run -- see CLAUDE.md's principle 16. Full detail:
 `experiments/stage1d_topology_specificity_gpu/FINDINGS.md`.
 
 ## Part 4: Infrastructure and execution environment
