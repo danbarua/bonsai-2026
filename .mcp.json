@@ -1,0 +1,14 @@
+{
+  "mcpServers": {
+    "mighty-colab": {
+      "command": "uvx",
+      "args": [
+        "mighty-colab",
+        "mcp"
+      ],
+      "env": {
+        "UV_WORKING_DIR": "/Users/dan/Code/pycharm/bonsai-2026"
+      }
+    }
+  }
+}
