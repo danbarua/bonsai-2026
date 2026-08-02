@@ -7,7 +7,7 @@
 
 ## Research & Methodology
 - **Project Memory**: Before starting any task, read `docs/PROJECT_MEMORY.md` to understand the current state, established findings, and active frontier.
-- **Methodological Principles**: Follow the 16 principles in `docs/PROJECT_MEMORY.md` Part 2. Key highlights:
+- **Methodological Principles**: Follow the 17 principles in `CLAUDE.md`'s "Methodological discipline" section. Key highlights:
     - Verify before trusting.
     - Prefer narrower, precisely scoped claims.
     - Unit-test new statistical machinery on synthetic data first.

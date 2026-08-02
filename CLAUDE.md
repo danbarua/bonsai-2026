@@ -2,10 +2,13 @@
 
 **First thing to do in any session: read `docs/PROJECT_MEMORY.md` in
 full.** It is the living, current-state record of this project --
-what's established, what's open, what methodology this project holds
-itself to, and what the active frontier is. Nothing below duplicates
-its content; this file is a map to get you there and to the rest of the
-repository, not a substitute for reading it.
+what's established, what's open, and what the active frontier is. This
+file is a map to the repository, plus the methodological principles
+this project holds itself to (kept here rather than in
+`PROJECT_MEMORY.md` so a one-shot agent gets working discipline without
+reading the full findings history first). This file does not restate
+`PROJECT_MEMORY.md`'s findings or current status -- read that document
+for those.
 
 ## What this project is
 
@@ -95,7 +98,7 @@ where a shared, hardened library actually earns its cost.
   local only; only the small provenance document gets committed. This
   data is for verification of existing, committed code, not a shortcut
   for generating new, independently-unreproducible claims -- see
-  `docs/PROJECT_MEMORY.md` Part 2, principle 16.
+  principle 17 below.
 - **`tests/`** -- pytest verification of specific, already-documented
   quantitative claims (a `FINDINGS.md` claim, a construction's byte-exact
   match against a historical cached artifact), not a general test suite
@@ -139,52 +142,150 @@ where a shared, hardened library actually earns its cost.
 
 ## Where the project actually is right now
 
-Two closed programmes, one open one:
-
-1. **Benchmark-feature programme (closed)**: does oscillator dynamics
-   produce useful exported classifier features? E and R (the two
-   candidate features) were both investigated exhaustively and both
-   retired from the benchmark feature vector -- not because they don't
-   work, but because generic, non-oscillator controls matched or beat
-   them on every test that was run. Full detail in `PROJECT_MEMORY.md`
-   Part 1, and `benchmark_programme/docs/22` through `38`.
-
-2. **Dynamics-as-computation programme (open, active)**: does the
-   oscillator system perform structured computation through its own
-   evolving state, independent of any exported feature? Currently at
-   **Level 2 of 3 established, across ten independent baseline
-   trajectories** on the KMNIST class-0 learned topology (Stage 1B.2
-   established it on one prespecified trajectory, following a
-   three-round correction process to close a subtle information-leakage
-   bug in the source-node-exclusion diagnostic; Stage 1C then confirmed
-   it generalizes across nine further independent trajectories, mean
-   Delta_map=0.3296, CV~5.2%, all ten significant at the Monte Carlo
-   floor). Full detail in `PROJECT_MEMORY.md` Part 3, and
-   `experiments/stage1b2_structured_transformation/FINDINGS.md` /
-   `experiments/stage1c_trajectory_generalization/FINDINGS.md`.
-
-   **The two remaining open questions, in priority order, are the
-   natural next work** (trajectory generalization is resolved, per
-   Stage 1C, and is no longer one of them): does learned topology T show
-   any advantage over the matched graph controls (rewired/random/
-   lattice) already built and validated for this exact purpose in the
-   E/R/Stage-1A work -- Stage 1A's own re-verification (raw-scale and
-   log-scale) found no such advantage survives its robustness battery
-   for historical-random or current-random, and remains genuinely
-   inconclusive for rewiring; this question is about T-vs-controls
-   specifically within the Stage 1B.2/1C mapping design, not a repeat of
-   Stage 1A -- and whether the structured mapping can be connected to
-   any externally defined task.
+One closed programme (benchmark-feature, Part 1), one open one
+(dynamics-as-computation, Part 3, currently at Stage 1D). See
+`docs/PROJECT_MEMORY.md` Parts 1 and 3 for current status, what's
+closed vs. open, and the priority-ordered open questions -- that status
+changes as findings land and is kept there, not duplicated here.
 
 ## Methodological discipline this project holds itself to
 
-Summarized in `PROJECT_MEMORY.md` Part 2 (17 numbered principles) --
-read them before designing any new experiment. The short version: verify
-before trusting, prefer narrower and more precisely scoped claims over
-more impressive ones, correct multiplicity within prespecified families,
-unit-test any new statistical machinery on synthetic data before running
-it on real results, and treat a second independent review (human or AI)
-as a first-class part of the method, not a formality.
+Read these before designing any new experiment. Kept in this file
+(reusable beyond Bonsai, and stable -- these don't change as findings
+land) rather than in `PROJECT_MEMORY.md`, so a one-shot agent gets them
+without reading that document's full findings history first.
+
+1. **Hygiene audits are distinct from null models.** A null model asks
+   "could something simpler explain this?" A hygiene audit asks "could my
+   analysis pipeline itself explain this?" A result can survive every
+   null model and still be a hygiene artifact.
+2. **Non-significance is not equivalence.** Absence of evidence is not
+   evidence of absence -- stated and re-stated across nearly every review
+   round in this project.
+3. **Multiplicity must be corrected within well-defined, prespecified
+   families**, and exploratory additions to an existing family should be
+   flagged as nominal, not folded into an already-corrected result.
+   Holm-Bonferroni (step-down) is generally preferable to plain
+   Bonferroni when multiple tests in a family are compared -- more
+   powerful while still controlling family-wise error rate.
+4. **Choose one primary control in advance; don't search multiple
+   candidates for the strongest story.**
+5. **Coordinate-wise statistics are not automatically block-level
+   claims**, and comparing a statistic computed in one normalized space
+   against the same-named statistic in a *different* normalized space
+   (e.g. Delta_map computed on the finite response vs. on the tangent-
+   only response vs. on the residual) does not tell you which space's
+   underlying quantity is "stronger" -- each is normalized separately
+   against its own replica dispersion.
+6. **Report exact p-values in scientific notation; never "p=0.00000."**
+   For permutation tests, report as a Monte Carlo floor
+   (p = (1+exceedances)/(N+1)) when zero permutations exceed the
+   observed statistic, not as if that were the exact tail probability.
+7. **Provenance metadata prevents catastrophic normalization-state
+   bugs.** Multiple incidents in this project traced to files with no
+   explicit record of raw-vs-normalized state.
+8. **A fixed random seed across all stochastic operations** both
+   verifies genuine reproducibility and surfaces findings a single
+   arbitrary seed had been obscuring. For parallelized Monte Carlo work,
+   use `numpy.random.SeedSequence(seed).spawn(n_workers)` to give each
+   worker a genuinely independent stream -- a shared or repeated seed
+   across workers produces correlated or duplicate draws and silently
+   invalidates the test.
+9. **The evidence hierarchy is a table of specific, falsifiable claims**,
+   each with its own status, not a single overall confidence level.
+10. **A permutation scheme must actually destroy the effect it's testing
+    for under the null.** A "common relabeling" that preserves which
+    outputs are grouped together (even if applied consistently) can leave
+    the test statistic literally unchanged under every permutation --
+    caught once in this project before being reported as a result. Always
+    unit-test a new permutation scheme on synthetic data first: identical
+    input maps should give the test statistic ~0; maximally separated,
+    reproducible maps should give a clearly positive, significant result.
+11. **A deterministic exclusion mask must be identical across every
+    condition being compared, not merely internally consistent per
+    condition.** Zeroing "the stimulated coordinate" (correct per-trial,
+    coordinate-aligned) still leaks input identity if *which* coordinate
+    is zeroed differs by condition -- the position of the mask becomes a
+    trivial, deterministic signature of the input, independent of any
+    genuine propagated response. The fix: a common mask (e.g. all
+    candidate source coordinates removed identically from every trial,
+    not just the one actually used), so no exclusion pattern alone can
+    reveal which condition produced which output.
+12. **When re-running an analysis after fixing a subtle bug, verify the
+    corrected object is genuinely different, not just assume the fix
+    worked because the headline statistic matched.** A rounded statistic
+    matching to several decimal places across a buggy and a corrected
+    version is not evidence the bug didn't matter -- it can simply mean
+    the specific dataset's structure happened not to expose it. Check
+    elementwise differences directly.
+13. **An omnibus test across combined factors does not establish a
+    claim about one factor specifically**, even when that factor
+    dominates the omnibus effect size. If a narrower, single-factor claim
+    is going to be stated, run the corresponding factor-restricted test
+    directly rather than inferring it from the omnibus result.
+14. **Independent AI review, applied consistently across a long
+    investigation, functions as an effective adversarial-collaboration
+    methodology.** Nearly every substantive correction in this project's
+    later stages (E/R closure precision, the Stage 1B permutation bug,
+    the three-layer q_excl_node fix) came from a second model reviewing
+    Claude's own output without the same investment in a particular
+    conclusion. The pattern that made it work: the reviewer consistently
+    pushed toward *narrower, more precisely scoped* claims rather than
+    more impressive ones, and Claude's role was to absorb corrections
+    fully (including reversing its own prior recommendations when a
+    reviewer's counter-argument was sound) rather than defend earlier
+    work reflexively.
+15. **A diff confirming a code consolidation lost nothing establishes
+    completeness, not behavioral equivalence.** Two `NOTE.md` files
+    (`stage0_simulator_calibration/`, `stage1a_infinitesimal_response/`)
+    stated the consolidation into `src/bonsai/dynamics/` was "confirmed
+    by diff... not assumed," phrased in a way that read as uniform
+    behavioral verification across all three consolidated files. Checked
+    file by file: `graph_oscillator_field.py` and
+    `degree_preserving_rewiring.py` were independently verified
+    (multistability/spectral-gap/solver-cross-validation reproduction;
+    byte-exact rewired-construction reproduction, respectively);
+    `matched_sparsity_ablation.py` was not, and turned out to actively
+    disagree with the historical cached result it had been assumed
+    equivalent to. A completeness check (nothing lost) and a behavioral
+    check (still does the same thing) are different claims and need
+    separate verification, not one standing in for the other.
+16. **A component verified field-by-field against its trusted reference
+    can still feed a wrong result, if the caller-side glue code around it
+    quietly reimplements something instead of calling the already-imported
+    real function.** Stage 1D's GPU/JAX port of `run_one_trial` was
+    verified correct to 1e-6-1e-8 precision, per-field, against the numpy
+    reference -- and the bug was still real: the benchmark script's batch
+    construction redrew replica directions via raw `uniform(-1,1)` instead
+    of calling the already-imported `generate_fixed_replica_directions()`
+    (which draws normal, projects out the rotation-invariant component,
+    and unit-normalizes), and separately dropped the E_min validity gate
+    when reformatting results for the real analysis functions. Confirmed
+    via a 4-way factorial (correct/buggy directions x correct/buggy
+    gating) that the direction bug alone fully reproduced the
+    discrepancy. The same reimplemented-uniform-directions bug was found
+    independently, a second time, in an unrelated draft notebook in the
+    same folder -- not a one-off typo but a recurring failure mode worth
+    naming: reimplementing a helper instead of importing it is a distinct
+    risk from the helper itself being wrong, and passing per-field
+    verification of the simulator does not clear the glue code around it.
+    Full account: `experiments/stage1d_topology_specificity_gpu/FINDINGS.md`.
+17. **Historical data recovered specifically to verify an
+    already-committed claim must not be repurposed as generative input
+    for a new, unverified one.** Caught mid-session: after recovering
+    `stage1a_all_classes.pkl` and `kmnist_class_topologies_200.pkl`
+    (sandbox-originated, explicitly scoped by their own handoff README
+    as "for independent verification only -- keep local, do not
+    commit") to check the newly-written `lattice_construction.py`
+    against a historical number, the same files were about to be used to
+    generate a NEW, seemingly-official "Stage 1B pilot across all 10
+    classes" result -- exactly the "inline code / hand-fed external
+    data, nobody else can reproduce it" pattern this project's whole
+    restructuring exists to close, recreated fresh rather than avoided.
+    Interrupted before any such result was produced. The distinction
+    that matters is verification of existing, committed code versus
+    generation of a new claim -- not merely whether the data happens to
+    be gitignored.
 
 # IntelliJ MCP Server Companion
 This project is open in Pycharm IDE (IntelliJ IDEA platform). 

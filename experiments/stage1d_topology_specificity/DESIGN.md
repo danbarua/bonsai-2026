@@ -440,7 +440,7 @@ no genuine stratification exists).
 **Common-support mask, defined separately for each intervention
 protocol -- this project has already been burned once by an exclusion
 mask that leaked input identity through its own position (Stage 1B.2's
-three-round q_excl_node fix; see `docs/PROJECT_MEMORY.md` principle 11),
+three-round q_excl_node fix; see `CLAUDE.md`'s principle 11),
 so this is worth stating explicitly rather than assuming it carries over
 correctly.**
 - **Fixed-coordinate protocol**: straightforward -- the mask removes the
