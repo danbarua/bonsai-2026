@@ -379,7 +379,42 @@ at any confirmatory-run results -- "10 to 20 realizations, 3 to 5
 trajectories" is a plausible range this rule might land on, not itself
 the rule.
 
-## What the permutation test does and does not answer
+## Locked confirmatory-run allocation: (R=25, K=3)
+
+The 3x3 pilot (`PILOT_RESULTS.md`) initially produced a provisional
+common design of (R=15, K=3), selected from rewired's and curr_random's
+own minimal requirements while explicitly flagging hist_random's own
+estimate as **indeterminate** -- its crossed variance decomposition was
+fit on only 2 of 3 realizations (one, seed=2, excluded for a fixed-
+coordinate degeneracy -- an isolated intervention node with zero
+weighted degree in that realization; see `PILOT_RESULTS.md`, "A real
+finding surfaced by the pilot itself"), giving df_r=1, below this
+project's own reliability threshold (df_r>=3)
+for a proper confidence bound on the between-realization variance
+component.
+
+A follow-up (`PILOT_RESULTS.md`, "Follow-up: hist_random variance
+re-estimation (seeds 3, 4)") drew two further hist_random realizations,
+reaching df_r=3 and a reliable 95% chi-squared upper confidence bound on
+both variance components. hist_random's own minimal design under this
+reliable estimate is **(R=25, K=3), cost 75** -- confirmed as the true
+minimum over the full candidate grid, and larger than rewired's and
+curr_random's own (15, 3) requirements, which this refit leaves
+unchanged.
+
+**This section's lock is a mechanical application of the pre-existing
+selection rule above, not a new judgment call**: "one common (R, K)
+across all three stochastic-control families... selected using
+whichever of the three families' pilot variance estimates is most
+demanding." With hist_random's estimate now reliable, it is the most
+demanding of the three. **The locked common allocation for the
+confirmatory run is (R=25, K=3), cost 75 per stochastic-control family
+(225 total across rewired, hist_random, curr_random)**, superseding the
+earlier provisional (R=15, K=3). Rewired and curr_random run at this
+same (25, 3) allocation despite their own lower individual requirement,
+per the one-common-design rule -- not because their own pilot estimates
+changed.
+
 
 The topology-specificity comparison above operates directly on
 Delta_map *values* (the d_grk differences and their aggregates) -- it

@@ -257,6 +257,13 @@ currently locked common design. Whether to raise the common design to
 an explicit decision left for the next step, not something this
 follow-up resolves unilaterally.
 
+**Resolved in a later step**: the common design has since been raised to
+(R=25, K=3) for all three stochastic-control families -- a mechanical
+consequence of the pre-existing selection rule now that hist_random's
+estimate is reliable, not a new judgment call. See `DESIGN.md`, "Locked
+confirmatory-run allocation: (R=25, K=3)", which supersedes the
+provisional (15, 3) lock above.
+
 Raw data for this follow-up (all 6 new trajectories' Delta_map values,
 the combined 5-realization `d_grk` table, and the full candidate-design
 grid) are in `results/stage1d_hist_random_followup.pkl`.
