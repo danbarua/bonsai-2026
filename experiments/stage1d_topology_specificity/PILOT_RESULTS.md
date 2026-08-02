@@ -191,3 +191,72 @@ the common design before the confirmatory run starts, per DESIGN.md's
 confirmatory-run results." Proceeding with (15, 3) as a provisional
 common design in the meantime is reasonable given two of three families
 agree exactly, but this gap should not be silently forgotten.
+
+## Follow-up: hist_random variance re-estimation (seeds 3, 4)
+
+**This section is additional evidence appended after the fact -- the
+numbers and "indeterminate" framing above are unchanged and still
+reflect the original 3x3 pilot exactly as it was run.** Acts on the
+recommendation immediately above: 2 more hist_random graph realizations
+(seeds 3, 4, continuing the 0/1/2 sequence) were drawn with the exact
+same construction recipe and run against the same 3 matched trajectory
+seeds (3000, 3010, 3020), full 432-trial simulation + Delta_map +
+10,000-permutation validation, identical to the original pilot.
+
+**Pre-simulation degeneracy check (before running anything):**
+
+| seed | degree at 'low' | degree at 'median' | degree at 'high' | isolated? |
+|---|---:|---:|---:|---|
+| 3 | 1.915 | 3.712 | 1.837 | no |
+| 4 | 1.807 | 7.480 | 3.800 | no |
+
+**Neither seed 3 nor seed 4 reproduced seed=2's isolated-node
+degeneracy.** Both realizations' simulations came back fully
+non-degenerate (`event_aligned_valid` never dropped to 0 for any node
+label at any t_p), and all 6 new trajectories hit the usual
+10,000-permutation floor (p=0.00010). Taken together, of the 5
+hist_random realizations drawn so far (seeds 0-4): 1 (seed=2, 20%) was
+**fully** degenerate, 1 (seed=0) was **mildly** degenerate (one
+isolated node, 'low', that didn't break `Delta_map` -- see the original
+pilot section above), and 3 (seeds 1, 3, 4) showed no isolated
+fixed-coordinate node at all. This is disclosed as-is: not frequent
+enough to call the fixed-coordinate protocol broken for this
+construction, but frequent enough (2 of 5 draws showing *some* isolated
+node) that it isn't a one-off fluke either -- a real, low-probability-
+but-not-negligible interaction between T's own sparsest fixed node and
+hist_random's ~half-density independent resampling.
+
+**Refit crossed variance decomposition**, using the 4 valid
+realizations (seeds 0, 1, 3, 4; seed 2 still excluded, unchanged):
+
+| | R used | point sigma^2_b | point sigma^2_tau | point sigma^2_eps | df_r | df_resid |
+|---|---:|---:|---:|---:|---:|---:|
+| hist_random (refit) | **4** | 0.000013 | 0.000784 | 0.000440 | **3** | **6** |
+
+df_r = 3 now clears this project's own reliability threshold (>= 3),
+so **both** variance components get a proper 95% chi-squared upper
+confidence bound -- no more 2x-point-estimate fallback needed for
+either one:
+
+| | sigma^2_b conservative | method | sigma^2_eps conservative | method |
+|---|---:|---|---:|---|
+| hist_random (refit) | 0.004069 | chi2 upper CI (df_r=3) | 0.001613 | chi2 upper CI (df_resid=6) |
+
+**hist_random's own minimal design, refit: (R=25, K=3), cost 75,
+power=0.827.** Confirmed as the true minimum over the full candidate
+grid (nothing cheaper reaches 80% power; e.g. (20,3) only reaches
+0.700). This is **larger** than the common design currently locked
+above -- (15, 3), cost 45 -- and larger than rewired's and
+curr_random's own requirements, which are unchanged by this follow-up.
+
+**Per this task's own instruction, the common (R, K) is NOT being
+updated here.** hist_random alone, now reliably estimated, requires
+(R=25, K=3) -- 67% more total trajectory-runs (75 vs. 45) than the
+currently locked common design. Whether to raise the common design to
+(25, 3) for all three families, or handle hist_random differently, is
+an explicit decision left for the next step, not something this
+follow-up resolves unilaterally.
+
+Raw data for this follow-up (all 6 new trajectories' Delta_map values,
+the combined 5-realization `d_grk` table, and the full candidate-design
+grid) are in `results/stage1d_hist_random_followup.pkl`.
