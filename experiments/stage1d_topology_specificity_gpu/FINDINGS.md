@@ -110,13 +110,89 @@ E_min gating should also be fixed at the call site: check
 (matching the numpy contract) rather than the JAX port's raw NaN-capable
 output when invalid.
 
-## Status / what's not yet done
+## Update: fix applied, confirmed on CPU, then re-verified end-to-end on GPU
 
-The fix above is understood and confirmed correct on CPU (via the
-4-way-factorial reproduction), but **not yet re-verified end-to-end on
-GPU** -- the A100 session was gone (backend returned 404/401; local
-tracking shows `session_terminated: pruned`) before this could be
-re-run there. Re-running the full 37-trajectory pilot with both fixes
-applied, on a fresh GPU session, is the natural next step before trusting
-any GPU-derived Delta_map figures for the Stage 1D lattice/stochastic-
-control comparison itself.
+Both fixes were applied directly to `build_432_batch()` and its two call
+sites in `real_pilot_benchmark.py` (the per-trajectory loop, and T's own
+seed=3000 cross-check). Before touching a GPU:
+
+- The patched `build_432_batch()` was smoke-tested in isolation against
+  the real `W_T` (no diffrax needed for this part -- only the JAX
+  trial-runner import needs it): correct shapes (432 trials, 505-dim
+  states), correct unique node/sign/amplitude values, and its
+  `theta0_b[0]` was confirmed to (a) exactly match an independently
+  computed `generate_fixed_replica_directions`-based replica state, and
+  (b) provably differ from the old buggy `uniform(-1,1)` construction --
+  i.e. the fix is real, not accidentally inert.
+- This is the same code path already validated in the 4-way-factorial
+  table above (same function, same arguments, imported from the same
+  `stage1b2_core` module) -- no new CPU recomputation of the full
+  432-trial Delta_map was needed to re-derive a value already in hand.
+
+A fresh A100 session was then provisioned (the original was confirmed
+fully gone -- `mighty-colab sessions` empty, `adopt --orphanage` found
+nothing). `verify_on_gpu.py` was re-run unchanged first and reproduced
+the same per-field precision as before (1e-6 to 1e-8 max abs diff, `PASS`),
+confirming the fresh environment is sound. The corrected
+`real_pilot_benchmark.py` was then re-run in full:
+
+```
+Total JAX GPU simulation time, all 37 trajectories: 32.67s
+M1 baseline (real, measured, simulation stage only): 3660s (61 min)
+Speedup vs real M1 baseline: 112.0x
+
+Per-t_p Delta_map (T, seed=3000): {0: 0.39549, 0.833: 0.32147, 1.667: 0.33953, 2.5: 0.34557}
+Pooled Delta_map (T, seed=3000, from this GPU run): 0.3505
+(Stage 1C's own cached figure for T, seed=3000: 0.3505 -- exact match)
+```
+
+**Confirmed**: the corrected GPU pipeline reproduces Stage 1C's cached
+Delta_map exactly (0.3505 vs 0.3505; the CPU-only reproduction earlier in
+this document got 0.3505 too, agreeing with the GPU figure to ~7-8
+significant figures, consistent with the cross-solver precision already
+established in `verify_on_gpu.py`). Simulation speed is materially
+unchanged by the fix (32.67s vs the original buggy run's 32.63s, as
+expected -- the bug was in what the batch was constructed *from*, not
+in how expensive it was to simulate), so the 112x speedup figure stands.
+
+Per-trajectory timings (all ~0.87-0.96s, GPU compute time only, warm-up/
+compile excluded): lattice x10 (seeds 3000-3090), rewired x3 realizations
+x3 trajectories each (seeds 3000/3010/3020), hist_random x3x3, curr_random
+x3x3 -- 37 trajectories total, matching the pilot design exactly.
+
+### Anti-pattern scan (requested check, not assumed clean)
+
+Checked every other script in this folder for the same failure mode
+(reimplementing a simplified/wrong version of a function instead of
+calling the real, already-imported one):
+
+- `verify_single_trial.py`, `verify_vmap_batch.py`: **clean** -- both
+  correctly call `generate_fixed_replica_directions()`.
+- `extract_pre_computed_class0_construction.py`,
+  `extract_pre_computed_class0_lattice.py`: trivial load/re-save
+  scripts, no simulation logic, not applicable.
+- `experiment.ipynb`: unrelated (Colab session-info inspector).
+- **`bonsai real pilot gpu benchmark.ipynb`: NOT clean.** Cell 15 defines
+  an entirely separate, cruder JAX reimplementation
+  (`run_one_trial_jax`, with its own inline `force_jacobian_jax`/`rhs`)
+  that does not compute event-alignment (`tau_star`, `E`/`C`, q/r/residual)
+  at all -- it just returns the raw final `(theta, delta)` state at
+  `T_HORIZON`. Its own `build_432_batch_for_graph()` has the identical
+  `rng_r.uniform(-1, 1, n)` direction-generation bug. A code comment in
+  cell 17 (`M1_MINUTES_37_TRAJECTORIES = 61  # Claude Code's first-run
+  figure; re-check once the corrected run lands`) suggests this was an
+  in-progress alternative/rewrite, abandoned before running (all relevant
+  cell outputs are empty -- this never produced a reported number, buggy
+  or otherwise). It predates `run_one_trial_jax_faithful.py` and appears
+  superseded by it. Left as-is rather than fixed, since it's a materially
+  different, less-complete implementation (missing the actual
+  event-alignment logic this whole pipeline depends on) -- deciding
+  whether to finish, fix, or discard this notebook is a scope decision
+  for whoever continues this thread, not something to silently patch.
+
+## Status
+
+Fixed, CPU-sanity-checked, and now GPU-re-verified end-to-end. The
+Stage 1D GPU pilot's Delta_map figures can be trusted going forward. The
+one open item is the stale notebook above -- not blocking, but not
+cleaned up either.

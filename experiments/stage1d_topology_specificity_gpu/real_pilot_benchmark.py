@@ -43,8 +43,7 @@ def build_432_batch(Wg_np, baseline_seed):
     theta0_b = rng_b.uniform(0, 2 * np.pi, n)
     sol_b = solve_ivp(rhs_theta_only_np, (0, T_HORIZON), theta0_b, args=(Wg_np,), method='RK45',
                        rtol=RTOL, atol=ATOL, max_step=MAX_STEP, dense_output=True)
-    rng_r = np.random.default_rng(replica_direction_seed)
-    directions = [rng_r.uniform(-1, 1, n) for _ in range(N_REPLICAS)]
+    directions = generate_fixed_replica_directions(n, replica_direction_seed, N_REPLICAS)
 
     theta0_list, node_list, sign_list, amp_list, keys = [], [], [], [], []
     for t_p in T_P_VALUES:
@@ -95,12 +94,19 @@ for name, seed, Wg_np, baseline_seeds in jobs:
         label = f"{name}" if seed is None else f"{name} seed={seed}"
         print(f"{label} traj={baseline_seed}: {elapsed:.2f}s")
 
-        # Reformat into the real analyze_stage1b2.py-compatible structure
+        # Reformat into the real analyze_stage1b2.py-compatible structure.
+        # event_aligned_q must be None when invalid, matching the numpy
+        # run_one_trial contract -- the JAX port can't return None from a
+        # batched/jitted computation, so it always returns a real (possibly
+        # meaningless) array plus this validity flag; the caller (here) is
+        # responsible for gating on it before analyze_stage1b2.py sees it,
+        # since d_q() only excludes a pair when it's literally None.
         results_dict = {}
         for i, key in enumerate(keys):
+            valid = bool(result['event_aligned_valid'][i])
             results_dict[key] = {
-                'event_aligned_q': np.asarray(result['event_aligned_q'][i]),
-                'event_aligned_valid': bool(result['event_aligned_valid'][i]),
+                'event_aligned_q': np.asarray(result['event_aligned_q'][i]) if valid else None,
+                'event_aligned_valid': valid,
             }
         all_results[(name, seed, baseline_seed)] = results_dict
 
@@ -121,9 +127,13 @@ print("=" * 60)
 # so compute it directly here for the cross-check, same 432-trial construction.
 theta0_b, node_b, sign_b, amp_b, keys = build_432_batch(W_T, 3000)
 result = batched_run(jnp.asarray(W_T), theta0_b, node_b, sign_b, amp_b)
-results_dict = {key: {'event_aligned_q': np.asarray(result['event_aligned_q'][i]),
-                       'event_aligned_valid': bool(result['event_aligned_valid'][i])}
-                for i, key in enumerate(keys)}
+results_dict = {}
+for i, key in enumerate(keys):
+    valid = bool(result['event_aligned_valid'][i])
+    results_dict[key] = {
+        'event_aligned_q': np.asarray(result['event_aligned_q'][i]) if valid else None,
+        'event_aligned_valid': valid,
+    }
 organized = load_results_as_arrays(results_dict, nodes_T, time_key='event_aligned_q')
 per_tp = {t_p: compute_W_B_deltamap(organized[t_p], node_labels)['delta_map'] for t_p in T_P_VALUES}
 pooled = np.mean(list(per_tp.values()))
