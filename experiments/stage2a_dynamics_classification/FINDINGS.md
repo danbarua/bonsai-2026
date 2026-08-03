@@ -504,4 +504,137 @@ topology.
 ## Next step
 
 Full feasibility stage 3 (60,000 images, ~4.2-hour projection, 6
-conditions) -- not launched here.
+conditions) -- superseded by the timing-split and GPU-port investigation
+below.
+
+# Stage 2A: Encode/Evolve Timing Split, and a Verified JAX Evolution Port
+
+**Status: diagnostic and infrastructure only. No stage-3 simulation data
+in this section -- a timing split, a spectral cross-check, and a
+from-scratch-verified JAX port, none of which is a scientific result.**
+
+## Timing split: evolution dominates by ~80x
+
+Encoding (`_local_converged_phases` + restriction) and graph evolution
+timed separately, 100 real images, single topology (T), single-threaded
+(no multiprocessing, to isolate the two steps cleanly):
+
+| step | total (100 images) | ms/image |
+|---|---:|---:|
+| encode | 0.458s | 4.58 |
+| evolve (T only) | 36.558s | 365.58 |
+
+**Evolution is ~80x the cost of encoding.** This sets the real ceiling
+on what a GPU port can help with: porting encoding would not
+meaningfully change throughput; porting evolution addresses essentially
+all of the cost.
+
+## curr_random seed=0: where does 13 isolated nodes sit in the family?
+
+Before committing hours of compute to this specific prespecified graph
+instance, checked its isolated-node count and main-component Fiedler
+value against all other curr_random realizations already computed in
+Stage 1D (3 pilot seeds 0-2, 25 confirmatory seeds 5-29 -- 28 total,
+zero new simulation, just loading and analyzing already-cached
+constructions):
+
+- **Isolated-node count**: range 3-15 across 28 realizations, mean 9.18,
+  median 9.0. Seed=0's 13 sits at the **92.9th percentile** -- elevated
+  relative to the median, but well within the observed range (several
+  other seeds, e.g. 5 and 1, have 15), not an outlier.
+- **Main-component Fiedler value**: seed=0's 0.2429 sits squarely within
+  the observed range (~0.16-0.36) across all 28 realizations.
+
+**Seed=0 is a reasonable prespecified representative** -- somewhat
+elevated on isolation count, typical on connectivity -- not a broken or
+unusually extreme draw. No reason to redraw the canonical seed.
+
+## JAX/diffrax port of graph evolution
+
+`evolve_on_graph_jax.py` ports `stage2a_core.evolve_on_graph`'s plain
+(unperturbed) evolution to JAX/diffrax, reusing
+`run_one_trial_jax_faithful.py`'s already-verified plain-evolution `rhs`
+directly (Stage 1D's own file, the perturbed-trajectory half of that
+function -- not the tangent-system half, which Stage 2A never needed).
+Returns `(theta_T, success)`, checking `diffrax.is_successful()`
+explicitly rather than assuming success -- the batched/jitted
+computation can't raise per-trial the way the numpy recovery-policy
+retry loop does, so the caller must gate on this exactly like the numpy
+path's `diag['failed']`.
+
+**Kernel-level verification** (`verify_evolve_on_graph_jax.py`): 6 real
+encoded images (KMNIST, not synthetic random phases) x all 4 topologies,
+unbatched and batched (vmap), compared against the real numpy
+`evolve_on_graph` via circular distance (accounting for mod-2pi
+wraparound). **Max absolute circular difference across all 24
+(topology, image) pairs: 5.4e-8** -- both unbatched and batched versions
+agree with numpy to this precision, comfortably inside the 1e-4
+cross-solver tolerance this project has used throughout (Stage 1D's own
+GPU port matched to 1e-6 to 1e-8).
+
+## End-to-end pipeline equivalence check (not just the kernel)
+
+**This project has been burned before by a kernel that passed
+field-by-field verification while the surrounding batch/caller code
+quietly did something different (Stage 1D's GPU episode -- see
+`experiments/stage1d_topology_specificity_gpu/FINDINGS.md`, and
+`CLAUDE.md`'s principle 16).** Per that lesson, the kernel check above
+is not treated as sufficient on its own. `stage2a_pipeline_jax.py`
+builds a full JAX-evolution pipeline matching
+`stage2a_pipeline.run_pipeline_multi_topology`'s exact result contract
+(same per-image/per-topology dict structure, same idx ordering),
+reusing `stage2a_core`'s numpy encoding and gauge-feature functions
+completely unchanged -- only the evolution step itself is replaced.
+
+`verify_stage2a_pipeline_equivalence.py` runs both the real numpy
+pipeline and this JAX pipeline on the same 40-image, **all-10-classes**
+mixed batch (not a homogeneous or single-class sample) and diffs the
+full output:
+
+| check | result |
+|---|---|
+| row ordering / labels | identical idx 0-39 in both, same label array |
+| encoded `theta_0` (via `R_pre`) | **bit-identical** (max diff 0.0) |
+| gauge-fixed pre-evolution features (`feat_pre`) | **bit-identical** (max diff 0.0) |
+| raw-pixel features | **bit-identical** (max diff 0.0) |
+| solver-failure accounting, all 4 topologies | **identical** (0/40 failed, both pipelines agree, every topology) |
+| evolved `theta_T` (via `R_post`), all 4 topologies | max diff 3.7e-10 to 3.6e-10 |
+| gauge-fixed evolved features (`feat_post`), all 4 topologies | max diff 1.8e-10 to 5.0e-8 |
+
+**All checks pass.** The bit-identical results (encoding, pre-evolution
+features, raw pixels) are expected and mechanically guaranteed -- both
+pipelines call the exact same numpy functions for those steps, so
+anything other than exact equality would indicate a real bug. The
+evolved-feature agreement (max 5.0e-8, well inside the 1e-4 tolerance)
+is the genuine cross-solver check (numpy/scipy RK45 vs. JAX/diffrax
+Tsit5), and the solver-failure-accounting match confirms the JAX path's
+`diffrax.is_successful()` gating is wired correctly, not just present
+in the code but untested.
+
+## What this means for the GPU decision
+
+CPU-only JAX (single device, no multiprocessing) was also timed: 400
+images, all 4 topologies, 119.9s (74.9 ms/image/topology) -- faster
+than numpy's single-threaded rate (365.6 ms/image/topology) but *not*
+clearly faster than numpy already parallelized via multiprocessing
+across ~9 cores (~40 ms/image/topology-equivalent). **The JAX port's
+real value is unlocking GPU batch parallelism, not CPU JAX by itself**
+-- consistent with Stage 1D's own experience (112x speedup was GPU vs.
+CPU-multiprocessing baseline, not vs. single-threaded numpy). A GPU
+session is the natural next step for the full 60,000-image, 4-topology
+stage-3 run, now that both the kernel and the full pipeline built
+around it are verified.
+
+## Code
+
+`evolve_on_graph_jax.py` (the JAX/diffrax evolution kernel),
+`verify_evolve_on_graph_jax.py` (kernel-level verification),
+`stage2a_pipeline_jax.py` (full pipeline, numpy encoding/gauge features
+reused unchanged), `verify_stage2a_pipeline_equivalence.py` (end-to-end
+equivalence check against the real numpy pipeline, mixed-class batch).
+
+## Next step
+
+Provision a GPU session and run the full stage-3 pipeline (60,000
+images, 4 topologies, 6 conditions) using the now-verified JAX pipeline
+-- not done here, pending confirmation.
