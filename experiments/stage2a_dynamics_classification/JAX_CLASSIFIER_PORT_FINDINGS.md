@@ -428,21 +428,31 @@ directly-measured convergence behavior at full scale, not an
 extrapolation from the 6,000-image subsample used throughout this
 document.
 
-**3. The CPU-slower-than-sklearn result (510s vs. 250s, Step 2) may not
-be the right comparison to conclude from.** The other session's own
-`evolve_on_graph_jax.py` port showed the same pattern at first: faster
-than single-threaded numpy, but not clearly faster than numpy already
-parallelized across this machine's ~9 CPU cores -- the real win only
-appeared once that port ran on GPU. sklearn's CPU baseline likely
-benefits from the same multi-core BLAS parallelism. The CPU-only
-`optax` comparison in Step 2 is a real, honestly-reported number, but
-per this precedent it probably isn't where a genuine speedup would show
-up even if the accuracy gap were resolved -- the A100 path (already
-demonstrated fast at 12.1x on synthetic `medium_10class_wide` data, and
-35.0s on the synthetic production-scale case) is the comparison that
-would actually answer whether this port helps, not the CPU-only run.
-Not yet re-tested on GPU with the recalibrated `GRAD_NORM_REL` on real
-data -- an open item, not a conclusion drawn here.
+**3. The CPU-slower-than-sklearn result (510s vs. 250s, Step 2) was not
+the right comparison to conclude from -- confirmed by immediately
+re-running on GPU.** The other session's own `evolve_on_graph_jax.py`
+port showed the same pattern at first (faster than single-threaded
+numpy, not clearly faster than numpy already parallelized across ~9 CPU
+cores, real win only on GPU); the same precedent held here. Same real
+`evolved_T` data (6,000-image subsample), same recalibrated module,
+A100 instead of CPU:
+
+| | elapsed | vs. sklearn (250s) | vs. CPU JAX (510s) |
+|---|---:|---:|---:|
+| sklearn (CPU) | 249.7s | -- | -- |
+| JAX (CPU) | 510.1s | 0.5x (slower) | -- |
+| **JAX (A100)** | **25.9s** | **9.6x** | **19.7x** |
+
+`best_C` still matched (0.1). Per-`C` values matched the CPU-JAX run
+closely (hardware-level floating-point noise, not a different result --
+consistent with the nondeterminism already characterized earlier in
+this investigation). Crucially, this also answers a question the
+accuracy-gap section above left open: **the large-`C` divergence from
+sklearn persists on GPU at essentially the same magnitude** (0.610 at
+`C=1000`, 0.942 at `C=10000`, vs. 0.506/1.09 on CPU) -- ruling out
+CPU-vs-GPU backend differences as the explanation and confirming this
+is a genuine algorithmic/convergence-trajectory issue, not a hardware
+artifact.
 
 ## Current status
 
@@ -460,14 +470,23 @@ data -- an open item, not a conclusion drawn here.
 - It did **not** make the full validation-loss curve trustworthy at
   large `C`: 1.09 absolute log-loss divergence from sklearn at
   `C=10000` on real `evolved_T` data, worse than the pre-recalibration
-  synthetic gap at the same point.
+  synthetic gap at the same point -- and confirmed present on GPU too
+  (0.94 at the same point), ruling out CPU/GPU backend differences as
+  the cause.
+- GPU **is** where this port's real speed advantage shows up: 25.9s on
+  A100 vs. 249.7s sklearn-CPU (9.6x) vs. 510.1s CPU-JAX (19.7x), same
+  real `evolved_T` data, same recalibrated module. The earlier
+  CPU-only "JAX is slower" result was real but not representative --
+  per the other session's `evolve_on_graph_jax.py` precedent, confirmed
+  directly here rather than assumed.
 - `evolved_lattice` and `evolved_rewired` were never re-checked after
   recalibration (deliberately -- evolved_T was gated as the condition
   that had to verify cleanly first).
 - No full-scale (60,000-image, all-6-condition) real timing exists.
 - **Still not a trustworthy replacement for `stage2a_classifier.py`.**
   Not used for, and should not be used for, any reported Stage 3 result
-  as-is.
+  as-is -- the large-`C` accuracy gap is the blocker, independent of the
+  now-resolved speed question.
 
 ## Open gaps (for whoever picks this up next)
 
@@ -502,19 +521,12 @@ data -- an open item, not a conclusion drawn here.
    upload path hit hard size limits well under 20MB per file; options
    include finer sharding at a size confirmed safe, or a different
    transfer path).
-5. **The CPU-only timing comparison (510s vs 250s, JAX slower) likely
-   isn't the right basis for concluding whether this port helps.** Per
-   the other session's `evolve_on_graph_jax.py` precedent -- faster than
-   single-threaded numpy but not clearly faster than numpy already
-   parallelized across ~9 CPU cores, with the real win only appearing on
-   GPU -- sklearn's CPU baseline here likely benefits from the same
-   multi-core BLAS parallelism. The recalibrated module has not yet been
-   re-tested on GPU against real data; that, not the CPU comparison, is
-   the number that would actually answer whether this port is worth
-   using. The A100 numbers elsewhere in this document (12.1x on
-   synthetic `medium_10class_wide`, 35.0s on synthetic production-scale)
-   are real but predate the `GRAD_NORM_REL` recalibration and are not
-   yet confirmed to hold on real, recalibrated, GPU-run data.
+5. ~~The CPU-only timing comparison likely isn't the right basis for
+   concluding whether this port helps.~~ **Resolved.** Re-ran the same
+   real `evolved_T` data on A100: 25.9s vs. sklearn-CPU's 249.7s (9.6x)
+   and CPU-JAX's 510.1s (19.7x). The speed question is answered; the
+   accuracy question (item 1) is not, and is now the sole blocker to
+   this port being trustworthy, independent of speed.
 
 ## Files
 
