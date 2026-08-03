@@ -23,10 +23,10 @@ This is explicitly NOT a drop-in replacement for
 stage2a_classifier.py's locked procedure:
 
 - Convergence here is defined as ||grad|| (L2 norm over the full
-  (W, b) parameter tree) <= GRAD_NORM_TOL after at most MAX_ITER
-  L-BFGS steps. This is a different quantity from sklearn's internal
-  lbfgs stopping rule (`n_iter_[0] < max_iter`, itself driven by
-  scipy's solver-internal criteria) -- a "converged" flag from this
+  (W, b) parameter tree) <= a per-(C, n_train) threshold after at most
+  MAX_ITER L-BFGS steps. This is a different quantity from sklearn's
+  internal lbfgs stopping rule (`n_iter_[0] < max_iter`, itself driven
+  by scipy's solver-internal criteria) -- a "converged" flag from this
   module is not directly comparable to one from stage2a_classifier.py.
 - Because the objective is the same strictly-convex-in-W problem
   (L2 on W breaks the softmax shift degeneracy; the intercept has one
@@ -36,8 +36,50 @@ stage2a_classifier.py's locked procedure:
   this is a claim to verify (see verify_stage_2a_classifier_jax.py),
   not to assume.
 
-Do not use this for any reported Stage 2A/3 result until that
-verification has been run and checked.
+## Convergence threshold derivation (GRAD_NORM_REL)
+
+An earlier version used a single fixed absolute threshold,
+GRAD_NORM_TOL=1e-6, for every (C, fold). This was wrong, and not just
+loosely calibrated: measured directly against sklearn's OWN converged
+solution (`stage2a_classifier._fit_one`'s fitted `coef_`/`intercept_`,
+with ||grad|| recomputed using THIS module's own `_make_loss_fn` --
+not a reimplementation) on real ill-conditioned data (evolved_T,
+6000-image stratified subsample of the real 60,000-image Stage-3 data,
+fold 0, n_train=4800, the full locked 9-value C grid), sklearn's
+achieved ||grad|| ranged from 7.0e-4 (C=1e-4) to 1.33e5 (C=10000) --
+eight orders of magnitude, and three to eleven orders of magnitude
+looser than 1e-6 at every single grid point. This is not sklearn being
+imprecise: the objective is C * sum_i NLL_i(W,b) + 0.5*sum(W**2), an
+UNWEIGHTED SUM (not mean) over n_train samples, scaled by C -- so
+||grad|| at any fixed quality of fit scales near-linearly with both C
+and n_train by construction. A fixed absolute threshold cannot be
+correct across a 9-value-C grid spanning 1e-4 to 1e4.
+
+The properly normalized quantity, ||grad|| / (C * n_train), was tight
+across that same measurement: [1.34e-3, 2.77e-3], a ~2.07x spread (vs.
+||grad|| alone's ~1.9e8x spread) -- consistent with the C * n_train
+scaling being the right normalization, not merely a rescaling that
+happens to work on this one dataset. GRAD_NORM_REL=6e-3 is set to
+~2x the max observed ratio (2.771e-3) as a safety margin, and the
+threshold used is GRAD_NORM_REL * C * n_train.
+
+Caveat: this was measured at n_train=4800 (the 6000-image subsample's
+fold size) only. The C * n_train scaling is the theoretically expected
+form for an unweighted-sum objective, not independently re-verified at
+production's ~48,000-sample fold size -- re-check before trusting this
+threshold at full scale. MAX_ITER's default (10000) is set to match
+sklearn's own CLASSIFIER_KWARGS max_iter exactly, for the same reason
+stage2a_classifier.py itself raised it from 1000: real, documented
+non-convergence on evolved_T's severe multicollinearity (condition
+number ~2e6), not a number picked for this module in isolation.
+
+See JAX_CLASSIFIER_PORT_FINDINGS.md's step-1 follow-up section for the
+full measurement (all 9 C values, both raw ||grad|| and the normalized
+ratio) that produced this derivation.
+
+Do not use this for any reported Stage 2A/3 result until full
+verification (per-C validation-loss curve, not just convergence, on
+real ill-conditioned data) has been run and checked.
 """
 import numpy as np
 import jax
@@ -54,15 +96,23 @@ jax.config.update("jax_enable_x64", True)
 C_GRID = (1e-4, 1e-3, 1e-2, 1e-1, 1e0, 1e1, 1e2, 1e3, 1e4)
 N_FOLDS = 5
 SEED = 42
-MAX_ITER = 2000
-GRAD_NORM_TOL = 1e-6  # distinct criterion from sklearn's -- see module docstring
+MAX_ITER = 10000  # matches sklearn's own CLASSIFIER_KWARGS max_iter -- see module docstring
+GRAD_NORM_REL = 6e-3  # ~2x the max ||grad||/(C*n_train) sklearn itself achieves -- see module docstring
+
+
+def _grad_tol_for(C, n_train, grad_norm_rel=GRAD_NORM_REL):
+    """Per-(C, n_train) convergence threshold -- see module docstring's
+    "Convergence threshold derivation" for why this is C * n_train
+    scaled, not a fixed absolute value."""
+    return grad_norm_rel * C * n_train
 
 
 class NonConvergenceError(RuntimeError):
-    """Raised when a required (fold, C) fit fails to reach GRAD_NORM_TOL
-    within MAX_ITER L-BFGS steps. Mirrors stage2a_classifier.py's locked
-    stop-gate (halt, do not silently log and continue) but is driven by
-    this module's own gradient-norm convergence criterion, not sklearn's."""
+    """Raised when a required (fold, C) fit fails to reach its
+    _grad_tol_for(C, n_train) threshold within MAX_ITER L-BFGS steps.
+    Mirrors stage2a_classifier.py's locked stop-gate (halt, do not
+    silently log and continue) but is driven by this module's own
+    gradient-norm convergence criterion, not sklearn's."""
 
 
 def _tree_l2_norm(tree):
@@ -91,10 +141,12 @@ def _tree_all_finite(tree):
 
 
 @partial(jax.jit, static_argnames=("n_features", "n_classes", "max_iter"))
-def _solve_one(C, X, y_onehot, n_features, n_classes, max_iter, grad_tol):
+def _solve_one(C, X, y_onehot, n_features, n_classes, max_iter, grad_norm_rel=GRAD_NORM_REL):
     """Minimizes _make_loss_fn(X, y_onehot, C) via optax.lbfgs, stopping
-    when ||grad|| <= grad_tol or max_iter steps are exhausted. Returns
-    (params, n_iter, grad_norm, converged).
+    when ||grad|| <= _grad_tol_for(C, n_train) or max_iter steps are
+    exhausted. Returns (params, n_iter, grad_norm, converged, grad_tol)
+    -- grad_tol returned too since it's now C-dependent, not a module
+    constant the caller already has in hand.
 
     Empirically flaky under jax.vmap + lax.while_loop: identical code and
     data occasionally produce a non-finite value/grad on some evaluation,
@@ -123,6 +175,7 @@ def _solve_one(C, X, y_onehot, n_features, n_classes, max_iter, grad_tol):
     of letting the corrupted curvature pair persist."""
     loss_fn = _make_loss_fn(X, y_onehot, C)
     solver = optax.lbfgs()
+    grad_tol = grad_norm_rel * C * X.shape[0]
 
     params0 = (jnp.zeros((n_features, n_classes), dtype=X.dtype),
                jnp.zeros((n_classes,), dtype=X.dtype))
@@ -165,18 +218,18 @@ def _solve_one(C, X, y_onehot, n_features, n_classes, max_iter, grad_tol):
     params, _state, n_iter, gnorm = jax.lax.while_loop(
         cond_fn, body_fn, (params0, state0, 0, jnp.asarray(jnp.inf, dtype=X.dtype)))
     converged = gnorm <= grad_tol
-    return params, n_iter, gnorm, converged
+    return params, n_iter, gnorm, converged, grad_tol
 
 
 def _solve_grid_for_fold(C_grid, X, y_onehot, n_features, n_classes,
-                          max_iter=MAX_ITER, grad_tol=GRAD_NORM_TOL):
+                          max_iter=MAX_ITER, grad_norm_rel=GRAD_NORM_REL):
     """vmaps _solve_one over the C grid: one batched optimization solving
     all len(C_grid) regularization strengths for this fold in parallel,
     instead of len(C_grid) serial sklearn fits."""
     solve_batched = jax.vmap(
         _solve_one, in_axes=(0, None, None, None, None, None, None))
     return solve_batched(jnp.asarray(C_grid, dtype=X.dtype), X, y_onehot,
-                          n_features, n_classes, max_iter, grad_tol)
+                          n_features, n_classes, max_iter, grad_norm_rel)
 
 
 def _predict_proba(params, X):
@@ -187,7 +240,7 @@ def _predict_proba(params, X):
 
 def select_C_via_cv_jax(X_train, y_train, condition_label, C_grid=C_GRID,
                          n_folds=N_FOLDS, seed=SEED, max_iter=MAX_ITER,
-                         grad_tol=GRAD_NORM_TOL):
+                         grad_norm_rel=GRAD_NORM_REL):
     """JAX-batched analog of stage2a_classifier.select_C_via_cv. Same
     fold-safe standardization, same fold splits (identical StratifiedKFold
     call), same deterministic smaller-C tie-break, same
@@ -215,20 +268,22 @@ def select_C_via_cv_jax(X_train, y_train, condition_label, C_grid=C_GRID,
         y_tr_onehot = jnp.asarray(np.eye(n_classes)[y_tr_idx], dtype=jnp.float64)
 
         n_features = X_tr_s.shape[1]
-        params, n_iter, gnorm, converged = _solve_grid_for_fold(
+        params, n_iter, gnorm, converged, grad_tol_used = _solve_grid_for_fold(
             C_grid, X_tr_s, y_tr_onehot, n_features, n_classes,
-            max_iter=max_iter, grad_tol=grad_tol)
+            max_iter=max_iter, grad_norm_rel=grad_norm_rel)
 
         for ci, C in enumerate(C_grid):
             if not bool(converged[ci]):
                 non_convergence_log.append({
                     "condition": condition_label, "fold": fold_idx, "C": C,
                     "n_iter": int(n_iter[ci]), "grad_norm": float(gnorm[ci]),
+                    "grad_tol": float(grad_tol_used[ci]),
                 })
                 raise NonConvergenceError(
                     f"[{condition_label}] fold={fold_idx} C={C}: did not reach "
-                    f"||grad||<={grad_tol} in {int(n_iter[ci])} iterations "
-                    f"(max_iter={max_iter}, final ||grad||={float(gnorm[ci]):.3e}). "
+                    f"||grad||<={float(grad_tol_used[ci]):.3e} in {int(n_iter[ci])} "
+                    f"iterations (max_iter={max_iter}, "
+                    f"final ||grad||={float(gnorm[ci]):.3e}). "
                     f"This module's own stop-gate -- halts, not silently logged.")
             W_c, b_c = params[0][ci], params[1][ci]
             val_pred_proba = np.asarray(_predict_proba((W_c, b_c), X_val_s))

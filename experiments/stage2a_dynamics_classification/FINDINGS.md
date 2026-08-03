@@ -712,3 +712,220 @@ already committed locally).
 Provision a fresh GPU session (this one to be stopped) and run the full
 60,000-image, 4-topology, 6-condition stage-3 pipeline for real -- not
 done here.
+
+# Stage 2A: Feasibility Stage 3 -- Full 60,000-Image Run
+
+**Status: mechanical/descriptive validation at full training-set scale,
+per `DESIGN.md`'s own framing throughout the feasibility ladder. This is
+NOT the locked confirmatory result.** The confirmatory claim (paired
+bootstrap on official-test-set log-loss, evolved vs. pre-evolution)
+still requires a separate, final step against the held-out official
+test set, not done here. Training-side CV log-loss is reported below
+descriptively, exactly as `DESIGN.md` permits at this stage, and no
+further than that.
+
+## Scope
+
+All 60,000 official KMNIST training images (no subsampling), all 10
+classes, `SEED`-independent (the full set, not a stratified draw). Six
+conditions: raw pixels (784-dim), encoded pre-evolution (1008-dim), and
+evolved on each of the 4 confirmatory-expansion topologies -- T,
+lattice, canonical rewired (seed=0), canonical curr_random (seed=0),
+each 1008-dim. Encoding used the primary locked seed (`ENCODER_SEED=0`)
+for every image.
+
+## Architecture: CPU encode, GPU evolve, CPU classify
+
+Per the explicit instruction to use the verified JAX/GPU pipeline for
+full-scale data generation: encoding ran locally (CPU, multiprocessing,
+unchanged `stage2a_core`/`stage2a_pipeline` code), evolution ran on a
+fresh `mighty-colab` A100 session (`stage2a-gpu-stage3`; no orphaned
+sessions found first; same pinned `jax[cuda12]==0.11.0` /
+`diffrax==0.7.2` / `equinox==0.13.8`, confirmed correct on first `exec`
+with no kernel restart needed this time), and classifier CV fitting ran
+locally afterward (CPU-only, sklearn) -- the GPU session was stopped
+immediately after evolution completed and its results were downloaded,
+since classifier fitting gains nothing from GPU and there is no reason
+to keep paying for idle-relative-to-task GPU time during it.
+
+**One real infrastructure snag, worth recording**: the single 250MB
+upload package (`theta0_batch` + all 4 topologies) was rejected by the
+`mighty-colab` upload endpoint with a 400 Bad Request -- the 10MB
+100-image package had worked fine, but 250MB exceeded some server-side
+limit. Worked around by splitting `theta0_batch` into 12 separate
+~20MB `.npy` chunks (uploaded individually, reassembled remotely via
+`np.concatenate`) plus the small 8MB topologies pickle uploaded
+separately. Both uploaded cleanly. This is an operational note for any
+future GPU work at this data scale, not a scientific finding.
+
+GPU evolution itself was chunked (`CHUNK_SIZE=1000`) rather than run as
+one 60,000-image batch, since `vmap` materializes a `(batch, n, n)`
+diff tensor per RHS evaluation -- at `batch=60000, n=505` that would be
+~120GB (float64), far beyond any single GPU's memory, whereas the
+100-image full-batch test's 204MB tensor gave no signal either way about
+this limit. `CHUNK_SIZE=1000` keeps the largest transient tensor at
+~2GB, conservatively safe; verified working with zero errors across all
+60 chunks x 4 topologies.
+
+## Result 1: data generation -- fast, clean, ahead of projection
+
+| phase | time | rate |
+|---|---:|---:|
+| encode (CPU, local, multiprocessing) | 68.1s | 1.135 ms/image |
+| GPU evolve, all 4 topologies | 114.0s | 0.475 ms/image/topology |
+| R_post/feat_post compute (CPU, local) | 6.4s | -- |
+| **total data-gen pipeline** | **188.5s (3.1 min)** | -- |
+
+Well under the ~7.3-minute (encode + GPU-evolve) projection from the
+100-image sanity run. GPU evolution rate (0.455-0.491 ms/image/topology
+across the 4 topologies) essentially matches the 100-image run's 0.67
+ms/image/topology, confirming the chunked approach scales cleanly with
+no throughput degradation at 600x more images.
+
+**One genuine surprise, stated plainly rather than smoothed over**: the
+measured 1.135 ms/image encode rate is roughly 4x faster than the ~4.6
+ms/image figure quoted in the pre-stage-3 timing investigation
+(`evolve_on_graph_jax.py`'s docstring, and the earlier projection
+"~4.6 minutes for 60,000 images"). That earlier figure appears to have
+been a single-threaded measurement; this run's local multiprocessing
+across ~9 workers accounts for most, but apparently not all, of the
+gap (a naive 9x parallel speedup on 4.6 ms/image would predict ~0.51
+ms/image, not the observed 1.135 ms/image) -- the discrepancy is not
+fully resolved and is noted honestly rather than assumed to be pure
+parallelism.
+
+Zero solver failures across all 240,000 (image, topology) evolutions;
+zero non-finite features anywhere (raw, pre-evolution, or evolved, any
+topology).
+
+## Result 2: R(theta) -- the synchronization asymmetry holds precisely at full scale
+
+| | min | max | mean | median | n < 0.01 | n > 0.99 (of 60,000) |
+|---|---:|---:|---:|---:|---:|---:|
+| pre-evolution (shared) | 0.321 | 0.991 | 0.733 | 0.739 | 0 | 4 |
+| T | 0.532 | 0.998 | 0.858 | 0.866 | 0 | 71 (0.12%) |
+| lattice | 0.525 | 0.998 | 0.865 | 0.872 | 0 | 64 (0.11%) |
+| rewired | 0.986 | 1.000 | 0.997 | 0.997 | 0 | **59,965 (99.94%)** |
+| curr_random | 0.973 | 1.000 | 0.991 | 0.991 | 0 | **36,547 (60.9%)** |
+
+This is not a weakening or drift of the 400-image sub-test's finding --
+it is a precise confirmation. That sub-test reported "R_post > 0.99 for
+~100%/~60% of images" for rewired/curr_random; at 150x the sample size,
+the real figures are 99.94% and 60.9% respectively, matching almost
+exactly. Rewired's near-total synchronization is in fact more extreme
+than "near-total" suggests: its *minimum* R_post across all 60,000
+images is 0.986 -- there is no image, of any class, that fails to
+synchronize almost completely under this topology. T and lattice show
+no such effect (0.11-0.12% above 0.99, an order of magnitude smaller
+than even curr_random's rate).
+
+## Result 3: classifier CV fitting is NOT negligible -- it dominates everything else
+
+**246.8 minutes (4.1 hours)** for the 6 conditions' full CV fitting
+(45 fold/C combinations each, 270 total, plus 6 final refits) --
+measured explicitly rather than continuing to assume it was cheap, per
+the instruction that motivated this measurement. This is **~79x** the
+entire data-generation pipeline's 188.5 seconds. Classifier fitting,
+not data generation, is now the dominant cost of this ladder's full-scale
+step, and any future re-run of this stage should budget for that
+directly rather than by extrapolating stage 1/2's much smaller-scale
+timings.
+
+**All 270 fold/C combinations converged, for every condition, with zero
+non-convergence events.** This directly resolves the concern flagged
+going into this stage: the pre-stage-3 investigation predicted
+non-convergence was "most likely to recur... for the higher-Fiedler-
+value topologies (rewired, curr_random) at weak regularization," given
+stage 2's evolved_T non-convergence at 5,000 images. At 60,000 images
+(12x stage 2's scale), it did not recur anywhere, for any condition,
+including rewired and curr_random despite their extreme R_post values
+above. The `max_iter=10000` amendment made after stage 2's diagnosis
+appears to have been not just a workaround for that one instance, but
+sufficient headroom at full scale too. No ill-conditioning-vs-
+separability diagnosis was needed, since there was no non-convergence to
+diagnose.
+
+## Result 4: descriptive training-CV log-loss ranking (NOT the confirmatory result)
+
+| condition | selected C | mean val. log-loss |
+|---|---:|---:|
+| raw_pixels | 0.001 | 0.6009 |
+| encoded_pre_evolution | 0.01 | 0.5609 |
+| evolved_lattice | 1000 | 0.4077 |
+| evolved_rewired | 10 | 0.3480 |
+| evolved_T | 1000 | 0.3415 |
+| evolved_curr_random | 1.0 | 0.3255 |
+
+All four evolved conditions beat both raw pixels and encoded
+pre-evolution by a wide, consistent margin -- descriptively consistent
+with this whole programme's motivating premise that evolution adds
+linearly-decodable structure. This is training-side CV log-loss only,
+never the locked confirmatory statistic (paired bootstrap on
+*official-test-set* log-loss, evolved vs. pre-evolution specifically),
+and must not be read as anything stronger than descriptive.
+
+**A second genuine surprise, stated plainly**: `curr_random` -- a
+topology with matched sparsity but no relationship to T's learned
+structure -- gives the *lowest* training-CV loss of all four evolved
+conditions (0.3255), edging out `evolved_T` (0.3415) despite T being
+the topology this whole construction was built around. And `rewired`,
+despite the almost-total phase synchronization documented above (R_post
+∈ [0.986, 1.0] for all 60,000 images), still gives the second-best
+evolved loss (0.3480) -- clearly better than `lattice` (0.4077) and far
+better than either pre-evolution condition. Naively, synchronization
+this severe should collapse most of the information that would
+distinguish one image's evolved state from another's; it evidently does
+not do so here, at least not enough to prevent a linear reference-node-
+gauge readout from separating classes better than the un-evolved
+features. Neither of these findings should be over-read as bearing on
+Stage 1D's own "no detectable difference" closure (a different metric
+-- paired bootstrap on the *tangent-departure* response measure -- and a
+different sample) but they are both real, and both reported as observed
+rather than smoothed toward the expected story.
+
+## Go/no-go summary
+
+- Solver failures: 0/240,000 (image, topology) evolutions.
+- Non-finite features: 0, any condition, any topology.
+- Classifier convergence: 270/270 fold/C fits converged, 6/6 final
+  refits converged.
+- **OVERALL: GO** (mechanical criteria only -- not a scientific result).
+
+## What remains open after this stage
+
+1. **The encoder-seed robustness check at full scale** (stage 2's
+   negligible-difference finding, re-tested at 60,000 images) was not
+   run in this pass. Given the now-measured classifier-fitting cost
+   (4.1 hours for 6 conditions), a partial re-fit (encoded_pre_evolution
+   + evolved_T only, matching stage 2's original scope) is a bounded but
+   real additional cost, plausibly on the order of an hour or more --
+   flagged for an explicit go-ahead rather than run automatically, given
+   that this stage's own instructions conditioned it on "not
+   prohibitively expensive," and the real cost is now known rather than
+   assumed.
+2. **The locked confirmatory endpoint itself**: paired bootstrap on
+   official-test-set log-loss (evolved vs. pre-evolution), the one
+   result this entire ladder has been building toward. Not started.
+
+## Code
+
+`run_feasibility_stage3_encode.py` (local CPU encode driver, all 60,000
+images), `stage2a_pipeline.py`'s new `run_encode_only_multi_topology` /
+`_process_one_image_encode_only` (encode-only split for the GPU
+hand-off, reusing `encode_and_restrict`/`order_parameter`/
+`reference_node_features` unchanged), `analyze_stage3_results.py`
+(local: reconstructs the full per-image results structure from the
+downloaded GPU evolution output + local encode results, via the same
+`s2a.order_parameter`/`s2a.reference_node_features` calls used
+everywhere else, then calls `check_go_no_go_multi_topology` and
+`run_classifier_conditions_multi_topology` unchanged). Remote-only GPU
+driver script (`stage3_gpu_evolve.py`, chunked evolution) not committed,
+per this project's convention for ephemeral GPU-session code -- reuses
+`evolve_on_graph_jax.py` (uploaded as-is, unchanged).
+
+## Next step
+
+An explicit decision on the full-scale encoder-seed robustness check
+(above), then the locked confirmatory run itself: paired bootstrap,
+evolved vs. pre-evolution, on the official 10,000-image KMNIST test
+set.
