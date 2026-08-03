@@ -162,30 +162,84 @@ without stopping on the first failure. Result:
 | encoded, pre-evolution | 0 |
 | evolved on T | **15** -- all 5 folds, at exactly `C in {100, 1000, 10000}` |
 
-**The pattern is clean and fully explained, not mysterious**: only
-`evolved_T` is affected, and only at the three weakest-regularization
-values in the 9-value grid (the top third) -- every fold fails at
-exactly the same three `C` values, and no fold fails at `C <= 10`. This
-is the textbook signature of a high-dimensional (1008-feature),
-large-sample (~4000 per fold), near-unregularized multinomial fit: as
-`C` grows, the loss surface flattens and coefficient magnitudes grow
-essentially unbounded, so `lbfgs` genuinely needs more than 1000
-iterations to satisfy `tol=1e-4` -- not evidence of a data or pipeline
-defect. Consistent with this: at every `C` value observed so far across
-both stages (1 and 2), the CV-selected `C` has always been **0.01** for
-every condition, with mean validation log-loss rising sharply and
-monotonically for `C >= 1` -- the non-convergent region is nowhere near
-where `C` would ever actually be selected.
+**The pattern is clean and unusual**: only `evolved_T` is affected, and
+only at the three weakest-regularization values in the 9-value grid
+(the top third) -- every fold fails at exactly the same three `C`
+values, and no fold fails at `C <= 10`. At every `C` value observed so
+far across both stages (1 and 2), the CV-selected `C` has always been
+**0.01** for every condition, with mean validation log-loss rising
+sharply and monotonically for `C >= 1` -- the non-convergent region is
+nowhere near where `C` would ever actually be selected.
 
 **This does not resolve the stop-gate on its own.** `DESIGN.md`'s rule
 is deliberately strict regardless of whether the failing `C` would have
 been selected, specifically so "it doesn't matter, that C was never
 going to be picked anyway" cannot become a silent, undisclosed
-justification for continuing. The pattern is now fully characterized
-and disclosed; whether to raise `max_iter` for this condition (or
-region of the grid), narrow the grid, or handle it some other way is a
-locked-design-parameter decision, not something to change unilaterally
-mid-implementation -- left for a separate decision, not resolved here.
+justification for continuing. Whether to raise `max_iter` for this
+condition (or region of the grid), narrow the grid, or handle it some
+other way is a locked-design-parameter decision, not something to
+change unilaterally mid-implementation -- left for a separate decision,
+not resolved here.
+
+## Why evolved_T specifically fails to converge: ill-conditioning, not separability
+
+A follow-up diagnostic (`diagnose_stage2_convergence_hypotheses.py`,
+also diagnostic-only) tested two candidate explanations directly, on the
+exact failing case (evolved_T, fold=0, C=100, same 4000-image training
+partition the original failure came from) against the other two
+conditions at the same fold and `C` values:
+
+| condition | train acc @ C=100 | converged @ C=100 (n_iter) | train logloss @ C=100 | \|\|coef\|\| @ C=0.01 -> C=100 | condition number |
+|---|---:|---|---:|---:|---:|
+| raw pixels | **1.000000** | yes (49) | 0.0013 | 3.29 -> 65.29 (19.9x) | 1.0e+02 |
+| encoded, pre-evolution | **1.000000** | yes (171) | 0.0022 | 3.29 -> 86.68 (26.3x) | 1.2e+03 |
+| evolved on T | 0.990750 | **no (1000)** | 0.0555 | 2.93 -> 186.53 (63.7x) | **2.0e+06** |
+
+**The evidence directly favors ill-conditioning, not near-separability,
+and actually argues against the separability hypothesis specifically.**
+Both `raw_pixels` and `encoded_pre_evolution` reach **perfect (100%)**
+training accuracy on this fold and still converge quickly and easily
+(49 and 171 iterations) -- the classic behavior when data is perfectly
+separable but well-conditioned. `evolved_T` does **not** reach perfect
+training accuracy (99.075%) -- it is the *least* separable of the three
+-- yet it is the one that fails to converge. If separability alone
+were driving the slow convergence, the two perfectly-separable
+conditions should have struggled more, not less.
+
+What `evolved_T` does have is a **condition number of the standardized
+training feature matrix ~2,000,000** -- roughly 4 orders of magnitude
+worse than `raw_pixels` (100) and 3 orders of magnitude worse than
+`encoded_pre_evolution` (1,164), driven by a very small minimum singular
+value (6.2e-4 against a max of 1,228). This is consistent with, and
+plausibly explained by, the `R(theta)` diagnostic already reported
+above: evolution measurably increases phase synchronization (mean `R`
+0.731 -> 0.857 across this same 5,000-image set) -- when many nodes'
+phases move toward similar values, their `cos`/`sin` reference-node-gauge
+features become nearly identical to each other, producing near-collinear
+(redundant) columns in the standardized feature matrix. **This is a
+plausible mechanistic link, not independently verified here** -- this
+diagnostic did not test whether the worst-conditioned images are
+specifically the highest-`R` ones.
+
+The coefficient-norm growth (`evolved_T`'s 63.7x ratio vs. 19.9x and
+26.3x for the other two) is consistent with, and likely compounds, the
+ill-conditioning explanation (an elongated, poorly-conditioned loss
+surface makes for larger steps toward a more extreme optimum) -- but
+`evolved_T`'s C=100 fit never actually reached convergence (still at
+`max_iter=1000` when stopped), so this norm is a mid-optimization
+snapshot, not its true optimum; the coefficient-norm comparison alone,
+without the condition-number evidence, would be far weaker support on
+its own.
+
+**Verdict, stated plainly**: the ill-conditioning hypothesis is
+supported by direct, substantial evidence (condition number ~1,700x
+worse than the next-worst condition). The near-separability hypothesis
+is not supported -- if anything, the data points the opposite direction,
+since `evolved_T` is the one condition that does *not* achieve perfect
+training-set separation. This looks like graph evolution's own
+synchronizing effect on the phase state, not incidental separability,
+producing a genuinely harder optimization problem for this specific
+condition at weak regularization.
 
 ## Not yet run because of the halt
 
@@ -199,13 +253,16 @@ re-characterize, the identical issue.
 
 `diagnose_stage2_convergence.py` (diagnostic-only scan, not part of the
 locked pipeline), `stage2a_classifier.py`'s new
-`diagnose_convergence_full_grid()` (same caveat). `run_feasibility_stage2.py`
-now halts and saves partial results (`results/stage2_feasibility_results.pkl`,
-gitignored) rather than silently continuing past a non-convergence.
+`diagnose_convergence_full_grid()` (same caveat),
+`diagnose_stage2_convergence_hypotheses.py` (the separability/
+ill-conditioning hypothesis test above, also diagnostic-only).
+`run_feasibility_stage2.py` now halts and saves partial results
+(`results/stage2_feasibility_results.pkl`, gitignored) rather than
+silently continuing past a non-convergence.
 
 ## Next step
 
 A decision on how to handle the `evolved_T` high-`C` non-convergence
-(raise `max_iter`, narrow the grid, or another approach), then re-run
-stage 2's primary CV and the encoder-seed robustness check -- not done
-here.
+(raise `max_iter`, narrow the grid, or another approach), informed by
+the ill-conditioning finding above, then re-run stage 2's primary CV and
+the encoder-seed robustness check -- not done here.
