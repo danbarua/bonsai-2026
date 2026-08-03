@@ -637,4 +637,78 @@ equivalence check against the real numpy pipeline, mixed-class batch).
 
 Provision a GPU session and run the full stage-3 pipeline (60,000
 images, 4 topologies, 6 conditions) using the now-verified JAX pipeline
--- not done here, pending confirmation.
+-- superseded by the 100-image GPU sanity run below.
+
+# Stage 2A: 100-Image GPU Sanity Run
+
+**Status: infrastructure verification only, not a scientific result.**
+Confirms the verified JAX pipeline produces correct results on real GPU
+hardware (not just locally on CPU-backend JAX) and gives a real,
+measured full-scale runtime projection, before committing to the full
+60,000-image run.
+
+## Setup
+
+Fresh A100 session (`stage2a-gpu-100`, via `mighty-colab`; no orphaned
+sessions found first). Environment: `jax==0.11.0` (`jax[cuda12]`),
+`diffrax==0.7.2`, `equinox==0.13.8` -- same pinned versions verified
+working in Stage 1D's own GPU work, installed then the kernel restarted
+(a pip install alone doesn't take effect in an already-running kernel
+that already imported the older pre-installed `jax==0.7.2`).
+
+100 images (10/class, `SEED=42`, same `subsample_stratified` used
+throughout) encoded locally (CPU/numpy, unchanged code), packaged with
+all four topologies, and uploaded (10MB). Only the evolution step ran
+on GPU.
+
+## Result: real ~546x-to-~60x speedup, zero failures, correctness confirmed
+
+| topology | GPU time (100 images) | ms/image |
+|---|---:|---:|
+| T | 0.072s | 0.72 |
+| lattice | 0.069s | 0.69 |
+| rewired | 0.069s | 0.69 |
+| curr_random | 0.058s | 0.58 |
+
+**Total: 0.268s for all 4 topologies, 100 images -- 0.67 ms/image/topology.**
+Against numpy's single-threaded 365.58 ms/image/topology, that is a
+**~546x speedup**; against numpy already parallelized via
+multiprocessing (~40 ms/image/topology-equivalent across ~9 cores),
+still **~60x**. Zero solver failures reported (`diffrax.is_successful()`
+gate), across all 400 (image, topology) combinations.
+
+**Correctness re-verified on real GPU hardware, not assumed from the
+earlier CPU-backend check**: the first 5 images' GPU-produced `theta_T`
+for all 4 topologies compared against local numpy `evolve_on_graph` --
+max circular difference **1.5e-8**, consistent with (and as tight as)
+the CPU-backend verification.
+
+**Full go/no-go check on all 100 images, all 4 topologies**: zero
+non-finite features; `R_post` distributions match the earlier CPU
+findings exactly (T mean 0.865, lattice 0.871, rewired 0.997 with
+100/100 above 0.99, curr_random 0.991 with 64/100 above 0.99) --
+confirms the GPU run reproduces the same dynamics, not just fast,
+different numbers.
+
+## Revised full-scale projection
+
+**Projected full 60,000-image, 4-topology GPU evolution time: ~161s
+(~2.7 minutes)** -- down from the ~4.2-hour CPU-multiprocessing
+projection. Encoding (CPU-only, ~4.6 ms/image) adds roughly 4.6 minutes
+for 60,000 images, unaffected by the GPU port. The evolution bottleneck
+that motivated this whole investigation is now essentially eliminated;
+remaining stage-3 runtime will be dominated by encoding and the 6-
+condition classifier CV fitting, not graph evolution.
+
+## Code
+
+Local: reused `evolve_on_graph_jax.py` unchanged (uploaded as-is).
+Remote-only driver script (not committed -- ephemeral GPU-session code,
+per this project's convention; the reusable kernel/pipeline code is
+already committed locally).
+
+## Next step
+
+Provision a fresh GPU session (this one to be stopped) and run the full
+60,000-image, 4-topology, 6-condition stage-3 pipeline for real -- not
+done here.
