@@ -13,6 +13,15 @@ this project's established convention (Stage 1D's own path through four
 review rounds before any code ran) -- implementation of feasibility
 stage 1 begins from this document.*
 
+**Post-lock amendment (during feasibility stage 2)**: `max_iter` raised
+from `1000` to `10000` in "Linear classifier implementation," below --
+a real non-convergence was found, investigated, and diagnosed as severe
+feature multicollinearity specific to `evolved_T` (not a sample-size-
+fixable separability issue); see `FINDINGS.md` for the full
+investigation. This is the only change made to this document after
+locking; disclosed here rather than silently edited into the original
+locked value.**
+
 ## The question, precisely -- corrected framing
 
 **Correction from review, load-bearing**: this design does not test
@@ -539,11 +548,19 @@ defaults from silently becoming part of the experiment**:
   explicitly rather than left to whatever the installed version
   defaults to).
 - Convergence tolerance: `tol=1e-4`.
-- Maximum iterations: `max_iter=1000` (higher than scikit-learn's own
-  default of 100, since 10-class multinomial fits with 784-1008
-  features (raw pixels through the reference-node representation) can
-  need more iterations to converge cleanly, especially at weak
-  regularization).
+- Maximum iterations: **`max_iter=10000`** (amended from the original
+  `max_iter=1000` -- feasibility stage 2 hit a real non-convergence at
+  1000 iterations, investigated and found to be driven by severe
+  multicollinearity specific to `evolved_T`'s standardized feature
+  matrix, not sample-size-fixable separability -- see `FINDINGS.md`'s
+  "Why evolved_T specifically fails to converge" section for the full
+  diagnostic. Raised uniformly across all three conditions, not just
+  the affected one, for consistency. **If `10000` iterations still does
+  not converge for some condition, that is treated as a new, different
+  finding** -- not grounds to raise `max_iter` again, but a signal that
+  a principled fix (a documented minimum ridge floor, or decorrelating/
+  whitening features before classification) is the right next step, not
+  brute-forcing the optimizer further).
 - Class weighting: uniform (`class_weight=None`) -- KMNIST's 10 classes
   are balanced by construction, so no reweighting is applied.
 - Random seed: `random_state=42` wherever the solver accepts one (governs

@@ -16,6 +16,7 @@ import os
 import sys
 
 import numpy as np
+from scipy.stats import pearsonr
 from sklearn.linear_model import LogisticRegression
 from sklearn.metrics import log_loss
 from sklearn.model_selection import StratifiedKFold
@@ -57,6 +58,23 @@ def condition_number_report(X_tr_s, label):
           f"n_near_zero(<1e-8*max)={int(np.sum(s < 1e-8 * s[0]))}")
     return {"condition_number": cond, "s_max": float(s[0]), "s_min": float(s[-1]),
             "n_near_zero": int(np.sum(s < 1e-8 * s[0]))}
+
+
+def r_correlation_check(X_tr_s, R_values, label):
+    """Tests the one link between stage 1's R(theta) diagnostic and this
+    ill-conditioning finding that hadn't actually been checked: do images
+    that load heavily onto the near-null direction (the smallest singular
+    value, the direction responsible for the poor condition number) tend
+    to be the highest-R (most phase-synchronized) images? Pearson
+    correlation between each training image's R and its |projection| onto
+    the smallest right-singular-vector direction."""
+    _U, _s, Vt = np.linalg.svd(X_tr_s, full_matrices=False)
+    v_min = Vt[-1]
+    projection = X_tr_s @ v_min
+    corr, p_value = pearsonr(R_values, np.abs(projection))
+    print(f"  [{label}] correlation(R, |projection onto smallest-singular-value "
+          f"direction|): r={corr:.4f}, p={p_value:.4e} (n={len(R_values)})")
+    return {"correlation": float(corr), "p_value": float(p_value)}
 
 
 def main():
@@ -114,7 +132,13 @@ def main():
     cond_report = {label: condition_number_report(standardized[label], label) for label in conditions}
 
     print("\n" + "=" * 70)
-    print("SUMMARY")
+    print("4. R(theta) CORRELATION WITH THE ILL-CONDITIONED DIRECTION (evolved_T only)")
+    print("=" * 70)
+    R_post_fold0_train = np.array([results[i]["R_post"] for i in fold0_train_idx])
+    r_corr = r_correlation_check(standardized["evolved_T"], R_post_fold0_train, "evolved_T")
+
+    print("\n" + "=" * 70)
+    print(f"SUMMARY (CLASSIFIER_KWARGS max_iter={CLASSIFIER_KWARGS['max_iter']})")
     print("=" * 70)
     for label in conditions:
         print(f"\n{label}:")
@@ -125,8 +149,10 @@ def main():
               f"-> @ C=100: {at_100[label]['coef_norm']:.4f}  "
               f"(ratio: {at_100[label]['coef_norm']/at_001[label]['coef_norm']:.2f}x)")
         print(f"  condition number: {cond_report[label]['condition_number']:.3e}")
+    print(f"\nevolved_T: R(theta)-vs-ill-conditioned-direction correlation: "
+          f"r={r_corr['correlation']:.4f}, p={r_corr['p_value']:.4e}")
 
-    return {"at_100": at_100, "at_001": at_001, "cond_report": cond_report}
+    return {"at_100": at_100, "at_001": at_001, "cond_report": cond_report, "r_corr": r_corr}
 
 
 if __name__ == "__main__":

@@ -104,14 +104,17 @@ locked ladder -- see below.
 
 # Stage 2A: Feasibility Stage 2
 
-**Status: HALTED on a real, disclosed non-convergence -- per DESIGN.md's
-own locked stop-gate ("any non-converged fit during a required fold/C
+**Status: complete (after halting once on a real, investigated, and
+resolved non-convergence).** Initially halted per `DESIGN.md`'s own
+locked stop-gate ("any non-converged fit during a required fold/C
 combination stops advancement to the next stage, pending
-investigation"). The stage did not complete: the encoder-seed
-robustness check was not run, and this is not a scientific result any
-more than stage 1 was.**
+investigation"); the cause was diagnosed (below), `max_iter` raised from
+1,000 to 10,000 as a disclosed post-lock amendment, and the full stage
+(primary CV + encoder-seed robustness check) re-run and completed with
+no non-convergences anywhere. Still mechanical validation only, per
+`DESIGN.md`'s own framing -- not a scientific result, same as stage 1.
 
-## What ran before halting
+## What ran before halting (first attempt)
 
 5,000 official KMNIST training images (500/class, class-stratified,
 `SEED=42`) -- this is also "the fixed training-derived validation
@@ -210,16 +213,30 @@ What `evolved_T` does have is a **condition number of the standardized
 training feature matrix ~2,000,000** -- roughly 4 orders of magnitude
 worse than `raw_pixels` (100) and 3 orders of magnitude worse than
 `encoded_pre_evolution` (1,164), driven by a very small minimum singular
-value (6.2e-4 against a max of 1,228). This is consistent with, and
-plausibly explained by, the `R(theta)` diagnostic already reported
-above: evolution measurably increases phase synchronization (mean `R`
-0.731 -> 0.857 across this same 5,000-image set) -- when many nodes'
-phases move toward similar values, their `cos`/`sin` reference-node-gauge
-features become nearly identical to each other, producing near-collinear
-(redundant) columns in the standardized feature matrix. **This is a
-plausible mechanistic link, not independently verified here** -- this
-diagnostic did not test whether the worst-conditioned images are
-specifically the highest-`R` ones.
+value (6.2e-4 against a max of 1,228). This is consistent with the
+`R(theta)` diagnostic already reported above: evolution measurably
+increases phase synchronization (mean `R` 0.731 -> 0.857 across this
+same 5,000-image set) -- when many nodes' phases move toward similar
+values, their `cos`/`sin` reference-node-gauge features become nearly
+identical to each other, producing near-collinear (redundant) columns
+in the standardized feature matrix.
+
+**This link was tested directly, not left as a plausible story**:
+Pearson correlation between each fold-0 training image's `R(theta)` and
+its |projection| onto the smallest-singular-value direction (the
+specific direction responsible for the poor condition number) gives
+**r = -0.170, p = 2.3e-27** (n=4000). The correlation is real and
+overwhelmingly statistically significant given the sample size, but
+**weak in magnitude** (r^2 ~ 0.03 -- roughly 3% of variance explained)
+and, notably, **negative** -- images with *higher* `R(theta)` tend to
+have *smaller* projections onto the near-null direction, not larger.
+This does not trivially match a naive "the most-synchronized images are
+individually the most collinear ones" story. The honest reading: `R`
+and the ill-conditioning are related, but `R(theta)` alone is far from a
+complete explanation of which images drive the near-null direction --
+whatever else determines it is not simply "high vs. low order
+parameter," and this diagnostic does not resolve what that additional
+structure is.
 
 The coefficient-norm growth (`evolved_T`'s 63.7x ratio vs. 19.9x and
 26.3x for the other two) is consistent with, and likely compounds, the
@@ -233,21 +250,88 @@ its own.
 
 **Verdict, stated plainly**: the ill-conditioning hypothesis is
 supported by direct, substantial evidence (condition number ~1,700x
-worse than the next-worst condition). The near-separability hypothesis
-is not supported -- if anything, the data points the opposite direction,
-since `evolved_T` is the one condition that does *not* achieve perfect
-training-set separation. This looks like graph evolution's own
-synchronizing effect on the phase state, not incidental separability,
-producing a genuinely harder optimization problem for this specific
-condition at weak regularization.
+worse than the next-worst condition), with a real but weak, and
+directionally counter-naive, statistical link to the `R(theta)`
+diagnostic. The near-separability hypothesis is not supported -- if
+anything, the data points the opposite direction, since `evolved_T` is
+the one condition that does *not* achieve perfect training-set
+separation. This looks like graph evolution's own synchronizing effect
+on the phase state, not incidental separability, producing a genuinely
+harder optimization problem for this specific condition at weak
+regularization -- and specifically a slow-to-converge one, not an
+unconverging one, once given enough iterations (below).
 
-## Not yet run because of the halt
+## Resolution: max_iter raised to 10,000, and the mechanism confirmed correctable by more iterations
 
-The encoder-seed robustness check (`DESIGN.md`'s locked requirement,
-reusing this same 5,000-image subset) has not been attempted -- it
-depends on the same CV procedure that just halted, and running it before
-resolving the non-convergence would risk hitting, and needing to
-re-characterize, the identical issue.
+Given the diagnosis (a real but purely slow-optimization problem, not
+divergence or a data pathology), `max_iter` was raised from 1,000 to
+10,000 -- uniformly across all three conditions, disclosed as a
+post-lock `DESIGN.md` amendment (see that document's own note). This is
+not "iterate further and hope": the diagnostic script re-ran the exact
+previously-failing case (`evolved_T`, fold=0, C=100) at `max_iter=10000`
+and it converged cleanly in **1,185 iterations** -- well inside the new
+budget, confirming this was a genuine iteration-count shortfall, not an
+unbounded divergence that a larger cap would only postpone.
+
+**The full stage-2 run (primary CV across all 9 `C` values x 5 folds x
+3 conditions, plus the encoder-seed robustness check) then completed
+end-to-end with zero non-convergences anywhere.** Selected `C` per
+condition (unchanged from before for the two unaffected conditions,
+confirming the fix didn't perturb anything that already worked):
+
+| condition | selected C | mean CV log-loss at selected C |
+|---|---:|---:|
+| raw pixels | 0.01 | 0.681 |
+| encoded, pre-evolution | 0.01 | 0.697 |
+| evolved on T | **0.1** | 0.661 |
+
+(`evolved_T`'s own selected `C` is 0.1, not 0.01 -- its full CV curve
+could not be completed at all under the old `max_iter=1000`, so this is
+newly-available information, not a changed prior result. Still
+descriptive only, per this ladder stage's own framing -- not the locked
+primary endpoint.)
+
+## Encoder-seed robustness check (now run)
+
+Reusing this same 5,000-image subset, per `DESIGN.md`'s locked
+protocol: recomputed `encoded_pre_evolution` and `evolved_T` features
+with each image's encoder seed set to its immutable dataset index
+(rather than the shared seed 0), refit on identical folds/`C`-selection:
+
+| condition | seed=0 mean val loss (own C) | independent-seed mean val loss (own C) | change |
+|---|---:|---:|---:|
+| encoded, pre-evolution | 0.6973 (C=0.01) | 0.6973 (C=0.01) | -0.0000 |
+| evolved on T | 0.6607 (C=0.1) | 0.6606 (C=0.1) | -0.0001 |
+
+**Negligible change in both conditions** -- the shared-seed-0 noise
+template does not appear to materially affect the classification result
+at this scale, for either encoder-derived condition. This is a
+descriptive, training-side result (per `DESIGN.md`, cannot replace or
+override the seed-0 primary analysis against the official test set),
+but it is a reassuring one: the encoder-RNG choice flagged as a caveat
+in `DESIGN.md`'s original design does not appear to be driving anything
+material here.
+
+**Overall stage-2 result: GO.** All locked go/no-go criteria pass;
+throughput (64.6 ms/image, consistent with stage 1's 65.7 ms/image)
+projects to ~64.6 minutes for stage 3's full 60,000-image training set
+-- this projection still needs explicit approval before stage 3
+launches, per `DESIGN.md`'s own requirement, not yet given here.
+
+## A flag for the confirmatory design, not acted on now
+
+If the ill-conditioning mechanism found here is genuinely about
+evolution-induced phase synchronization (rather than an artifact of
+this particular 5,000-image draw), there is real reason to expect the
+top of the locked `C` grid (100, 1000, 10000) to remain persistently
+uninformative for evolved conditions specifically, **at any sample
+size** -- multicollinearity is a property of relationships between
+features, not the ratio of samples to features, so scaling to 60,000
+images would not be expected to fix it on its own. This is flagged here
+as a candidate for a future, explicitly-documented, separately-reviewed
+`DESIGN.md` change (e.g. narrowing the confirmatory grid, or adding a
+documented minimum ridge floor) -- **only if the pattern is confirmed to
+persist at stage 3's scale**, not assumed or acted on now.
 
 ## Code
 
@@ -255,14 +339,15 @@ re-characterize, the identical issue.
 locked pipeline), `stage2a_classifier.py`'s new
 `diagnose_convergence_full_grid()` (same caveat),
 `diagnose_stage2_convergence_hypotheses.py` (the separability/
-ill-conditioning hypothesis test above, also diagnostic-only).
-`run_feasibility_stage2.py` now halts and saves partial results
-(`results/stage2_feasibility_results.pkl`, gitignored) rather than
-silently continuing past a non-convergence.
+ill-conditioning hypothesis test, the `R(theta)` correlation check, and
+the `max_iter=10000` re-verification, all diagnostic-only).
+`run_feasibility_stage2.py` now halts and saves partial results if a
+non-convergence recurs, rather than silently continuing past one; with
+`max_iter=10000` it now completes cleanly and saves full results
+(`results/stage2_feasibility_results.pkl`, gitignored).
 
 ## Next step
 
-A decision on how to handle the `evolved_T` high-`C` non-convergence
-(raise `max_iter`, narrow the grid, or another approach), informed by
-the ill-conditioning finding above, then re-run stage 2's primary CV and
-the encoder-seed robustness check -- not done here.
+Explicit approval of the stage-3 runtime projection (~64.6 minutes),
+then feasibility stage 3 (the full 60,000-image official training set,
+final feature generation and model selection) -- not done here.

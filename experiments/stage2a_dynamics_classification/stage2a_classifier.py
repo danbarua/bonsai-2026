@@ -23,7 +23,10 @@ SEED = 42
 CLASSIFIER_KWARGS = dict(
     solver="lbfgs",
     tol=1e-4,
-    max_iter=1000,
+    max_iter=10000,  # amended from 1000 (DESIGN.md, "Linear classifier
+    # implementation") -- feasibility stage 2's evolved_T non-convergence
+    # was diagnosed as severe feature multicollinearity (condition number
+    # ~2e6), not sample-size-fixable separability; see FINDINGS.md.
     class_weight=None,
     random_state=SEED,
 )  # multinomial is lbfgs's native, default behavior for >2 classes in the
