@@ -387,6 +387,63 @@ both being "converged" by their own respective criteria; or the
 normalized criterion, while a large improvement, may still not be tight
 enough specifically at the grid's largest `C` values.
 
+## Cross-session feedback: real-scale context from the confirmatory run
+
+The other session's `analyze_stage3_results.py` run (the real,
+official, 60,000-image sklearn fit that this whole investigation was
+independent of and never touched) finished and produced its own locked
+confirmatory result. That session reviewed this document and returned
+two points worth recording here directly, since both change how the
+open gap above should be read.
+
+**1. The C values that actually matter aren't the grid extreme this
+document tested at.** The real confirmatory result's CV-selected `C`
+per condition: `evolved_T` -> **C=1000**, `evolved_rewired` -> **C=10**,
+`evolved_curr_random` -> **C=1**. Step 2 above measured the divergence
+*curve shape* across the whole grid (correctly, for characterizing the
+port generally), but the single number that would actually matter if
+this port were ever used to reproduce or double-check the locked
+result is the divergence *at the selected C*, on the *full 60,000-image
+fit* -- not at `C=10000` on a 6,000-image subsample. At `C=1000`
+specifically (evolved_T's selected value), Step 2's subsample measured
+a 0.506 absolute log-loss divergence -- still substantial, and still
+the right thing to resolve, but it's worth being precise that this is
+the relevant number, not the 1.09 at `C=10000` quoted as the headline
+gap above.
+
+**2. Iteration count does not extrapolate from subsample to full scale
+-- confirmed by a real second data point, not assumed.** The other
+session handed over one concrete number: sklearn's own full-scale
+(60,000-image) `evolved_T` refit at `C=1000` took **n_iter=5123** (of
+`max_iter=10000`) -- vs. this document's 6,000-image subsample's
+n_iter=1378 at the same `C` (see Step 1's table above). Roughly 3.7x
+more iterations at 10x the data, not the same iteration count a naive
+"small-scale timing extrapolates linearly" assumption would predict.
+This is exactly the failure mode `CLAUDE.md` principle 18 (added
+earlier in this investigation, prompted by this same document's own
+Step 2 timing misestimate) names directly -- and here it's the
+*iteration count*, not just wall-clock time, that doesn't extrapolate.
+Any future full-scale verification of this port needs its own,
+directly-measured convergence behavior at full scale, not an
+extrapolation from the 6,000-image subsample used throughout this
+document.
+
+**3. The CPU-slower-than-sklearn result (510s vs. 250s, Step 2) may not
+be the right comparison to conclude from.** The other session's own
+`evolve_on_graph_jax.py` port showed the same pattern at first: faster
+than single-threaded numpy, but not clearly faster than numpy already
+parallelized across this machine's ~9 CPU cores -- the real win only
+appeared once that port ran on GPU. sklearn's CPU baseline likely
+benefits from the same multi-core BLAS parallelism. The CPU-only
+`optax` comparison in Step 2 is a real, honestly-reported number, but
+per this precedent it probably isn't where a genuine speedup would show
+up even if the accuracy gap were resolved -- the A100 path (already
+demonstrated fast at 12.1x on synthetic `medium_10class_wide` data, and
+35.0s on the synthetic production-scale case) is the comparison that
+would actually answer whether this port helps, not the CPU-only run.
+Not yet re-tested on GPU with the recalibrated `GRAD_NORM_REL` on real
+data -- an open item, not a conclusion drawn here.
+
 ## Current status
 
 - The `vmap`/`lax.while_loop` NaN instability is fixed and
@@ -414,31 +471,50 @@ enough specifically at the grid's largest `C` values.
 
 ## Open gaps (for whoever picks this up next)
 
-1. **Large-`C` divergence from sklearn, on real data, is unresolved.**
+1. **Large-`C` divergence from sklearn, on real data, is unresolved --
+   and the number that actually matters is at the selected `C`, on the
+   full 60,000-image fit, not at the grid extreme on the subsample.**
    The `C * n_train`-normalized convergence criterion was a real fix for
-   the non-convergence problem but did not close this gap -- if
-   anything it's larger on real data (1.09) than it was on synthetic
-   data pre-recalibration (0.42). This needs its own investigation, not
-   an assumption that a further-tightened tolerance will fix it --
+   the non-convergence problem but did not close this gap. Per the
+   cross-session feedback above, `evolved_T`'s real, locked result
+   selected `C=1000` (0.506 divergence measured on the subsample at that
+   `C`, not the 1.09 at `C=10000` this document otherwise headlines);
+   `evolved_rewired` selected `C=10`; `evolved_curr_random` selected
+   `C=1`. Whoever picks this up should verify at those specific values,
+   at full scale, not assume the grid-extreme number is representative.
+   Not an assumption that a further-tightened tolerance will fix it --
    see the candidate explanations at the end of the Step 2 section
    above.
-2. **`evolved_lattice` and `evolved_rewired`**, re-checked against
+2. **Convergence behavior does not extrapolate from the 6,000-image
+   subsample to full scale -- confirmed, not assumed.** Real data point
+   from the other session: `evolved_T` at `C=1000` took n_iter=5123 (of
+   max_iter=10000) at full 60,000-image scale, vs. n_iter=1378 on this
+   document's 6,000-image subsample at the same `C` -- ~3.7x more
+   iterations at 10x the data. Any full-scale verification needs its
+   own directly-measured convergence numbers, not a scaled-up guess from
+   this document's subsample results (`CLAUDE.md` principle 18).
+3. **`evolved_lattice` and `evolved_rewired`**, re-checked against
    sklearn on real data with the recalibrated criterion -- not done,
    deliberately deferred until (1) is understood, since evolved_T was
    the one case that had to verify cleanly first.
-3. **Full 60,000-image real-data run**, blocked on both (1) and a
+4. **Full 60,000-image real-data run**, blocked on both (1)/(2) and a
    practical way to get full-scale data onto a GPU session (the Colab
    upload path hit hard size limits well under 20MB per file; options
    include finer sharding at a size confirmed safe, or a different
    transfer path).
-4. **Timing number for the real, full-scale, all-6-condition run** is
-   still not established -- every number in this document is either a
-   synthetic proxy or a partial (6,000/60,000-image) real run. Note
-   also that the one real CPU-vs-JAX timing comparison done on real,
-   ill-conditioned, non-GPU data (evolved_T, Step 2 above) had JAX
-   *slower* than sklearn (510s vs 250s) -- the A100 speedup numbers
-   elsewhere in this document are GPU-measured and should not be
-   conflated with this CPU-only comparison.
+5. **The CPU-only timing comparison (510s vs 250s, JAX slower) likely
+   isn't the right basis for concluding whether this port helps.** Per
+   the other session's `evolve_on_graph_jax.py` precedent -- faster than
+   single-threaded numpy but not clearly faster than numpy already
+   parallelized across ~9 CPU cores, with the real win only appearing on
+   GPU -- sklearn's CPU baseline here likely benefits from the same
+   multi-core BLAS parallelism. The recalibrated module has not yet been
+   re-tested on GPU against real data; that, not the CPU comparison, is
+   the number that would actually answer whether this port is worth
+   using. The A100 numbers elsewhere in this document (12.1x on
+   synthetic `medium_10class_wide`, 35.0s on synthetic production-scale)
+   are real but predate the `GRAD_NORM_REL` recalibration and are not
+   yet confirmed to hold on real, recalibrated, GPU-run data.
 
 ## Files
 
