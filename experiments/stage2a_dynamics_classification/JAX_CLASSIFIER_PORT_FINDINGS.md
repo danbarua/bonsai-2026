@@ -228,46 +228,228 @@ both point at the same underlying issue: this port's stopping criterion
 does not yet track sklearn's effective precision across conditioning
 regimes.
 
+## Follow-up: convergence-criterion recalibration (evolved_T)
+
+Direct follow-up to the open gap above, done as an isolated diagnostic
+-- still independent of, and never touching, the real CPU
+`analyze_stage3_results.py` run (which finished on its own, using the
+already-trusted sklearn path, during this follow-up).
+
+### Step 1: what gradient norm does sklearn's own converged solution achieve?
+
+`stage2a_classifier._fit_one`'s fitted `coef_`/`intercept_`, for each
+`C` in the locked grid, on real `evolved_T` data (6000-image stratified
+subsample, fold 0, `n_train=4800`) -- with `||grad||` recomputed using
+`stage_2a_classifier_jax._make_loss_fn` directly (not reimplemented):
+
+| C | sklearn `n_iter` | converged | `\|\|grad\|\|` at sklearn's solution |
+|---:|---:|---|---:|
+| 1e-4 | 68 | True | 6.995e-04 |
+| 1e-3 | 106 | True | 6.423e-03 |
+| 1e-2 | 165 | True | 1.141e-01 |
+| 1e-1 | 222 | True | 9.428e-01 |
+| 1 | 473 | True | 1.285e+01 |
+| 10 | 996 | True | 1.101e+02 |
+| 100 | 1460 | True | 1.134e+03 |
+| 1000 | 1378 | True | 1.237e+04 |
+| 10000 | 1415 | True | 1.330e+05 |
+
+Sklearn's own achieved `||grad||` ranges over **eight orders of
+magnitude** (7.0e-4 to 1.33e5) and is three to eleven orders of
+magnitude looser than `GRAD_NORM_TOL=1e-6` at every single grid point.
+Not sklearn being imprecise -- the objective
+`C * sum_i NLL_i(W,b) + 0.5*sum(W**2)` is an unweighted **sum** (not
+mean) over `n_train` samples, so `||grad||` at any fixed fit quality
+scales near-linearly with both `C` and `n_train` by construction. A
+fixed absolute threshold cannot be right across a grid spanning
+`C=1e-4` to `C=1e4`.
+
+The normalized quantity `||grad|| / (C * n_train)` is tight over the
+same measurement: **[1.338e-3, 2.771e-3]**, a ~2.07x spread (vs.
+`||grad||` alone's ~1.9e8x spread):
+
+| C | `\|\|grad\|\|/C` | `\|\|grad\|\|/(C*n_train)` |
+|---:|---:|---:|
+| 1e-4 | 6.995 | 1.457e-03 |
+| 1e-3 | 6.423 | 1.338e-03 |
+| 1e-2 | 11.405 | 2.376e-03 |
+| 1e-1 | 9.428 | 1.964e-03 |
+| 1 | 12.855 | 2.678e-03 |
+| 10 | 11.006 | 2.293e-03 |
+| 100 | 11.338 | 2.362e-03 |
+| 1000 | 12.366 | 2.576e-03 |
+| 10000 | 13.302 | 2.771e-03 |
+
+**Systematic trend vs. noise, checked directly (not chased further, per
+scope):** both are present. There is a real, roughly 2x systematic
+upward trend in the ratio from small `C` (~1.3-1.5e-3) to large `C`
+(~2.4-2.8e-3), but the middle of the grid (`C=0.01` to `C=10`) zigzags
+non-monotonically on top of it (e.g. `C=0.01`'s ratio exceeds
+`C=0.1`'s; `C=1`'s exceeds `C=10`'s) -- plausibly per-fit noise from
+sklearn's own relative `tol=1e-4` stopping point landing at a slightly
+different absolute precision on each independent solve. The tail
+(`C>=100`) is cleanly monotonic. A single fixed tolerance with a margin
+absorbs both the trend and the noise reasonably; a tighter
+`C`-dependent correction is possible but not pursued.
+
+### Implementation
+
+`stage_2a_classifier_jax.py` changed:
+
+- `GRAD_NORM_TOL=1e-6` (fixed absolute) replaced with
+  `GRAD_NORM_REL=6e-3` (~2x the max observed ratio, 2.771e-3), applied
+  as `grad_tol = GRAD_NORM_REL * C * n_train` -- computed inside
+  `_solve_one` from the actual fold's `X.shape[0]`, so `n_train` is
+  genuinely per-fold (`StratifiedKFold`'s unequal fold sizes are
+  handled correctly, never assumed constant).
+- `MAX_ITER` default raised `2000 -> 10000`, matching sklearn's own
+  `CLASSIFIER_KWARGS max_iter` exactly, for the same documented reason
+  `stage2a_classifier.py` itself raised it: real non-convergence on
+  `evolved_T`'s condition number ~2e6, not a number picked for this
+  module in isolation.
+- Full derivation, with this same measurement, is now in the module's
+  own docstring (matching the documentation standard already used there
+  for the `max_iter` 1000->10000 precedent).
+
+### Synthetic re-verification (sanity check, not the real bar)
+
+Re-ran the original three synthetic cases after recalibration:
+
+| case | `best_C` match | max \|val_loss diff\| (before -> after) |
+|---|---|---:|
+| small_2class | yes | 7.50e-02 -> **2.680e-01** (worse) |
+| small_10class | yes | 1.20e-01 -> **4.108e-01** (worse) |
+| medium_10class_wide | yes | 4.18e-01 -> **1.580e-01** (better, ~62% reduction) |
+
+Mixed, and not surprising: `GRAD_NORM_REL` was derived from real
+ill-conditioned data, which is a *looser* bar than what easy,
+well-conditioned synthetic problems can actually achieve -- so the new
+threshold now stops the easy cases *earlier* (less precisely converged)
+than the old absolute `1e-6` did. `best_C` selection still matched
+sklearn in all three cases regardless.
+
+### Step 2: real-data re-verification (evolved_T only)
+
+Full sklearn-vs-JAX per-`C` validation-loss curve, real `evolved_T`
+data (6000-image subsample), the same condition `GRAD_NORM_REL` was
+derived from -- the one case that has to verify cleanly for the
+recalibration to mean anything. (An initial attempt covering all three
+hard conditions -- evolved_T, evolved_lattice, evolved_rewired -- was
+killed after 21 minutes of wall-clock time with zero output, i.e. the
+*first* condition's sklearn CV alone hadn't finished; narrowed to
+evolved_T alone per real-time discipline, not a pre-run estimate --
+this is the concrete incident behind the new `CLAUDE.md` principle 18,
+"different computations need their own timing checks, even within the
+same pipeline.")
+
+Real, measured elapsed times (CPU only -- this run was local, not GPU):
+sklearn 249.7s (4.2 min), JAX 510.1s (8.5 min, **slower than sklearn
+here** -- the recalibrated tolerance now makes JAX actually grind
+through many more iterations at large `C` instead of declaring early
+non-convergence).
+
+`best_C` matched (0.1, both). Non-convergence is fixed (0/9, vs. always
+failing before recalibration). The full curve:
+
+| C | sklearn | jax | diff |
+|---:|---:|---:|---:|
+| 1e-4 | 1.283012 | 1.282900 | 0.0001 |
+| 1e-3 | 0.876343 | 0.876250 | 0.0001 |
+| 1e-2 | 0.698169 | 0.698034 | 0.0001 |
+| 1e-1 | 0.654089 | 0.655044 | 0.0010 |
+| 1 | 0.697745 | 0.702978 | 0.0052 |
+| 10 | 0.892122 | 0.928273 | 0.0361 |
+| 100 | 1.635789 | 1.733410 | 0.0976 |
+| 1000 | 3.239479 | 2.733631 | **0.5058** |
+| 10000 | 4.347592 | 3.258859 | **1.0887** |
+
+**Does not verify cleanly.** Small-to-moderate `C` (<=10) match tightly
+(hundredths or better). Large `C` (100-10000) diverges substantially --
+1.09 absolute log-loss at `C=10000`, *worse* than the earlier synthetic
+gap (0.158) at the same grid point. Per the pre-committed gating for
+this follow-up: this result is the important finding to report now,
+before spending more time on `evolved_lattice`/`evolved_rewired` or any
+full-scale timing run -- neither was attempted.
+
+**What this does and doesn't establish:** the `C * n_train` normalized
+criterion is a real, measured improvement -- it correctly diagnosed why
+the old fixed threshold was wrong by many orders of magnitude, and
+fixed both the spurious non-convergence and `best_C` selection on real
+ill-conditioned data. It does **not** establish that this module
+reproduces sklearn's actual fitted solution at large `C` -- something
+beyond convergence-threshold calibration is still causing the two
+solvers to land on meaningfully different loss values there. Candidate
+explanations not yet investigated: the weak-regularization regime may
+have a wide, flat set of near-equally-good solutions where sklearn's
+and this module's different optimizer trajectories (different
+quasi-Newton implementations entirely) land in different places despite
+both being "converged" by their own respective criteria; or the
+normalized criterion, while a large improvement, may still not be tight
+enough specifically at the grid's largest `C` values.
+
 ## Current status
 
 - The `vmap`/`lax.while_loop` NaN instability is fixed and
   stress-tested clean (13/13 CPU, 20/20 GPU) on the case that originally
   exposed it.
-- `best_C` selection matches sklearn on easy synthetic data (3/3 cases).
-- Real data, subsampled: 3 of 6 conditions converge and plausibly match
-  sklearn's regime; the 3 hardest (evolved_T, evolved_lattice,
-  evolved_rewired -- the scientifically interesting topologies) do not
-  converge under this module's current stopping criterion, even at
-  sklearn's own `max_iter=10000` budget.
-- **Not yet a trustworthy replacement for `stage2a_classifier.py`** on
-  the conditions that matter most. Not used for, and should not be used
-  for, any reported Stage 3 result as-is.
+- `best_C` selection matches sklearn on easy synthetic data (3/3 cases)
+  and on the one real ill-conditioned condition checked in depth
+  (evolved_T).
+- The convergence-criterion recalibration (`GRAD_NORM_REL=6e-3`,
+  `C * n_train`-normalized, derived from a direct measurement of
+  sklearn's own converged gradient norm on real data) fixed the
+  real-data non-convergence problem and got `best_C` right on
+  `evolved_T` -- a genuine, measured improvement, not a guess.
+- It did **not** make the full validation-loss curve trustworthy at
+  large `C`: 1.09 absolute log-loss divergence from sklearn at
+  `C=10000` on real `evolved_T` data, worse than the pre-recalibration
+  synthetic gap at the same point.
+- `evolved_lattice` and `evolved_rewired` were never re-checked after
+  recalibration (deliberately -- evolved_T was gated as the condition
+  that had to verify cleanly first).
+- No full-scale (60,000-image, all-6-condition) real timing exists.
+- **Still not a trustworthy replacement for `stage2a_classifier.py`.**
+  Not used for, and should not be used for, any reported Stage 3 result
+  as-is.
 
 ## Open gaps (for whoever picks this up next)
 
-1. **Convergence criterion recalibration.** `GRAD_NORM_TOL=1e-6` is
-   this module's own invention, not derived from sklearn's actual
-   effective precision. The large-`C` loss-curve gap (synthetic) and the
-   real-data non-convergence on ill-conditioned topologies both trace to
-   this. Needs either a criterion demonstrably equivalent to sklearn's,
-   or a documented, justified alternative -- not a looser tolerance
-   picked to make the symptom disappear.
-2. **Full 60,000-image real-data run**, once (1) is resolved and once
-   there's a practical way to get the full-scale data onto a GPU session
-   (the Colab upload path hit hard size limits well under 20MB per file;
-   options include finer sharding at a size confirmed safe, or a
-   different transfer path).
-3. **Timing number for the real, full-scale, all-6-condition run** is
+1. **Large-`C` divergence from sklearn, on real data, is unresolved.**
+   The `C * n_train`-normalized convergence criterion was a real fix for
+   the non-convergence problem but did not close this gap -- if
+   anything it's larger on real data (1.09) than it was on synthetic
+   data pre-recalibration (0.42). This needs its own investigation, not
+   an assumption that a further-tightened tolerance will fix it --
+   see the candidate explanations at the end of the Step 2 section
+   above.
+2. **`evolved_lattice` and `evolved_rewired`**, re-checked against
+   sklearn on real data with the recalibrated criterion -- not done,
+   deliberately deferred until (1) is understood, since evolved_T was
+   the one case that had to verify cleanly first.
+3. **Full 60,000-image real-data run**, blocked on both (1) and a
+   practical way to get full-scale data onto a GPU session (the Colab
+   upload path hit hard size limits well under 20MB per file; options
+   include finer sharding at a size confirmed safe, or a different
+   transfer path).
+4. **Timing number for the real, full-scale, all-6-condition run** is
    still not established -- every number in this document is either a
-   synthetic proxy or a partial (6,000/60,000-image, 3/6-converged) real
-   run.
+   synthetic proxy or a partial (6,000/60,000-image) real run. Note
+   also that the one real CPU-vs-JAX timing comparison done on real,
+   ill-conditioned, non-GPU data (evolved_T, Step 2 above) had JAX
+   *slower* than sklearn (510s vs 250s) -- the A100 speedup numbers
+   elsewhere in this document are GPU-measured and should not be
+   conflated with this CPU-only comparison.
 
 ## Files
 
-- `stage_2a_classifier_jax.py` -- the port (new, this investigation).
+- `stage_2a_classifier_jax.py` -- the port (new, this investigation;
+  updated during the follow-up with the `GRAD_NORM_REL` recalibration).
 - `analyze_stage_3_results_jax.py` -- R_post/feat_post JAX port (existed
   before this investigation; verified here as a side effect of building
   the real-data test).
 - `evolve_on_graph_jax.py`, `stage2a_pipeline_jax.py` -- ODE-evolution
   JAX port (prior session, not modified here).
 - `pyproject.toml` -- added `optax>=0.2.8`.
+- `CLAUDE.md` -- added methodological principle 18 (a pipeline stage's
+  timing does not extrapolate to other stages), prompted directly by
+  this investigation's own initial classifier-CV timing misestimate.
