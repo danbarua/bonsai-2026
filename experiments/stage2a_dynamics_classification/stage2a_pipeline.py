@@ -163,6 +163,51 @@ def _process_one_image_multi_topology(args):
     }
 
 
+def _process_one_image_encode_only(args):
+    """Stage 3's GPU-split variant: encode/restrict/gauge the pre-evolution
+    features on CPU only, deferring evolution itself to a separate,
+    GPU-side batched step (stage 3's 60,000-image scale makes per-image
+    CPU evolution the dominant cost -- see stage2a_pipeline_jax.py and
+    evolve_on_graph_jax.py). Calls the identical encode_and_restrict /
+    order_parameter / reference_node_features functions used everywhere
+    else in this pipeline -- not a separate reimplementation, just the
+    first half of _process_one_image_multi_topology without the evolve
+    loop. Returns theta0 itself (needed by the caller to build the batch
+    uploaded to the GPU session)."""
+    idx, image_01, active_indices_tuple, ref_idx, encoder_seed = args
+    active_indices = np.array(active_indices_tuple)
+
+    theta0 = s2a.encode_and_restrict(image_01, active_indices, seed=encoder_seed)
+    R_pre = s2a.order_parameter(theta0)
+    feat_pre = s2a.reference_node_features(theta0, ref_idx)
+
+    return {
+        "idx": idx, "theta0": theta0, "R_pre": R_pre, "feat_pre": feat_pre,
+        "raw_feat": image_01.flatten(),
+    }
+
+
+def run_encode_only_multi_topology(images_01, ref_idx, active_indices, encoder_seeds=None):
+    """CPU-only encode step for all images, no evolution. Returns
+    (results, elapsed) where each result has idx/theta0/R_pre/feat_pre/raw_feat,
+    sorted by idx. The caller stacks theta0 into a batch for GPU upload."""
+    n_images = len(images_01)
+    if encoder_seeds is None:
+        encoder_seeds = [s2a.ENCODER_SEED] * n_images
+
+    n_workers = max(1, mp.cpu_count() - 1)
+    work_items = [(i, images_01[i], tuple(active_indices), ref_idx, encoder_seeds[i])
+                  for i in range(n_images)]
+
+    t0 = time.time()
+    with mp.Pool(n_workers) as pool:
+        results = pool.map(_process_one_image_encode_only, work_items)
+    elapsed = time.time() - t0
+
+    results.sort(key=lambda r: r["idx"])
+    return results, elapsed
+
+
 def run_pipeline_multi_topology(images_01, labels, topologies, ref_idx, active_indices,
                                  encoder_seeds=None):
     """Stage 3: encode once per image, evolve on every topology in
