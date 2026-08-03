@@ -1,7 +1,8 @@
 # NVIDIA cuML `accel`: zero-code-change GPU acceleration check
 
-**Status: promising, one real caveat, not yet adopted for anything
-reported.** Prompted by the same question the JAX/optax classifier
+**Status: promising, the one caveat found is now resolved, still not
+yet adopted for anything reported (no reported result has needed it).**
+Prompted by the same question the JAX/optax classifier
 port was built to answer (is the slow, sklearn-based classifier CV
 fitting acceleratable?), tested here via a different route: NVIDIA
 RAPIDS' `cuml.accel`, which monkey-patches `sklearn.linear_model.
@@ -33,9 +34,13 @@ confirmatory result -- `evolved_T=1000`, `evolved_rewired=10`,
 
 | condition | `C` | sklearn acc / log-loss / n_iter / time | `cuml.accel` acc / log-loss / n_iter / time / converged |
 |---|---:|---|---|
-| evolved_T | 1000 | 0.8058 / 0.7067 / 5123 / 458.3s | 0.8059 / 0.6860 / 10000 / 13.9s / **False** |
+| evolved_T | 1000 | 0.8058 / 0.7067 / 5123 / 458.3s | 0.8059 / 0.6860 / 10000 / 13.9s / **False*** |
 | evolved_rewired | 10 | 0.8183 / 0.6739 / 2054 / 190.9s | 0.8197 / 0.6659 / 3514 / 5.0s / True |
 | evolved_curr_random | 1 | 0.8221 / 0.6509 / -- / 49.5s | 0.8223 / 0.6462 / 1020 / 2.7s / True |
+
+*`evolved_T`'s `converged=False` at `max_iter=10000` is resolved below
+(genuinely converges at `max_iter=15000`, with even better predictive
+quality) -- not a lingering caveat.
 
 **Speedups**: 33x, 38x, 18x. **Accuracy**: matches within 0.14
 percentage points at every condition (0.01/0.14/0.02pp), never worse.
@@ -61,37 +66,65 @@ not a correctness gap, but a real mismatch between this project's
 behavior, per `stage2a_classifier.py`'s own documented history) and
 `cuml.accel`'s different convergence footprint on the same data.
 
+## Caveat resolved: `max_iter` sweep, same session's follow-up
+
+Given how cheap each fit is (13.9s even at the `max_iter=10000` ceiling),
+a direct sweep was the obvious next check rather than assuming a fix:
+`evolved_T`/`C=1000`, `max_iter` in `{15000, 20000, 30000, 50000,
+100000}`, stopping at the first value that reaches genuine convergence.
+
+**Converged cleanly at `max_iter=15000`** (`n_iter=11621`, still only
+18.7s -- a 24.5x speedup over sklearn's 458.3s, not meaningfully worse
+than the earlier non-converged 13.9s run): **accuracy=0.8115,
+log_loss=0.6762** -- now clearly *better* than sklearn's own converged
+solution (accuracy +0.57pp, log-loss -0.031), not just comparable. No
+sweep beyond 15000 was needed.
+
+**This resolves the one open caveat cleanly, not just cheaply.** The
+fix is a single, cheap, documented number (`max_iter=15000` for
+`cuml.accel`, vs. sklearn's own `10000`) -- not a deeper unresolved
+algorithmic issue like the JAX/optax port's persistent large-`C`
+divergence. All three real selected-`C` conditions now converge
+genuinely under `cuml.accel`, with predictive quality matching or
+exceeding sklearn's at every one, and speedups of 18-38x intact.
+
 ## What this does and does not establish
 
 **Does establish**: `cuml.accel`, on our own unmodified code, gives
-real, large speedups (18-38x) with predictive quality that matches or
-slightly beats sklearn's own converged solution, at all three real
-selected `C` values checked -- a materially more favorable result than
-the from-scratch JAX/optax port's, which showed a real, unresolved,
-`C`-scaling divergence in sklearn's favor.
+real, large speedups (18-38x, 25x for `evolved_T` once genuinely
+converged) with predictive quality that matches or clearly beats
+sklearn's own converged solution, at all three real selected `C` values
+checked, once each condition uses a `max_iter` calibrated to
+`cuml.accel`'s own convergence behavior rather than assumed to inherit
+sklearn's. A materially more favorable result than the from-scratch
+JAX/optax port's, which showed a real, unresolved, `C`-scaling
+divergence in sklearn's favor that did not close with more iterations.
 
-**Does not establish**: that `cuml.accel` is a drop-in replacement as
-currently configured. The `evolved_T`/`C=1000` non-convergence flag
-means naive adoption would halt at exactly the stop-gate this project
-built for exactly this purpose -- appropriately, since the gate doesn't
-know the fit is actually fine, only that `n_iter_` hit `max_iter`. A
-real adoption would need either a `cuml.accel`-specific `max_iter`
-(recalibrated the same way `stage2a_classifier.py`'s own `10000` was --
-measured against `cuml.accel`'s actual convergence behavior, not
-assumed to transfer from sklearn's), or a documented, deliberate
-decision to trust `cuml.accel`'s output at this condition despite the
-flag -- not something to do silently.
+**Does not establish**: that `cuml.accel` is a drop-in replacement
+*using sklearn's own `max_iter=10000` unchanged*. `cuml.accel`'s solver
+needs a different iteration budget than sklearn's own lbfgs on this
+specific ill-conditioned problem -- a real, measured mismatch, resolved
+here by measuring and using the right number for this backend
+(`max_iter=15000` for `evolved_T`'s `C=1000`), not by loosening the
+stop-gate or trusting an unconverged fit. Only `evolved_T`'s worst-`C`
+case was checked against a higher `max_iter`; `evolved_rewired` and
+`evolved_curr_random` already converged cleanly at `10000` and were not
+swept further.
 
 Not used for, and should not be used for, any reported Stage 2A result
-as-is -- exactly the same standard already applied to the JAX/optax
-port.
+as-is -- a real adoption would still need this `max_iter` finding
+written into a `cuml.accel`-specific `CLASSIFIER_KWARGS`-equivalent
+(disclosed the same way `stage2a_classifier.py`'s own `1000->10000`
+amendment was), and a decision about whether the confirmatory result
+should ever be re-run under a different backend at all -- not something
+to decide implicitly by swapping the solver in.
 
 ## Next step, if pursued
 
-Recalibrate `max_iter` (or investigate a `cuml.accel`-specific
-convergence criterion) specifically for `evolved_T`'s `C=1000` case,
-re-verify `converged=True` is achievable without materially changing
-the already-matching predictions, then re-run this same three-condition
-check before considering `cuml.accel` for any full classifier-CV
-re-run. Not started here -- this was a bounded feasibility check, not
-an adoption decision.
+Sweep `max_iter` for `evolved_rewired`/`evolved_curr_random` too (even
+though both already converged at `10000`, to know their actual margin,
+not just that they cleared the bar), then a from-scratch full-scale
+timing/accuracy run using the calibrated `max_iter` values throughout,
+before considering `cuml.accel` for any actual classifier-CV re-run.
+Not started here -- this was a bounded feasibility check, not an
+adoption decision.
