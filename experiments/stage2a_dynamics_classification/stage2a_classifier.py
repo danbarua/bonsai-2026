@@ -115,16 +115,14 @@ def diagnose_convergence_full_grid(X_train, y_train, condition_label, n_folds=N_
     return table
 
 
-def fit_condition(X_train, y_train, X_test, condition_label, n_folds=N_FOLDS, seed=SEED):
-    """Full locked procedure for one feature condition: CV-select C
-    (fold-safe standardization throughout), then refit a fresh scaler on
-    the complete training set and a fresh classifier at the selected C,
-    applied unchanged to X_test. Returns a dict with the fitted
-    scaler/classifier, selected C, CV diagnostics, and test-set
-    (standardized) features ready for prediction."""
-    best_C, mean_val_loss, non_convergence_log = select_C_via_cv(
-        X_train, y_train, condition_label, n_folds=n_folds, seed=seed)
-
+def fit_final_at_selected_C(X_train, y_train, X_test, best_C, condition_label):
+    """The confirmatory-run half of fit_condition() below, split out so a
+    C already selected elsewhere (stage 3's full-training-set CV) can be
+    reused directly -- no new CV search, no new hyperparameter selection,
+    just the single locked final refit (fresh scaler on the complete
+    training set, fresh classifier at the given C) and its application to
+    test features. Raises NonConvergenceError on the same terms as
+    fit_condition(), never silently."""
     final_scaler = StandardScaler().fit(X_train)
     X_train_s = final_scaler.transform(X_train)
     X_test_s = final_scaler.transform(X_test)
@@ -136,11 +134,22 @@ def fit_condition(X_train, y_train, X_test, condition_label, n_folds=N_FOLDS, se
             f"{n_iter} iterations. Halts advancement, per DESIGN.md's locked stop-gate.")
 
     return {
-        "condition": condition_label,
-        "selected_C": best_C,
-        "mean_val_loss_per_C": mean_val_loss,
-        "scaler": final_scaler,
-        "classifier": final_clf,
-        "final_n_iter": n_iter,
+        "condition": condition_label, "selected_C": best_C,
+        "scaler": final_scaler, "classifier": final_clf, "final_n_iter": n_iter,
         "X_test_standardized": X_test_s,
     }
+
+
+def fit_condition(X_train, y_train, X_test, condition_label, n_folds=N_FOLDS, seed=SEED):
+    """Full locked procedure for one feature condition: CV-select C
+    (fold-safe standardization throughout), then refit a fresh scaler on
+    the complete training set and a fresh classifier at the selected C,
+    applied unchanged to X_test. Returns a dict with the fitted
+    scaler/classifier, selected C, CV diagnostics, and test-set
+    (standardized) features ready for prediction."""
+    best_C, mean_val_loss, non_convergence_log = select_C_via_cv(
+        X_train, y_train, condition_label, n_folds=n_folds, seed=seed)
+
+    final = fit_final_at_selected_C(X_train, y_train, X_test, best_C, condition_label)
+    final["mean_val_loss_per_C"] = mean_val_loss
+    return final

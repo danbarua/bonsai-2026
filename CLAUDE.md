@@ -286,6 +286,18 @@ without reading that document's full findings history first.
     that matters is verification of existing, committed code versus
     generation of a new claim -- not merely whether the data happens to
     be gitignored.
+18. **Extrapolating one pipeline stage's small-scale timing to full
+    scale does not license assuming *other* stages scale the same way.**
+    Stage 2A's own history is the concrete example: data generation
+    (embarrassingly parallel, genuinely linear in image count) was
+    correctly extrapolated from n=1,000 all the way to n=60,000;
+    classifier CV fitting (iterative optimization, not guaranteed to
+    stay flat as n grows, especially for ill-conditioned features) was
+    dismissed as "a few seconds, not separately timed" at that same
+    n=1,000 and turned out to dominate total runtime by ~79x at full
+    scale. Different computations need their own timing checks, even
+    within the same pipeline -- one stage behaving linearly is not
+    evidence another does.
 
 # IntelliJ MCP Server Companion
 This project is open in Pycharm IDE (IntelliJ IDEA platform). 

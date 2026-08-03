@@ -923,9 +923,229 @@ driver script (`stage3_gpu_evolve.py`, chunked evolution) not committed,
 per this project's convention for ephemeral GPU-session code -- reuses
 `evolve_on_graph_jax.py` (uploaded as-is, unchanged).
 
+## Explicit scope decision: full-scale encoder-seed robustness check not re-run
+
+**Decided, reasoned, and recorded here rather than silently skipped.**
+`DESIGN.md`'s robustness check is conditioned on "not prohibitively
+expensive" (it is a descriptive, non-blocking check, never able to
+override or replace the seed-0 primary analysis). It already ran once,
+at feasibility stage 2's 5,000-image scale, and passed cleanly: the
+change in mean validation log-loss (independent-per-image-seed vs. the
+shared seed-0 encoding) was **-1.5e-6** for `encoded_pre_evolution` and
+**-8.4e-5** for `evolved_T` -- both negligible, well inside noise, and
+in the *same* direction (independent seeds very slightly *lower* loss,
+not higher) for both conditions.
+
+Given classifier CV fitting was just measured at **4.1 hours for 6
+conditions at n=60,000** (Result 3, above), a full-scale re-check
+(re-encoding all 60,000 images under independent seeds, re-evolving on
+GPU, and refitting CV for at least `encoded_pre_evolution` and
+`evolved_T`) would plausibly cost **an hour or more** -- to re-test
+something that already passed once, with no reason to expect the
+direction or magnitude to change qualitatively at 12x the sample size.
+That is not consistent with "not prohibitively expensive" applied to a
+check whose only role is descriptive robustness support, not a locked
+gate. **Decision: not re-run at full scale.** The stage-2 result stands
+as the encoder-seed robustness evidence for this design.
+
 ## Next step
 
-An explicit decision on the full-scale encoder-seed robustness check
-(above), then the locked confirmatory run itself: paired bootstrap,
-evolved vs. pre-evolution, on the official 10,000-image KMNIST test
-set.
+The locked confirmatory run itself: paired bootstrap, evolved vs.
+pre-evolution, on the official 10,000-image KMNIST test set -- touched
+for the first and only time in this project.
+
+# Stage 2A: The Locked Confirmatory Result
+
+**Status: this is it -- the one and only official-test-set evaluation
+this entire design has been building toward, per `DESIGN.md`'s
+"Confirmatory endpoint and test" section, executed exactly as locked.
+The official KMNIST test set was touched here for the first time in
+this project, and after this evaluation, will not be touched again
+under this design.**
+
+## Setup: no new model fitting, one refit at an already-selected C
+
+Per `DESIGN.md`, each condition's regularization `C` was already
+selected via full-training-set 5-fold CV in feasibility stage 3 --
+`{raw_pixels: 0.001, encoded_pre_evolution: 0.01, evolved_T: 1000,
+evolved_lattice: 1000, evolved_rewired: 10, evolved_curr_random: 1}`.
+No new hyperparameter search was run. This step does exactly one thing
+per condition: fit a fresh scaler and classifier on the *complete*
+60,000-image official training set at that already-locked `C`
+(`stage2a_classifier.fit_final_at_selected_C`, factored out of the
+existing `fit_condition` so no CV-search code path could be
+accidentally re-triggered), then apply that fit, unchanged, to the
+official test set's 10,000 images -- encoded and evolved on GPU exactly
+as stage 3's training data was (`run_official_test_encode.py` +
+`evolve_on_graph_jax.py`, zero solver failures across all 4 topologies,
+19.1s total GPU evolution for 10,000 images x 4 topologies).
+
+The six final refits took between 8.4s (`raw_pixels`) and 458.3s
+(`evolved_T`) -- `evolved_T`'s refit was the single slowest, consistent
+with it also being the condition whose selected `C=1000` sits closest
+to `max_iter`'s ceiling (5,123 of 10,000 iterations used, the most of
+any condition).
+
+## Test-set performance, all six conditions
+
+| condition | C | test accuracy | macro-F1 | mean log-loss |
+|---|---:|---:|---:|---:|
+| raw_pixels | 0.001 | 0.6960 | 0.6976 | 0.9848 |
+| encoded_pre_evolution | 0.01 | 0.7208 | 0.7221 | 0.9558 |
+| evolved_T | 1000 | 0.8058 | 0.8065 | 0.7067 |
+| evolved_lattice | 1000 | 0.7778 | 0.7787 | 0.7815 |
+| evolved_rewired | 10 | 0.8183 | 0.8191 | 0.6739 |
+| evolved_curr_random | 1 | 0.8221 | 0.8229 | 0.6509 |
+
+## Primary result: T-evolved vs. encoded-pre-evolution -- IMPROVEMENT, stated plainly
+
+`d_i = ell_i(evolved T) - ell_i(pre-evolution)`, 20,000 paired
+class-stratified bootstrap resamples of the 10,000 official test images:
+
+**Observed mean d_i = -0.2491. 95% percentile interval: [-0.2721,
+-0.2266]. The entire interval is below zero.**
+
+Per `DESIGN.md`'s pre-registered success criterion, this is
+unambiguously an **improvement** -- not a result requiring interpretation
+or a borderline call. Graph evolution on T, on top of the already-
+dynamically-encoded pre-evolution state, reduces mean per-image test
+log-loss by a large, non-straddling margin. Secondary confirmation via
+exact McNemar's test on classification disagreement: of the 1,618 test
+images where the two conditions' predictions disagreed, **1,234 were
+correct only under evolved_T** versus 384 correct only under
+pre-evolution (p = 6.68e-104) -- consistent in direction and scale with
+the log-loss result, not a separate or conflicting story.
+
+This resolves the question this whole design existed to ask, in the
+positive direction, for the first time in this project's history:
+**named outcome 2 from `DESIGN.md`'s "Named watched-for outcomes"**
+("dynamics useful, one specific graph wins") is the one that obtains --
+not outcome 1 (topologies equivalent) or outcome 3 (dynamics not
+useful). Graph evolution demonstrably adds classification value beyond
+the local encoding dynamics alone, under this task and this linear
+readout.
+
+## Secondary comparisons: all three other graphs also improve, none rescuing (or needed to rescue) anything
+
+Same direction convention and bootstrap procedure, each vs.
+`encoded_pre_evolution`, no cross-comparison correction (`DESIGN.md`:
+none of these is a second chance at the primary claim, so none needed
+correcting against the others):
+
+| comparison | observed mean d_i | 95% CI | verdict | McNemar p |
+|---|---:|---|---|---:|
+| evolved_lattice vs. pre | -0.1743 | [-0.1930, -0.1557] | IMPROVEMENT | 1.55e-56 |
+| evolved_rewired vs. pre | -0.2819 | [-0.3074, -0.2570] | IMPROVEMENT | 9.76e-133 |
+| evolved_curr_random vs. pre | -0.3049 | [-0.3303, -0.2797] | IMPROVEMENT | 8.42e-138 |
+
+All four evolved graphs improve on pre-evolution, with entirely
+non-straddling intervals. **The four graphs are not equivalent**,
+consistent with the primary result already being outcome 2 rather than
+outcome 1: `curr_random` shows the largest improvement (-0.305),
+`rewired` second (-0.282), `T` third (-0.249), `lattice` smallest but
+still clearly an improvement (-0.174).
+
+**A genuine, small, honestly-reported rank swap between the CV-selection
+data and the held-out test set**: feasibility stage 3's training-CV
+delta-vs-pre-evolution ranking (most-to-least improvement) was
+`curr_random (-0.235) > T (-0.219) > rewired (-0.213) > lattice
+(-0.153)` -- T ahead of rewired. On the actual held-out test set, the
+order of exactly those two swaps: `curr_random > rewired > T > lattice`.
+`curr_random` (largest) and `lattice` (smallest) are stable across both;
+only the middle two trade places. This is a modest, reportable
+instability in the *exact* middle-of-the-pack ordering between
+model-selection data and truly held-out data -- not a reversal of the
+overall finding, and not treated as a family-level claim regardless
+(`DESIGN.md`'s fixed-prespecified-graph-instances scope), but worth
+stating rather than quietly picking whichever ordering looks cleaner.
+
+**`rewired`'s near-total phase synchronization (Result 2, above: R_post
+in [0.986, 1.0] for every one of the 60,000 training images) is now
+confirmed, on genuinely held-out test data, not to prevent it from being
+the second-strongest of the four evolved conditions.** This extends
+stage 3's training-CV surprise to the one evaluation that actually
+matters: extreme synchronization under this topology does not erase the
+linearly-decodable class information the reference-node gauge extracts.
+
+## The class-0 confound `DESIGN.md` flagged: checked directly, no special effect found
+
+`DESIGN.md` warned that the primary comparison, while cleaner than
+initially thought (both conditions already share T's class-0-derived
+active-node support), "still may benefit class 0 differently... under
+evolution on T," and locked per-class recall as a required output for
+exactly this reason. Checked directly: the per-class recall delta
+(evolved_T minus pre-evolution) across all 10 classes is `[0.089, 0.102,
+0.038, 0.118, 0.103, 0.089, 0.056, 0.095, 0.072, 0.088]` -- **class 0's
+improvement (+0.089) ranks 5th of 10, squarely in the middle of the
+distribution**, not the largest (class 3, +0.118) or smallest (class 2,
++0.038). No class-0-specific effect is evident; the improvement is
+broadly distributed across classes, not concentrated in the one class
+whose topology happens to be under test.
+
+## Baselines (context only -- never part of the locked primary/secondary comparisons)
+
+| baseline | params | test accuracy | macro-F1 | log-loss |
+|---|---:|---:|---:|---:|
+| raw pixels (linear) | 7,850 (784x10+10) | 0.6960 | 0.6976 | 0.9848 |
+| MLP, H=13 (parameter-matched) | 10,345 | 0.7534 | 0.7544 | 0.8971 |
+| MLP, H=128 (competent context) | 101,770 | 0.8863 | 0.8863 | 0.6160 |
+
+**At matched parameter budget** (oscillator readout: 10,090 params;
+`H=13` MLP: 10,345, DESIGN.md's own matching), **every one of the four
+evolved conditions outperforms the parameter-matched MLP** -- even the
+weakest, `evolved_lattice` (77.78% accuracy), beats `MLP_H13`'s 75.34%
+by 2.4 points, and the strongest, `evolved_curr_random` (82.21%), beats
+it by 6.9 points. This is a genuinely favorable comparison for the
+oscillator representation, reported descriptively per `DESIGN.md`'s
+context-only framing for baselines, not as a locked claim.
+
+**Stated plainly, the other direction**: a competently-sized ordinary
+MLP (`H=128`, ~10x the oscillator readout's parameter count) reaches
+88.63% test accuracy -- clearly ahead of every oscillator-evolved
+condition (best: `curr_random` at 82.21%). The oscillator dynamics
+improve on the pre-evolution baseline substantially, and beat an
+equally-sized ordinary network, but do not close the gap to a
+competently-sized one. Both facts are true at once and neither is
+softened by the other.
+
+## What this settles, and what it does not
+
+**Settled**: for this task, this linear readout, and these four
+prespecified graph instances -- graph-level evolution on top of an
+already-dynamically-encoded phase state adds real, statistically
+unambiguous classification value on genuinely held-out data. This is
+the strongest positive Level 3 result this project has produced, and
+the first to survive contact with an official, untouched test set
+rather than training-derived validation data alone.
+
+**Not settled, and explicitly out of scope for this design** (per
+`DESIGN.md`'s "What this does not do"): whether this generalizes to a
+topology *family* rather than these four specific prespecified
+instances; whether the genuinely static `theta_static = pi*x` control
+(no local-convergence encoding at all) would show the local encoding
+step already carries most of the value; role-matched or per-class
+topology selection (circular for a real classifier, rejected by
+design); and denoising or generation (Stage 2B, deferred).
+
+This is the one and only official-test-set evaluation for this design.
+No further evaluation against these 10,000 test images is planned or
+justified under this locked design.
+
+## Code
+
+`run_official_test_encode.py` (local CPU encode of the official test
+set, mirrors `run_feasibility_stage3_encode.py`), `run_confirmatory_evaluation.py`
+(the confirmatory analysis itself: final refits, primary/secondary
+bootstrap, McNemar, MLP baselines), `stage2a_classifier.py`'s new
+`fit_final_at_selected_C` (the refit-only half of `fit_condition`,
+factored out so no new CV search could run here even by accident).
+Remote-only GPU driver (`stage4_gpu_evolve.py`, same chunked approach as
+stage 3's) not committed, per this project's convention for ephemeral
+GPU-session code.
+
+## Next step
+
+None specified by this design -- the locked confirmatory evaluation is
+complete. Any further extension (topology-family generalization, the
+static-encoding control, Stage 2B denoising) is a new design decision,
+not a continuation of this one.
