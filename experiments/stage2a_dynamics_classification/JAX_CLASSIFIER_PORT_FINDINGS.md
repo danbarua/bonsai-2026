@@ -473,6 +473,12 @@ artifact.
   synthetic gap at the same point -- and confirmed present on GPU too
   (0.94 at the same point), ruling out CPU/GPU backend differences as
   the cause.
+- **Confirmed at full scale, at all three real selected `C` values
+  (1000/10/1), against the real confirmatory result's known test-set
+  numbers**: this port's held-out test accuracy/log-loss is measurably
+  worse than sklearn's in every case (1.87pp/0.061 at `C=1000`, down to
+  0.55pp/0.026 at `C=1`) -- shrinks with `C` as predicted, never
+  vanishes. Not a subsample or grid-extreme artifact.
 - GPU **is** where this port's real speed advantage shows up: 25.9s on
   A100 vs. 249.7s sklearn-CPU (9.6x) vs. 510.1s CPU-JAX (19.7x), same
   real `evolved_T` data, same recalibrated module. The earlier
@@ -488,22 +494,58 @@ artifact.
   as-is -- the large-`C` accuracy gap is the blocker, independent of the
   now-resolved speed question.
 
+## Cross-session follow-up: item 1 checked directly, at full scale, all three real selected `C` values
+
+Done by the other session, using the already-cached full 60,000-image
+training features and the already-cached official 10,000-image test set
+from the real confirmatory run (no refitting of sklearn needed --
+its test-set numbers were already known from that run). This module's
+`_solve_one`/`_predict_proba` were called directly (not reimplemented),
+once per condition, at exactly the `C` each condition actually selected
+-- not the grid extremes this document otherwise headlines, and not a
+6,000-image subsample:
+
+| condition | `C` | sklearn acc / log-loss (known, confirmatory run) | this port's acc / log-loss | `\|\|grad\|\|` at convergence | n_iter |
+|---|---:|---|---|---:|---:|
+| evolved_T | 1000 | 0.8058 / 0.7067 | 0.7871 / 0.7679 | 3.567e5 (tol 3.6e5) | 1847 |
+| evolved_rewired | 10 | 0.8183 / 0.6739 | 0.8105 / 0.6998 | 3.582e3 (tol 3.6e3) | 976 |
+| evolved_curr_random | 1 | 0.8221 / 0.6509 | 0.8166 / 0.6774 | 3.557e2 (tol 3.6e2) | 333 |
+
+**The divergence is real at every one of the three values that actually
+matter, not just at the grid extremes.** It shrinks with `C`, exactly
+the direction this document's own trend analysis predicted (accuracy
+gap 1.87pp at `C=1000` down to 0.55pp at `C=1`; log-loss gap 0.061 down
+to 0.026), but does not vanish even at `C=1`, the mildest of the three.
+Confirms item 1 was not an artifact of the subsample or the grid
+extremes -- **this module's held-out test-set performance would have
+been measurably, consistently worse than sklearn's on all three real
+comparisons had it been used for the actual confirmatory result.** Item
+1 (the accuracy gap) is answered in the sense of "yes, it's real and it
+matters at the values that count" -- its root cause (flat-loss-surface
+divergent trajectories vs. a genuinely different optimum) remains open,
+per the candidate explanations already on record in the Step 2 section
+above.
+
+GPU throughput at this full scale, incidentally: 9.4s / 3.0s / 1.1s for
+`evolved_T`/`evolved_rewired`/`evolved_curr_random` respectively (all
+three under sklearn's corresponding final-refit times of 458.3s /
+190.9s / 49.5s from the confirmatory run) -- the speed advantage holds
+at full scale too, on top of the now-confirmed accuracy gap. Speed and
+correctness are separate axes; this result closes neither in this
+port's favor on its own -- fast and measurably wrong is not a
+replacement for slow and right.
+
 ## Open gaps (for whoever picks this up next)
 
-1. **Large-`C` divergence from sklearn, on real data, is unresolved --
+1. ~~Large-`C` divergence from sklearn, on real data, is unresolved --
    and the number that actually matters is at the selected `C`, on the
-   full 60,000-image fit, not at the grid extreme on the subsample.**
-   The `C * n_train`-normalized convergence criterion was a real fix for
-   the non-convergence problem but did not close this gap. Per the
-   cross-session feedback above, `evolved_T`'s real, locked result
-   selected `C=1000` (0.506 divergence measured on the subsample at that
-   `C`, not the 1.09 at `C=10000` this document otherwise headlines);
-   `evolved_rewired` selected `C=10`; `evolved_curr_random` selected
-   `C=1`. Whoever picks this up should verify at those specific values,
-   at full scale, not assume the grid-extreme number is representative.
-   Not an assumption that a further-tightened tolerance will fix it --
-   see the candidate explanations at the end of the Step 2 section
-   above.
+   full 60,000-image fit, not at the grid extreme on the subsample.~~
+   **Checked directly, above: confirmed real at all three actual
+   selected `C` values, at full scale, against the real confirmatory
+   test-set numbers.** Root cause still open -- see the candidate
+   explanations at the end of the Step 2 section above; this module
+   remains not usable for any reported result until that's resolved,
+   independent of its now-twice-confirmed speed advantage.
 2. **Convergence behavior does not extrapolate from the 6,000-image
    subsample to full scale -- confirmed, not assumed.** Real data point
    from the other session: `evolved_T` at `C=1000` took n_iter=5123 (of
