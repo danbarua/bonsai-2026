@@ -133,6 +133,147 @@ def check_go_no_go(results):
     return report
 
 
+def _process_one_image_multi_topology(args):
+    """Stage 3's multi-topology variant: encode ONCE per image (shared
+    across all topologies, since only the evolution step depends on
+    which graph is used -- DESIGN.md), then evolve on every topology in
+    `topologies_dict`. Returns raw/pre-evolution once, plus a per-topology
+    dict of evolved results."""
+    idx, image_01, active_indices_tuple, topologies_items, ref_idx, encoder_seed = args
+    active_indices = np.array(active_indices_tuple)
+
+    theta0 = s2a.encode_and_restrict(image_01, active_indices, seed=encoder_seed)
+    R_pre = s2a.order_parameter(theta0)
+    feat_pre = s2a.reference_node_features(theta0, ref_idx)
+
+    evolved = {}
+    for name, W in topologies_items:
+        thetaT, diag = s2a.evolve_on_graph(theta0, W)
+        if thetaT is None:
+            evolved[name] = {"solver_failed": True, "solver_diag": diag,
+                              "R_post": None, "feat_post": None}
+        else:
+            evolved[name] = {"solver_failed": False, "solver_diag": diag,
+                              "R_post": s2a.order_parameter(thetaT),
+                              "feat_post": s2a.reference_node_features(thetaT, ref_idx)}
+
+    return {
+        "idx": idx, "R_pre": R_pre, "feat_pre": feat_pre,
+        "raw_feat": image_01.flatten(), "evolved": evolved,
+    }
+
+
+def run_pipeline_multi_topology(images_01, labels, topologies, ref_idx, active_indices,
+                                 encoder_seeds=None):
+    """Stage 3: encode once per image, evolve on every topology in
+    `topologies` (dict: name -> W). `active_indices`/`ref_idx` passed in
+    directly (from stage2a_topologies.build_all_topologies()) rather than
+    reloaded via s2a.load_T(), since stage 3 needs the SAME active
+    support/nodes_T used to build the topologies themselves."""
+    if encoder_seeds is None:
+        encoder_seeds = [s2a.ENCODER_SEED] * len(images_01)
+
+    topologies_items = list(topologies.items())
+    n_workers = max(1, mp.cpu_count() - 1)
+    work_items = [(i, images_01[i], tuple(active_indices), topologies_items, ref_idx, encoder_seeds[i])
+                  for i in range(len(images_01))]
+
+    t0 = time.time()
+    with mp.Pool(n_workers) as pool:
+        results = pool.map(_process_one_image_multi_topology, work_items)
+    elapsed = time.time() - t0
+
+    results.sort(key=lambda r: r["idx"])
+    return results, elapsed
+
+
+def check_go_no_go_multi_topology(results, topology_names):
+    """Multi-topology analog of check_go_no_go: solver failures and
+    R(theta) are now per-topology, everything else (raw/pre-evolution
+    finiteness) stays shared."""
+    report = {"n_images": len(results)}
+
+    non_finite_count = 0
+    for r in results:
+        if not np.all(np.isfinite(r["raw_feat"])):
+            non_finite_count += 1
+        if not np.all(np.isfinite(r["feat_pre"])):
+            non_finite_count += 1
+    report["n_non_finite_shared_feature_vectors"] = non_finite_count
+
+    R_pre_vals = np.array([r["R_pre"] for r in results])
+    report["R_pre_summary"] = {
+        "min": float(R_pre_vals.min()), "max": float(R_pre_vals.max()),
+        "mean": float(R_pre_vals.mean()), "median": float(np.median(R_pre_vals)),
+        "n_below_0.01": int(np.sum(R_pre_vals < 0.01)), "n_above_0.99": int(np.sum(R_pre_vals > 0.99)),
+    }
+
+    per_topology = {}
+    for name in topology_names:
+        n_failed = sum(1 for r in results if r["evolved"][name]["solver_failed"])
+        non_finite_evolved = sum(
+            1 for r in results
+            if not r["evolved"][name]["solver_failed"]
+            and not np.all(np.isfinite(r["evolved"][name]["feat_post"])))
+        R_post_vals = np.array([r["evolved"][name]["R_post"] for r in results
+                                 if r["evolved"][name]["R_post"] is not None])
+        per_topology[name] = {
+            "n_solver_failed": n_failed,
+            "solver_failure_rate": n_failed / len(results),
+            "solver_failure_rate_ok": (n_failed / len(results)) <= 0.001,
+            "n_non_finite_feature_vectors": non_finite_evolved,
+            "non_finite_ok": non_finite_evolved == 0,
+            "R_post_summary": {
+                "min": float(R_post_vals.min()), "max": float(R_post_vals.max()),
+                "mean": float(R_post_vals.mean()), "median": float(np.median(R_post_vals)),
+                "n_below_0.01": int(np.sum(R_post_vals < 0.01)),
+                "n_above_0.99": int(np.sum(R_post_vals > 0.99)),
+            } if len(R_post_vals) else None,
+        }
+    report["per_topology"] = per_topology
+    report["non_finite_ok"] = (report["n_non_finite_shared_feature_vectors"] == 0
+                                and all(v["non_finite_ok"] for v in per_topology.values()))
+    report["solver_failure_rate_ok"] = all(v["solver_failure_rate_ok"] for v in per_topology.values())
+    return report
+
+
+def run_classifier_conditions_multi_topology(results, labels, topology_names, label_prefix=""):
+    """Stage 3's 6-condition version: raw pixels, encoded pre-evolution
+    (both shared across topologies), plus one evolved condition per
+    topology in topology_names. Same locked CV procedure per condition,
+    each selecting its own C independently."""
+    raw_X = np.stack([r["raw_feat"] for r in results])
+    pre_X = np.stack([r["feat_pre"] for r in results])
+
+    conditions_to_fit = [("raw_pixels", raw_X, labels), ("encoded_pre_evolution", pre_X, labels)]
+    for name in topology_names:
+        valid_mask = np.array([not r["evolved"][name]["solver_failed"] for r in results])
+        evolved_X = np.stack([r["evolved"][name]["feat_post"] for r in results
+                               if not r["evolved"][name]["solver_failed"]])
+        evolved_y = labels[valid_mask]
+        conditions_to_fit.append((f"evolved_{name}", evolved_X, evolved_y))
+
+    conditions_out = {}
+    for label, X, y in conditions_to_fit:
+        full_label = f"{label_prefix}{label}"
+        print(f"\nFitting condition: {full_label} (n={len(y)}, dim={X.shape[1]})")
+        try:
+            best_C, mean_val_loss, _non_convergence_log = s2a_clf.select_C_via_cv(X, y, full_label)
+            conditions_out[label] = {
+                "converged": True,
+                "selected_C": best_C,
+                "mean_val_loss_per_C": mean_val_loss,
+                "mean_val_loss_at_selected_C": mean_val_loss[best_C],
+            }
+            print(f"  Converged in every fold/C. Selected C={best_C}, "
+                  f"mean_val_loss_per_C={mean_val_loss}")
+        except NonConvergenceError as e:
+            conditions_out[label] = {"converged": False, "error": str(e)}
+            print(f"  NON-CONVERGENCE (stage halts per locked gate): {e}")
+
+    return conditions_out
+
+
 def run_classifier_conditions(results, labels, label_prefix=""):
     """CV-selects C for all 3 conditions via the real, locked selection
     procedure (stage2a_classifier.select_C_via_cv) -- every (fold, C)

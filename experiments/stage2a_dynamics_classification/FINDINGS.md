@@ -350,4 +350,158 @@ non-convergence recurs, rather than silently continuing past one; with
 
 Explicit approval of the stage-3 runtime projection (~64.6 minutes),
 then feasibility stage 3 (the full 60,000-image official training set,
-final feature generation and model selection) -- not done here.
+final feature generation and model selection) -- superseded by the
+pre-stage-3 investigation below, which revises both the scope and the
+runtime projection before any full run was launched.
+
+# Stage 2A: Pre-Stage-3 Investigation (topology synchronization)
+
+**Status: diagnostic only, no simulation data from a full run -- all of
+this uses either a 400-image timing sub-test or zero-simulation
+graph-spectral analysis. Not a scientific result.**
+
+Stage 3 requires evolving every image on **four** topologies (T,
+lattice, canonical rewired, canonical curr_random -- `DESIGN.md`'s
+"Confirmatory expansion"), not just T. A 400-image timing sub-test,
+run before committing to the full 60,000-image job, surfaced two things
+that needed investigating before launching a multi-hour run.
+
+## Revised runtime projection
+
+400 images across all four topologies (shared encoding, per-topology
+evolution): 99.7s (249.3 ms/image) -- projecting to **~249 minutes
+(~4.2 hours)** for the full 60,000 images, not the ~64.6 minutes
+previously discussed (which covered evolving on T alone; stage 3
+requires roughly 4x the evolution-heavy work). Still comfortably
+CPU-feasible, no GPU needed -- but a real scope difference from what was
+first approved, disclosed here rather than launched silently.
+
+## A striking synchronization asymmetry, investigated before launching
+
+At n=400, `R(theta)` post-evolution differed sharply by topology:
+
+| topology | R_post mean | R_post > 0.99 |
+|---|---:|---:|
+| T | 0.860 | 0/400 |
+| lattice | 0.867 | 0/400 |
+| rewired | 0.997 | 400/400 (100%) |
+| curr_random | 0.991 | 241/400 (60%) |
+
+Given stage 2's finding that even T's moderate synchrony (R~0.86)
+produced a condition number of ~2e6, near-total synchronization under
+rewired/curr_random risked a much worse version of the same problem.
+Investigated via three checks, all using already-verified code, none
+requiring the full 60,000-image run:
+
+**1. Laplacian spectrum / algebraic connectivity (zero new simulation --
+purely spectral, on the already-built graphs)**: standard Kuramoto
+theory predicts synchronization strength scales with a graph's
+algebraic connectivity (the Fiedler value -- second-smallest Laplacian
+eigenvalue).
+
+| topology | Fiedler value | connected components |
+|---|---:|---:|
+| T | 0.0059 | 1 |
+| lattice | 0.0056 | 1 |
+| rewired | **0.1322** (22x T's) | 1 |
+| curr_random (main component) | **0.2429** (41x T's) | **14** (see correction, below) |
+
+**This directly and cleanly explains the synchronization asymmetry**:
+both randomized constructions have dramatically higher algebraic
+connectivity than T or lattice -- degree-preserving rewiring and
+independent resampling both destroy whatever clustered/community
+structure T (learned) and lattice (regular) have, and a more
+"well-mixed" graph synchronizes faster and more completely. Not a
+pipeline artifact; a real, spectrally-confirmed structural difference
+between the learned/regular constructions and the randomized ones.
+
+**Correction, prompted by this check**: computing the Laplacian
+spectrum for `curr_random` surfaced 14 near-zero eigenvalues, not the 1
+expected for a connected graph -- meaning **`curr_random` seed=0 has 13
+isolated nodes, not the 1 originally disclosed** in `DESIGN.md`'s graph-
+statistics table. The original check only tested `nodes_T`'s three
+fixed coordinates for isolation (Stage 1D's own pre-screening scope),
+not all 505 nodes. Fixed directly in `DESIGN.md` (see its "Confirmatory
+expansion" section) rather than left standing. The main 492-node
+component's own Fiedler value (0.2429) is what actually explains the
+strong synchronization; the 13 isolated singletons are a separate,
+now-correctly-disclosed structural fact about this specific draw.
+
+**2. Information-collapse check**: does a classifier trained on
+rewired/curr_random's evolved features collapse to predicting one or
+two classes (genuine information loss), or does real per-image signal
+survive? At n=400, C=0.01:
+
+| topology | train accuracy | classes actually predicted |
+|---|---:|---:|
+| T | 0.8425 | 10/10 |
+| lattice | 0.8525 | 10/10 |
+| rewired | 0.8875 | 10/10 |
+| curr_random | 0.9300 | 10/10 |
+
+**No collapse.** Both rewired and curr_random predict across all 10
+classes with roughly balanced distributions, and their training
+accuracy is nominally *higher* than T's or lattice's, not lower. Despite
+near-total phase synchronization, real per-image discriminative
+information survives in the evolved features -- the mechanism is
+severe optimization difficulty (as stage 2 found for T, likely worse
+here given the much higher Fiedler values), not information destruction.
+
+**3. Multistability check, mirroring Stage 0's own method exactly**
+(`find_equilibrium_lbfgs`, `same_attractor`'s 0.05 dedup threshold, 5
+seeds 0-4, no image encoding at all -- reused directly from
+`bonsai.dynamics.graph_oscillator_field`, not reimplemented):
+
+| topology | distinct equilibria (of 5 seeds) |
+|---|---|
+| T | 5/5 |
+| lattice | 1/5 |
+| rewired | 1/5 |
+| curr_random | 2/5 |
+
+**Answers the question directly**: this is not simply "T/lattice have
+multistability that rewired/curr_random lack." T is uniquely richly
+multistable (5/5); lattice and rewired both collapse to a single basin
+(1/5 each) -- consistent with, though not identical in specific seeds
+to, Stage 0's own original table for these two construction types.
+`curr_random`'s 2/5 sits in between, for this specific (13-isolated-node)
+draw -- a different specific realization from whatever Stage 0's
+original "matched-sparsity random" check used, so a different count is
+expected, not a contradiction (this project's own established
+one-draw-is-not-a-family caveat, Stage 1D). Consistent with the
+Laplacian finding: reduced multistability tracks with increased
+algebraic connectivity across all three non-T constructions.
+
+## What this means for stage 3
+
+The synchronization asymmetry is real, spectrally well-explained, and
+does not indicate an information-collapse problem -- rewired and
+curr_random's evolved features remain genuinely discriminative, if
+possibly harder to optimize (an open question the full stage-3 CV run
+will answer directly, given `max_iter=10000` is already in place from
+stage 2's fix). The revised ~4.2-hour runtime projection and the
+corrected 13-isolated-node fact are both disclosed above. Two things to
+check honestly once stage 3's full run completes (not new requirements,
+just what to verify): (1) whether the high-`C` non-convergence pattern
+from stage 2 persists, worsens, or resolves for rewired/curr_random at
+12x the sample size; (2) whether the encoder-seed robustness finding
+(negligible difference) still holds at full scale.
+
+## Code
+
+`stage2a_topologies.py` (builds all four canonical graphs, reused
+verified construction code only), `diagnose_topology_synchronizability.py`
+(Laplacian spectrum, zero simulation), `diagnose_rewired_currrandom_synchronization.py`
+(information-collapse + multistability checks, reuses
+`bonsai.dynamics.graph_oscillator_field`'s `find_equilibrium_lbfgs`
+directly). `stage2a_pipeline.py` extended with
+`run_pipeline_multi_topology()`/`check_go_no_go_multi_topology()`/
+`run_classifier_conditions_multi_topology()` for stage 3's 6-condition
+(raw pixels, pre-evolution, 4 evolved topologies) design, encoding each
+image once and evolving on all four graphs rather than re-encoding per
+topology.
+
+## Next step
+
+Full feasibility stage 3 (60,000 images, ~4.2-hour projection, 6
+conditions) -- not launched here.

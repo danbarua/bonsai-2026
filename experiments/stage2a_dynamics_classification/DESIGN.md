@@ -459,9 +459,18 @@ rewired, canonical random) rather than left implicit**:
 | rewired (seed=0) | 1051 | 1959.98 | 3.881 | 0.903 | 12.122 |
 | curr_random (seed=0) | 1051 | 1959.98 | 3.881 | 0.000 | 12.083 |
 
-**Disclosed, not silently absorbed**: `curr_random` seed=0 has one
-isolated node (weighted degree 0.0) under this specific draw. Unlike
-Stage 1D's perturbation-response measurement (where an isolated fixed
+**Disclosed, not silently absorbed -- corrected from an earlier
+undercount**: `curr_random` seed=0 has **13 isolated nodes** (weighted
+degree 0.0) under this specific draw, not the "one isolated node"
+originally stated here -- the original check only tested `nodes_T`'s
+three fixed coordinates (Stage 1D's own pre-screening scope), not all
+505 nodes; a full scan (prompted by the Laplacian-spectrum diagnostic
+in `FINDINGS.md`'s stage-3 pre-check) found 13. This fragments the
+graph into 14 connected components (13 isolated singletons + one
+492-node main component) -- confirmed directly via the graph
+Laplacian's eigenvalues (14 at or near zero, vs. exactly 1 for T,
+lattice, and rewired, all single connected components). Unlike Stage
+1D's perturbation-response measurement (where an isolated fixed
 intervention node breaks the tangent/event-alignment machinery
 entirely), an isolated node under Stage 2A's plain unperturbed evolution
 simply never changes its phase during evolution (`dtheta_i/dt = 0` when
@@ -645,8 +654,9 @@ three operational closures**, on a third draft the reviewer judged
    its own `C`), the competent-MLP width (`H=128`, fixed), and the exact
    prespecified-graph-instance seeds (rewired and curr_random, both
    seed=0, reused from Stage 1D's own pilot artifacts, with graph
-   statistics recorded and one disclosed isolated node in curr_random's
-   draw).
+   statistics recorded -- later corrected to 13 disclosed isolated nodes
+   in curr_random's draw, not the originally-stated one; see
+   "Confirmatory expansion," above).
 
 **This draft's own corrections**:
 
