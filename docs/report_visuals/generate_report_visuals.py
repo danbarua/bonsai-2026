@@ -52,6 +52,41 @@ generate_frontier_visuals_data.py -- see that script's own docstring for
 what's new and why. Plots 8, 9, and 11 use only already-cached
 stage1b2_results.pkl / Stage 1C result files, no new simulation.
 
+**Plots 13-17** implement EXTRA_VISUALS_DESIGN.md's "Extra-Extra Visuals
+Design Proposals" section (Grok's second round, covering Stage 1D and
+Stage 2A, neither of which had visual coverage before now). Unlike
+plots 5-12, these map 1:1 onto the design doc's own item numbers:
+
+  design-doc item 13 (Stage 1D Delta_map equivalence) -> plot13
+    (also serves as the rewrite of the original item 10, gated on
+    topology-specificity experiments that now exist)
+  design-doc item 14 (Stage 2A primary: evolution vs pre-evolution) -> plot14
+  design-doc item 15 (Stage 2A graph ranking)                       -> plot15
+  design-doc item 16 (two-endpoint dissociation, 1D vs 2A)          -> plot16
+  design-doc item 17 (Stage 2A baselines context)                   -> plot17
+
+Item 18 (sync/Fiedler strength vs. task-gain scatter) is deliberately
+NOT implemented here -- the design doc itself flags it as exploratory
+with only n=4 points and "only if explicitly marked exploratory";
+building it well needs a designed test for that hypothesis, which
+doesn't exist yet. Left for a future pass.
+
+All five of plots 13-17 use only already-cached analysis pickles
+(stage1c_final_analysis.pkl, stage1d_lattice_analysis.pkl,
+stage1d_confirmatory_analysis.pkl, stage4_confirmatory_results.pkl,
+stage4_posthoc_pairwise_results.pkl) -- no new simulation, fitting, or
+resampling. Per the explicit guardrails in EXTRA_VISUALS_DESIGN.md's
+"Claude Expansion Context" section: Stage 1D and Stage 2A are different
+endpoints and never share a headline in any of these figures (see
+plot16 in particular); item 15's pairwise brackets give the marginal
+rewired-vs-curr_random pair (p~0.046) a visibly different treatment
+from the other five Holm-surviving pairs, rather than one uniform
+style; and all summary numbers (Delta_map means, log-losses, p-values)
+are computed here directly from the underlying arrays, not copied from
+the design doc's own paraphrased figures -- verified to match
+PROJECT_MEMORY.md exactly (see plot13's docstring), not merely assumed
+to.
+
 Usage: python3 generate_report_visuals.py
 """
 import os
@@ -80,6 +115,14 @@ STAGE1B2_CONSTRUCTIONS_PATH = os.path.join(_REPO_ROOT, "experiments", "stage1b2_
 STAGE1B2_FRONTIER_DATA_PATH = os.path.join(_REPO_ROOT, "experiments", "stage1b2_structured_transformation",
                                              "results", "stage1b2_frontier_visuals_data.pkl")
 STAGE1C_RESULTS_DIR = os.path.join(_REPO_ROOT, "experiments", "stage1c_trajectory_generalization", "results")
+STAGE1D_CONFIRMATORY_PATH = os.path.join(_REPO_ROOT, "experiments", "stage1d_topology_specificity",
+                                           "results", "stage1d_confirmatory_analysis.pkl")
+STAGE1D_LATTICE_PATH = os.path.join(_REPO_ROOT, "experiments", "stage1d_topology_specificity",
+                                      "results", "stage1d_lattice_analysis.pkl")
+STAGE2A_CONFIRMATORY_PATH = os.path.join(_REPO_ROOT, "experiments", "stage2a_dynamics_classification",
+                                           "results", "stage4_confirmatory_results.pkl")
+STAGE2A_POSTHOC_PATH = os.path.join(_REPO_ROOT, "experiments", "stage2a_dynamics_classification",
+                                      "results", "stage4_posthoc_pairwise_results.pkl")
 
 FRONTIER_NODES = {"source": 129, "relay": 105, "dest_a": 103, "dest_b": 152}
 FRONTIER_EDGE_COLORS = {
@@ -100,6 +143,19 @@ plt.rcParams.update({
 NEUTRAL = "#4C72B0"
 HIGHLIGHT = "#DD8452"
 GREY = "#888888"
+
+# Identity-only colouring for the five (Stage 1D) / four (Stage 2A) graph
+# constructions -- consistent across plots 13, 15, 16 so the same
+# construction is always the same colour whether it's being shown as
+# statistically equivalent (Stage 1D) or ranked (Stage 2A). Not an
+# encoding of "good"/"bad" -- T deliberately gets no special treatment.
+CONSTRUCTION_COLORS = {
+    "T": "#4C72B0",
+    "lattice": "#55A868",
+    "rewired": "#C44E52",
+    "hist_random": "#8172B2",
+    "curr_random": "#CCB974",
+}
 
 
 def plot1_stage1c_consistency():
@@ -796,6 +852,338 @@ def plot12_source_energy_redistribution_scoped():
     print(f"Saved {out_path}")
 
 
+def plot13_stage1d_delta_map_equivalence():
+    """EXTRA_VISUALS_DESIGN.md's 'Extra-Extra' item 13 -- also serves as
+    its own rewrite of the original item 10 (same forest/strip visual):
+    item 10 was skipped in the first implementation pass because the
+    topology-specificity experiments it was gated on didn't exist yet;
+    Stage 1D has since run them.
+
+    Strip plot of raw Delta_map values for all five constructions Stage
+    1D tested: T and lattice from the 10 Stage-1C-matched trajectories
+    (deterministic, Part 1); rewired, hist_random, curr_random from the
+    R=25 x K=3 confirmatory design's 75 realization x seed draws each
+    (Part 2). Same y-scale, identity-only colouring (no construction
+    visually marked as a "winner") -- the result is equivalence, not a
+    ranking: none of the four control comparisons vs T reach significance
+    after Holm correction (raw p=0.28-0.90, all Holm-adjusted to 1.0,
+    annotated per construction). Existing cached analysis pickles only
+    (stage1c_final_analysis.pkl, stage1d_lattice_analysis.pkl,
+    stage1d_confirmatory_analysis.pkl), no new simulation.
+
+    Means computed here from the raw arrays match PROJECT_MEMORY.md's
+    reported values exactly (T=0.3296, lattice=0.3381, rewired=0.3283,
+    hist_random=0.3288, curr_random=0.3266) -- verified directly, not
+    assumed."""
+    with open(STAGE1C_PATH, "rb") as f:
+        stage1c = pickle.load(f)
+    T_vals = [stage1c[s]["pooled_delta_map"] for s in sorted(stage1c)]
+
+    with open(STAGE1D_LATTICE_PATH, "rb") as f:
+        lattice_analysis = pickle.load(f)
+    lattice_vals = [lattice_analysis["lattice_results"][s]["pooled_delta_map"]
+                     for s in sorted(lattice_analysis["lattice_results"])]
+
+    with open(STAGE1D_CONFIRMATORY_PATH, "rb") as f:
+        confirmatory = pickle.load(f)
+    stochastic_vals = {
+        fam: list(confirmatory["per_family"][fam]["raw_pooled_delta_map"].values())
+        for fam in ("rewired", "hist_random", "curr_random")
+    }
+    holm_by_name = {h["name"]: h for h in confirmatory["holm_4way"]}
+
+    constructions = ["T", "lattice", "rewired", "hist_random", "curr_random"]
+    values_by_construction = {"T": T_vals, "lattice": lattice_vals, **stochastic_vals}
+
+    all_vals = np.concatenate([np.asarray(v) for v in values_by_construction.values()])
+    y_lo, y_hi = float(all_vals.min()), float(all_vals.max())
+    pad = 0.08 * (y_hi - y_lo)
+
+    fig, ax = plt.subplots(figsize=(9, 6.5))
+    rng = np.random.default_rng(42)
+    for i, name in enumerate(constructions):
+        vals = np.asarray(values_by_construction[name])
+        jitter = rng.uniform(-0.12, 0.12, size=len(vals))
+        ax.scatter(np.full(len(vals), i) + jitter, vals, s=14, alpha=0.45,
+                    color=CONSTRUCTION_COLORS[name], zorder=2)
+        mean, sd = vals.mean(), vals.std()
+        ax.errorbar([i], [mean], yerr=[sd], fmt="D", color="black", markersize=7,
+                     capsize=5, zorder=3, linewidth=1.5)
+        label = f"n={len(vals)}"
+        if name != "T":
+            h = holm_by_name.get(name)
+            if h:
+                label += f"\nvs T: p={h['raw_p']:.2f}\n(Holm={h['holm_adjusted_p']:.2f})"
+        # Annotated above each column's own max, not below the x-axis --
+        # placing it below crowded straight into the tick labels (fixed
+        # after the first render made that obvious).
+        ax.text(i, float(vals.max()) + pad * 0.35, label, ha="center", va="bottom",
+                 fontsize=8, color=GREY)
+
+    ax.set_xticks(range(len(constructions)))
+    ax.set_xticklabels(constructions)
+    ax.set_ylabel(r"$\Delta_{\mathrm{map}}$ (per-trajectory / per-realization)")
+    ax.set_ylim(y_lo - pad, y_hi + pad * 5.5)
+    ax.set_title("Structured transformation strength is equivalent across five graph constructions\n"
+                 "(Stage 1D: none of the four controls separate from T after Holm correction)",
+                 fontsize=11)
+    fig.tight_layout()
+    out_path = os.path.join(_THIS_DIR, "13_stage1d_delta_map_equivalence.png")
+    fig.savefig(out_path, dpi=150, bbox_inches="tight")
+    plt.close(fig)
+    print(f"Saved {out_path}")
+
+
+def plot14_stage2a_evolution_vs_preevolution():
+    """Design item 14: the locked Level 3 primary claim -- paired
+    comparison of each evolved condition against the SAME
+    encoded_pre_evolution baseline (mean per-image log-loss difference,
+    paired class-stratified bootstrap 95% CI, 20,000 resamples -- already
+    computed and cached by run_confirmatory_evaluation.py, no new
+    bootstrap here).
+
+    All four evolved conditions are shown with identical styling --
+    deliberately NOT ranked or colour-differentiated by outcome (that
+    comparison is item 15's job) -- guarding against the overclaim risk
+    the design doc flags explicitly: "Caption must not say learned
+    topology helps classification. Claim is graph evolution helps vs
+    pre-evolution encoding." evolved_T is labelled "(primary)" as a
+    provenance note (it's the pre-registered comparison DESIGN.md locked
+    before any result existed) -- not a ranking claim. Existing cached
+    stage4_confirmatory_results.pkl only, no new evaluation."""
+    with open(STAGE2A_CONFIRMATORY_PATH, "rb") as f:
+        confirmatory = pickle.load(f)
+
+    order = ["evolved_T", "evolved_lattice", "evolved_rewired", "evolved_curr_random"]
+    display = {"evolved_T": "T", "evolved_lattice": "lattice",
+               "evolved_rewired": "rewired", "evolved_curr_random": "curr_random"}
+
+    fig, ax = plt.subplots(figsize=(8.5, 5.5))
+    for i, cond in enumerate(order):
+        if cond == "evolved_T":
+            entry = confirmatory["primary"]["bootstrap"]
+            mcnemar = confirmatory["primary"]["mcnemar"]
+        else:
+            entry = confirmatory["secondary"][cond]["bootstrap"]
+            mcnemar = confirmatory["secondary"][cond]["mcnemar"]
+        mean, lo, hi = entry["observed_mean"], entry["ci_low"], entry["ci_high"]
+        color = CONSTRUCTION_COLORS[display[cond]]
+        ax.errorbar([mean], [i], xerr=[[mean - lo], [hi - mean]], fmt="o",
+                     color=color, markersize=9, capsize=6, linewidth=2, zorder=3)
+        ax.text(hi + 0.008, i, f"McNemar p={mcnemar['p_value']:.1e}", va="center", fontsize=8.5, color=GREY)
+
+    ax.axvline(0, color="black", linewidth=1, zorder=1)
+    ax.set_yticks(range(len(order)))
+    ax.set_yticklabels([display[c] + (" (primary)" if c == "evolved_T" else "") for c in order])
+    ax.invert_yaxis()
+    ax.set_xlim(right=ax.get_xlim()[1] * 1.55)
+    ax.set_xlabel("mean per-image log-loss, evolved minus pre-evolution\n(negative = evolution improves classification)")
+    ax.set_title("Graph evolution improves classification versus the same pre-evolution encoding\n"
+                 "-- for every prespecified graph instance (95% bootstrap CI)", fontsize=11)
+    fig.tight_layout()
+    out_path = os.path.join(_THIS_DIR, "14_stage2a_evolution_vs_preevolution.png")
+    fig.savefig(out_path, dpi=150, bbox_inches="tight")
+    plt.close(fig)
+    print(f"Saved {out_path}")
+
+
+def plot15_stage2a_graph_ranking():
+    """Design item 15: ranking of the four evolved graph instances
+    against EACH OTHER (post hoc, not the pre-registered primary
+    comparison -- that's item 14). Ordered bar chart on mean test
+    log-loss (lower is better), annotated with the Holm-corrected
+    pairwise sign-flip permutation test from
+    stage4_posthoc_pairwise_results.pkl (the corrected test that replaced
+    an earlier, not-properly-null-calibrated bootstrap -- see
+    FINDINGS.md).
+
+    All 6 of 6 pairs are Holm-significant at alpha=0.05, but they are NOT
+    equally decisive: five have raw p from 5e-5 to 0.0075, while
+    rewired-vs-curr_random is genuinely marginal (raw p=0.046, stable
+    across reruns but with essentially no margin -- FINDINGS.md's own
+    characterisation). All 6 pairwise brackets are drawn (stacked by
+    rank-span), but the marginal pair gets a visibly different
+    treatment -- dashed, highlighted colour, explicit p-value -- rather
+    than the uniform 'Holm-surviving' styling the other five share, per
+    explicit review guidance. Existing cached
+    stage4_confirmatory_results.pkl / stage4_posthoc_pairwise_results.pkl
+    only, no new fitting or resampling."""
+    with open(STAGE2A_CONFIRMATORY_PATH, "rb") as f:
+        confirmatory = pickle.load(f)
+    with open(STAGE2A_POSTHOC_PATH, "rb") as f:
+        posthoc = pickle.load(f)
+
+    display = {"evolved_T": "T", "evolved_lattice": "lattice",
+               "evolved_rewired": "rewired", "evolved_curr_random": "curr_random"}
+    log_loss = {c: confirmatory["condition_results"][c]["mean_log_loss"] for c in display}
+    order = sorted(display, key=lambda c: log_loss[c])  # best (lowest loss) first
+    values = [log_loss[c] for c in order]
+
+    def raw_p_for(a, b):
+        key = (a, b) if (a, b) in posthoc["raw_p"] else (b, a)
+        return posthoc["raw_p"][key]
+
+    MARGINAL_PAIR = {"evolved_rewired", "evolved_curr_random"}
+
+    x = np.arange(len(order))
+    fig, ax = plt.subplots(figsize=(9, 7.5))
+    colors = [CONSTRUCTION_COLORS[display[c]] for c in order]
+    ax.bar(x, values, color=colors, width=0.55, zorder=2)
+    ax.set_xticks(x)
+    ax.set_xticklabels([display[c] for c in order])
+    ax.set_ylabel("mean per-image log-loss (lower = better)")
+
+    # Bracket spacing is sized off the chart's y-range (bars start at 0),
+    # NOT off the small inter-bar spread -- these bars are all ~0.65-0.78,
+    # so spacing derived from that ~0.13 spread crowds three stacked
+    # bracket levels into a sliver of the total 0-0.8 axis and the labels
+    # overlap. Sizing off max(values) instead gives each level real room.
+    base = max(values) * 1.08
+    step = max(values) * 0.085
+
+    def bracket(i, j, level, label, dashed):
+        y = base + level * step
+        tick = step * 0.2
+        color = HIGHLIGHT if dashed else "black"
+        ax.plot([x[i], x[i], x[j], x[j]], [y - tick, y, y, y - tick],
+                 color=color, linewidth=1.4, linestyle="--" if dashed else "-", zorder=3)
+        ax.text((x[i] + x[j]) / 2, y + step * 0.18, label, ha="center", fontsize=8.5,
+                 color=color, fontweight="bold" if dashed else "normal")
+
+    pairs_by_level = [[(0, 1), (1, 2), (2, 3)], [(0, 2), (1, 3)], [(0, 3)]]
+    for level, pairs in enumerate(pairs_by_level):
+        for (i, j) in pairs:
+            a, b = order[i], order[j]
+            p = raw_p_for(a, b)
+            dashed = {a, b} == MARGINAL_PAIR
+            label = f"p={p:.3f} (marginal)" if dashed else (f"p={p:.1e}" if p < 0.001 else f"p={p:.3f}")
+            bracket(i, j, level, label, dashed)
+
+    ax.set_ylim(0, base + (len(pairs_by_level) - 1) * step + step * 1.8)
+    ax.set_title("The four evolved graph instances are not equivalent on this task\n"
+                 "(post hoc, Holm-corrected pairwise sign-flip test -- 6/6 pairs significant,\n"
+                 "but rewired-vs-curr_random is genuinely marginal, dashed)", fontsize=10.5)
+    fig.tight_layout()
+    out_path = os.path.join(_THIS_DIR, "15_stage2a_graph_ranking.png")
+    fig.savefig(out_path, dpi=150, bbox_inches="tight")
+    plt.close(fig)
+    print(f"Saved {out_path}")
+
+
+def plot16_two_endpoint_dissociation():
+    """Design item 16: two-panel dissociation panel guarding against the
+    most likely misread -- that Stage 1D (Delta_map, an equivalence
+    result) and Stage 2A (classification, an ordered-ranking result)
+    contradict each other. They measure different endpoints on the same
+    four construction names (T, lattice, rewired, curr_random -- Stage
+    1D's hist_random has no Stage 2A counterpart, so it is dropped here
+    for a clean four-way overlap, not silently; it remains in plot13).
+
+    Left panel: Stage 1D Delta_map, mean +/- SD, flat/tight cluster.
+    Right panel: Stage 2A mean log-loss, ordered bars, the same four
+    instances. Panels are independently labelled by endpoint; no headline
+    spans both, per the explicit guardrail this figure exists to
+    enforce. Existing cached analysis pickles only, no new computation."""
+    with open(STAGE1C_PATH, "rb") as f:
+        stage1c = pickle.load(f)
+    with open(STAGE1D_LATTICE_PATH, "rb") as f:
+        lattice_analysis = pickle.load(f)
+    with open(STAGE1D_CONFIRMATORY_PATH, "rb") as f:
+        confirmatory_1d = pickle.load(f)
+
+    four_way = {
+        "T": np.array([stage1c[s]["pooled_delta_map"] for s in sorted(stage1c)]),
+        "lattice": np.array([lattice_analysis["lattice_results"][s]["pooled_delta_map"]
+                              for s in sorted(lattice_analysis["lattice_results"])]),
+        "rewired": np.array(list(confirmatory_1d["per_family"]["rewired"]["raw_pooled_delta_map"].values())),
+        "curr_random": np.array(list(confirmatory_1d["per_family"]["curr_random"]["raw_pooled_delta_map"].values())),
+    }
+
+    with open(STAGE2A_CONFIRMATORY_PATH, "rb") as f:
+        confirmatory_2a = pickle.load(f)
+    log_loss = {
+        "T": confirmatory_2a["condition_results"]["evolved_T"]["mean_log_loss"],
+        "lattice": confirmatory_2a["condition_results"]["evolved_lattice"]["mean_log_loss"],
+        "rewired": confirmatory_2a["condition_results"]["evolved_rewired"]["mean_log_loss"],
+        "curr_random": confirmatory_2a["condition_results"]["evolved_curr_random"]["mean_log_loss"],
+    }
+
+    names = ["T", "lattice", "rewired", "curr_random"]
+    fig, axes = plt.subplots(1, 2, figsize=(13, 5.5))
+
+    ax = axes[0]
+    for i, name in enumerate(names):
+        vals = four_way[name]
+        ax.errorbar([i], [vals.mean()], yerr=[vals.std()], fmt="D", color=CONSTRUCTION_COLORS[name],
+                     markersize=10, capsize=6, linewidth=2)
+    ax.set_xticks(range(len(names)))
+    ax.set_xticklabels(names)
+    ax.set_ylabel(r"$\Delta_{\mathrm{map}}$ (mean $\pm$ SD)")
+    ax.set_ylim(0.25, 0.40)
+    ax.set_title("Stage 1D -- internal transformation strength\nFLAT: no construction separates from T", fontsize=10.5)
+
+    ax = axes[1]
+    ordered = sorted(names, key=lambda n: log_loss[n])
+    ax.bar(range(len(ordered)), [log_loss[n] for n in ordered],
+            color=[CONSTRUCTION_COLORS[n] for n in ordered], width=0.55)
+    ax.set_xticks(range(len(ordered)))
+    ax.set_xticklabels(ordered)
+    ax.set_ylabel("mean per-image log-loss (lower = better)")
+    ax.set_title("Stage 2A -- external classification task\nORDERED: instances are not equivalent here", fontsize=10.5)
+
+    fig.suptitle("Different endpoints, different answers -- not a contradiction\n"
+                 "(Delta_map equivalence does not imply task-utility equivalence)", fontsize=12)
+    fig.tight_layout(rect=(0, 0, 1, 0.93))
+    out_path = os.path.join(_THIS_DIR, "16_two_endpoint_dissociation.png")
+    fig.savefig(out_path, dpi=150, bbox_inches="tight")
+    plt.close(fig)
+    print(f"Saved {out_path}")
+
+
+def plot17_stage2a_baselines_context():
+    """Design item 17: honest envelope figure -- pre-evolution encoding,
+    the best-performing of the four prespecified evolved instances
+    (curr_random, NOT T -- see item 15), and two MLP baselines (a
+    parameter-matched H=13 MLP, ~10k params; and a larger, "competent"
+    H=128 MLP, ~102k params) on test accuracy.
+
+    Deliberately captioned to avoid the design doc's flagged misread
+    ("oscillators are worse than MLPs" without the matched-parameter
+    frame) -- parameter counts are baked into the axis tick labels, not
+    just a legend that's easy to miss. Existing cached
+    stage4_confirmatory_results.pkl only (mlp_results was already
+    computed and stored there), no new fitting."""
+    with open(STAGE2A_CONFIRMATORY_PATH, "rb") as f:
+        confirmatory = pickle.load(f)
+
+    cr = confirmatory["condition_results"]
+    mlp = confirmatory["mlp_results"]
+    bars = [
+        ("pre-evolution\nencoding", cr["encoded_pre_evolution"]["accuracy"], GREY),
+        ("best evolved\n(curr_random)", cr["evolved_curr_random"]["accuracy"], CONSTRUCTION_COLORS["curr_random"]),
+        (f"MLP H=13\n(~{mlp['MLP_H13_param_matched']['n_params']:,} params,\nparam-matched)",
+         mlp["MLP_H13_param_matched"]["accuracy"], HIGHLIGHT),
+        (f"MLP H=128\n(~{mlp['MLP_H128_competent_context']['n_params']:,} params)",
+         mlp["MLP_H128_competent_context"]["accuracy"], "#555555"),
+    ]
+    fig, ax = plt.subplots(figsize=(8.5, 5.5))
+    ax.bar(range(len(bars)), [b[1] for b in bars], color=[b[2] for b in bars], width=0.55, zorder=2)
+    ax.set_xticks(range(len(bars)))
+    ax.set_xticklabels([b[0] for b in bars], fontsize=9)
+    ax.set_ylabel("test accuracy")
+    ax.set_ylim(0, 1)
+    for i, b in enumerate(bars):
+        ax.text(i, b[1] + 0.015, f"{b[1]:.1%}", ha="center", fontsize=9)
+    ax.set_title("Honest envelope: beats a parameter-matched MLP, loses to a larger one\n"
+                 "(best of four prespecified evolved instances -- not necessarily T; see item 15)",
+                 fontsize=10.5)
+    fig.tight_layout()
+    out_path = os.path.join(_THIS_DIR, "17_stage2a_baselines_context.png")
+    fig.savefig(out_path, dpi=150, bbox_inches="tight")
+    plt.close(fig)
+    print(f"Saved {out_path}")
+
+
 def main():
     os.makedirs(_THIS_DIR, exist_ok=True)
     plot1_stage1c_consistency()
@@ -810,6 +1198,11 @@ def main():
     plot10_early_leader_vs_final_winner()
     plot11_stage1c_consistency_extended()
     plot12_source_energy_redistribution_scoped()
+    plot13_stage1d_delta_map_equivalence()
+    plot14_stage2a_evolution_vs_preevolution()
+    plot15_stage2a_graph_ranking()
+    plot16_two_endpoint_dissociation()
+    plot17_stage2a_baselines_context()
 
 
 if __name__ == "__main__":
