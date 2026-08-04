@@ -851,15 +851,35 @@ makes this residual visible directly. **"Looks uniform to the eye" and
 plot is honest evidence for the first, not the second, consistent with
 (not contradicting) the classification result.
 
-One further, honestly-reported observation from this normalized view,
-not chased further here: the residual structure that becomes visible in
-`rewired`/`curr_random` reads as fine-grained, speckled, high-frequency
-variation, qualitatively different from `T`/`lattice`'s smooth,
-spatially-coherent fields that visibly echo the digit's stroke shape.
-Both carry real signal (per the resolution above and the confirmatory
-result's own accuracy numbers), but whatever the classifier is
-exploiting in `rewired`/`curr_random` does not appear, at least by eye,
-to be "a faint copy of the digit's shape" the way `T`/`lattice`'s does.
+**The follow-up observation above was chased, and the mechanism behind
+the speckle pattern is now confirmed directly** (`results/
+ink_correlation_decay.png`): Pearson correlation between each active
+pixel's ink intensity *in that specific image* and its z-scored
+residual phase deviation, per class, per condition -- not a comparison
+against any population baseline, just "is this pixel inked, in this
+image":
+
+| condition | mean r (10 classes) | std |
+|---|---:|---:|
+| pre_evolution | +0.938 | 0.011 |
+| T | +0.725 | 0.053 |
+| lattice | +0.722 | 0.049 |
+| rewired | +0.373 | 0.039 |
+| curr_random | +0.274 | 0.031 |
+
+**Every one of the 10 classes, every condition: positive, and
+overwhelmingly significant** (worst case `p < 2e-7`, most `p < 1e-20`
+or smaller). This is exactly the mechanism the speckle pattern
+suggested by eye: red = inked here, blue = not inked here, and it holds
+all the way down to `curr_random`'s r=+0.27 -- small, but a genuine,
+consistent, monotonically-decaying-not-vanishing relationship, not
+noise. The decay order (`pre_evolution > T ≈ lattice > rewired >
+curr_random`) tracks the synchronization ordering exactly (Result 2,
+above) -- more synchronization, more of this signal washed out, but
+never all of it. This is a cleaner, more parsimonious finding than
+"qualitatively different signal": it is the *same* underlying signal
+(local ink presence) at every condition, just attenuated by a
+condition-dependent, but never total, factor.
 
 ## Result 3: classifier CV fitting is NOT negligible -- it dominates everything else
 
