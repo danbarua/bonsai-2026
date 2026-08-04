@@ -1376,6 +1376,94 @@ classifier backend differs. `CUML_ACCEL_FINDINGS.md` itself has been
 amended to use this framing throughout, in place of the "independent
 confirmation/replication" language it originally used.
 
+3. **A post hoc, exploratory graph-to-graph pairwise comparison** (below,
+   "Post hoc, exploratory: direct graph-to-graph pairwise comparison")
+   -- the third reuse of the test set, and the first that computes a new
+   statistic (paired bootstrap directly between two evolved graphs)
+   rather than auditing an existing one against a different backend. No
+   new simulation or GPU time: computed entirely from the per-image test
+   losses this locked evaluation already produced and saved.
+
+## Post hoc, exploratory: direct graph-to-graph pairwise comparison
+
+**Explicitly post hoc and exploratory -- not part of, and does not
+reopen or alter, the locked confirmatory result above.** Prompted
+directly by this document's own secondary-comparisons section flagging
+that a graph-to-graph superiority claim "would require direct, paired
+graph-to-graph comparisons... these could be computed from the
+already-saved per-image losses, but any such comparison would now be
+explicitly post hoc and should use multiplicity correction." This
+section does exactly that, properly, rather than leaving it as an
+unresolved caveat.
+
+**No new simulation, no new GPU time**: `ell_i` for all four evolved
+conditions was already computed and saved by `run_confirmatory_
+evaluation.py` (`results/stage4_confirmatory_results.pkl`). This is a
+new bootstrap computation on existing data only
+(`run_posthoc_graph_pairwise.py`).
+
+**Method**: identical to the locked primary/secondary procedure --
+`d_i = ell_i(graph_A) - ell_i(graph_B)`, 20,000 paired class-stratified
+bootstrap resamples of the test set, two-sided 95% percentile interval
+on mean `d_i`, same `seed=42`. All six pairwise comparisons among the
+four evolved graphs, not a subset chosen after seeing which looked
+interesting. Because this is new, un-pre-registered multiple-comparison
+territory (`DESIGN.md` only locked the four graph-vs-pre-evolution
+tests, never graph-vs-graph), **Holm-Bonferroni correction across all
+six comparisons, as one family, is applied** -- not optional here, per
+this project's own standing rule (`CLAUDE.md` principle 3).
+
+| comparison | mean `d_i` | 95% CI | raw `p` | Holm-adjusted `p` | survives (alpha=0.05) |
+|---|---:|---|---:|---:|---|
+| T vs. lattice | -0.0748 | [-0.0935, -0.0564] | 9.9995e-05 | 5.9997e-04 | **yes** |
+| T vs. curr_random | +0.0558 | [+0.0307, +0.0803] | 9.9995e-05 | 5.9997e-04 | **yes** |
+| lattice vs. rewired | +0.1076 | [+0.0844, +0.1312] | 9.9995e-05 | 5.9997e-04 | **yes** |
+| lattice vs. curr_random | +0.1305 | [+0.1070, +0.1543] | 9.9995e-05 | 5.9997e-04 | **yes** |
+| T vs. rewired | +0.0328 | [+0.0088, +0.0572] | 8.1996e-03 | 1.6399e-02 | **yes** |
+| rewired vs. curr_random | +0.0229 | [+0.0002, +0.0456] | 4.8398e-02 | 4.8398e-02 | **yes, barely** |
+
+(Sign convention: positive `d_i` means the first-named graph's log-loss
+is higher, i.e. the second-named graph wins that pair. Raw `p` computed
+from each bootstrap's own resampled-mean distribution via the
+double-the-smaller-tail method, with the Monte Carlo floor convention
+applied per tail -- `9.9995e-05` is the floor at `N=20,000` resamples,
+not an exact zero.)
+
+**All six of six comparisons survive Holm correction at alpha=0.05.**
+This is the strongest of the outcomes this check could have produced,
+and it is reported exactly as measured, not softened or oversold. Five
+of the six are extremely well-separated (raw `p` at or near the Monte
+Carlo floor, surviving correction by a wide margin). The sixth --
+`rewired` vs. `curr_random`, the two closest performers -- is real but
+genuinely marginal: raw `p=0.048`, and because it is the largest
+`p`-value in the family it receives no Holm penalty (correction factor
+1) and survives at essentially its raw value, just under the 0.05
+threshold. Worth naming plainly: this is a significant result, not a
+robust one -- a small change in resampling seed or test-set composition
+could plausibly flip it.
+
+**The full pairwise ranking is transitive and internally consistent**:
+`curr_random > rewired > T > lattice`, exactly matching the descriptive
+point-estimate ordering already reported in "Secondary comparisons,"
+above -- and now, for the first time, that ordering rests on a properly
+powered, multiplicity-corrected, direct pairwise test, not a point-
+estimate comparison against a shared baseline. **Restated precisely,
+now that it is justified**: `curr_random` (a topology with matched
+sparsity but no relationship to `T`'s learned structure) measurably
+outperforms `T` (the topology this whole design was built around) on
+this held-out test set (`d = +0.0558`, `[+0.0307, +0.0803]`, Holm-
+survives) -- a real, corrected, direct result, not the descriptive
+observation it was before this check.
+
+**What this does and does not establish, restated for this specific
+addendum**: this confirms the four graphs are not equivalent in task
+utility under this exact pipeline, on this one test set, for this one
+locked feature/classifier procedure -- it does not extend to a
+topology-*family* claim (still explicitly out of scope, per `DESIGN.md`
+and every prior section here), and it does not retroactively change the
+primary/secondary locked results above, which stand as reported
+regardless of this addendum's outcome.
+
 ## Code
 
 `run_official_test_encode.py` (local CPU encode of the official test
@@ -1386,7 +1474,9 @@ bootstrap, McNemar, MLP baselines), `stage2a_classifier.py`'s new
 factored out so no new CV search could run here even by accident).
 Remote-only GPU driver (`stage4_gpu_evolve.py`, same chunked approach as
 stage 3's) not committed, per this project's convention for ephemeral
-GPU-session code.
+GPU-session code. `run_posthoc_graph_pairwise.py` (the post hoc
+graph-to-graph pairwise comparison, above -- no GPU dependency, reuses
+the already-saved per-image losses only).
 
 ## Reproducibility gaps (flagged by external review, not yet closed)
 
