@@ -1,10 +1,14 @@
 """
 Stage 2A confirmatory run, phase 1 (CPU-only, local): encode the
-OFFICIAL 10,000-image KMNIST test set. This is the first and only time
-in this project the test set's labels/images are used at all -- per
+OFFICIAL 10,000-image KMNIST test set. This is the first and sole
+locked confirmatory use of the test set in this project -- per
 DESIGN.md's locked feasibility ladder ("one locked evaluation on the
 untouched 10,000-image official test set... happens exactly once, after
-stages 1-3 and the rest of this design are fully settled").
+stages 1-3 and the rest of this design are fully settled"). The test
+set was subsequently reused, post hoc, in classifier-backend audits
+(JAX/optax port cross-check, NVIDIA cuML cross-check) that do not alter
+this locked evaluation's status -- see FINDINGS.md's "Post hoc reuse of
+the test set."
 
 Mirrors run_feasibility_stage3_encode.py exactly (same encode_and_restrict/
 order_parameter/reference_node_features calls, same topology build), just
@@ -34,7 +38,7 @@ def main():
     os.makedirs(SCRATCH_DIR, exist_ok=True)
 
     print("Loading official KMNIST test set (the untouched 10,000-image split) -- "
-          "first and only use of it in this project...")
+          "first and sole locked confirmatory use of it in this project...")
     _X_train, _y_train, X_test, y_test = load_mnist(KMNIST_DIR, gz=False)
     n_total = X_test.shape[0]
     print(f"Official test set: {n_total} images")

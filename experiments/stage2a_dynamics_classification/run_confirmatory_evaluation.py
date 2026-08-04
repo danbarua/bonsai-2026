@@ -1,7 +1,10 @@
 """
 Stage 2A: the locked confirmatory evaluation (DESIGN.md, "Confirmatory
 endpoint and test"). The official 10,000-image KMNIST test set is
-touched here for the first and only time in this project.
+touched here for the first and sole locked confirmatory evaluation in
+this project -- subsequently reused, post hoc, in classifier-backend
+audits that do not alter this evaluation's status (see FINDINGS.md's
+"Post hoc reuse of the test set").
 
 No new hyperparameter search: each condition's C was already selected
 via full-training-set CV in feasibility stage 3
@@ -86,8 +89,8 @@ def summarize_condition(y_true, y_pred, proba, classes, label):
 
 def main():
     print("=" * 70)
-    print("STAGE 2A CONFIRMATORY EVALUATION -- official test set touched "
-          "for the first and only time")
+    print("STAGE 2A CONFIRMATORY EVALUATION -- first and sole locked "
+          "confirmatory use of the official test set")
     print("=" * 70)
 
     print("\nLoading training-side artifacts (feasibility stage 3)...")
@@ -110,8 +113,8 @@ def main():
         train_encode, train_gpu, ref_idx)
     print(f"  done in {time.time()-t0:.1f}s")
 
-    print("\nLoading test-side artifacts (this project's first and only touch "
-          "of the official test set)...")
+    print("\nLoading test-side artifacts (this project's first and sole locked "
+          "confirmatory touch of the official test set)...")
     with open(os.path.join(TEST_SCRATCH, "stage4_encode_local.pkl"), "rb") as f:
         test_encode = pickle.load(f)
     with open(os.path.join(TEST_SCRATCH, "stage4_gpu_results.pkl"), "rb") as f:
