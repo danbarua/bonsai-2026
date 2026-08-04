@@ -77,16 +77,28 @@ check** -- time an `MLPClassifier` fit of comparable size under
 `cuml.accel` against the same fit without it. If there is no
 meaningful speedup, `cuml.accel` does not accelerate this estimator,
 and that is reported plainly as a real limitation, not silently papered
-over. Two options if that happens, decided at that point rather than
-pre-committed now: (a) keep the CPU-sklearn MLP numbers and disclose
-the resulting hardware asymmetry explicitly in the final write-up, or
-(b) use a genuinely GPU-native MLP implementation (e.g. a minimal
-PyTorch or JAX forward-pass/training-loop, architecture and
-hyperparameters matched exactly to the already-reported `H=13`/`H=128`
-baselines) -- a real reimplementation, so only pursued if (a) is judged
-insufficient, and verified against the existing CPU-sklearn numbers
-before being trusted, per this project's own standing discipline
-(`CLAUDE.md` principle 16).
+over.
+
+**Check 0 result: confirmed, `cuml.accel` does not accelerate
+`MLPClassifier`.** `H=128`, full 60,000-image raw-pixel training set,
+identical `MLP_KWARGS`: 31.5s plain sklearn vs. 30.9s with
+`cuml.accel.install()` active (1.02x -- noise, not a speedup), and
+critically **identical `n_iter=32` in both runs** -- direct evidence
+the "accelerated" call executed the exact same CPU code path, not a
+partial or marginal GPU dispatch. Not ambiguous.
+
+**Decision: option (a).** MLP training and inference are measured on
+CPU sklearn throughout this design; the oscillator side stays on GPU.
+The hardware-parity principle above is honored everywhere it could be
+(the check itself, and the oscillator side's own CPU-vs-GPU treatment)
+except this one estimator, where it genuinely cannot be, and that
+asymmetry is disclosed here rather than silently accepted. Option (b)
+(a from-scratch GPU-native MLP reimplementation) was considered and
+deliberately not pursued -- the MLP side is expected to be the
+uninteresting, trivially-cheap half of this comparison regardless of
+which hardware it runs on, and taking on fresh reimplementation risk
+(this project's own `CLAUDE.md` principle 16 territory) for a component
+unlikely to change the shape of the answer was judged not worth it.
 
 ## What's already measured, reused directly (no new work)
 
@@ -135,15 +147,13 @@ double-counted across topologies in any aggregate.
 See "GPU-parity adjustment," above. A direct, cheap timing check, run
 before anything else in this design.
 
-### 1. MLP training cost, on GPU (`cuml.accel`, contingent on check 0)
+### 1. MLP training cost -- resolved, no new measurement (option (a))
 
-Same architecture, hyperparameters, and convergence criterion as the
-already-reported baselines (`hidden_layer_sizes`, `alpha`, `batch_size`,
-`max_iter`, `early_stopping`, `validation_fraction`, `n_iter_no_change`,
-`random_state` -- unchanged from `run_confirmatory_evaluation.py`, not
-retrained to a more generous budget than what actually produced the
-reported test numbers). Measure wall-clock and epochs to convergence,
-full 60,000-image training set, both `H=13` and `H=128`.
+Already measured on CPU sklearn, already reported above: `H=13` 6.3s/27
+iterations, `H=128` 26.4s/32 iterations, identical `MLP_KWARGS` to what
+actually produced the reported baseline numbers. Per the check-0
+decision, this is the number used in the cost model -- no GPU
+counterpart exists to measure.
 
 ### 2. Oscillator single-image inference latency -- all 4 topologies, CPU and GPU
 
@@ -180,17 +190,15 @@ topology) by removing the need to choose.
   solver step count is genuinely input-dependent and a single draw is
   not representative.
 
-### 3. MLP single-image inference latency, CPU and GPU, same basis
+### 3. MLP single-image inference latency, CPU only (option (a))
 
-Symmetric treatment with item 2 (round-1 concern #5 -- the first draft
-only asked for "the same hardware" on the MLP side, ambiguous next to
-item 2's explicit CPU+GPU split). CPU: plain sklearn `predict_proba`
-on one image. GPU: `cuml.accel`-accelerated (contingent on check 0),
-same warm-up-excluded, 100-repeat mean/std discipline as item 2.
-Almost certainly trivial either way (a `784xH + Hx10` matrix multiply)
--- measured directly rather than assumed, per this project's own
-repeated lesson (`CLAUDE.md` principle 18: assumed-cheap steps have
-been wrong before).
+CPU sklearn `predict_proba` on one image, same 100-repeat mean/std
+discipline as item 2's CPU path (no warm-up needed, no JIT). No GPU
+counterpart, per the check-0 decision -- the asymmetry with item 2's
+CPU+GPU split is real and disclosed, not silently matched. Almost
+certainly trivial (a `784xH + Hx10` matrix multiply) -- measured
+directly rather than assumed, per this project's own repeated lesson
+(`CLAUDE.md` principle 18: assumed-cheap steps have been wrong before).
 
 ## The cost model
 
@@ -213,11 +221,17 @@ topology/MLP pair where one exists in that range, or state plainly if
 one approach dominates at every plausible scale for that pair.
 
 **Report in two units, not one** (unchanged from the first draft):
-real, measured wall-clock as primary (same GPU for both approaches
-throughout, per the parity adjustment); a rough theoretical FLOPs
-estimate as a hardware-independent secondary cross-check, reported as a
-range or measured-average given the oscillator ODE solver's genuinely
-input-dependent step count, not a single precise number.
+real, measured wall-clock as primary -- GPU throughout for the
+oscillator side, CPU throughout for the MLP side (the check-0 result
+above means true hardware parity isn't available for this comparison;
+reported as a disclosed limitation, not silently worked around); a
+rough theoretical FLOPs estimate as a hardware-independent secondary
+cross-check, which matters more than it otherwise would given the
+hardware asymmetry -- it's the one basis in this design that doesn't
+depend on which physical device either approach happened to run on.
+Reported as a range or measured-average given the oscillator ODE
+solver's genuinely input-dependent step count, not a single precise
+number.
 
 ## An important, explicit scope boundary: simulated dynamics, not physical substrate
 
