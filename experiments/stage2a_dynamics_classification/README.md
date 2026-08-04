@@ -358,51 +358,54 @@ a dataset or result where that reasoning wouldn't hold.
 
 ## Artifact replay vs. full raw-data regeneration
 
-**Amended by external review**: these are two different reproducibility
-claims, and this repository only fully supports one of them without an
-extra step.
+**Amended by external review, then closed (not just documented).**
+These are two different reproducibility claims. Both are now supported.
 
-- **Artifact replay -- now largely supported.** Given the cached
-  intermediate artifacts (via the GCS bucket above, or your own prior
-  local run), every downstream step -- classifier CV, the confirmatory
-  bootstrap/McNemar, the post hoc pairwise comparison, the artifact
-  manifest -- reruns from those artifacts and reproduces the reported
-  numbers. This is what `tests/test_stage2a_stats.py`'s
-  `test_frozen_primary_effect_matches_findings_md` (Tier 2) checks
-  directly, and what most of "Reproducing the pipeline locally," above,
-  actually exercises once the encode/GPU-evolve artifacts exist.
+- **Artifact replay.** Given the cached intermediate artifacts (via the
+  GCS bucket above, or your own prior local run), every downstream step
+  -- classifier CV, the confirmatory bootstrap/McNemar, the post hoc
+  pairwise comparison, the artifact manifest -- reruns from those
+  artifacts and reproduces the reported numbers. This is what
+  `tests/test_stage2a_stats.py`'s `test_frozen_primary_effect_matches_
+  findings_md` (Tier 2) checks directly, and what most of "Reproducing
+  the pipeline locally," above, actually exercises once the
+  encode/GPU-evolve artifacts exist.
 
-- **Full raw-data regeneration (from nothing but public KMNIST +
-  public code) -- not wholly self-contained.** `stage2a_topologies.
-  build_all_topologies()` depends, transitively, on
-  `build_and_verify_T()` (`experiments/stage1d_topology_specificity/
-  build_stage1d_constructions.py`), which verifies its from-raw-KMNIST
-  reconstruction of `T` against a cross-stage historical artifact,
+- **Full raw-data regeneration (from nothing but public KMNIST + public
+  code).** `stage2a_topologies.build_all_topologies()` previously
+  depended on a cross-stage historical artifact,
   `experiments/stage1b2_structured_transformation/results/
-  class0_constructions.pkl` -- gitignored, not committed (per this
-  project's convention for large cached artifacts), and not part of the
-  Stage 2A GCS bucket above (that bucket mirrors Stage 2A's own
-  artifacts, not Stage 1B2's). Without it, `build_all_topologies()`
-  raises rather than reconstructing `T` from scratch -- confirmed
-  directly, not assumed (this is exactly the gap
-  `tests/test_stage2a_topologies.py`'s Tier-2 skip condition checks
-  for, so a fresh clone missing this artifact skips that test cleanly
-  rather than erroring, but the same gap applies to actually *running*
-  the pipeline, not just testing it).
+  class0_constructions.pkl` -- gitignored, not committed, not part of
+  the Stage 2A GCS bucket above (that bucket mirrors Stage 2A's own
+  artifacts, not Stage 1B2's) -- in two places: `lattice` was read
+  directly from that cache rather than reconstructed, and `T`'s own
+  reconstruction hard-required the cache present just to verify against
+  (even though the construction itself never needed it). **Both fixed**:
+  `T` now calls `build_and_verify_T(require_historical_verification=
+  False)` (still verifies against the cache opportunistically if
+  present, skips the check rather than raising if not); `lattice` is
+  now reconstructed via `build_lattice_topology`
+  (`src/bonsai/dynamics/lattice_construction.py`) directly. `rewired`/
+  `curr_random` were already fully cache-independent (derived from
+  freshly-reconstructed `T`, never from the cache).
 
-  Two ways to close this, neither done here: (1) obtain
-  `class0_constructions.pkl` separately (it is this project's own
-  historical artifact, from an earlier stage, not a Stage 2A output --
-  see that stage's own `FINDINGS.md`/handoff docs for provenance), or
-  (2) reconstruct the lattice/T-verification path directly through
-  already-committed code without relying on the cached comparison
-  target -- a real option (the underlying construction code itself,
-  `src/bonsai/dynamics/learned_topology_construction.py` /
-  `lattice_construction.py`, is committed and already verified
-  byte-exact against this same historical artifact for class 0 --
-  `docs/PROJECT_MEMORY.md`'s "Construction-pipeline reproducibility"
-  section), just not wired into `stage2a_topologies.py` as a
-  from-scratch fallback path.
+  **Verified directly, not assumed**: with `class0_constructions.pkl`
+  present locally, the new from-scratch path was compared elementwise
+  against what the old cache-reading path returned -- `T` and `lattice`
+  both match to float64 machine epsilon (max diff `2.22e-16`, same
+  precision this project's other from-scratch reconstructions already
+  establish, not literally bit-identical since one side is recomputed
+  fresh and the other was computed once, historically, on different
+  hardware/library versions). Separately confirmed the historical
+  artifact is now genuinely optional, not just theoretically so: the
+  cache path was monkeypatched to a nonexistent file and
+  `build_all_topologies()` still succeeded, producing the same `T`/
+  `lattice` (to that same tolerance). Both checks are now a permanent
+  regression test,
+  `tests/test_stage2a_topologies.py::test_from_scratch_reconstruction_matches_cache_backed_values`
+  (Tier 2, skipped if the cache isn't present locally to compare
+  against -- but the other tests in that file, and the pipeline itself,
+  no longer need it).
 
 ## Testing
 
@@ -422,9 +425,13 @@ refactor that silently changes the statistic. `test_stage2a_classifier.py`,
 `test_stage2a_pipeline.py`, and `test_stage2a_paths.py` are Tier 1 only
 (synthetic data, no cached-artifact dependency).
 `test_stage2a_topologies.py` is Tier 2 only -- `build_all_topologies()`
-needs real KMNIST data and a cached cross-directory historical artifact
-to reconstruct T against; there's no meaningful synthetic version of
-that check.
+needs real KMNIST data to reconstruct from; there's no meaningful
+synthetic version of that check. It no longer additionally needs the
+`class0_constructions.pkl` historical artifact (see "Artifact replay
+vs. full raw-data regeneration," above) -- one test within the file
+does still use it, when present, as a direct regression check that the
+from-scratch reconstruction matches what the artifact-backed path used
+to return, and skips independently if it's absent.
 
 Deliberately not covered by this test suite: the class-0-audit,
 compute-cost, and cuML-accel threads -- lower priority for a research
