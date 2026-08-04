@@ -819,6 +819,19 @@ synchronize almost completely under this topology. T and lattice show
 no such effect (0.11-0.12% above 0.99, an order of magnitude smaller
 than even curr_random's rate).
 
+**Visual supplement** (`results/topology_graph_structure.png`,
+`results/phase_state_per_class_per_topology.png`, added later during
+the compute-cost follow-on): the graph-structure plot makes the
+mechanism visible directly -- `rewired`/`curr_random` are dense with
+long-range edges connecting spatially distant nodes across the whole
+image, while `T`/`lattice` are almost entirely short-range/local,
+closely tracking the pixel grid's own spatial layout. The per-class
+phase-state grid shows the consequence: for every one of the 10
+classes, `T`/`lattice`'s evolved phase fields retain visible spatial
+structure echoing the digit's shape, while `rewired`/`curr_random`
+collapse to near-uniform color -- near-total synchronization, visible
+directly rather than only as a summary statistic.
+
 ## Result 3: classifier CV fitting is NOT negligible -- it dominates everything else
 
 **246.8 minutes (4.1 hours)** for the 6 conditions' full CV fitting
