@@ -1548,16 +1548,32 @@ statistics are now computed separately:
    ell_i(graph_B)`, 20,000 paired class-stratified bootstrap resamples,
    two-sided 95% percentile interval on mean `d_i`, same `seed=42`.
 2. **Inferential `p`-value, for Holm correction**: a paired sign-flip
-   permutation test (`stage2a_stats.paired_sign_flip_p`) -- under H0 (no
-   systematic difference between the two graphs), each image's `d_i` is
-   exchangeable with `-d_i`, so independently flipping signs directly
-   simulates the null distribution (`CLAUDE.md` principle 10: "a
-   permutation scheme must actually destroy the effect it's testing for
-   under the null"), unit-tested on synthetic data first
-   (`tests/test_stage2a_stats.py`) per that same principle's explicit
-   requirement: identical (zero-difference) input gives `p~1`;
+   permutation test (`stage2a_stats.paired_sign_flip_p`) -- independently
+   flipping each image's `d_i` sign directly simulates a null
+   distribution that actually destroys the effect being tested for
+   (`CLAUDE.md` principle 10: "a permutation scheme must actually
+   destroy the effect it's testing for under the null"), unlike the
+   discarded conflated procedure above. Unit-tested on synthetic data
+   first (`tests/test_stage2a_stats.py`) per that same principle's
+   explicit requirement: identical (zero-difference) input gives `p~1`;
    maximally separated (large constant difference) input gives `p` at
    the Monte Carlo floor.
+
+   **Exactness caveat**: this test's exact validity requires each `d_i`
+   to be exchangeable with `-d_i` under H0, a symmetry condition on
+   `d_i`'s distribution around zero that is stronger than merely
+   "no systematic difference" (`E[d_i]=0`) and is not separately
+   verified here. With `n=10,000` independent test images this is a
+   large-sample-justified approximation for the mean contrast, not an
+   exact test by construction alone (`stage2a_stats.py`'s
+   `paired_sign_flip_p` docstring carries the same caveat). This is
+   immaterial for the five comparisons below whose `p`-values sit at or
+   near the Monte Carlo floor -- approximation error is swamped by
+   effect size -- but is directly relevant to the one comparison that
+   sits close to the alpha=0.05 boundary (`rewired` vs. `curr_random`,
+   below): "significant under this test" there should be read as
+   "significant under a large-sample approximation," not as an exact
+   result.
 
 All six pairwise comparisons among the four evolved graphs, not a
 subset chosen after seeing which looked interesting. Because this is
@@ -1583,13 +1599,17 @@ computed via 20,000 permutations, Monte Carlo floor convention applied
 zero.)
 
 **All six of six comparisons survive Holm correction at alpha=0.05,
-under the corrected, properly null-calibrated test -- the same
-qualitative conclusion as before the correction, not a different one,
-but now resting on a method that actually supports the claim.** Five of
-the six are extremely well-separated (`p` at or near the Monte Carlo
-floor, surviving correction by a wide margin). The sixth --
+under the corrected sign-flip test -- which genuinely destroys the
+effect under its permutation null (unlike the discarded bootstrap-`p`
+approach it replaced), subject to the exactness caveat noted above --
+the same qualitative conclusion as before the correction, not a
+different one, but now resting on a method that actually supports the
+claim.** Five of the six are extremely well-separated (`p` at or near
+the Monte Carlo floor, surviving correction by a wide margin -- the
+exactness caveat is immaterial at this margin). The sixth --
 `rewired` vs. `curr_random`, the two closest performers -- remains
-genuinely marginal: `p=0.0461` under the primary seed, and because it
+genuinely marginal, and is exactly where that caveat is load-bearing:
+`p=0.0461` under the primary seed, and because it
 is the largest `p`-value in the family it receives no Holm penalty
 (correction factor 1) and survives at essentially its raw value, just
 under the 0.05 threshold. **Checked for stability, not just reported
@@ -1606,13 +1626,14 @@ this one fixed test set) could plausibly flip it.
 point-estimate ordering already reported in "Secondary comparisons,"
 above -- and now, for the first time, that ordering rests on a properly
 powered, multiplicity-corrected, direct pairwise test, not a point-
-estimate comparison against a shared baseline. Not all five links in
-that chain carry the same weight, though: `curr_random`-vs-`rewired`
-itself is one of the five well-separated comparisons (`p` at the Monte
-Carlo floor), but the adjacent `rewired`-vs-`curr_random` *magnitude*
-comparison above is the marginal one -- the ordering (which is larger)
-is Holm-significant, just not by a wide margin. **Restated precisely,
-now that it is justified**: `curr_random` (a topology with matched
+estimate comparison against a shared baseline. This chain has three
+adjacent links, and they do not all carry the same weight: `T`-vs-
+`lattice` is at the Monte Carlo floor (well-separated); `T`-vs-`rewired`
+is Holm-significant but not at the floor (raw `p=7.4496e-03`); and
+`curr_random`-vs-`rewired` -- the same pair as the `rewired vs.
+curr_random` row in the table above -- is the one genuinely marginal
+link (`p=0.0461`, already discussed). **Restated precisely, now that it
+is justified**: `curr_random` (a topology with matched
 sparsity but no relationship to `T`'s learned structure) measurably
 outperforms `T` (the topology this whole design was built around) on
 this held-out test set (`d = +0.0558`, `[+0.0307, +0.0803]`, Holm-

@@ -108,16 +108,29 @@ def bootstrap_two_sided_p(resampled_means, n_resamples):
 
 
 def paired_sign_flip_p(d, n_perms=N_RESAMPLES, seed=BOOTSTRAP_SEED):
-    """Null-calibrated two-sided p-value for a paired-difference test, via
-    sign-flip permutation: under H0 (no systematic difference between the
-    two conditions), each image's d_i is exchangeable with -d_i, so
-    independently flipping each d_i's sign with probability 0.5 and
-    recomputing the mean directly simulates the null distribution --
-    unlike bootstrap_two_sided_p above (see its docstring), this actually
-    destroys the effect being tested for under the null, per CLAUDE.md
-    principle 10. Test statistic: |mean(d)|. Monte Carlo p-value with the
-    +1 floor convention (CLAUDE.md principle 6): p = (1 + n_as_extreme) /
-    (n_perms + 1), never reported as exactly zero.
+    """Two-sided p-value for a paired-difference test, via sign-flip
+    permutation: independently flipping each image's d_i sign with
+    probability 0.5 and recomputing the mean directly simulates a null
+    distribution that actually destroys the effect being tested for,
+    unlike bootstrap_two_sided_p above (see its docstring) -- per
+    CLAUDE.md principle 10. Test statistic: |mean(d)|. Monte Carlo
+    p-value with the +1 floor convention (CLAUDE.md principle 6):
+    p = (1 + n_as_extreme) / (n_perms + 1), never reported as exactly
+    zero.
+
+    Exactness caveat, flagged by external review: EXACT sign-flip
+    validity requires each d_i to be exchangeable with -d_i under H0,
+    which needs a symmetry condition on d_i's distribution around zero
+    -- stronger than merely E[d_i]=0 ("no systematic difference"). That
+    stronger condition is not verified here. With n=10,000 independent
+    test images, this is a large-sample-justified approximation for the
+    mean contrast, not a test that is exact by construction alone. This
+    barely matters for a comparison whose p-value sits at or near the
+    Monte Carlo floor (approximation error is swamped by the effect
+    size); it matters more for a comparison that is already close to the
+    alpha=0.05 boundary -- see FINDINGS.md's "Post hoc, exploratory:
+    direct graph-to-graph pairwise comparison" for where that caveat is
+    load-bearing (the rewired-vs-curr_random result specifically).
 
     Unit-tested directly on synthetic data (test_stage2a_stats.py, per
     CLAUDE.md principle 10's explicit requirement): identical-valued
