@@ -609,6 +609,18 @@ Closed the same way: two scripts committed.
   float64 precision throughout; see the script's own docstring for the
   measured difference.
 
+**A second instance of the same gap, found during a later organization/
+reproducibility pass over the whole directory**: `analyze_stage3_results_jax.py`
+was the only JAX port in the directory with no committed `verify_*.py`
+companion -- `Finding 1` above documents that its `R_post`/`feat_post`
+computation *was* verified (max diffs 3.469e-17 / 0.0 and 0 mismatches
+on synthetic mock data respectively), but only as a side effect of
+building the real-data test in an interactive session, with no
+standalone script committed encoding that check. Closed with
+`verify_analyze_stage3_results_jax.py`, encoding exactly the two checks
+already documented in `Finding 1` -- no new or expanded check, and
+verified to actually pass before being committed.
+
 ## Files
 
 - `stage2a_classifier_jax.py` -- the port (new, this investigation;
@@ -618,8 +630,10 @@ Closed the same way: two scripts committed.
   diagnostic scripts for the above, committed per the reproducibility
   gap noted directly above (previously only in local scratch).
 - `analyze_stage3_results_jax.py` -- R_post/feat_post JAX port (existed
-  before this investigation; verified here as a side effect of building
-  the real-data test).
+  before this investigation). `verify_analyze_stage3_results_jax.py` --
+  standalone verification script (committed later, closing the
+  reproducibility gap noted above where this was previously only
+  verified ad hoc).
 - `evolve_on_graph_jax.py`, `stage2a_pipeline_jax.py` -- ODE-evolution
   JAX port (prior session, not modified here).
 - `pyproject.toml` -- added `optax>=0.2.8`.
