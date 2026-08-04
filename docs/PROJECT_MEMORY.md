@@ -193,7 +193,12 @@ floor-level mapping (p_MC ~ 0.0001).** Critically:
   topology (Stage 1B.2 established it on one trajectory; Stage 1C, below,
   confirmed it generalizes across nine further independent trajectories
   -- see that subsection for the numbers).
-- Level 3 (useful computation): not established.
+- Level 3 (useful computation): **established, under a bounded
+  classification design** -- Stage 2A, below, confirmed runtime graph
+  evolution adds real classification value over the same locally-encoded
+  pre-evolution state on held-out official test data. Scoped to this
+  task, this linear readout, and four prespecified graph instances (not
+  a topology-family claim) -- see that subsection for what remains open.
 
 **Scope, essential** (Stage 1B.2's own scope, as originally run -- the
 trajectory-count dimension is superseded by Stage 1C, immediately below;
@@ -208,15 +213,12 @@ design and is now closed, see Part 4), no external task.
 (generalization across independent trajectories, and topology
 specificity), both are now resolved -- generalization by Stage 1C
 (confirmed positive), topology specificity by Stage 1D (closed, in the
-negative -- see that subsection, below). **External usefulness (Level
-3) -- can the structured mapping be linked to an externally defined
-task? -- is now the sole open item for the dynamics-as-computation
-programme's core capability hierarchy.**
-
-A first-draft design for the initial Level 3 test (does runtime
-oscillator evolution improve classification over the unevolved encoded
-state?) exists at `experiments/stage2a_dynamics_classification/DESIGN.md`
--- status: **first draft, pending review, not yet implemented**.
+negative -- see that subsection, below). External usefulness (Level 3)
+is also now resolved, positively but narrowly, by Stage 2A (below) --
+see that subsection for exactly what is and isn't established, and the
+GitHub issue tracker (danbarua/bonsai-2026, `stage2a` label) for the
+still-open follow-ons (topology-family generality, static encoding,
+synchronization robustness, denoising).
 
 Full details: `experiments/stage1b2_structured_transformation/FINDINGS.md`.
 
@@ -320,6 +322,67 @@ measured CPU baseline. One nontrivial bug was found and fixed in the
 surrounding batch-construction code (not the simulator itself) before
 this confirmatory run -- see CLAUDE.md's principle 16. Full detail:
 `experiments/stage1d_topology_specificity_gpu/FINDINGS.md`.
+
+### Stage 2A (external task utility, Level 3 -- ESTABLISHED under a bounded classification design)
+
+Tests the item Stage 1B.2/1C/1D left open: can the structured internal
+transformation be linked to an externally defined task, not just shown
+to exist? Design (`experiments/stage2a_dynamics_classification/DESIGN.md`,
+locked before any result existed): does runtime graph evolution, on top
+of an already-dynamically-encoded local phase state, add classification
+value a linear readout can use, on KMNIST, evaluated on the held-out
+official 10,000-image test set? Four prespecified graph instances (`T`,
+`lattice`, `rewired`, `curr_random`), each evolved then compared against
+the same `encoded_pre_evolution` (unevolved) baseline.
+
+**Primary result: yes, unambiguously.** `evolved_T` vs.
+`encoded_pre_evolution`, 20,000 paired class-stratified bootstrap
+resamples of the 10,000 official test images: observed mean per-image
+log-loss difference -0.2491, 95% CI [-0.2721, -0.2266] -- the entire
+interval below zero, a large, non-straddling improvement. Confirmed by
+exact McNemar's test on classification disagreement: of 1,618
+disagreeing test images, 1,234 were correct only under `evolved_T`
+versus 384 only under `encoded_pre_evolution` (p=6.68e-104). All three
+other evolved graphs also beat pre-evolution by similarly large,
+non-straddling margins (secondary comparisons, not cross-corrected
+against each other).
+
+**The graph-instance-specific caveat, stated plainly, not buried**: `T`
+is not uniquely best. A disclosed post hoc, Holm-corrected
+graph-to-graph pairwise comparison found the full ranking
+`curr_random > rewired > T > lattice` -- `curr_random` (matched sparsity,
+no relationship to `T`'s learned structure) measurably *outperforms* `T`
+on this held-out test set. Five of the six pairwise comparisons are
+extremely well-separated; the sixth (`rewired` vs. `curr_random`) is
+genuinely marginal (p~0.046, tracked as
+[issue #8](https://github.com/danbarua/bonsai-2026/issues/8)). This
+result is consistent with -- not merely compatible with -- Stage 1D's
+own closure (T indistinguishable from matched controls under the
+Stage 1B.2/1C mapping design): Stage 2A now shows the same genericity
+under an actual external task, not just under the internal
+Delta_map statistic.
+
+**Settled**: for this task, this linear readout, and these four
+prespecified graph instances -- graph-level evolution on top of an
+already-dynamically-encoded phase state adds real, statistically
+unambiguous classification value on genuinely held-out data. This is
+the strongest positive Level 3 result this project has produced.
+
+**Not settled, explicitly out of scope for this design, and tracked as
+GitHub issues** (`danbarua/bonsai-2026`, `stage2a` label): whether this
+generalizes to a topology *family* rather than these four specific
+instances (#9); whether a genuinely static `theta_static = pi*x`
+control would show the local encoding step already carries most of the
+value (#10); robustness of the near-total-synchronization decodability
+result to quantization/noise/precision/perturbation (#11); denoising or
+generation, Stage 2B (#13). A JAX/optax reimplementation of the
+classifier-fitting step remains unresolved and unused for any reported
+result (#2-#4).
+
+Full detail: `experiments/stage2a_dynamics_classification/FINDINGS.md`
+(the full pipeline, go/no-go checks, primary/secondary/post hoc results,
+and every disclosed caveat above); `DESIGN.md` (the locked design, read
+before the result).
 
 ## Part 4: Infrastructure and execution environment
 

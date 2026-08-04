@@ -143,7 +143,10 @@ where a shared, hardened library actually earns its cost.
 ## Where the project actually is right now
 
 One closed programme (benchmark-feature, Part 1), one open one
-(dynamics-as-computation, Part 3, currently at Stage 1D). See
+(dynamics-as-computation, Part 3, currently at Stage 2A -- Level 3
+established under a bounded classification design; topology-family
+generality and other follow-ons remain open, tracked as GitHub issues).
+See
 `docs/PROJECT_MEMORY.md` Parts 1 and 3 for current status, what's
 closed vs. open, and the priority-ordered open questions -- that status
 changes as findings land and is kept there, not duplicated here.

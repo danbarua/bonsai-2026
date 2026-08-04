@@ -9,8 +9,8 @@ This project transitioned from a benchmark-feature programme (investigating stat
 The core of Bonsai involves:
 - **Topology Learning**: Constructing graphs based on image data (MNIST, KMNIST, etc.).
 - **Oscillator Dynamics**: Simulating coupled-oscillator evolution over these topologies.
-- **Causal Ablation**: Using various controls (random, rewired, lattice) to verify that performance depends on specific learned connectivity and dynamics.
-- **Dynamics-as-Computation**: Analyzing structured responses to perturbations as a form of computation. Established at Level 2 (structured internal transformation) across independent trajectories.
+- **Causal Ablation**: Using various controls (random, rewired, lattice) to verify that performance depends on specific learned connectivity and dynamics. This finding is specific to the closed benchmark-feature programme (`docs/PROJECT_MEMORY.md` Part 1); the later dynamics-as-computation work (Stage 1D/2A) found the *opposite* for oscillator dynamics itself -- learned topology is not distinguishable from matched generic controls, under either an internal structured-transformation statistic or an external classification task.
+- **Dynamics-as-Computation**: Analyzing structured responses to perturbations as a form of computation. Established at Level 2 (structured internal transformation) across independent trajectories, and at Level 3 (useful computation) under a bounded classification design (Stage 2A) -- see `docs/PROJECT_MEMORY.md` Part 3 for scope and open follow-ons.
 
 For detailed history and current status, see `docs/PROJECT_MEMORY.md`; for the methodological principles this project holds itself to, see `CLAUDE.md`. For definitions of project-specific terms (trajectory, baseline seed, replica, t_p, tau, finite/tangent/residual response, etc.), see `docs/GLOSSARY.md`.
 
