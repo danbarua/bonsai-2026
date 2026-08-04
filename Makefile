@@ -39,6 +39,16 @@ MIGHTY_COLAB ?= uv run --group gpu mighty-colab
 SESSION_TRAIN ?= stage3-evolve
 SESSION_TEST ?= stage4-evolve
 
+# GPU-target idempotency: `mighty-colab new -s <name>` provisions a fresh
+# session unconditionally, so re-running a GPU target after a partial
+# failure (a dropped upload, a flaky exec) would try to allocate a second
+# session under the same name instead of resuming the one already up --
+# and `mighty-colab status -s <name>` returns exit code 0 even when the
+# session doesn't exist (prints "Session '<name>' not found." but does not
+# fail), verified directly, not assumed -- so the two GPU targets below
+# grep that message rather than trusting the exit status, and only call
+# `new` when a session by that name genuinely isn't there yet.
+
 .PHONY: stage2a-help
 stage2a-help:  ## List available stage2a-* targets
 	@grep -E '^stage2a-[a-zA-Z0-9_-]+:.*##' $(MAKEFILE_LIST) | awk -F':|##' '{printf "  %-28s %s\n", $$1, $$3}'
@@ -52,7 +62,11 @@ stage2a-prepare-train:  ## Encode 60k KMNIST training images + split for GPU upl
 stage2a-evolve-train-gpu:  ## Upload + run Stage-3 (training set) GPU evolution via mighty-colab -- bills while running
 	cd $(STAGE2A_DIR) && \
 	$(MIGHTY_COLAB) sessions && \
-	$(MIGHTY_COLAB) new -s $(SESSION_TRAIN) --gpu A100 && \
+	if $(MIGHTY_COLAB) status -s $(SESSION_TRAIN) 2>&1 | grep -q "not found"; then \
+		$(MIGHTY_COLAB) new -s $(SESSION_TRAIN) --gpu A100; \
+	else \
+		echo "[make] Reusing existing session $(SESSION_TRAIN) (resuming after a partial run, or you re-ran this target with a session still up)"; \
+	fi && \
 	$(MIGHTY_COLAB) reinstall -s $(SESSION_TRAIN) jax[cuda12]==0.11.0 diffrax==0.7.2 equinox==0.13.8 && \
 	$(MIGHTY_COLAB) upload -s $(SESSION_TRAIN) evolve_on_graph_jax.py /content/evolve_on_graph_jax.py && \
 	$(MIGHTY_COLAB) upload -s $(SESSION_TRAIN) scratch/stage3_train/stage3_topologies.pkl /content/stage3_topologies.pkl && \
@@ -71,7 +85,11 @@ stage2a-prepare-test:  ## Encode 10k KMNIST official test images (local, CPU, ~2
 stage2a-evolve-test-gpu:  ## Upload + run Stage-4 (official test set) GPU evolution via mighty-colab -- bills while running
 	cd $(STAGE2A_DIR) && \
 	$(MIGHTY_COLAB) sessions && \
-	$(MIGHTY_COLAB) new -s $(SESSION_TEST) --gpu A100 && \
+	if $(MIGHTY_COLAB) status -s $(SESSION_TEST) 2>&1 | grep -q "not found"; then \
+		$(MIGHTY_COLAB) new -s $(SESSION_TEST) --gpu A100; \
+	else \
+		echo "[make] Reusing existing session $(SESSION_TEST) (resuming after a partial run, or you re-ran this target with a session still up)"; \
+	fi && \
 	$(MIGHTY_COLAB) reinstall -s $(SESSION_TEST) jax[cuda12]==0.11.0 diffrax==0.7.2 equinox==0.13.8 && \
 	$(MIGHTY_COLAB) upload -s $(SESSION_TEST) evolve_on_graph_jax.py /content/evolve_on_graph_jax.py && \
 	$(MIGHTY_COLAB) upload -s $(SESSION_TEST) scratch/stage4_test/stage4_gpu_upload_topologies.pkl /content/stage4_gpu_upload_topologies.pkl && \
