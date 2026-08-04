@@ -73,7 +73,6 @@ This project uses `hatchling` as a build backend and is compatible with `uv`.
 All research scripts should be executed from the project root using `uv run python ...`.
 
 - **`experiments/stage1b_pilot/run_stage1b_pilot.py`**: Runs a pilot batch for dynamics-as-computation trials.
-- **`tools/notMNIST-to-MNIST/convert_to_mnist_format.py`**: Utility to convert notMNIST data to the standard MNIST IDX format.
 - **`main.py`**: A sample entry point (placeholder).
 
 The root `Makefile` wraps the Stage 2A reproduction workflow (local
@@ -102,4 +101,4 @@ uv run pytest -m "not slow"
 
 ## License
 
-TODO: Specify license (e.g., MIT, Proprietary). See `tools/notMNIST-to-MNIST/LICENSE` for tools-specific licensing.
+TODO: Specify license (e.g., MIT, Proprietary).
