@@ -15,7 +15,7 @@ kernel via `mighty-colab exec`, not invoked locally.
 Not runnable locally as-is -- this executes ON the remote GPU session
 (uploaded via `mighty-colab upload`, run via `mighty-colab exec`), with
 its inputs already staged at `/content/...` by the driving local script
-(see `README.md`'s "Reproducing the confirmatory GPU evolution" section
+(see `README.md`'s "GPU evolution" section
 for the exact upload/exec sequence). Reuses `evolve_on_graph_jax.py`
 (uploaded alongside, unmodified) -- not a reimplementation.
 

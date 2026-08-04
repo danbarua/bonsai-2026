@@ -13,7 +13,7 @@ exempt -- it produced data feeding this document's headline numbers.
 
 Not runnable locally as-is -- executes ON the remote GPU session
 (uploaded via `mighty-colab upload`, run via `mighty-colab exec`); see
-`README.md`'s "Reproducing the confirmatory GPU evolution" section for
+`README.md`'s "GPU evolution" section for
 the exact upload/exec sequence, including the 12-chunk `theta0` upload
 workaround this script's own inline comment explains (the single
 250MB-pickle upload hit the transfer endpoint's size limit). Reuses

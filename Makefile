@@ -50,13 +50,31 @@ SESSION_TEST ?= stage4-evolve
 # `new` when a session by that name genuinely isn't there yet.
 
 .PHONY: stage2a-help
-stage2a-help:  ## List available stage2a-* targets
-	@grep -E '^stage2a-[a-zA-Z0-9_-]+:.*##' $(MAKEFILE_LIST) | awk -F':|##' '{printf "  %-28s %s\n", $$1, $$3}'
+stage2a-help:  ## List every stage2a-* target, grouped by pipeline stage
+	@awk 'BEGIN {FS = ":.*##"} /^##@/ {printf "\n%s\n", substr($$0, 5)} /^stage2a-[a-zA-Z0-9_-]+:.*##/ {printf "  %-28s %s\n", $$1, $$2}' $(MAKEFILE_LIST)
+
+##@ Small-scale feasibility (mechanical validation only, not confirmatory -- see FINDINGS.md)
+
+.PHONY: stage2a-feasibility1
+stage2a-feasibility1:  ## Feasibility stage 1: 1,000 images, CPU, ~1 min
+	$(PYTHON) $(STAGE2A_DIR)/run_feasibility_stage1.py
+
+.PHONY: stage2a-feasibility2
+stage2a-feasibility2:  ## Feasibility stage 2: 5,000 images, CPU, ~6 min
+	$(PYTHON) $(STAGE2A_DIR)/run_feasibility_stage2.py
+
+##@ Local data preparation (CPU, free)
 
 .PHONY: stage2a-prepare-train
 stage2a-prepare-train:  ## Encode 60k KMNIST training images + split for GPU upload (local, CPU, ~70s)
 	$(PYTHON) $(STAGE2A_DIR)/run_feasibility_stage3_encode.py
 	$(PYTHON) $(STAGE2A_DIR)/prepare_stage3_gpu_upload.py
+
+.PHONY: stage2a-prepare-test
+stage2a-prepare-test:  ## Encode 10k KMNIST official test images (local, CPU, ~25s) -- the ONE place test-set images/labels are touched
+	$(PYTHON) $(STAGE2A_DIR)/run_official_test_encode.py
+
+##@ GPU evolution (mighty-colab, bills while running)
 
 .PHONY: stage2a-evolve-train-gpu
 stage2a-evolve-train-gpu:  ## Upload + run Stage-3 (training set) GPU evolution via mighty-colab -- bills while running
@@ -77,10 +95,6 @@ stage2a-evolve-train-gpu:  ## Upload + run Stage-3 (training set) GPU evolution 
 	$(MIGHTY_COLAB) download -s $(SESSION_TRAIN) /content/stage3_gpu_results.pkl scratch/stage3_train/stage3_gpu_results.pkl && \
 	$(MIGHTY_COLAB) stop -s $(SESSION_TRAIN)
 
-.PHONY: stage2a-prepare-test
-stage2a-prepare-test:  ## Encode 10k KMNIST official test images (local, CPU, ~25s) -- the ONE place test-set images/labels are touched
-	$(PYTHON) $(STAGE2A_DIR)/run_official_test_encode.py
-
 .PHONY: stage2a-evolve-test-gpu
 stage2a-evolve-test-gpu:  ## Upload + run Stage-4 (official test set) GPU evolution via mighty-colab -- bills while running
 	cd $(STAGE2A_DIR) && \
@@ -98,6 +112,8 @@ stage2a-evolve-test-gpu:  ## Upload + run Stage-4 (official test set) GPU evolut
 	$(MIGHTY_COLAB) download -s $(SESSION_TEST) /content/stage4_gpu_results.pkl scratch/stage4_test/stage4_gpu_results.pkl && \
 	$(MIGHTY_COLAB) stop -s $(SESSION_TEST)
 
+##@ Analysis and confirmatory evaluation (CPU)
+
 .PHONY: stage2a-analyze
 stage2a-analyze:  ## Feasibility stage-3 classifier CV model selection (~4hr on CPU sklearn -- see FINDINGS.md Result 3 first)
 	$(PYTHON) $(STAGE2A_DIR)/analyze_stage3_results.py
@@ -110,6 +126,8 @@ stage2a-confirm:  ## Run the locked confirmatory evaluation (final refits, prima
 stage2a-posthoc:  ## Post hoc graph-to-graph pairwise comparison (seconds -- reuses saved per-image losses, no new GPU time)
 	$(PYTHON) $(STAGE2A_DIR)/run_posthoc_graph_pairwise.py
 
+##@ Artifact verification
+
 .PHONY: stage2a-manifest
 stage2a-manifest:  ## Regenerate results/ARTIFACT_MANIFEST.json (hashes, dimensions, selected C, environment metadata)
 	$(PYTHON) $(STAGE2A_DIR)/generate_artifact_manifest.py
@@ -119,3 +137,36 @@ stage2a-verify: stage2a-manifest  ## Regenerate the manifest and diff it against
 	@echo "Diffing regenerated manifest against the committed one."
 	@echo "NOTE: environment.git_commit_sha will always differ on a later commit -- that field alone changing is NOT a reproduction failure. Compare the artifact/graph/array sha256 fields specifically."
 	git diff --stat $(STAGE2A_DIR)/results/ARTIFACT_MANIFEST.json
+
+##@ Class-0 support audit (post hoc -- see FINDINGS.md's "class-0 confound" sections)
+
+.PHONY: stage2a-class0-audit
+stage2a-class0-audit:  ## Part 1: retained-ink statistics (local, free)
+	$(PYTHON) $(STAGE2A_DIR)/run_class0_support_audit.py
+
+.PHONY: stage2a-class0-classify
+stage2a-class0-classify:  ## Part 2: the two baseline classifier fits (local sklearn; needs stage2a-prepare-train's artifacts)
+	$(PYTHON) $(STAGE2A_DIR)/run_class0_support_audit_classify.py
+
+# stage2a-class0-classify's --cuml variant (cuml.accel on a mighty-colab GPU
+# session, see CUML_ACCEL_FINDINGS.md) is deliberately NOT a target here.
+# Unlike the two evolve-*-gpu targets above, no concrete upload/exec command
+# sequence for this specific script was ever recorded anywhere in this
+# project's docs -- CUML_ACCEL_FINDINGS.md's own "Code" section only points
+# back at the README's generic cuml.accel activation steps, not at a tested
+# sequence for this script's actual inputs (which load through
+# stage2a_paths.scratch_root(), meaning a real remote run needs
+# STAGE2A_SCRATCH_ROOT=/content plus the core modules and audit inputs
+# uploaded alongside it -- untested). Fabricating an unverified command
+# sequence for a billed GPU session is worse than leaving this manual; see
+# CUML_ACCEL_FINDINGS.md directly if reproducing this thread.
+
+##@ Testing
+
+TEST_FILES := tests/test_stage2a_core.py tests/test_stage2a_stats.py \
+              tests/test_stage2a_classifier.py tests/test_stage2a_pipeline.py \
+              tests/test_stage2a_topologies.py tests/test_stage2a_paths.py
+
+.PHONY: stage2a-test
+stage2a-test:  ## Run the Stage 2A test suite (Tier 2 cases skip cleanly without local cached artifacts)
+	cd $(REPO_ROOT) && uv run pytest $(TEST_FILES) -v

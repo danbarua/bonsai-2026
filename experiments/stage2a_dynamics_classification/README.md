@@ -101,71 +101,48 @@ record.
 encode/GPU-evolve intermediate artifacts (`stage2a_paths.py`'s
 default location, overridable via `STAGE2A_SCRATCH_ROOT`).
 
-## Reproducing the pipeline locally
+## Running things
 
-All scripts assume the project's `uv`-managed virtualenv (`uv run
-python ...`, not bare `python3` -- see the root `CLAUDE.md`) and
-`datasets/kmnist/` present locally.
-
-```bash
-# Stage 3: encode the full 60,000-image official training set (CPU, ~70s)
-uv run python experiments/stage2a_dynamics_classification/run_feasibility_stage3_encode.py
-
-# Official test set: encode the 10,000-image official test set (CPU, ~25s)
-# -- the ONE place this project touches test-set images/labels for the
-# locked confirmatory analysis. Do not run this speculatively.
-uv run python experiments/stage2a_dynamics_classification/run_official_test_encode.py
-```
-
-Both produce a `theta0` batch + topologies package that then needs GPU
-evolution (`stage3_gpu_evolve.py` / `stage4_gpu_evolve.py`) -- see
-"Reproducing the confirmatory GPU evolution," below, for the exact
-remote-session sequence. Once both splits have their GPU-evolved
-`theta_T` cached locally (`scratch/stage3_train/stage3_gpu_results.pkl`,
-`scratch/stage4_test/stage4_gpu_results.pkl`):
+Every stage2a operation -- local CPU steps, GPU evolution, artifact
+verification, and the test suite -- runs through the root-level
+`Makefile`. It's the single source of truth for the actual commands
+(no duplicated filenames between README and Makefile); this section is
+a map to the targets, not a copy of them.
 
 ```bash
-# Feasibility stage 3 model selection (classifier CV, ~4hr on CPU sklearn
-# -- see FINDINGS.md's Result 3 before running this unattended)
-uv run python experiments/stage2a_dynamics_classification/analyze_stage3_results.py
-
-# The locked confirmatory evaluation itself
-uv run python experiments/stage2a_dynamics_classification/run_confirmatory_evaluation.py
-
-# Post hoc graph-to-graph pairwise comparison (seconds -- reuses the
-# confirmatory run's already-saved per-image losses, no new GPU time)
-uv run python experiments/stage2a_dynamics_classification/run_posthoc_graph_pairwise.py
-
-# Artifact manifest (hashes, dimensions, selected C, frozen headline numbers)
-uv run python experiments/stage2a_dynamics_classification/generate_artifact_manifest.py
+make stage2a-help   # from the repository root -- lists every target, grouped by pipeline stage
 ```
 
-**Small-scale feasibility stages** (mechanical validation only, not
-confirmatory -- see `FINDINGS.md`'s "Feasibility Stage 1"/"Feasibility
-Stage 2" sections; each is self-contained, no prior encode/GPU step
-needed):
-```bash
-uv run python experiments/stage2a_dynamics_classification/run_feasibility_stage1.py   # 1,000 images, CPU, ~1 min
-uv run python experiments/stage2a_dynamics_classification/run_feasibility_stage2.py   # 5,000 images, CPU, ~6 min
-```
+All targets assume the project's `uv`-managed virtualenv and
+`datasets/kmnist/` present locally, and resolve their own paths via
+`git rev-parse --show-toplevel` (see the Makefile's own header comment)
+-- run everything from the repository root, no `cd` needed.
 
-**Class-0 support audit** (post hoc, per external review's request --
-see `FINDINGS.md`'s "class-0 confound" sections; part 1 is free/local,
-part 2 needs the same cached training-set artifacts as the main
-pipeline above and optionally accepts `--cuml` to fit under `cuml.accel`
-on a GPU session rather than local sklearn):
-```bash
-uv run python experiments/stage2a_dynamics_classification/run_class0_support_audit.py
-uv run python experiments/stage2a_dynamics_classification/run_class0_support_audit_classify.py            # local sklearn
-uv run python experiments/stage2a_dynamics_classification/run_class0_support_audit_classify.py --cuml      # cuml.accel, remote GPU session
-```
+**Typical order**, matching `stage2a-help`'s own grouping:
 
-**Follow-on threads** (JAX classifier port, NVIDIA cuML cross-check,
-compute-cost accounting) are not reproduced from this section --
-each owns its reproduction details directly in its own findings doc
-(`JAX_CLASSIFIER_PORT_FINDINGS.md`'s "Files" section,
-`CUML_ACCEL_FINDINGS.md`'s "Code" section, `COMPUTE_COST_FINDINGS.md`'s
-"Code" section), not centralized here.
+1. `stage2a-feasibility1` / `stage2a-feasibility2` -- optional,
+   mechanical-validation-only sanity checks, not confirmatory (see
+   `FINDINGS.md`'s "Feasibility Stage 1"/"Feasibility Stage 2").
+2. `stage2a-prepare-train` / `stage2a-prepare-test` -- local, CPU,
+   encode the official KMNIST splits. **`stage2a-prepare-test` is the
+   ONE place this project touches test-set images/labels for the
+   locked confirmatory analysis -- don't run it speculatively.**
+3. `stage2a-evolve-train-gpu` / `stage2a-evolve-test-gpu` -- GPU
+   evolution via `mighty-colab`, **bills while running**. See "GPU
+   evolution," below, before running these.
+4. `stage2a-analyze` -- classifier CV model selection. **~4hr on CPU
+   sklearn** -- read `FINDINGS.md`'s Result 3 before running this
+   unattended.
+5. `stage2a-confirm` -- the locked confirmatory evaluation.
+6. `stage2a-posthoc` -- post hoc graph-to-graph pairwise comparison
+   (seconds, reuses saved per-image losses, no new GPU time).
+7. `stage2a-manifest` / `stage2a-verify` -- regenerate the artifact
+   manifest and diff it against the committed one.
+8. `stage2a-class0-audit` / `stage2a-class0-classify` -- the class-0
+   support audit, post hoc, per external review's request (see
+   `FINDINGS.md`'s "class-0 confound" sections). The `--cuml` GPU
+   variant of part 2 is deliberately not a `make` target -- see the
+   comment above it in the Makefile, and `CUML_ACCEL_FINDINGS.md`.
 
 Override the scratch location if you don't want the default
 (`experiments/stage2a_dynamics_classification/scratch/`):
@@ -174,114 +151,48 @@ Override the scratch location if you don't want the default
 export STAGE2A_SCRATCH_ROOT=/path/to/your/scratch/dir
 ```
 
-## Reproducing the confirmatory GPU evolution
+**Follow-on threads** (JAX classifier port, NVIDIA cuML cross-check,
+compute-cost accounting) aren't in the Makefile -- each owns its
+reproduction details directly in its own findings doc
+(`JAX_CLASSIFIER_PORT_FINDINGS.md`'s "Files" section,
+`CUML_ACCEL_FINDINGS.md`'s "Code" section, `COMPUTE_COST_FINDINGS.md`'s
+"Code" section), not centralized here.
 
-**Amended by external review, twice.** First: the single generic
-example previously here (`theta0_batch.npy`, `topologies.pkl`) didn't
-match either driver's actual expected filenames. Second: the exact
-`mighty-colab` command sequences that replaced it assumed the shell's
-cwd was already `experiments/stage2a_dynamics_classification/` (bare
-filenames, bare `scratch/...` paths) -- silently contradicting this
-README's own "run from repository root" convention used everywhere
-else. Rather than document a fragile "cd here first, then run these
-exact commands" instruction, **the root-level `Makefile` is now the
-single source of truth for these commands** -- run everything below
-from the repository root via `make`, not by copying commands out of
-this section. This also means the Makefile and this README no longer
-duplicate the same filenames in two places that can drift apart.
+## GPU evolution
 
-```bash
-make stage2a-help   # lists every stage2a-* target with a one-line description
-```
-
-The GPU-evolution step used [`mighty-colab`](https://pypi.org/project/mighty-colab/)
-(a Colab CLI/MCP wrapper) to provision an A100 session, upload inputs,
-run the evolution kernel remotely, and download the resulting `theta_T`
+The GPU-evolution step uses [`mighty-colab`](https://pypi.org/project/mighty-colab/)
+(a Colab CLI wrapper) to provision an A100 session, upload inputs, run
+the evolution kernel remotely, and download the resulting `theta_T`
 states. `stage3_gpu_evolve.py` / `stage4_gpu_evolve.py` are the exact
-scripts that ran on the remote kernel -- not runnable locally as-is
+scripts that run on the remote kernel -- not runnable locally as-is
 (they read/write `/content/...`, the remote session's filesystem
-convention). The `make` targets below `cd` into
-`experiments/stage2a_dynamics_classification/` internally (resolved via
-`git rev-parse --show-toplevel`, not a hardcoded path -- see the
-Makefile's own header comment) before invoking `mighty-colab`, so the
-commands it runs are identical to what worked before, just no longer
-something you have to get the cwd right for by hand. `mighty-colab`
-itself is a pinned dependency (`pyproject.toml`'s `[dependency-groups].gpu`,
-the official PyPI release) rather than something you install globally
-and hope matches -- `uv run --group gpu` (what the Makefile calls under
-the hood) installs it into this project's own `.venv` on first use, so
-a clean checkout needs no separate install step.
+convention). `mighty-colab` itself is a pinned dependency
+(`pyproject.toml`'s `[dependency-groups].gpu`, the official PyPI
+release) -- `uv run --group gpu` (what the Makefile calls under the
+hood) installs it into this project's own `.venv` on first use, so a
+clean checkout needs no separate install step.
 
-### Workflow A: Stage 3, training-set evolution (60,000 images)
-
-**1. Local preparation.** Encodes the full 60,000-image training set
-and splits the result into the exact files the remote driver expects
-(one combined `theta0_batch`+`topologies` pickle is too large for the
-upload endpoint -- see "Upload size limit," below):
+**Full sequence** (training set; swap `-train-`/`stage3` for
+`-test-`/`stage4` for the official test set):
 ```bash
-make stage2a-prepare-train
+make stage2a-prepare-train      # local, CPU
+make stage2a-evolve-train-gpu   # bills while running
+make stage2a-verify             # regenerate + diff the artifact manifest
 ```
-Produces, in `scratch/stage3_train/`: `theta0_chunk_00.npy` through
-`theta0_chunk_11.npy` (12 files, `(5000, 505)` float64 each, ~20MB
-each) and `stage3_topologies.pkl` (`{4 x (505, 505)} float64`, ~8MB) --
-verified to reassemble byte-identical to the original before the script
-reports success, not just "the right shape."
+`stage2a-verify`'s clean diff on the artifact/graph/array `sha256`
+fields confirms byte-identical regeneration. **`environment.git_commit_sha`
+will always differ once you're on a later commit than the one that
+generated the committed manifest -- that field alone changing is not a
+reproduction failure**; only the artifact-hash fields are load-bearing
+(`make stage2a-verify`'s own output repeats this note).
 
-**2. Upload + GPU execution** (provisions an A100 session, uploads
-inputs, runs the evolution kernel, downloads `theta_T`, stops the
-session -- **bills while running**):
-```bash
-make stage2a-evolve-train-gpu
-```
-
-**3. Verify** your regenerated artifact matches the one behind the
-reported numbers -- regenerate the manifest and diff it against the
-committed one:
-```bash
-make stage2a-verify
-```
-A clean diff on the artifact/graph/array `sha256` fields confirms
-byte-identical regeneration; a changed `sha256` for
-`stage3_gpu_results.pkl` specifically means your regenerated evolution
-output differs from the one the reported numbers are based on.
-**`environment.git_commit_sha` will always differ once you're on a
-later commit than the one that generated the committed manifest --
-that field alone changing is not a reproduction failure, only the
-artifact-hash fields are load-bearing for this check** (`make
-stage2a-verify`'s own output repeats this note).
-
-### Workflow B: Stage 4, official-test-set evolution (10,000 images)
-
-**1. Local preparation** -- the one and only place this project
-touches test-set images/labels for the locked confirmatory analysis;
-do not run this speculatively. Already produces the exact files the
-remote driver expects, no separate chunking step needed at this
-smaller scale:
-```bash
-make stage2a-prepare-test
-```
-Produces `scratch/stage4_test/stage4_gpu_upload_topologies.pkl`
-(`{"topologies": {4 x (505, 505)} float64}`, ~8MB) and
-`scratch/stage4_test/stage4_theta0_test.npy` (`(10000, 505)` float64,
-~40MB -- small enough for a single-file upload).
-
-**2. Upload + GPU execution** (same pattern as Workflow A -- bills
-while running):
-```bash
-make stage2a-evolve-test-gpu
-```
-
-**3. Verify**, same as Workflow A:
-```bash
-make stage2a-verify
-```
-
-**Upload size limit, worth knowing in advance**: a single large pickle
-(the original 250MB Stage 3 `theta0`+topologies package) hit the
-transfer endpoint's size limit -- this is why Workflow A's chunking step
-exists and Workflow B's doesn't need one (Stage 4's combined package is
-only ~48MB total, under the limit that broke Stage 3's single-file
-upload). Small files (under ~50MB) upload fine as a single transfer.
+**Upload size limit**: a single large pickle (the original 250MB
+Stage 3 `theta0`+topologies package) hit the transfer endpoint's size
+limit -- this is why `stage2a-prepare-train` chunks its output into 12
+files (`theta0_chunk_00.npy` ... `theta0_chunk_11.npy`, ~20MB each)
+while `stage2a-prepare-test` doesn't need to (Stage 4's combined
+package is only ~48MB total, under the limit). Files under ~50MB
+upload fine as a single transfer.
 
 **`cuml.accel`, if extending into that territory** (see
 `CUML_ACCEL_FINDINGS.md`): install via
@@ -367,9 +278,8 @@ These are two different reproducibility claims. Both are now supported.
   pairwise comparison, the artifact manifest -- reruns from those
   artifacts and reproduces the reported numbers. This is what
   `tests/test_stage2a_stats.py`'s `test_frozen_primary_effect_matches_findings_md`
-  (Tier 2) checks directly, and what most of "Reproducing
-  the pipeline locally," above, actually exercises once the
-  encode/GPU-evolve artifacts exist.
+  (Tier 2) checks directly, and what most of "Running things," above,
+  actually exercises once the encode/GPU-evolve artifacts exist.
 
 - **Full raw-data regeneration (from nothing but public KMNIST + public
   code).** `stage2a_topologies.build_all_topologies()` previously
@@ -410,7 +320,7 @@ These are two different reproducibility claims. Both are now supported.
 ## Testing
 
 ```bash
-uv run pytest tests/test_stage2a_core.py tests/test_stage2a_stats.py tests/test_stage2a_classifier.py tests/test_stage2a_pipeline.py tests/test_stage2a_topologies.py tests/test_stage2a_paths.py -v
+make stage2a-test
 ```
 
 Two-tier convention (this project's established pattern, see the root
