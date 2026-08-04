@@ -236,24 +236,61 @@ numerical implementation.
 
 ## Code
 
-No dedicated driver script for this thread -- it reuses this project's
-own unmodified `analyze_stage3_results.py`, `run_confirmatory_evaluation.py`,
-and `run_class0_support_audit_classify.py` (the last via its `--cuml`
-flag), the whole point being that no reimplementation was needed.
-Reproducing this doc's numbers means running those same scripts on a
-`mighty-colab` A100 session with `cuml.accel.install()` called before
-`sklearn` is imported (see `README.md`'s "`cuml.accel`, if extending
-into that territory" for the exact install/activation sequence), rather
-than a separate command sequence specific to this doc.
+No dedicated driver script for the CV-grid/confirmatory replication
+above -- it reuses this project's own unmodified `analyze_stage3_results.py`
+and `run_confirmatory_evaluation.py`, the whole point being that no
+reimplementation was needed. Reproducing those numbers means running
+those same scripts on a `mighty-colab` A100 session: install `cuml-cu12`
+via `mighty-colab reinstall -s <session> --requirement
+cuml_requirements.txt` (the committed requirements file), then call
+`cuml.accel.install()` before `sklearn` (or anything importing it) is
+loaded -- `cuml.accel` patches sklearn's estimator classes at import
+time. Verified to accelerate `LogisticRegression`; verified **not** to
+accelerate `MLPClassifier` (silent CPU fallback, no error) -- see
+`COMPUTE_COST_FINDINGS.md`'s "Check 0" for that finding; check any new
+estimator directly before trusting it rather than assuming coverage.
+
+The class-0-support audit's GPU classifier fits (the
+`raw_pixels_505restricted` / `encoded_784_unrestricted` numbers
+reported in `FINDINGS.md`'s "class-0-support audit" section) are a
+partial exception: that specific run *does* have a dedicated,
+committed, actually-tested driver, `class0_support_audit_classify_gpu.py` --
+wired into `make stage2a-class0-classify-gpu`. It still reuses
+`stage2a_classifier.py`/`stage2a_stats.py` unmodified (uploaded
+alongside it, unchanged), but is its own file rather than the local
+`run_class0_support_audit_classify.py --cuml` path, because it
+downloads its six input `.npy` files directly from the public GCS
+mirror (`gs://bonsai-2026-stage2a-cache/class0_support_audit/`) instead
+of reading through `stage2a_paths.scratch_root()` -- the same
+`/content`-hardcoded convention `stage3_gpu_evolve.py`/
+`stage4_gpu_evolve.py` already use for remote-only drivers. The
+committed `run_class0_support_audit_classify.py --cuml` combination,
+with `STAGE2A_SCRATCH_ROOT` pointed at `/content`, has never actually
+been run remotely -- don't assume it works untested.
 
 ## Next step, if pursued
 
-A real adoption decision (not attempted here) would still need: the
-`max_iter=20000` override written into a disclosed, `cuml.accel`-
-specific configuration (not the committed `CLASSIFIER_KWARGS` itself,
-which stays calibrated to sklearn); a decision on `evolved_lattice`'s
-near-tie `C` selection if `cuml.accel` were ever used as the primary
-fitting path rather than a cross-check; and an explicit choice about
-whether any future re-run of this pipeline should use `cuml.accel` for
-speed or keep sklearn for continuity with this project's own established
-numerical history.
+A real adoption decision for the *whole confirmatory pipeline* has not
+been made, and this section's three original items are only partly
+addressed by what's happened since:
+
+- **The `max_iter` override, written into a disclosed, `cuml.accel`-
+  specific configuration, not the committed `CLASSIFIER_KWARGS` itself**
+  -- done, but only narrowly: `run_class0_support_audit_classify.py`
+  and `class0_support_audit_classify_gpu.py` both use a local
+  `CUML_MAX_ITER = 20000` constant, applied by overriding
+  `CLASSIFIER_KWARGS["max_iter"]` at runtime rather than editing the
+  committed sklearn-calibrated default -- exactly the disclosed-not-silent
+  pattern this item asked for, but scoped to the class-0-audit thread
+  alone. No general-purpose `cuml.accel`-specific config exists for the
+  CV-grid/confirmatory replication itself.
+- **`evolved_lattice`'s near-tie `C` selection** -- still entirely open.
+  No decision has been made or needed to be made, since `cuml.accel`
+  hasn't been adopted as a primary fitting path anywhere.
+- **Whether any future re-run should use `cuml.accel` or keep sklearn**
+  -- already answered, for now: this doc's own opening line states
+  plainly that no reported result has adopted `cuml.accel` and this
+  project's sklearn-based numbers remain what's reported. That's a
+  continuity decision already made, not a gap -- but it's a "for now"
+  answer, not a permanent one; revisit it explicitly if a future stage
+  makes the ~4hr sklearn CV cost a real blocker rather than an annoyance.

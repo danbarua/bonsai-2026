@@ -64,12 +64,13 @@ enumerated explicitly here instead):
    `stage2a_classifier_jax.py`, `verify_stage2a_classifier_jax.py`,
    `diagnose_classifier_jax_grad_norm_calibration.py` -- investigative,
    not used for any reported result; see that doc for why.
-5. **cuML cross-check thread** (`CUML_ACCEL_FINDINGS.md`): no dedicated
-   driver script -- reuses `analyze_stage3_results.py`,
-   `run_confirmatory_evaluation.py`, and
-   `run_class0_support_audit_classify.py` under `cuml.accel` via a
-   `--cuml` flag / `cuml.accel.install()` call, on this project's own
-   unmodified selection/fitting code.
+5. **cuML cross-check thread** (`CUML_ACCEL_FINDINGS.md`): the
+   CV-grid/confirmatory replication has no dedicated driver -- reuses
+   `analyze_stage3_results.py` and `run_confirmatory_evaluation.py`
+   under `cuml.accel` via `cuml.accel.install()`, on this project's own
+   unmodified selection/fitting code. The class-0-support audit's GPU
+   fits are the one exception with an actual committed driver: see
+   thread 7, below.
 6. **Compute-cost accounting thread** (`COMPUTE_COST_DESIGN.md` /
    `COMPUTE_COST_FINDINGS.md`): `measure_oscillator_cpu_latency.py`,
    `prep_oscillator_latency_gpu_inputs.py` + `measure_oscillator_gpu_latency.py`
@@ -78,7 +79,12 @@ enumerated explicitly here instead):
 7. **Class-0 support audit thread** (folded into `FINDINGS.md`, no
    standalone doc): `run_class0_support_audit.py` (part 1: retained-ink
    statistics, local/free), `run_class0_support_audit_classify.py`
-   (part 2: the two baseline classifier fits, `--cuml` optional).
+   (part 2: the two baseline classifier fits, `--cuml` optional, but
+   that flag combined with a local `stage2a_paths.scratch_root()` read
+   has only ever been run on local/CPU sklearn), `class0_support_audit_classify_gpu.py`
+   (part 2's actually-tested remote GPU driver -- see
+   `CUML_ACCEL_FINDINGS.md`'s "Code" section for why it's a separate
+   file, not the same script with a flag).
 8. **Topology/correlation visualization thread**: `visualize_topologies.py`,
    `visualize_normalized.py`, `plot_ink_correlation.py` +
    `diagnose_ink_correlation.py` (the correlation-table companion
@@ -108,6 +114,15 @@ verification, and the test suite -- runs through the root-level
 `Makefile`. It's the single source of truth for the actual commands
 (no duplicated filenames between README and Makefile); this section is
 a map to the targets, not a copy of them.
+
+**Local vs. remote, at a glance**: every script in this directory is
+either invoked locally (CPU, free, no `mighty-colab` session involved)
+or uploaded to and executed on a remote GPU session. The `Makefile`'s
+own `##@`-grouped sections are the actual source of truth for which is
+which -- `make stage2a-help` lists them grouped exactly that way (local
+feasibility/data-prep/analysis targets first, GPU-evolution and
+GPU-classify targets, each explicitly marked "bills while running",
+after). Don't infer this split from filenames alone.
 
 ```bash
 make stage2a-help   # from the repository root -- lists every target, grouped by pipeline stage
@@ -140,9 +155,12 @@ All targets assume the project's `uv`-managed virtualenv and
    manifest and diff it against the committed one.
 8. `stage2a-class0-audit` / `stage2a-class0-classify` -- the class-0
    support audit, post hoc, per external review's request (see
-   `FINDINGS.md`'s "class-0 confound" sections). The `--cuml` GPU
-   variant of part 2 is deliberately not a `make` target -- see the
-   comment above it in the Makefile, and `CUML_ACCEL_FINDINGS.md`.
+   `FINDINGS.md`'s "class-0 confound" sections).
+   `stage2a-class0-classify-gpu` runs part 2 under `cuml.accel` on a
+   `mighty-colab` GPU session instead -- **bills while running**, see
+   the Makefile comment above it and `CUML_ACCEL_FINDINGS.md` for why
+   it's a distinct driver script (`class0_support_audit_classify_gpu.py`) rather
+   than the local script with a flag.
 
 Override the scratch location if you don't want the default
 (`experiments/stage2a_dynamics_classification/scratch/`):
@@ -152,11 +170,15 @@ export STAGE2A_SCRATCH_ROOT=/path/to/your/scratch/dir
 ```
 
 **Follow-on threads** (JAX classifier port, NVIDIA cuML cross-check,
-compute-cost accounting) aren't in the Makefile -- each owns its
+compute-cost accounting) mostly aren't in the Makefile -- each owns its
 reproduction details directly in its own findings doc
 (`JAX_CLASSIFIER_PORT_FINDINGS.md`'s "Files" section,
 `CUML_ACCEL_FINDINGS.md`'s "Code" section, `COMPUTE_COST_FINDINGS.md`'s
-"Code" section), not centralized here.
+"Code" section), not centralized here. The one exception: the
+class-0-support audit's GPU classifier fits, wired into `make
+stage2a-class0-classify-gpu` (see "Directory contents" thread 7, and
+`CUML_ACCEL_FINDINGS.md`'s "Code" section for why that one has a
+dedicated driver when the rest of the cuML thread doesn't).
 
 ## GPU evolution
 
@@ -194,24 +216,6 @@ while `stage2a-prepare-test` doesn't need to (Stage 4's combined
 package is only ~48MB total, under the limit). Files under ~50MB
 upload fine as a single transfer.
 
-**`cuml.accel`, if extending into that territory** (see
-`CUML_ACCEL_FINDINGS.md`): install via
-`mighty-colab reinstall -s my-session --requirement cuml_requirements.txt`
-where the requirements file contains:
-```
---extra-index-url=https://pypi.nvidia.com
-cuml-cu12
-```
-Activate with `import cuml.accel; cuml.accel.install()` **before**
-importing `sklearn` (or anything that imports it) -- `cuml.accel`
-patches sklearn's estimator classes at import time. Verified to
-accelerate `LogisticRegression`; verified **not** to accelerate
-`MLPClassifier` (silent CPU fallback, no error) -- check any new
-estimator directly before trusting it, per `CUML_ACCEL_FINDINGS.md`'s
-own check-0 precedent, rather than assuming coverage. Not wired into a
-`make` target -- this is exploratory/interactive per
-`CUML_ACCEL_FINDINGS.md`, not a fixed reproduction sequence.
-
 ## Public artifact cache (GCS)
 
 The large cached artifacts behind the confirmatory result and its
@@ -221,9 +225,10 @@ mirrored in a public, read-only Google Cloud Storage bucket:
 
 ```
 gs://bonsai-2026-stage2a-cache/
-├── stage3_train/    # 60,000-image official training set artifacts
-├── stage4_test/     # 10,000-image official test set artifacts
-└── results/         # small results pkls (go/no-go, classifier conditions, confirmatory results)
+├── stage3_train/          # 60,000-image official training set artifacts
+├── stage4_test/           # 10,000-image official test set artifacts
+├── results/               # small results pkls (go/no-go, classifier conditions, confirmatory results)
+└── class0_support_audit/  # the 6 .npy inputs to class0_support_audit_classify_gpu.py (raw505/encoded784 x train/test, labels)
 ```
 
 Public HTTPS access, no authentication needed -- useful for pulling

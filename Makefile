@@ -38,6 +38,7 @@ PYTHON ?= uv run python
 MIGHTY_COLAB ?= uv run --group gpu mighty-colab
 SESSION_TRAIN ?= stage3-evolve
 SESSION_TEST ?= stage4-evolve
+SESSION_CLASS0 ?= class0-audit-gpu
 
 # GPU-target idempotency: `mighty-colab new -s <name>` provisions a fresh
 # session unconditionally, so re-running a GPU target after a partial
@@ -148,18 +149,33 @@ stage2a-class0-audit:  ## Part 1: retained-ink statistics (local, free)
 stage2a-class0-classify:  ## Part 2: the two baseline classifier fits (local sklearn; needs stage2a-prepare-train's artifacts)
 	$(PYTHON) $(STAGE2A_DIR)/run_class0_support_audit_classify.py
 
-# stage2a-class0-classify's --cuml variant (cuml.accel on a mighty-colab GPU
-# session, see CUML_ACCEL_FINDINGS.md) is deliberately NOT a target here.
-# Unlike the two evolve-*-gpu targets above, no concrete upload/exec command
-# sequence for this specific script was ever recorded anywhere in this
-# project's docs -- CUML_ACCEL_FINDINGS.md's own "Code" section only points
-# back at the README's generic cuml.accel activation steps, not at a tested
-# sequence for this script's actual inputs (which load through
-# stage2a_paths.scratch_root(), meaning a real remote run needs
-# STAGE2A_SCRATCH_ROOT=/content plus the core modules and audit inputs
-# uploaded alongside it -- untested). Fabricating an unverified command
-# sequence for a billed GPU session is worse than leaving this manual; see
-# CUML_ACCEL_FINDINGS.md directly if reproducing this thread.
+# Part 2's GPU variant: a genuinely tested and verified upload/exec
+# sequence (run for real on a mighty-colab A100 session named
+# class0-audit-gpu; its output is the raw_pixels_505restricted /
+# encoded_784_unrestricted numbers already reported in FINDINGS.md's
+# "class-0-support audit" section) -- not the committed
+# run_class0_support_audit_classify.py --cuml path (that one still reads
+# through stage2a_paths.scratch_root() and has never actually been run
+# remotely), but the dedicated remote driver
+# class0_support_audit_classify_gpu.py, which downloads its inputs
+# directly from the public GCS mirror rather than needing them uploaded.
+# See CUML_ACCEL_FINDINGS.md and that script's own docstring for the
+# distinction.
+.PHONY: stage2a-class0-classify-gpu
+stage2a-class0-classify-gpu:  ## Part 2's cuml.accel GPU variant via mighty-colab -- bills while running
+	cd $(STAGE2A_DIR) && \
+	$(MIGHTY_COLAB) sessions && \
+	if $(MIGHTY_COLAB) status -s $(SESSION_CLASS0) 2>&1 | grep -q "not found"; then \
+		$(MIGHTY_COLAB) new -s $(SESSION_CLASS0) --gpu A100; \
+	else \
+		echo "[make] Reusing existing session $(SESSION_CLASS0) (resuming after a partial run, or you re-ran this target with a session still up)"; \
+	fi && \
+	$(MIGHTY_COLAB) reinstall -s $(SESSION_CLASS0) --requirement cuml_requirements.txt && \
+	$(MIGHTY_COLAB) upload -s $(SESSION_CLASS0) stage2a_classifier.py /content/stage2a_classifier.py && \
+	$(MIGHTY_COLAB) upload -s $(SESSION_CLASS0) stage2a_stats.py /content/stage2a_stats.py && \
+	$(MIGHTY_COLAB) exec -s $(SESSION_CLASS0) -f class0_support_audit_classify_gpu.py && \
+	$(MIGHTY_COLAB) download -s $(SESSION_CLASS0) /content/class0_support_audit_classify_results.pkl results/class0_support_audit_classify_results.pkl && \
+	$(MIGHTY_COLAB) stop -s $(SESSION_CLASS0)
 
 ##@ Testing
 
