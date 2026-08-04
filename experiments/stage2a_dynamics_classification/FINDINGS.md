@@ -881,6 +881,38 @@ never all of it. This is a cleaner, more parsimonious finding than
 (local ink presence) at every condition, just attenuated by a
 condition-dependent, but never total, factor.
 
+**A further, sharper decomposition, also tested rather than assumed**
+(`results/ink_correlation_decomposed.png`): "this pixel has ink" splits
+exactly into a **population-common component** (the per-pixel mean ink
+intensity across the 10 classes -- shared, not class-discriminatory by
+construction) and a **class-discriminatory component** (that class's
+deviation from the population mean at that pixel -- the part that
+actually varies by class). Correlating each sub-component against the
+residual separately, per condition:
+
+| condition | r(common) | r(discriminatory) | ratio |
+|---|---:|---:|---:|
+| pre_evolution | +0.370 | +0.854 | 2.3x |
+| T | +0.344 | +0.639 | 1.9x |
+| lattice | +0.322 | +0.642 | 2.0x |
+| rewired | +0.187 | +0.325 | 1.7x |
+| curr_random | +0.134 | +0.240 | 1.8x |
+
+**The discriminatory component correlates more strongly than the
+common component with the surviving residual, at every single
+condition, by a consistent 1.7-2.3x margin.** This is not a foregone
+conclusion -- Pearson r is scale-invariant, so this isn't an artifact of
+the discriminatory component happening to have larger variance; it
+reflects an actual preferential preservation of the class-varying part
+of the signal, not just "there is ink somewhere in this general
+vicinity." Good news for the classification result specifically: what
+survives synchronization is weighted toward the part of the ink pattern
+that could plausibly help tell classes apart, not dominated by a shared
+baseline that couldn't. (Caveat: the population-common baseline here is
+estimated from only 10 images, one per class -- a small-sample proxy for
+"commonality across classes," sufficient to establish the direction and
+rough size of the effect, not a precise population estimate.)
+
 ## Result 3: classifier CV fitting is NOT negligible -- it dominates everything else
 
 **246.8 minutes (4.1 hours)** for the 6 conditions' full CV fitting
