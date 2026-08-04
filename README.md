@@ -101,4 +101,4 @@ uv run pytest -m "not slow"
 
 ## License
 
-TODO: Specify license (e.g., MIT, Proprietary).
+MIT -- see [`LICENSE.md`](LICENSE.md).
