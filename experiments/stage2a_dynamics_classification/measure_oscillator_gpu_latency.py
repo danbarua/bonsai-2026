@@ -1,3 +1,26 @@
+"""
+GPU single-image inference-latency measurement feeding
+`COMPUTE_COST_FINDINGS.md`'s compute-cost accounting -- not the
+confirmatory result. Different provenance from `stage3_gpu_evolve.py`/
+`stage4_gpu_evolve.py`: this script's classifiers are synthetic
+(shape-only stand-ins, never real predictors, see the inline comment
+below), the goal is timing the encode+evolve+classify pipeline's
+per-image latency at batch=1, not producing real evolved states.
+
+Not runnable locally as-is -- executes ON the remote GPU session
+(uploaded via `mighty-colab upload`, run via `mighty-colab exec`,
+paired with `prep_oscillator_latency_gpu_inputs.py`, which stages this
+script's `/content/...` inputs); see `README.md`'s "Reproducing the
+confirmatory GPU evolution" for the general upload/exec pattern and
+`COMPUTE_COST_FINDINGS.md`'s "Code" section for this thread's exact run
+order. Reuses `evolve_on_graph_jax.py` (uploaded alongside, unmodified)
+-- not a reimplementation. The `local_converged_phases`/
+`reference_node_features`/`encode_and_restrict` functions below are
+inline verbatim copies of the real numpy implementations (disclosed,
+not reimplementations from scratch), to avoid installing the whole
+`bonsai` package + other experiment folders on this fresh session for
+three small, self-contained functions.
+"""
 import sys
 sys.path.insert(0, '/content')
 import pickle
