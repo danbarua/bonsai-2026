@@ -1,4 +1,4 @@
-# Visualisation Design Proposals
+# Visualisation Design Proposals - ✅ implemented (see below)
 
 Here are concrete visualisation directions, ordered by how directly they illuminate the current frontier (state-dependent linear routing via \(\Phi(T,0)\), concentration regime, and Level-2 structure). Most can be built from already-cached Stage 1B.2 / 1C artefacts plus light re-integration of the tangent system.
 
@@ -137,7 +137,7 @@ Plots 1–3 form a natural single figure or short figure sequence that carries t
 
 ---
 
-# Implementation Response
+# Implementation Response ✅ Done
 
 **Done.** 8 new plots implementing 8 of `EXTRA_VISUALS_DESIGN.md`'s 10 items, mapped as plot5-plot12 in `generate_report_visuals.py`:
 
@@ -161,3 +161,266 @@ Plots 1–3 form a natural single figure or short figure sequence that carries t
 2. Plots 9 and 10 restrict to replica=0 (since that's what the tangent solve used), which makes seeds 3020 and 3080 look like they never concentrate — they actually do (2/36 and 5/36), just not at replica=0. Rather than leave that silently misleading, both plots now carry an asterisk/caption disclosing the restriction and the true counts.
 
 Also fixed `08_concentration_landscape.png`'s colorbar label to match.
+
+---
+
+# Extra-Extra Visuals Design Proposals
+
+---
+
+### 1. Item 10 — still the right visual?
+
+**Original gate:** “Once topology-specificity experiments exist” → same \(q_i(\tau)\) / \(J_{ij}(\tau)\) for rewired/lattice/random, plus side-by-side Δ_map and concentration frequency.
+
+**What Stage 1D actually found:** T ≈ lattice ≈ rewired ≈ hist_random ≈ curr_random on Δ_map (means ~0.327–0.338, spread ~0.012 < T’s own trajectory SD). Null is closed after confirmatory; not “we haven’t looked.”
+
+**Verdict: keep a comparison visual, but change the job.**
+
+| Original intent | Fit after Stage 1D |
+|-----------------|-------------------|
+| Hunt for T-specific routing signatures in \(q_i\) / \(J\) | **Weak** — invites hunting differences the primary endpoint did not find |
+| Show Δ_map / concentration side-by-side | **Strong** — the right visual is **equivalence / tight cluster**, not “T wins” |
+
+**Recommended rewrite of item 10:**
+
+**What:**  
+(a) Strip or forest plot of mean Δ_map (± trajectory spread) for all five constructions tested in Stage 1D — same y-scale, no “winner” highlighting.  
+(b) Optional small multiples: concentration frequency (high-degree / \(t_p{=}0\)) per construction, same style.  
+(c) **Do not** lead with full temporal-routing panels for controls unless a *secondary*, pre-registered routing endpoint is defined; exploratory \(q_i\) overlays risk overclaiming structure Stage 1D did not detect.
+
+**Why:** Communicates the actual result — structured transformation is real and **shared**, learned wiring is not required for Level 2.
+
+**Data needed:** Stage 1D analysis outputs (per-trajectory Δ_map by construction). Prose already lists means; live arrays are gitignored — generation must run from existing analysis pickles locally or recompute from locked design.
+
+**Priority:** High for any Level-2 / “what is established” figure set.
+
+---
+
+### 2. Proposed new items (13+)
+
+### 13. Stage 1D Δ_map equivalence (forest / strip)
+
+**What:** Five constructions on one axis; Δ_map on the other; points = trajectories or mean±spread; optional Holm-null annotation (“no pair separated after correction”).
+
+**Why:** Single figure for “Level 2 is real; T is not special on this measure.”
+
+**Data needed:** Stage 1D per-trajectory Δ_map (from confirmatory analysis artefacts — not in git).
+
+**Priority:** High.
+
+**Overclaim risk:** Low if caption says *internal* mapping strength, not task performance.
+
+---
+
+### 14. Stage 2A primary: evolution vs pre-evolution
+
+**What:** Paired comparison only — `encoded_pre_evolution` vs `evolved_T` (and optionally all four evolved vs shared pre-evolution baseline): test accuracy and/or mean log-loss; bootstrap CI on paired \(d_i\) as a simple interval graphic.
+
+**Why:** This is the locked Level 3 claim. One visual, one contrast.
+
+**Data needed:** Confirmatory per-image losses / metrics (gitignored pickles); numbers also in FINDINGS tables for a static annotated bar chart without re-touching arrays.
+
+**Priority:** Highest among Stage 2A figures.
+
+**Overclaim risk:** **High if merged with ranking.** Caption must not say “learned topology helps classification.” Claim is **graph evolution** helps vs pre-evolution encoding.
+
+---
+
+### 15. Stage 2A graph ranking (four evolved instances)
+
+**What:** Ordered bars or forest plot of the four evolved conditions only (curr_random, rewired, T, lattice) on test log-loss or accuracy; annotate Holm-surviving pairwise separations from the post-hoc family.
+
+**Why:** Separates “dynamics help” from “which wiring ranked where on this task.”
+
+**Data needed:** Same confirmatory outputs; pairwise results in FINDINGS.
+
+**Priority:** High, **as a separate figure from 14.**
+
+**Overclaim risk:** **High** if titled “random beats learned topology” without “these four prespecified instances” and “classification endpoint, not Δ_map.”
+
+---
+
+### 16. Two-endpoint dissociation (1D vs 2A)
+
+**What:** Two-panel or linked graphic: (left) Stage 1D Δ_map cluster — flat; (right) Stage 2A evolved ranking — ordered. Same four construction names where they overlap.
+
+**Why:** Prevents the most likely misread: that Stage 1D and Stage 2A contradict each other. They measure different things.
+
+**Data needed:** Summary statistics already in PROJECT_MEMORY / FINDINGS (can be drawn without pickles if using published means only).
+
+**Priority:** High for any external narrative; medium if only internal lab slides.
+
+**Overclaim risk:** Low if panels are explicitly labeled by endpoint; **high** if a single headline spans both panels.
+
+---
+
+### 17. Stage 2A baselines context (optional, careful)
+
+**What:** Pre-evolution, best evolved, parameter-matched MLP (H=13), competent MLP (H=128) on one accuracy axis.
+
+**Why:** Honest envelope: beats matched MLP, loses to larger MLP.
+
+**Data needed:** FINDINGS baseline table.
+
+**Priority:** Medium — useful, easy to misuse as “oscillators are worse than MLPs” without the matched-parameter frame.
+
+**Overclaim risk:** Medium; keep parameter counts in the legend.
+
+---
+
+### 18. Sync strength vs task gain (exploratory, interpretive)
+
+**What:** Scatter of graph-level sync / Fiedler (or R_post) vs classification improvement — four points only.
+
+**Why:** Touches the multistability-vs-sync hypothesis; **not** a locked causal claim.
+
+**Data needed:** FINDINGS sync diagnostics + confirmatory deltas.
+
+**Priority:** Low until a designed test exists.
+
+**Overclaim risk:** **Very high** with n=4 points — caption must say exploratory / hypothesis-generating.
+
+---
+
+### 3. Overclaim flags (cross-cutting)
+
+| Collapse | Safer split |
+|----------|-------------|
+| “T doesn’t matter” | Stage 1D: T not special on **Δ_map**. Stage 2A: evolution helps; **among instances**, T not best on **classification**. |
+| “Random graphs are better” | Four **prespecified** instances; not a family inference. |
+| “Dynamics = learned topology” | Dynamics help even when wiring is lattice/random; learned T is optional for both Level 2 and best Level 3 score here. |
+| Item 10-style routing diffs for controls | Only with a secondary endpoint; Stage 1D does not license “T routes differently.” |
+| Item 18 sync→accuracy | Hypothesis sketch, not a result figure. |
+
+Existing Stage 2A PNGs in `results/` (phase-state grids, ink correlation, topology structure, cost) are useful mechanism/context visuals; they should not substitute for **14** and **15** as the claim figures.
+
+---
+
+### 4. Suggested priority order for next builds
+
+1. **14** — Level 3 primary (evolution vs pre-evolution)  
+2. **15** — ranking, separate slide/figure  
+3. **13** / rewritten **10** — Level 2 equivalence  
+4. **16** — dissociation panel if communicating both programmes  
+5. **17** — baselines context  
+6. **18** — only if explicitly marked exploratory  
+
+I did not read any `.pkl`/`.npz`; anywhere a visual needs per-trajectory or per-image arrays, generation has to run where those caches exist locally. Summary means in FINDINGS/PROJECT_MEMORY are enough for static claim figures **13–17** if you annotate from prose.
+
+---
+
+## Claude Expansion Context re: Extra-Extra-Visuals
+
+Context (you won't have this from any prior conversation): Grok has been 
+acting as the plain-English visual-design reviewer for this project — it 
+drafted the original EXTRA_VISUALS_DESIGN.md (items 1–10), you implemented 
+8 of them as plots 5–12 in docs/report_visuals/generate_report_visuals.py. 
+That pattern continues here: Grok proposes, you implement.
+
+I've appended Grok's new proposals to EXTRA_VISUALS_DESIGN.md — a rewrite of 
+item 10 plus new items 13–18, covering Stage 1D (topology specificity) and 
+Stage 2A (dynamics-classification), which had no visual coverage before now. 
+Read that file in full before starting; it has priority ordering and 
+overclaim-risk notes on every item that matter as much as the "what to build" 
+part.
+
+One correction to make on top of what's written there, and this is the part 
+most likely to get lost without conversation context: item 15 (the four-graph 
+ranking figure) needs to visually distinguish the five decisive pairwise 
+separations from the one marginal one. Specifically: the post-hoc Holm-
+corrected pairwise comparison among the four evolved graphs (T, lattice, 
+rewired, curr_random) originally used a bootstrap that wasn't properly 
+null-calibrated; that was caught and fixed with a paired sign-flip permutation 
+test (see FINDINGS.md and the commit that replaced it). The corrected result: 
+all 6 of 6 pairs still survive Holm at α=0.05, but rewired-vs-curr_random is 
+explicitly flagged in FINDINGS.md as genuinely marginal (p≈0.046, stable 
+across reruns and permutation counts, but with essentially no margin) — 
+unlike the other five, which are at the Monte Carlo floor. If item 15's 
+figure shows all six pairs with the same significance annotation, it 
+misrepresents how fragile that one gap is. Give it a visibly different 
+treatment (e.g. dashed vs. solid bracket, or an explicit footnote naming the 
+marginal pair) rather than one uniform "Holm-surviving" style.
+
+Two things to hold as guardrails throughout, not just for item 15:
+
+1. Stage 1D and Stage 2A are different endpoints and must never share a 
+   headline. Stage 1D: T is statistically indistinguishable from all four 
+   controls on Δ_map (a null result, closed). Stage 2A: graph evolution 
+   improves classification vs. pre-evolution encoding — for all four graphs, 
+   not just T — and separately, T is not the best-ranked of the four evolved 
+   graphs on this task. "T doesn't matter," "random graphs are better," and 
+   "learned topology helps classification" are all overclaims of what's 
+   actually established — see the "Overclaim flags" table in the design doc 
+   for the specific collapses to avoid.
+
+2. Grok explicitly did not read any .pkl/.npz (they're gitignored, never 
+   committed — it worked entirely from FINDINGS.md/PROJECT_MEMORY.md prose 
+   and approximated some numbers accordingly). You have real filesystem 
+   access to those caches — compute exact figures from the actual data 
+   rather than trusting Grok's paraphrased numbers as final. If anything you 
+   compute meaningfully disagrees with what's written in FINDINGS.md or the 
+   design doc, disclose it rather than silently reconciling — same standard 
+   as the rest of this project.
+
+Build order per the design doc's own priority list: item 14 (Level 3 primary: 
+evolution vs. pre-evolution) first, then 15 (ranking, with the marginal-pair 
+fix above), then 13/rewritten-10 (Level 2 equivalence), then 16 (two-endpoint 
+dissociation panel), then 17 and 18 only if you have time — 18 is explicitly 
+exploratory with n=4 points and must be captioned as hypothesis-generating, 
+not a result.
+
+Match whatever file/script convention already fits — docs/report_visuals/ 
+for the Level-2 style plots, or alongside the existing Stage 2A visualize_*/
+plot_*.py scripts in experiments/stage2a_dynamics_classification/, whichever 
+the existing repo structure suggests fits each item best. You have better 
+visibility into that than this handoff note does.
+
+---
+
+# Implementation Response (Extra-Extra) ✅ Done
+
+**Done.** 5 of the 6 proposed items (13-17), mapped 1:1 as plot13-plot17
+in `generate_report_visuals.py` (unlike plots 5-12, which didn't map
+1:1 onto the original design doc's numbering, these do):
+
+| Design item                          | Plot                                  |
+| ------------------------------------- | -------------------------------------- |
+| 13 / rewritten 10. Δ_map equivalence | `13_stage1d_delta_map_equivalence.png` |
+| 14. Evolution vs pre-evolution        | `14_stage2a_evolution_vs_preevolution.png` |
+| 15. Four-graph ranking                | `15_stage2a_graph_ranking.png`         |
+| 16. Two-endpoint dissociation         | `16_two_endpoint_dissociation.png`     |
+| 17. Baselines context                 | `17_stage2a_baselines_context.png`     |
+
+**Skipped, disclosed in the docstring**: item 18 (sync/Fiedler vs.
+task-gain scatter) — per this doc's own priority ordering ("only if
+explicitly marked exploratory"), and n=4 with no designed test behind
+it. Left for a future pass if that test gets designed.
+
+**Data, all real, none paraphrased**: every number came from the
+underlying cached analysis pickles (`stage1c_final_analysis.pkl`,
+`stage1d_lattice_analysis.pkl`, `stage1d_confirmatory_analysis.pkl`,
+`stage4_confirmatory_results.pkl`, `stage4_posthoc_pairwise_results.pkl`),
+not from this doc's own prose. Checked against it anyway, per the
+"don't trust Grok's paraphrased numbers as final" instruction above:
+plot13's five construction means (T=0.3296, lattice=0.3381,
+rewired=0.3283, hist_random=0.3288, curr_random=0.3266) matched
+PROJECT_MEMORY.md exactly — no discrepancy to disclose.
+
+**The item 15 marginal-pair fix, done as specified**: `raw_p` for all
+six pairwise comparisons pulled directly from
+`stage4_posthoc_pairwise_results.pkl` — five sit between 5.0e-05 and
+0.0075, one (`rewired` vs `curr_random`) sits at 0.046. The figure
+draws all six Holm-corrected brackets (stacked by rank-span) but the
+marginal pair gets a dashed line, a distinct colour, bold text, and an
+explicit "(marginal)" label — the other five are solid black with a
+bare p-value. Stage 1D and Stage 2A never share a headline anywhere in
+13/15/16 — each figure's title names its own endpoint (Δ_map vs.
+classification log-loss) explicitly.
+
+**Two layout bugs caught by actually looking at the rendered PNGs, not
+just checking for exceptions**: plot13's per-construction annotations
+were first placed just below the x-axis and collided with the tick
+labels; plot15's pairwise-bracket spacing was first sized off the
+~0.13 inter-bar spread rather than the 0-0.8 axis range, crowding all
+three stacked bracket levels into a sliver near the top. Both fixed,
+both re-rendered, both re-inspected before being called done.
