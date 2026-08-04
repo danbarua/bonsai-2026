@@ -15,12 +15,12 @@ on its own.
 `experiments/stage2a_dynamics_classification/analyze_stage3_results.py`
 (the phase-2 combine-and-classify step for feasibility stage 3, 60,000
 images x 4 topologies) had been running for hours. A JAX-vectorized
-port of it existed (`analyze_stage_3_results_jax.py`) and the question
+port of it existed (`analyze_stage3_results_jax.py`) and the question
 was whether running it on GPU would resolve the runtime.
 
 ## Finding 1: the existing JAX port speeds up the wrong step
 
-`analyze_stage_3_results_jax.py` batches `R_post`/`feat_post`
+`analyze_stage3_results_jax.py` batches `R_post`/`feat_post`
 computation (`stage2a_core.order_parameter` /
 `reference_node_features`) via `jax.vmap`, replacing a Python loop over
 240,000 (image x topology) pairs. This was verified correct:
@@ -31,7 +31,7 @@ computation (`stage2a_core.order_parameter` /
   `|R_ref - R_jax|` = 3.469e-17, max `|feat_ref - feat_jax|` = 0.0.
 - Full `build_results_structure` output (including solver-failure
   handling across all four topologies), compared field-by-field between
-  `analyze_stage3_results.py` and `analyze_stage_3_results_jax.py` on
+  `analyze_stage3_results.py` and `analyze_stage3_results_jax.py` on
   synthetic mock data with injected solver failures: 0 mismatches, max
   numeric diff 2.220e-16.
 
@@ -70,9 +70,9 @@ in a prior session:
 So the only genuinely unported piece of the classification pipeline was
 the classifier CV fit itself -- `stage2a_classifier.select_C_via_cv`.
 
-## The classifier port: `stage_2a_classifier_jax.py`
+## The classifier port: `stage2a_classifier_jax.py`
 
-New file, `experiments/stage2a_dynamics_classification/stage_2a_classifier_jax.py`.
+New file, `experiments/stage2a_dynamics_classification/stage2a_classifier_jax.py`.
 Reimplements `stage2a_classifier.select_C_via_cv`'s multinomial
 logistic regression (L2-regularized, 5-fold stratified CV over the
 locked 9-value `C` grid) with the model fit itself done in JAX:
@@ -189,7 +189,7 @@ validated stand-in for the real 6-condition production runtime.**
 Read-only against the actual Stage-3 artifacts
 (`stage3_encode_local.pkl`, `stage3_gpu_results.pkl`; 60,000 images,
 `ref_idx=363`, 0 solver failures across all 4 topologies at full scale)
-via the already-verified `analyze_stage_3_results_jax.build_results_structure`.
+via the already-verified `analyze_stage3_results_jax.build_results_structure`.
 Nothing was written to `experiments/stage2a_dynamics_classification/results/`
 or the shared scratch directory.
 
@@ -240,7 +240,7 @@ already-trusted sklearn path, during this follow-up).
 `stage2a_classifier._fit_one`'s fitted `coef_`/`intercept_`, for each
 `C` in the locked grid, on real `evolved_T` data (6000-image stratified
 subsample, fold 0, `n_train=4800`) -- with `||grad||` recomputed using
-`stage_2a_classifier_jax._make_loss_fn` directly (not reimplemented):
+`stage2a_classifier_jax._make_loss_fn` directly (not reimplemented):
 
 | C | sklearn `n_iter` | converged | `\|\|grad\|\|` at sklearn's solution |
 |---:|---:|---|---:|
@@ -294,7 +294,7 @@ absorbs both the trend and the noise reasonably; a tighter
 
 ### Implementation
 
-`stage_2a_classifier_jax.py` changed:
+`stage2a_classifier_jax.py` changed:
 
 - `GRAD_NORM_TOL=1e-6` (fixed absolute) replaced with
   `GRAD_NORM_REL=6e-3` (~2x the max observed ratio, 2.771e-3), applied
@@ -573,10 +573,10 @@ replacement for slow and right.
 ## A reproducibility gap in this investigation itself, found and closed
 
 **Self-review finding, not part of external review's original pass**:
-`stage_2a_classifier_jax.py`'s own module docstring twice references
-`verify_stage_2a_classifier_jax.py` by name ("see
-verify_stage_2a_classifier_jax.py", "See
-verify_stage_2a_classifier_jax.py's debug history") -- but that file was
+`stage2a_classifier_jax.py`'s own module docstring twice references
+`verify_stage2a_classifier_jax.py` by name ("see
+verify_stage2a_classifier_jax.py", "See
+verify_stage2a_classifier_jax.py's debug history") -- but that file was
 never actually committed, only ever existing in an interactive session's
 local scratch directory. A dangling reference in committed code, the
 same category of gap external review flagged for the confirmatory
@@ -584,7 +584,7 @@ pipeline (since resolved -- see `FINDINGS.md`'s "Reproducibility gaps"
 section), just in this investigation's own follow-on code instead.
 Closed the same way: two scripts committed.
 
-- `verify_stage_2a_classifier_jax.py` -- the file the docstring already
+- `verify_stage2a_classifier_jax.py` -- the file the docstring already
   pointed at. Synthetic-data-only (fast, no dependency on cached real
   artifacts): correctness (`best_C` match + reported loss-curve gap)
   across three synthetic cases, plus a 10-repetition stress test of the
@@ -611,13 +611,13 @@ Closed the same way: two scripts committed.
 
 ## Files
 
-- `stage_2a_classifier_jax.py` -- the port (new, this investigation;
+- `stage2a_classifier_jax.py` -- the port (new, this investigation;
   updated during the follow-up with the `GRAD_NORM_REL` recalibration).
-- `verify_stage_2a_classifier_jax.py`,
+- `verify_stage2a_classifier_jax.py`,
   `diagnose_classifier_jax_grad_norm_calibration.py` -- verification/
   diagnostic scripts for the above, committed per the reproducibility
   gap noted directly above (previously only in local scratch).
-- `analyze_stage_3_results_jax.py` -- R_post/feat_post JAX port (existed
+- `analyze_stage3_results_jax.py` -- R_post/feat_post JAX port (existed
   before this investigation; verified here as a side effect of building
   the real-data test).
 - `evolve_on_graph_jax.py`, `stage2a_pipeline_jax.py` -- ODE-evolution

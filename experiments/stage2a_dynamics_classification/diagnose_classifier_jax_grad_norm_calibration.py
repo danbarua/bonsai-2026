@@ -1,6 +1,6 @@
 """
 Diagnostic-only (not part of any locked pipeline): reproduces the two
-real-data measurements behind stage_2a_classifier_jax.py's GRAD_NORM_REL
+real-data measurements behind stage2a_classifier_jax.py's GRAD_NORM_REL
 recalibration, documented in JAX_CLASSIFIER_PORT_FINDINGS.md's
 "Follow-up: convergence-criterion recalibration (evolved_T)" section.
 Committed because those numbers were previously only reproducible from
@@ -8,7 +8,7 @@ an interactive session's scratch scripts -- a real reproducibility gap,
 not because either check is part of Stage 2A's locked pipeline.
 
 Uses the real, cached evolved_T features (via the already-verified
-analyze_stage_3_results_jax.build_results_structure -- not
+analyze_stage3_results_jax.build_results_structure -- not
 reimplemented), a stratified 6,000-of-60,000-image subsample (seed=0),
 matching exactly what JAX_CLASSIFIER_PORT_FINDINGS.md reports. Requires
 the real Stage-3 training artifacts locally
@@ -20,7 +20,7 @@ Two checks, run in sequence:
 1. **Grad-norm calibration** (Step 1): fits sklearn to convergence at
    each locked C value on evolved_T's fold-0 training partition, then
    recomputes ||grad|| at sklearn's own converged solution using
-   stage_2a_classifier_jax's own loss/gradient formula (not
+   stage2a_classifier_jax's own loss/gradient formula (not
    reimplemented). Reproduces the table showing sklearn's achieved
    ||grad|| spans eight orders of magnitude and is three to eleven
    orders of magnitude looser than the module's original fixed
@@ -64,8 +64,8 @@ _THIS_DIR = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, _THIS_DIR)
 
 import stage2a_classifier as ref
-import stage_2a_classifier_jax as jaxclf
-import analyze_stage_3_results_jax as azjax
+import stage2a_classifier_jax as jaxclf
+import analyze_stage3_results_jax as azjax
 
 N_SUBSAMPLE = 6000
 SUBSAMPLE_SEED = 0
@@ -129,7 +129,7 @@ def check_1_grad_norm_calibration(X, y):
         b = jnp.asarray(clf.intercept_, dtype=jnp.float64)
         # THIS module's own loss function -- not reimplemented -- so the
         # gradient norm reported is directly comparable to what
-        # stage_2a_classifier_jax's own convergence check uses.
+        # stage2a_classifier_jax's own convergence check uses.
         loss_fn = jaxclf._make_loss_fn(jnp.asarray(X_tr_s), jnp.asarray(y_tr_onehot), C)
         grad = jax.grad(loss_fn)((W, b))
         gnorm = float(jaxclf._tree_l2_norm(grad))

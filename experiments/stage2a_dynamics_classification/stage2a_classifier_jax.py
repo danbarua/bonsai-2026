@@ -33,7 +33,7 @@ stage2a_classifier.py's locked procedure:
   flat direction that does not affect predict_proba), a tightly
   converged fit here should land on the same predictions as sklearn's,
   and therefore closely matching mean_val_loss / selected C -- but
-  this is a claim to verify (see verify_stage_2a_classifier_jax.py),
+  this is a claim to verify (see verify_stage2a_classifier_jax.py),
   not to assume.
 
 ## Convergence threshold derivation (GRAD_NORM_REL)
@@ -158,7 +158,7 @@ def _solve_one(C, X, y_onehot, n_features, n_classes, max_iter, grad_norm_rel=GR
     y_k . s_k collapse near zero (classic L-BFGS curvature degeneracy,
     most likely exactly where C is weak enough that the objective is
     nearly pure-quadratic and a step lands very close to the optimum).
-    See verify_stage_2a_classifier_jax.py's debug history for the
+    See verify_stage2a_classifier_jax.py's debug history for the
     isolation trail (batch-of-1 reproduction, order-dependence ruled out,
     sklearn-interleaving ruled out).
 

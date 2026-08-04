@@ -1,8 +1,8 @@
 """
-Verifies stage_2a_classifier_jax.select_C_via_cv_jax against
+Verifies stage2a_classifier_jax.select_C_via_cv_jax against
 stage2a_classifier.select_C_via_cv, and stress-tests the vmap/
 lax.while_loop NaN-guard fix -- both referenced by name from
-stage_2a_classifier_jax.py's own module docstring and from
+stage2a_classifier_jax.py's own module docstring and from
 JAX_CLASSIFIER_PORT_FINDINGS.md, but not previously committed (a real
 reproducibility gap: the docstring pointed at a file that only existed
 in a local scratch directory). Synthetic data only -- never touches the
@@ -12,10 +12,10 @@ checks that motivated GRAD_NORM_REL's recalibration.
 
 Two checks:
   1. Correctness: per-C mean validation log-loss curves and best_C
-     selection, stage_2a_classifier_jax vs. stage2a_classifier, on three
+     selection, stage2a_classifier_jax vs. stage2a_classifier, on three
      synthetic cases of increasing size/dimensionality.
   2. Robustness: repeated runs of the case that originally exposed the
-     vmap/lax.while_loop NaN flakiness (see stage_2a_classifier_jax.py's
+     vmap/lax.while_loop NaN flakiness (see stage2a_classifier_jax.py's
      _solve_one docstring), asserting zero NonConvergenceError/NaN
      failures -- a smaller, always-run version of the 13/20-run
      CPU/GPU stress test documented in JAX_CLASSIFIER_PORT_FINDINGS.md.
@@ -31,7 +31,7 @@ _THIS_DIR = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, _THIS_DIR)
 
 import stage2a_classifier as ref
-import stage_2a_classifier_jax as jaxclf
+import stage2a_classifier_jax as jaxclf
 
 # Reasonable given best_C selection is exact-match in every case checked
 # so far; the per-C curve itself is NOT held to this bound (see
@@ -82,7 +82,7 @@ def run_case(name, n_samples, n_features, n_classes, seed=0):
 
 def stress_test_nan_guard(n_reps=10):
     """The case that originally exposed the vmap/lax.while_loop NaN
-    flakiness (n=3000, d=200, k=10 -- see stage_2a_classifier_jax.py's
+    flakiness (n=3000, d=200, k=10 -- see stage2a_classifier_jax.py's
     _solve_one docstring for the isolation trail). Asserts zero
     failures across n_reps fresh process-level calls; the underlying
     bug was nondeterministic run-to-run, not within a single call, so
@@ -103,7 +103,7 @@ def stress_test_nan_guard(n_reps=10):
     print(f"\n{n_failed}/{n_reps} failed")
     assert n_failed == 0, (
         f"{n_failed}/{n_reps} runs hit the vmap/lax.while_loop NaN flakiness -- "
-        f"the guard fix in stage_2a_classifier_jax.py's _solve_one is not holding.")
+        f"the guard fix in stage2a_classifier_jax.py's _solve_one is not holding.")
     print("PASS: zero NaN-guard failures.")
 
 
