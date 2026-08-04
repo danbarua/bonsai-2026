@@ -20,9 +20,32 @@ _STAGE2A_DIR = _REPO_ROOT / "experiments" / "stage2a_dynamics_classification"
 _KMNIST_DIR = _REPO_ROOT / "datasets" / "kmnist"
 sys.path.insert(0, str(_STAGE2A_DIR))
 
+# Amended by external review: the original skip condition checked only
+# KMNIST presence, but build_all_topologies() -> build_and_verify_T()
+# ALSO needs the cross-stage historical artifact
+# stage1b2_structured_transformation/results/class0_constructions.pkl
+# (gitignored, not committed) to verify the reconstructed T against. A
+# fresh clone with KMNIST present but that artifact missing would have
+# errored inside the fixture instead of skipping cleanly -- checking
+# only one of two required preconditions. Both are now checked.
 _kmnist_present = (_KMNIST_DIR / "train-images-idx3-ubyte").exists()
+_class0_constructions_path = (
+    _REPO_ROOT / "experiments" / "stage1b2_structured_transformation"
+    / "results" / "class0_constructions.pkl")
+_class0_constructions_present = _class0_constructions_path.exists()
+_tier2_data_present = _kmnist_present and _class0_constructions_present
 
-pytestmark = pytest.mark.skipif(not _kmnist_present, reason="datasets/kmnist not present locally")
+if not _kmnist_present:
+    _skip_reason = "datasets/kmnist not present locally"
+elif not _class0_constructions_present:
+    _skip_reason = (
+        f"{_class0_constructions_path.relative_to(_REPO_ROOT)} not present "
+        f"locally (gitignored historical artifact, needed by "
+        f"build_and_verify_T() to verify the reconstructed T against)")
+else:
+    _skip_reason = ""
+
+pytestmark = pytest.mark.skipif(not _tier2_data_present, reason=_skip_reason)
 
 
 @pytest.fixture(scope="module")
