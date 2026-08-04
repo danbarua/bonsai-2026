@@ -12,14 +12,32 @@ already computed and saved by run_confirmatory_evaluation.py
 (results/stage4_confirmatory_results.pkl). This is a new bootstrap
 computation on existing data only.
 
-Identical statistical procedure to the locked primary/secondary
-comparisons (DESIGN.md's "Confirmatory endpoint and test"): for each
-pair, d_i = ell_i(graph_A) - ell_i(graph_B), 20,000 paired
-class-stratified bootstrap resamples, two-sided 95% percentile interval
-on mean d_i. This is new, un-pre-registered multiple-comparison
-territory (DESIGN.md only locked the four graph-vs-pre-evolution tests)
--- Holm-Bonferroni correction across all six comparisons, as one family,
-is applied here, not optional.
+For each pair, d_i = ell_i(graph_A) - ell_i(graph_B). Two separate
+statistics are computed, deliberately not conflated:
+
+1. **Descriptive interval**: the same 20,000 paired class-stratified
+   bootstrap procedure as the locked primary/secondary comparisons
+   (DESIGN.md), reported as a pointwise 95% percentile interval on
+   mean d_i -- kept exactly as before, per external review's own
+   guidance that these intervals "can remain as pointwise descriptive
+   intervals."
+2. **Inferential p-value, for the Holm family**: a paired sign-flip
+   permutation test (`stage2a_stats.paired_sign_flip_p`), NOT the
+   bootstrap-derived `bootstrap_two_sided_p`. External review found the
+   latter is not properly null-calibrated for a family-wise-error
+   claim -- it is closely related to inverting the percentile CI
+   (a distribution centred on the observed effect), not a genuine
+   simulation of the null. Sign-flipping is: under H0 (no systematic
+   difference between the two evolved conditions), each image's d_i is
+   exchangeable with -d_i, so independently flipping signs directly
+   simulates the null distribution (CLAUDE.md principle 10), unit-tested
+   on synthetic data first (tests/test_stage2a_stats.py) per that same
+   principle's explicit requirement.
+
+This is new, un-pre-registered multiple-comparison territory (DESIGN.md
+only locked the four graph-vs-pre-evolution tests) -- Holm-Bonferroni
+correction across all six sign-flip-test p-values, as one family, is
+applied here, not optional.
 """
 import os
 import pickle
@@ -30,7 +48,7 @@ sys.path.insert(0, _THIS_DIR)
 RESULTS_DIR = os.path.join(_THIS_DIR, "results")
 
 from stage2a_stats import (  # noqa: E402
-    N_RESAMPLES, paired_class_stratified_bootstrap, bootstrap_two_sided_p, holm_bonferroni,
+    N_RESAMPLES, paired_class_stratified_bootstrap, paired_sign_flip_p, holm_bonferroni,
 )
 
 EVOLVED_CONDITIONS = ["evolved_T", "evolved_lattice", "evolved_rewired", "evolved_curr_random"]
@@ -49,23 +67,24 @@ def main():
             pairs.append((EVOLVED_CONDITIONS[i], EVOLVED_CONDITIONS[j]))
     assert len(pairs) == 6, f"expected 6 pairs, got {len(pairs)}"
 
-    print(f"\nRunning all {len(pairs)} pairwise comparisons, "
-          f"{N_RESAMPLES} paired class-stratified bootstrap resamples each...\n")
+    print(f"\nRunning all {len(pairs)} pairwise comparisons: {N_RESAMPLES} paired "
+          f"class-stratified bootstrap resamples each (descriptive interval only) "
+          f"plus a separate {N_RESAMPLES}-permutation paired sign-flip test "
+          f"(the inferential p-value the Holm family below actually uses)...\n")
     results = {}
     for a, b in pairs:
         d_ab = ell_i[a] - ell_i[b]
         boot = paired_class_stratified_bootstrap(d_ab, y_test)
-        p = bootstrap_two_sided_p(boot["resampled_means"], N_RESAMPLES)
-        if boot["ci_high"] < 0:
-            verdict = f"{a} IMPROVES over {b}"
-        elif boot["ci_low"] > 0:
-            verdict = f"{b} IMPROVES over {a}"
-        else:
-            verdict = "NULL (straddles zero)"
+        p = paired_sign_flip_p(d_ab, n_perms=N_RESAMPLES)
+        # Descriptive only -- which condition has the lower observed mean
+        # loss, NOT a significance claim (that's what the Holm-corrected
+        # sign-flip p-value below is for).
+        direction = f"{a} lower" if boot["observed_mean"] < 0 else f"{b} lower"
         results[(a, b)] = {"observed_mean": boot["observed_mean"], "ci_low": boot["ci_low"],
-                            "ci_high": boot["ci_high"], "raw_p": p, "verdict": verdict}
+                            "ci_high": boot["ci_high"], "raw_p": p, "direction": direction}
         print(f"[{a} vs {b}] mean_d={boot['observed_mean']:+.4f}, "
-              f"95% CI=[{boot['ci_low']:+.4f}, {boot['ci_high']:+.4f}], raw_p={p:.4e} -> {verdict}")
+              f"95% CI (descriptive)=[{boot['ci_low']:+.4f}, {boot['ci_high']:+.4f}], "
+              f"sign-flip raw_p={p:.4e} -> {direction}")
 
     raw_p = {k: v["raw_p"] for k, v in results.items()}
     adjusted, rejected = holm_bonferroni(raw_p, alpha=0.05)

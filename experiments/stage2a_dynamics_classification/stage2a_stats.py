@@ -85,12 +85,51 @@ def bootstrap_two_sided_p(resampled_means, n_resamples):
     """Two-sided p-value from a percentile bootstrap distribution, via the
     double-the-smaller-tail method, with the Monte Carlo floor convention
     (CLAUDE.md principle 6) applied to each one-sided tail so a p-value is
-    never reported as exactly zero when zero resamples cross zero."""
+    never reported as exactly zero when zero resamples cross zero.
+
+    NOT null-calibrated -- flagged by external review and NOT used for the
+    post hoc graph-to-graph Holm-corrected family (see
+    paired_sign_flip_p below). This distribution is centred on the
+    OBSERVED effect (via ordinary paired-bootstrap resampling), so reading
+    off how often it crosses zero is closely related to inverting the
+    percentile CI, not a genuine simulation of the null distribution --
+    adequate for the locked primary/secondary tests, where the pre-
+    registered decision rule is exactly "does the 95% CI exclude zero"
+    (this function's p-value and that CI-exclusion rule agree by
+    construction), but not a properly calibrated p-value for a
+    family-wise-error claim across multiple new, un-pre-registered
+    comparisons. Kept for that locked-CI-consistent use; do not reuse it
+    for calibrated inference elsewhere."""
     n_below = int(np.sum(resampled_means < 0))
     n_above = int(np.sum(resampled_means > 0))
     p_low = (1 + n_above) / (n_resamples + 1)   # H0: mean_d >= 0
     p_high = (1 + n_below) / (n_resamples + 1)  # H0: mean_d <= 0
     return min(1.0, 2 * min(p_low, p_high))
+
+
+def paired_sign_flip_p(d, n_perms=N_RESAMPLES, seed=BOOTSTRAP_SEED):
+    """Null-calibrated two-sided p-value for a paired-difference test, via
+    sign-flip permutation: under H0 (no systematic difference between the
+    two conditions), each image's d_i is exchangeable with -d_i, so
+    independently flipping each d_i's sign with probability 0.5 and
+    recomputing the mean directly simulates the null distribution --
+    unlike bootstrap_two_sided_p above (see its docstring), this actually
+    destroys the effect being tested for under the null, per CLAUDE.md
+    principle 10. Test statistic: |mean(d)|. Monte Carlo p-value with the
+    +1 floor convention (CLAUDE.md principle 6): p = (1 + n_as_extreme) /
+    (n_perms + 1), never reported as exactly zero.
+
+    Unit-tested directly on synthetic data (test_stage2a_stats.py, per
+    CLAUDE.md principle 10's explicit requirement): identical-valued
+    (zero-difference) input gives p~1; a large, constant, one-directional
+    difference gives p at the Monte Carlo floor."""
+    rng = np.random.default_rng(seed)
+    n = len(d)
+    observed = abs(float(np.mean(d)))
+    signs = rng.choice([-1.0, 1.0], size=(n_perms, n))
+    perm_means = np.abs((signs * d).mean(axis=1))
+    n_as_extreme = int(np.sum(perm_means >= observed))
+    return (1 + n_as_extreme) / (n_perms + 1)
 
 
 def holm_bonferroni(raw_p, alpha=0.05):

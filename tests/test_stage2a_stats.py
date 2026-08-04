@@ -171,6 +171,51 @@ def test_bootstrap_p_near_one_when_evenly_split():
     assert p > 0.9
 
 
+# ---- Tier 1: paired_sign_flip_p ----
+# Per CLAUDE.md principle 10 ("a permutation scheme must actually destroy
+# the effect it's testing for under the null... always unit-test a new
+# permutation scheme on synthetic data first: identical input maps should
+# give the test statistic ~0; maximally separated, reproducible maps
+# should give a clearly positive, significant result") -- added when
+# external review found bootstrap_two_sided_p was not properly
+# null-calibrated for the post hoc pairwise Holm family.
+
+def test_sign_flip_p_near_one_for_zero_difference():
+    """Identical maps (zero difference everywhere): the null is exactly
+    true, so p should be close to 1, not small."""
+    d = np.zeros(2000)
+    p = stats.paired_sign_flip_p(d, n_perms=5000)
+    assert p > 0.9
+
+
+def test_sign_flip_p_at_floor_for_large_constant_difference():
+    """Maximally separated: a large, constant, one-directional difference
+    across every image should be clearly significant, at the Monte Carlo
+    floor (CLAUDE.md principle 6) with this many permutations."""
+    d = np.full(2000, 10.0)
+    p = stats.paired_sign_flip_p(d, n_perms=5000)
+    assert abs(p - 1 / 5001) < 1e-12
+
+
+def test_sign_flip_p_reproducible_with_same_seed():
+    rng = np.random.default_rng(0)
+    d = rng.normal(-0.1, 1.0, size=500)
+    p1 = stats.paired_sign_flip_p(d, n_perms=2000, seed=1)
+    p2 = stats.paired_sign_flip_p(d, n_perms=2000, seed=1)
+    assert p1 == p2
+
+
+def test_sign_flip_p_intermediate_for_realistic_moderate_effect():
+    """A moderate, noisy effect at a modest sample size should land
+    somewhere genuinely intermediate -- not floored, not near 1 --
+    confirming the test has real discriminating power, not just the two
+    extremes checked above."""
+    rng = np.random.default_rng(2)
+    d = rng.normal(0.05, 1.0, size=200)  # small effect relative to noise
+    p = stats.paired_sign_flip_p(d, n_perms=5000)
+    assert 0.01 < p < 0.99
+
+
 # ---- Tier 1: holm_bonferroni ----
 
 def test_holm_bonferroni_hand_computed_example():

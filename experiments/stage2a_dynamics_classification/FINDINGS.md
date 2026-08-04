@@ -1532,58 +1532,92 @@ evaluation.py` (`results/stage4_confirmatory_results.pkl`). This is a
 new bootstrap computation on existing data only
 (`run_posthoc_graph_pairwise.py`).
 
-**Method**: identical to the locked primary/secondary procedure --
-`d_i = ell_i(graph_A) - ell_i(graph_B)`, 20,000 paired class-stratified
-bootstrap resamples of the test set, two-sided 95% percentile interval
-on mean `d_i`, same `seed=42`. All six pairwise comparisons among the
-four evolved graphs, not a subset chosen after seeing which looked
-interesting. Because this is new, un-pre-registered multiple-comparison
-territory (`DESIGN.md` only locked the four graph-vs-pre-evolution
-tests, never graph-vs-graph), **Holm-Bonferroni correction across all
-six comparisons, as one family, is applied** -- not optional here, per
-this project's own standing rule (`CLAUDE.md` principle 3).
+**Method, amended by external review**: the original version of this
+section used one bootstrap procedure for both the descriptive interval
+and the `p`-value feeding Holm correction. External review found that
+conflation wrong: a `p`-value read off a bootstrap distribution centred
+on the *observed* effect (how often it crosses zero) is closely related
+to inverting the percentile CI, not a properly null-calibrated
+`p`-value suitable for a family-wise-error claim -- adequate for the
+locked primary/secondary tests (where the pre-registered decision rule
+*is* "does the 95% CI exclude zero," so the two agree by construction),
+but not for this new, un-pre-registered six-comparison family. Two
+statistics are now computed separately:
 
-| comparison | mean `d_i` | 95% CI | raw `p` | Holm-adjusted `p` | survives (alpha=0.05) |
+1. **Descriptive interval** (unchanged): `d_i = ell_i(graph_A) -
+   ell_i(graph_B)`, 20,000 paired class-stratified bootstrap resamples,
+   two-sided 95% percentile interval on mean `d_i`, same `seed=42`.
+2. **Inferential `p`-value, for Holm correction**: a paired sign-flip
+   permutation test (`stage2a_stats.paired_sign_flip_p`) -- under H0 (no
+   systematic difference between the two graphs), each image's `d_i` is
+   exchangeable with `-d_i`, so independently flipping signs directly
+   simulates the null distribution (`CLAUDE.md` principle 10: "a
+   permutation scheme must actually destroy the effect it's testing for
+   under the null"), unit-tested on synthetic data first
+   (`tests/test_stage2a_stats.py`) per that same principle's explicit
+   requirement: identical (zero-difference) input gives `p~1`;
+   maximally separated (large constant difference) input gives `p` at
+   the Monte Carlo floor.
+
+All six pairwise comparisons among the four evolved graphs, not a
+subset chosen after seeing which looked interesting. Because this is
+new, un-pre-registered multiple-comparison territory (`DESIGN.md` only
+locked the four graph-vs-pre-evolution tests, never graph-vs-graph),
+**Holm-Bonferroni correction across all six sign-flip-test `p`-values,
+as one family, is applied** -- not optional here, per this project's
+own standing rule (`CLAUDE.md` principle 3).
+
+| comparison | mean `d_i` | 95% CI (descriptive) | sign-flip raw `p` | Holm-adjusted `p` | survives (alpha=0.05) |
 |---|---:|---|---:|---:|---|
-| T vs. lattice | -0.0748 | [-0.0935, -0.0564] | 9.9995e-05 | 5.9997e-04 | **yes** |
-| T vs. curr_random | +0.0558 | [+0.0307, +0.0803] | 9.9995e-05 | 5.9997e-04 | **yes** |
-| lattice vs. rewired | +0.1076 | [+0.0844, +0.1312] | 9.9995e-05 | 5.9997e-04 | **yes** |
-| lattice vs. curr_random | +0.1305 | [+0.1070, +0.1543] | 9.9995e-05 | 5.9997e-04 | **yes** |
-| T vs. rewired | +0.0328 | [+0.0088, +0.0572] | 8.1996e-03 | 1.6399e-02 | **yes** |
-| rewired vs. curr_random | +0.0229 | [+0.0002, +0.0456] | 4.8398e-02 | 4.8398e-02 | **yes, barely** |
+| T vs. lattice | -0.0748 | [-0.0935, -0.0564] | 4.9998e-05 | 2.9999e-04 | **yes** |
+| T vs. curr_random | +0.0558 | [+0.0307, +0.0803] | 4.9998e-05 | 2.9999e-04 | **yes** |
+| lattice vs. rewired | +0.1076 | [+0.0844, +0.1312] | 4.9998e-05 | 2.9999e-04 | **yes** |
+| lattice vs. curr_random | +0.1305 | [+0.1070, +0.1543] | 4.9998e-05 | 2.9999e-04 | **yes** |
+| T vs. rewired | +0.0328 | [+0.0088, +0.0572] | 7.4496e-03 | 1.4899e-02 | **yes** |
+| rewired vs. curr_random | +0.0229 | [+0.0002, +0.0456] | 4.6148e-02 | 4.6148e-02 | **yes, marginal** |
 
 (Sign convention: positive `d_i` means the first-named graph's log-loss
-is higher, i.e. the second-named graph wins that pair. Raw `p` computed
-from each bootstrap's own resampled-mean distribution via the
-double-the-smaller-tail method, with the Monte Carlo floor convention
-applied per tail -- `9.9995e-05` is the floor at `N=20,000` resamples,
-not an exact zero.)
+is higher, i.e. the second-named graph wins that pair. Sign-flip `p`
+computed via 20,000 permutations, Monte Carlo floor convention applied
+-- `4.9998e-05` is the floor at `N=20,000` permutations, not an exact
+zero.)
 
-**All six of six comparisons survive Holm correction at alpha=0.05.**
-This is the strongest of the outcomes this check could have produced,
-and it is reported exactly as measured, not softened or oversold. Five
-of the six are extremely well-separated (raw `p` at or near the Monte
-Carlo floor, surviving correction by a wide margin). The sixth --
-`rewired` vs. `curr_random`, the two closest performers -- is real but
-genuinely marginal: raw `p=0.048`, and because it is the largest
-`p`-value in the family it receives no Holm penalty (correction factor
-1) and survives at essentially its raw value, just under the 0.05
-threshold. Worth naming plainly: this is a significant result, not a
-robust one -- a small change in resampling seed or test-set composition
-could plausibly flip it.
+**All six of six comparisons survive Holm correction at alpha=0.05,
+under the corrected, properly null-calibrated test -- the same
+qualitative conclusion as before the correction, not a different one,
+but now resting on a method that actually supports the claim.** Five of
+the six are extremely well-separated (`p` at or near the Monte Carlo
+floor, surviving correction by a wide margin). The sixth --
+`rewired` vs. `curr_random`, the two closest performers -- remains
+genuinely marginal: `p=0.0461` under the primary seed, and because it
+is the largest `p`-value in the family it receives no Holm penalty
+(correction factor 1) and survives at essentially its raw value, just
+under the 0.05 threshold. **Checked for stability, not just reported
+once**: re-run across 4 additional random seeds and at 50,000/100,000
+permutations, `p` ranged 0.0459-0.0497 -- consistently just under 0.05,
+not flipping sign under the resampling randomness itself, but with
+essentially no margin. Worth naming plainly, as before: this is a
+significant result, not a robust one -- a genuinely different draw of
+the underlying test-set images (not just resampling randomness within
+this one fixed test set) could plausibly flip it.
 
 **The full pairwise ranking is transitive and internally consistent**:
 `curr_random > rewired > T > lattice`, exactly matching the descriptive
 point-estimate ordering already reported in "Secondary comparisons,"
 above -- and now, for the first time, that ordering rests on a properly
 powered, multiplicity-corrected, direct pairwise test, not a point-
-estimate comparison against a shared baseline. **Restated precisely,
+estimate comparison against a shared baseline. Not all five links in
+that chain carry the same weight, though: `curr_random`-vs-`rewired`
+itself is one of the five well-separated comparisons (`p` at the Monte
+Carlo floor), but the adjacent `rewired`-vs-`curr_random` *magnitude*
+comparison above is the marginal one -- the ordering (which is larger)
+is Holm-significant, just not by a wide margin. **Restated precisely,
 now that it is justified**: `curr_random` (a topology with matched
 sparsity but no relationship to `T`'s learned structure) measurably
 outperforms `T` (the topology this whole design was built around) on
 this held-out test set (`d = +0.0558`, `[+0.0307, +0.0803]`, Holm-
-survives) -- a real, corrected, direct result, not the descriptive
-observation it was before this check.
+survives comfortably) -- a real, corrected, direct result, not the
+descriptive observation it was before this check.
 
 **What this does and does not establish, restated for this specific
 addendum**: this confirms the four graphs are not equivalent in task
