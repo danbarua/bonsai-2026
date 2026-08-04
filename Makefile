@@ -134,10 +134,9 @@ stage2a-manifest:  ## Regenerate results/ARTIFACT_MANIFEST.json (hashes, dimensi
 	$(PYTHON) $(STAGE2A_DIR)/generate_artifact_manifest.py
 
 .PHONY: stage2a-verify
-stage2a-verify: stage2a-manifest  ## Regenerate the manifest and diff it against the committed version
-	@echo "Diffing regenerated manifest against the committed one."
-	@echo "NOTE: environment.git_commit_sha will always differ on a later commit -- that field alone changing is NOT a reproduction failure. Compare the artifact/graph/array sha256 fields specifically."
-	git diff --stat $(STAGE2A_DIR)/results/ARTIFACT_MANIFEST.json
+stage2a-verify:  ## Regenerate a candidate manifest and fail if it mismatches the committed one on any load-bearing field
+	$(PYTHON) $(STAGE2A_DIR)/generate_artifact_manifest.py --out $(STAGE2A_DIR)/scratch/ARTIFACT_MANIFEST.candidate.json
+	$(PYTHON) $(STAGE2A_DIR)/compare_artifact_manifests.py $(STAGE2A_DIR)/results/ARTIFACT_MANIFEST.json $(STAGE2A_DIR)/scratch/ARTIFACT_MANIFEST.candidate.json
 
 ##@ Class-0 support audit (post hoc -- see FINDINGS.md's "class-0 confound" sections)
 

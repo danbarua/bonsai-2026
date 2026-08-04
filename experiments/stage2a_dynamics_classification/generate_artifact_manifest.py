@@ -38,6 +38,7 @@ of the reported numbers is checkable without re-running anything.
   for the confirmatory result as the training-side ones were, and had
   no hash coverage before this.
 """
+import argparse
 import hashlib
 import json
 import os
@@ -126,6 +127,14 @@ def get_environment_metadata():
 
 
 def main():
+    parser = argparse.ArgumentParser(description=__doc__)
+    parser.add_argument(
+        "--out", default=os.path.join(RESULTS_DIR, "ARTIFACT_MANIFEST.json"),
+        help="Output path (default: the committed results/ARTIFACT_MANIFEST.json). "
+             "stage2a-verify passes a scratch path here so verification never "
+             "overwrites the committed manifest in place.")
+    args = parser.parse_args()
+
     manifest = {"artifacts": {}, "graphs": {}, "selected_C": {}, "dimensions": {},
                 "image_ordering": {}, "environment": get_environment_metadata()}
     print(f"Environment: git={manifest['environment']['git_commit_sha'][:12]}, "
@@ -244,8 +253,8 @@ def main():
         print("stage4_confirmatory_results.pkl not present locally -- "
               "frozen_primary_effect skipped.")
 
-    os.makedirs(RESULTS_DIR, exist_ok=True)
-    out_path = os.path.join(RESULTS_DIR, "ARTIFACT_MANIFEST.json")
+    out_path = args.out
+    os.makedirs(os.path.dirname(out_path) or ".", exist_ok=True)
     with open(out_path, "w") as f:
         json.dump(manifest, f, indent=2, sort_keys=True)
     print(f"\nSaved {out_path}")
