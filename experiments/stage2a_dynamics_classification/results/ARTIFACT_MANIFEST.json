@@ -1,0 +1,157 @@
+{
+  "artifacts": {
+    "stage3_classifier_conditions.pkl": {
+      "path": "/Users/dan/Code/pycharm/bonsai-2026/experiments/stage2a_dynamics_classification/results/stage3_classifier_conditions.pkl",
+      "present": true,
+      "sha256": "1f7be2fe343827798ce1eca2fcf922cd00b43f814cfd1a30650f0db9647cce77",
+      "size_bytes": 1619
+    },
+    "stage3_encode_local.pkl": {
+      "path": "/Users/dan/Code/pycharm/bonsai-2026/experiments/stage2a_dynamics_classification/scratch/stage3_train/stage3_encode_local.pkl",
+      "present": true,
+      "sha256": "4560b5a8a4ddfebdb71a7dd42a4e5a0e621a379765677cc070138311ce0818c6",
+      "size_bytes": 861184580
+    },
+    "stage3_gpu_results.pkl": {
+      "path": "/Users/dan/Code/pycharm/bonsai-2026/experiments/stage2a_dynamics_classification/scratch/stage3_train/stage3_gpu_results.pkl",
+      "present": true,
+      "sha256": "d5ed4ad628435f934264f6ff31ff53be86ef879f979d4260dc08839d98290f0a",
+      "size_bytes": 969840685
+    },
+    "stage3_topologies.pkl": {
+      "path": "/Users/dan/Code/pycharm/bonsai-2026/experiments/stage2a_dynamics_classification/scratch/stage3_train/stage3_topologies.pkl",
+      "present": true,
+      "sha256": "12142fbb8fbacd95ba6cf090126c1e93f55a8247f7dbceedeca3e0085915813f",
+      "size_bytes": 8161130
+    },
+    "stage4_confirmatory_results.pkl": {
+      "path": "/Users/dan/Code/pycharm/bonsai-2026/experiments/stage2a_dynamics_classification/results/stage4_confirmatory_results.pkl",
+      "present": true,
+      "sha256": "203e56ffa43ff01498e2e65f2eae45d5942c759fb60a5b788ed64995466358aa",
+      "size_bytes": 1195296
+    },
+    "stage4_encode_local.pkl": {
+      "path": "/Users/dan/Code/pycharm/bonsai-2026/experiments/stage2a_dynamics_classification/scratch/stage4_test/stage4_encode_local.pkl",
+      "present": true,
+      "sha256": "11e21d4320cae2ba31443623e7b3b676cc62d55c7bb71ed3e319c6c7089e4340",
+      "size_bytes": 143534580
+    },
+    "stage4_gpu_results.pkl": {
+      "path": "/Users/dan/Code/pycharm/bonsai-2026/experiments/stage2a_dynamics_classification/scratch/stage4_test/stage4_gpu_results.pkl",
+      "present": true,
+      "sha256": "3e9cfe7ccc9862ffd02b69a09676688ebcfe9b1ee783812c7caf27a14e9f49ed",
+      "size_bytes": 161640685
+    },
+    "stage4_gpu_upload_topologies.pkl": {
+      "path": "/Users/dan/Code/pycharm/bonsai-2026/experiments/stage2a_dynamics_classification/scratch/stage4_test/stage4_gpu_upload_topologies.pkl",
+      "present": true,
+      "sha256": "a892ea5207e05c42b04fcde55b6d08099e45134b54263bfa557735f3a5c4cabc",
+      "size_bytes": 8161146
+    }
+  },
+  "dimensions": {
+    "feat_pre_dim": 1008,
+    "n_active_nodes": 505,
+    "n_train": 60000,
+    "raw_feat_dim": 784,
+    "ref_idx": 363
+  },
+  "frozen_primary_effect": {
+    "ci_high": -0.2265601378355279,
+    "ci_low": -0.2721439820630537,
+    "observed_mean_d": -0.24908714604677853,
+    "verdict": "IMPROVEMENT (entire interval below zero)"
+  },
+  "graphs": {
+    "T": {
+      "adjacency_sha256": "000a7074de53bde0d17f2c37dc263ffb6b5b090e89e3f33952310cded0546cfb",
+      "n_edges": 1051,
+      "shape": [
+        505,
+        505
+      ],
+      "theta_T_train_sha256": "033c9a624f3b11d494d707e5d6ca4d41c6955c07ab4cbd8ad6d1da9c0095dce0",
+      "theta_T_train_shape": [
+        60000,
+        505
+      ]
+    },
+    "curr_random": {
+      "adjacency_sha256": "c5e0cc422bebefdd620fdf7cc6a725e373932e03fbf21ca99aee639f6a71101d",
+      "n_edges": 1051,
+      "shape": [
+        505,
+        505
+      ],
+      "theta_T_train_sha256": "8ebb43ab29cde0fd05a611d3772c3525bc670c234d0a6b35253b28c887be0fcd",
+      "theta_T_train_shape": [
+        60000,
+        505
+      ]
+    },
+    "lattice": {
+      "adjacency_sha256": "5fd89fadc82901be1d0298efe44651944ccca55fc1060a3a11e3940277e55875",
+      "n_edges": 935,
+      "shape": [
+        505,
+        505
+      ],
+      "theta_T_train_sha256": "c19add0d17984c729d70d053a2548ff19454190e89aee00862c0283d7b3849f0",
+      "theta_T_train_shape": [
+        60000,
+        505
+      ]
+    },
+    "rewired": {
+      "adjacency_sha256": "d8f11b0210a3c013c222db1bc558dc08ced98f3b5be2ad92dd26b4ec6300523f",
+      "n_edges": 1051,
+      "shape": [
+        505,
+        505
+      ],
+      "theta_T_train_sha256": "d274d53f62572d61a2dd069ccf54bb7b2c5bbe1a03b1d0f3d02af0a4d5ba333a",
+      "theta_T_train_shape": [
+        60000,
+        505
+      ]
+    }
+  },
+  "image_ordering": {
+    "idx_is_arange": true,
+    "labels_first10": [
+      8,
+      7,
+      0,
+      1,
+      4,
+      2,
+      4,
+      8,
+      1,
+      1
+    ],
+    "labels_last10": [
+      5,
+      9,
+      2,
+      2,
+      7,
+      4,
+      9,
+      0,
+      4,
+      9
+    ],
+    "labels_sha256": "691c5342313eaef4a0b4d33645442ae1b98f13bd2066e67b551fdd4972ef71ea",
+    "n_test": 10000,
+    "y_test_sha256": "77d83a49ca5434c5da77399edc7143065cb3a7b0834e2898ea3094e8c2b21a3c"
+  },
+  "selected_C": {
+    "encoded_pre_evolution": 0.01,
+    "evolved_T": 1000.0,
+    "evolved_curr_random": 1.0,
+    "evolved_lattice": 1000.0,
+    "evolved_rewired": 10.0,
+    "raw_pixels": 0.001
+  }
+}

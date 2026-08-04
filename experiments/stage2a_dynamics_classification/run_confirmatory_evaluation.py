@@ -26,21 +26,20 @@ import numpy as np
 from sklearn.metrics import f1_score, recall_score, confusion_matrix, log_loss
 from sklearn.neural_network import MLPClassifier
 from sklearn.preprocessing import StandardScaler
-from scipy.stats import binomtest
 
 _THIS_DIR = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, _THIS_DIR)
 
 import stage2a_core as s2a
 from stage2a_classifier import fit_final_at_selected_C, NonConvergenceError
+from stage2a_paths import train_scratch_dir, test_scratch_dir
+from stage2a_stats import per_image_log_loss, paired_class_stratified_bootstrap, mcnemar_exact
 
-TRAIN_SCRATCH = "/private/tmp/claude-501/-Users-dan-Code-pycharm-bonsai-2026/54a406a1-f8d0-41df-bc2a-d46e08e68715/scratchpad/stage2a_gpu_stage3"
-TEST_SCRATCH = "/private/tmp/claude-501/-Users-dan-Code-pycharm-bonsai-2026/54a406a1-f8d0-41df-bc2a-d46e08e68715/scratchpad/stage2a_gpu_stage4_test"
+TRAIN_SCRATCH = train_scratch_dir()
+TEST_SCRATCH = test_scratch_dir()
 RESULTS_DIR = os.path.join(_THIS_DIR, "results")
 
 TOPOLOGY_NAMES = ["T", "lattice", "rewired", "curr_random"]
-N_RESAMPLES = 20000
-BOOTSTRAP_SEED = 42
 
 
 def compute_feat_post_for_split(encode_local, gpu_results, ref_idx):
@@ -68,64 +67,6 @@ def compute_feat_post_for_split(encode_local, gpu_results, ref_idx):
         R_post[name] = rp
         solver_failed[name] = failed
     return feat_post, R_post, solver_failed
-
-
-def per_image_log_loss(y_true, proba, classes):
-    """ell_i for each image -- sklearn's log_loss gives only the mean;
-    the locked test needs the per-image value d_i is built from."""
-    class_to_col = {c: j for j, c in enumerate(classes)}
-    cols = np.array([class_to_col[y] for y in y_true])
-    p_true = proba[np.arange(len(y_true)), cols]
-    eps = 1e-15
-    p_true = np.clip(p_true, eps, 1 - eps)
-    return -np.log(p_true)
-
-
-def paired_class_stratified_bootstrap(d, y, n_resamples=N_RESAMPLES, seed=BOOTSTRAP_SEED):
-    """DESIGN.md's locked primary test: 20,000 paired, class-stratified
-    bootstrap resamples (each resample preserves each class's original
-    count, drawn with replacement within class), mean per-image d_i on
-    each resample, two-sided 95% percentile interval. Vectorized per
-    class rather than materializing a full resampled index array per
-    draw."""
-    rng = np.random.default_rng(seed)
-    classes = np.unique(y)
-    total_n = len(d)
-    sums = np.zeros(n_resamples)
-    for c in classes:
-        idx_c = np.where(y == c)[0]
-        n_c = len(idx_c)
-        d_c = d[idx_c]
-        draws = rng.integers(0, n_c, size=(n_resamples, n_c))
-        sums += d_c[draws].sum(axis=1)
-    means = sums / total_n
-    lo, hi = np.percentile(means, [2.5, 97.5])
-    return {
-        "resampled_means": means, "ci_low": float(lo), "ci_high": float(hi),
-        "observed_mean": float(np.mean(d)),
-    }
-
-
-def mcnemar_exact(y_true, pred_a, pred_b, label_a, label_b):
-    """Exact McNemar's test on the discordant pairs (A wrong/B right vs.
-    A right/B wrong), via a two-sided exact binomial test on the
-    discordant counts -- the standard 'exact McNemar' construction,
-    implemented directly via scipy.stats.binomtest rather than adding a
-    new dependency for it."""
-    correct_a = (pred_a == y_true)
-    correct_b = (pred_b == y_true)
-    n_b_only = int(np.sum(~correct_a & correct_b))   # A wrong, B right
-    n_a_only = int(np.sum(correct_a & ~correct_b))   # A right, B wrong
-    n_discordant = n_a_only + n_b_only
-    if n_discordant == 0:
-        p_value = 1.0
-    else:
-        k = min(n_a_only, n_b_only)
-        p_value = binomtest(k, n_discordant, 0.5, alternative="two-sided").pvalue
-    return {
-        f"n_{label_a}_only_correct": n_a_only, f"n_{label_b}_only_correct": n_b_only,
-        "n_discordant": n_discordant, "p_value": float(p_value),
-    }
 
 
 def summarize_condition(y_true, y_pred, proba, classes, label):

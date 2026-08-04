@@ -17,8 +17,9 @@ sys.path.insert(0, _THIS_DIR)
 
 import stage2a_pipeline as pipe
 import stage2a_core as s2a
+from stage2a_paths import train_scratch_dir
 
-SCRATCH_DIR = "/private/tmp/claude-501/-Users-dan-Code-pycharm-bonsai-2026/54a406a1-f8d0-41df-bc2a-d46e08e68715/scratchpad/stage2a_gpu_stage3"
+SCRATCH_DIR = train_scratch_dir()
 RESULTS_DIR = os.path.join(_THIS_DIR, "results")
 TOPOLOGY_NAMES = ["T", "lattice", "rewired", "curr_random"]
 

@@ -1478,53 +1478,79 @@ GPU-session code. `run_posthoc_graph_pairwise.py` (the post hoc
 graph-to-graph pairwise comparison, above -- no GPU dependency, reuses
 the already-saved per-image losses only).
 
-## Reproducibility gaps (flagged by external review, not yet closed)
+## Reproducibility gaps (flagged by external review, now closed)
 
-**Not a blocker to accepting the scientific finding above -- it is a
+**Not a blocker to accepting the scientific finding above -- it was a
 blocker to describing this branch as fully reproducible from its public
-contents**, and is recorded here rather than silently left implicit.
-The confirmatory scripts contain hard-coded private scratch paths, and
-the exact GPU driver that generated the official-test evolved states
-(`stage4_gpu_evolve.py`) is explicitly not committed, per this
-project's own stated convention for ephemeral GPU-session code -- a
-convention that is reasonable for diagnostic/exploratory GPU work, but
-leaves the one script that produced this document's headline numbers
-outside the reproducible record. The public test suite covers Stage
-2A's core feature construction (encoding, gauge features, the recovery
-policy), but there is no dedicated test for the confirmatory paired
-bootstrap, the McNemar implementation, artifact/index alignment between
-the cached GPU-evolved states and the official label ordering, or a
-regression check on the frozen headline numbers themselves.
+contents.** All five items external review flagged are now implemented,
+verified, and committed (not merely planned):
 
-Recommended, before treating this branch as fully reproducible (not
-done here -- a scope decision for whoever picks this up, not
-implemented as part of this amendment):
+- **Artifact paths parameterized** (`stage2a_paths.py`): every script
+  that reads or writes the large scratch artifacts now resolves its
+  directory through `train_scratch_dir()`/`test_scratch_dir()`,
+  overridable via `STAGE2A_SCRATCH_ROOT`, rather than a hard-coded
+  private path. Default location documented in `README.md`.
+- **Both exact GPU evolution drivers committed**: `stage4_gpu_evolve.py`
+  (test-set, the one flagged) and `stage3_gpu_evolve.py` (training-set
+  -- equally load-bearing for the same reason, committed alongside for
+  the same completeness, not explicitly named in the original
+  recommendation but the identical gap). Neither is runnable locally
+  as-is (both execute on a remote Colab kernel's `/content/...`
+  filesystem) -- `README.md`'s "Reproducing the confirmatory GPU
+  evolution" documents the exact `mighty-colab` upload/exec sequence,
+  including the chunked-upload workaround for the transfer endpoint's
+  size limit.
+- **Artifact manifest** (`generate_artifact_manifest.py`, run against
+  the real cached artifacts -- not a template): `results/ARTIFACT_
+  MANIFEST.json` records SHA256 hashes for every pkl the confirmatory
+  result depends on, per-topology adjacency and evolved-state hashes,
+  training/test dimensions, image-ordering checks (label array hashes,
+  `idx == arange(n)` confirmation), the selected `C` values actually
+  consumed (`{raw_pixels: 0.001, encoded_pre_evolution: 0.01,
+  evolved_T: 1000, evolved_lattice: 1000, evolved_rewired: 10,
+  evolved_curr_random: 1}`), and the frozen primary effect itself.
+- **Unit tests** (`tests/test_stage2a_stats.py`, 17 tests, all passing):
+  Tier 1 synthetic-data coverage for the paired class-stratified
+  bootstrap (including a deterministic zero-variance construction that
+  directly verifies genuine per-class stratification, not just
+  plausible-looking output), per-image log-loss class indexing
+  (including a non-default class-ordering case that would silently
+  mis-index on a positional bug), exact McNemar's contingency
+  construction, the bootstrap-derived p-value, and Holm-Bonferroni
+  (including a step-down-stopping edge case a naive implementation
+  could get wrong -- caught a real error in the test's own first draft,
+  not the implementation, when first run).
+- **Artifact-backed regression test**
+  (`test_frozen_primary_effect_matches_findings_md`, Tier 2, skips
+  cleanly if the confirmatory pkl isn't present locally): recomputes
+  the primary bootstrap directly from the already-saved per-image
+  losses and asserts it still lands at `d_i = -0.2491`,
+  `CI = [-0.2721, -0.2266]` -- passing now, and will catch a future
+  refactor that silently changes the statistic.
 
-- Parameterize all artifact paths through CLI arguments or environment
-  variables, rather than hard-coded private scratch paths.
-- Commit the exact test-set GPU evolution driver (`stage4_gpu_evolve.py`),
-  even though it's ephemeral-session code by this project's usual
-  convention -- this specific script produced the confirmatory numbers
-  and is not exempt the way purely diagnostic GPU scripts are.
-- Add an artifact manifest recording hashes, dimensions, image ordering,
-  graph hashes, and the selected `C` values the confirmatory run
-  actually consumed.
-- Add unit tests for the paired class-stratified bootstrap, the
-  per-image log-loss class indexing, and the McNemar contingency-count
-  construction.
-- Add an optional, artifact-backed test asserting the frozen primary
-  effect (`d_i = -0.2491`) and its interval
-  (`[-0.2721, -0.2266]`) against a small cached reference, so a future
-  refactor that silently changes the numbers is caught mechanically.
+The stats functions themselves were also consolidated during this work:
+`run_confirmatory_evaluation.py` originally defined
+`paired_class_stratified_bootstrap` and the other statistics itself,
+and `run_posthoc_graph_pairwise.py` had copied the bootstrap function
+verbatim rather than importing it (disclosed as deliberate at the time,
+for exact-fidelity reasons) -- both now import from the new
+`stage2a_stats.py`, so there is exactly one implementation to trust and
+test, not two that could silently drift apart. Re-ran the post hoc
+pairwise comparison after the refactor and confirmed bit-identical
+output against the pre-refactor numbers reported above.
+
+See `README.md` (new, added alongside this closure) for the full
+reproduction sequence, the `mighty-colab`/Colab-A100 GPU-session
+pattern, and the public GCS artifact cache
+(`gs://bonsai-2026-stage2a-cache`) this closure also made use of.
 
 ## Next step
 
 None specified by this design -- the locked confirmatory evaluation is
-complete. Any further extension (topology-family generalization, the
-static-encoding control, Stage 2B denoising) is a new design decision,
-not a continuation of this one. The reproducibility gaps immediately
-above are a candidate for near-term follow-up independent of any new
-scientific extension.
+complete, and the reproducibility gaps that were the last open item are
+now closed (immediately above). Any further extension (topology-family
+generalization, the static-encoding control, Stage 2B denoising) is a
+new design decision, not a continuation of this one.
 
 ## External review verdict (amendment record)
 
