@@ -956,12 +956,21 @@ for the first and only time in this project.
 
 # Stage 2A: The Locked Confirmatory Result
 
-**Status: this is it -- the one and only official-test-set evaluation
-this entire design has been building toward, per `DESIGN.md`'s
-"Confirmatory endpoint and test" section, executed exactly as locked.
-The official KMNIST test set was touched here for the first time in
-this project, and after this evaluation, will not be touched again
-under this design.**
+**Status: this is it -- the one and only locked, pre-registered
+official-test-set evaluation this entire design has been building
+toward, per `DESIGN.md`'s "Confirmatory endpoint and test" section,
+executed exactly as locked. The official KMNIST test set was touched
+here for the first time in this project, and this sklearn evaluation
+remains the sole confirmatory result under this design -- nothing below
+retroactively alters it.**
+
+**Amended by external review (see "Post hoc reuse of the test set,"
+below): the test set was subsequently reused, after this locked
+evaluation, in explicitly post hoc classifier-backend audits (a JAX/optax
+port cross-check and an NVIDIA cuML `accel` cross-backend replication).
+Neither altered this locked analysis or supplied a new confirmatory
+claim, but the original framing here -- "will not be touched again" --
+is no longer accurate and has been corrected rather than left standing.**
 
 ## Setup: no new model fitting, one refit at an already-selected C
 
@@ -1018,12 +1027,25 @@ the log-loss result, not a separate or conflicting story.
 
 This resolves the question this whole design existed to ask, in the
 positive direction, for the first time in this project's history:
-**named outcome 2 from `DESIGN.md`'s "Named watched-for outcomes"**
-("dynamics useful, one specific graph wins") is the one that obtains --
-not outcome 1 (topologies equivalent) or outcome 3 (dynamics not
-useful). Graph evolution demonstrably adds classification value beyond
-the local encoding dynamics alone, under this task and this linear
-readout.
+graph evolution demonstrably adds classification value beyond the local
+encoding dynamics alone, under this task and this linear readout --
+"dynamics not useful" (`DESIGN.md`'s named outcome 3) is directly
+contradicted by this result, and "topologies equivalent" (named outcome
+1) is also inconsistent with it, since T's evolution alone produces this
+large, non-straddling improvement.
+
+**Amended by external review**: the primary, locked comparison here is
+`evolved_T` vs. `encoded_pre_evolution` only, and *that* comparison is
+what this bootstrap interval and McNemar test directly support --
+"dynamics useful" is established. It does **not**, on its own, establish
+named outcome 2's stronger second half, "one specific graph wins": that
+would require directly testing one evolved graph against another (e.g.
+`evolved_curr_random` vs. `evolved_rewired`), which was never run. The
+secondary comparisons below test each of the other three graphs
+separately against the same `pre-evolution` baseline -- non-straddling
+intervals there establish that each graph individually beats
+pre-evolution, not that the graphs differ significantly from each
+other. See "Secondary comparisons," below, for the corrected framing.
 
 ## Secondary comparisons: all three other graphs also improve, none rescuing (or needed to rescue) anything
 
@@ -1038,12 +1060,27 @@ correcting against the others):
 | evolved_rewired vs. pre | -0.2819 | [-0.3074, -0.2570] | IMPROVEMENT | 9.76e-133 |
 | evolved_curr_random vs. pre | -0.3049 | [-0.3303, -0.2797] | IMPROVEMENT | 8.42e-138 |
 
-All four evolved graphs improve on pre-evolution, with entirely
-non-straddling intervals. **The four graphs are not equivalent**,
-consistent with the primary result already being outcome 2 rather than
-outcome 1: `curr_random` shows the largest improvement (-0.305),
-`rewired` second (-0.282), `T` third (-0.249), `lattice` smallest but
-still clearly an improvement (-0.174).
+All four prespecified graph instances improved over encoded
+pre-evolution, with entirely non-straddling intervals. **Amended by
+external review**: the tests performed here compare each graph
+separately against the common `pre-evolution` baseline; they do not
+directly test one evolved graph against another (e.g.
+`ell(curr_random) - ell(rewired)`), and separate non-straddling
+intervals against a shared baseline do not themselves establish that two
+evolved graphs differ significantly from one another. The originally
+stated "the four graphs are not equivalent" overclaimed what these tests
+support and has been removed. What the data do support, stated
+descriptively rather than as a confirmatory ranking claim: their
+observed test-set effects differed, with `curr_random` producing the
+lowest log-loss (-0.305), followed by `rewired` (-0.282), `T` (-0.249),
+and `lattice` (-0.174, smallest but still a clear improvement).
+Graph-to-graph superiority was not a confirmatory estimand under
+`DESIGN.md`'s locked design and is reported here descriptively, not
+inferentially. A formal task-utility ranking would require direct,
+paired graph-to-graph comparisons -- these could be computed from the
+already-saved per-image losses, but any such comparison would now be
+explicitly post hoc and should use multiplicity correction across
+however many pairwise tests it involved.
 
 **A genuine, small, honestly-reported rank swap between the CV-selection
 data and the held-out test set**: feasibility stage 3's training-CV
@@ -1058,16 +1095,52 @@ model-selection data and truly held-out data -- not a reversal of the
 overall finding, and not treated as a family-level claim regardless
 (`DESIGN.md`'s fixed-prespecified-graph-instances scope), but worth
 stating rather than quietly picking whichever ordering looks cleaner.
+**This swap directly reinforces the caution above against a
+graph-to-graph superiority claim**: if `T` and `rewired`'s relative
+order isn't even stable between the CV-selection data and the held-out
+test set, treating their point-estimate ordering here as a confident
+ranking (rather than a descriptive observation) would be
+overinterpreting noise the data itself already shows is real. The broad
+pattern -- all four graphs clearly beat pre-evolution, `curr_random` and
+`lattice` anchoring the top and bottom -- is stable; the exact middle
+ordering is not.
+
+**On the Stage 1D dissociation, stated precisely rather than loosely**:
+Stage 1D found no detectable differences in internal mapping strength
+across these topology constructions (a different metric -- paired
+bootstrap on the tangent-departure response measure -- and a different
+sample). Stage 2A produced visibly different downstream task effects
+among these specific graph instances, as the table above shows. These
+two findings are not in tension -- "no detectable difference in one
+metric" and "visible difference in another" can both be true of the
+same graphs -- but this document does not treat it as a formal,
+confirmatory task-utility dissociation, since that would itself require
+the direct paired graph-to-graph comparisons flagged as not yet run
+above (and, if computed post hoc from the saved per-image losses,
+multiplicity-corrected).
 
 **`rewired`'s near-total phase synchronization (Result 2, above: R_post
 in [0.986, 1.0] for every one of the 60,000 training images) is now
 confirmed, on genuinely held-out test data, not to prevent it from being
 the second-strongest of the four evolved conditions.** This extends
 stage 3's training-CV surprise to the one evaluation that actually
-matters: extreme synchronization under this topology does not erase the
-linearly-decodable class information the reference-node gauge extracts.
+matters: extreme synchronization under this topology does not erase
+class information that remains **linearly decodable under the locked
+high-precision, per-feature-standardized pipeline used throughout this
+design**. That qualification is precise, not decorative: when phases
+become nearly synchronized, the informative differences between images
+can be small in absolute magnitude, and `StandardScaler`'s per-feature
+normalization can amplify a consistent, low-variance residual difference
+into a classifier-usable coordinate. That is legitimate predictive
+computation under this exact pipeline, not an artifact -- but it does
+not, on its own, establish robustness to feature quantization, phase
+noise, lower solver precision, or small perturbations at inference time.
+Those are open questions this result motivates, not ones it answers; a
+useful follow-up before making any stronger physical-computation or
+hardware-robustness claim about this topology, not a gap in the claim
+actually made here.
 
-## The class-0 confound `DESIGN.md` flagged: checked directly, no special effect found
+## The class-0 confound `DESIGN.md` flagged: checked directly -- reassuring, not dispositive
 
 `DESIGN.md` warned that the primary comparison, while cleaner than
 initially thought (both conditions already share T's class-0-derived
@@ -1078,9 +1151,27 @@ exactly this reason. Checked directly: the per-class recall delta
 0.038, 0.118, 0.103, 0.089, 0.056, 0.095, 0.072, 0.088]` -- **class 0's
 improvement (+0.089) ranks 5th of 10, squarely in the middle of the
 distribution**, not the largest (class 3, +0.118) or smallest (class 2,
-+0.038). No class-0-specific effect is evident; the improvement is
-broadly distributed across classes, not concentrated in the one class
-whose topology happens to be under test.
++0.038). No obvious class-0-specific recall advantage was observed; the
+improvement is broadly distributed across classes, not concentrated in
+the one class whose topology happens to be under test.
+
+**Amended by external review**: this supports "no obvious
+class-0-specific recall advantage was observed," but does not fully
+support the stronger claim originally implied by this section's
+heading, "the class-0 confound has been ruled out." A class-0-derived
+support or edge structure could still provide generic features useful
+across several classes without producing a class-0-specific *recall*
+spike -- recall alone doesn't rule that out. More importantly, this
+issue does not threaten the primary causal contrast: the primary
+comparison already holds the class-0-derived active support fixed
+across both conditions (`evolved_T` and `encoded_pre_evolution` share
+the identical support), so whatever class-0-derived structure exists is
+common to both sides of the comparison, not a confound of it. What
+remains open is only the *interpretation* of what makes T's evolution
+useful, not the primary result itself. A stronger descriptive check,
+not yet run, would report per-class mean log-loss differences rather
+than recall alone -- computable directly from the already-saved `ell_i`
+values, without refitting or any new model-selection decision.
 
 ## Baselines (context only -- never part of the locked primary/secondary comparisons)
 
@@ -1090,23 +1181,37 @@ whose topology happens to be under test.
 | MLP, H=13 (parameter-matched) | 10,345 | 0.7534 | 0.7544 | 0.8971 |
 | MLP, H=128 (competent context) | 101,770 | 0.8863 | 0.8863 | 0.6160 |
 
-**At matched parameter budget** (oscillator readout: 10,090 params;
-`H=13` MLP: 10,345, DESIGN.md's own matching), **every one of the four
-evolved conditions outperforms the parameter-matched MLP** -- even the
-weakest, `evolved_lattice` (77.78% accuracy), beats `MLP_H13`'s 75.34%
-by 2.4 points, and the strongest, `evolved_curr_random` (82.21%), beats
-it by 6.9 points. This is a genuinely favorable comparison for the
-oscillator representation, reported descriptively per `DESIGN.md`'s
-context-only framing for baselines, not as a locked claim.
+**At approximately matched trainable-parameter count** (oscillator
+readout: 10,090 params; `H=13` MLP: 10,345, `DESIGN.md`'s own matching),
+**every one of the four evolved conditions outperforms this MLP** --
+even the weakest, `evolved_lattice` (77.78% accuracy), beats
+`MLP_H13`'s 75.34% by 2.4 points, and the strongest,
+`evolved_curr_random` (82.21%), beats it by 6.9 points. This is a
+genuinely favorable comparison for the oscillator representation,
+reported descriptively per `DESIGN.md`'s context-only framing for
+baselines, not as a locked claim.
 
-**Stated plainly, the other direction**: a competently-sized ordinary
+**Amended by external review**: `H=13` is matched only on trainable
+parameter count in the final linear readout -- it is not matched on
+frozen graph parameters or the data-derived structure the graph itself
+encodes, preprocessing capacity, inference compute, or training/
+hyperparameter-search budget. The wording "equally-sized ordinary
+network" overstated how much this comparison actually controls for,
+and has been replaced with "an MLP with approximately matched trainable
+parameter count" throughout this section. The result remains favorable
+contextual evidence for the oscillator representation, but it is not a
+complete compute- or model-capacity-matched comparison; the separate
+compute-cost design (`COMPUTE_COST_DESIGN.md`) is the right place to
+settle that more rigorously.
+
+**Stated plainly, the other direction**: a larger, competently-sized
 MLP (`H=128`, ~10x the oscillator readout's parameter count) reaches
 88.63% test accuracy -- clearly ahead of every oscillator-evolved
 condition (best: `curr_random` at 82.21%). The oscillator dynamics
-improve on the pre-evolution baseline substantially, and beat an
-equally-sized ordinary network, but do not close the gap to a
-competently-sized one. Both facts are true at once and neither is
-softened by the other.
+improve on the pre-evolution baseline substantially, and beat an MLP
+with approximately matched trainable parameter count, but do not close
+the gap to a larger, competently-sized one. Both facts are true at once
+and neither is softened by the other.
 
 ## What this settles, and what it does not
 
@@ -1127,9 +1232,55 @@ step already carries most of the value; role-matched or per-class
 topology selection (circular for a real classifier, rejected by
 design); and denoising or generation (Stage 2B, deferred).
 
-This is the one and only official-test-set evaluation for this design.
-No further evaluation against these 10,000 test images is planned or
-justified under this locked design.
+This locked sklearn evaluation is the one and only *confirmatory*
+official-test-set evaluation for this design -- no further confirmatory
+evaluation against these 10,000 test images is planned or justified
+under this locked design. See "Post hoc reuse of the test set," below,
+for what has and has not happened to the test set since.
+
+## Post hoc reuse of the test set (amended by external review)
+
+**The original framing above -- that the official test set was touched
+once and would never be touched again -- is no longer factually
+correct, and is corrected here rather than left standing.** The locked
+sklearn evaluation documented in this section was the first use of the
+official test set and remains the sole confirmatory result; nothing
+below alters that analysis or its numbers. But the test set was
+subsequently reused twice, both explicitly post hoc and both
+classifier-*backend* audits rather than new scientific investigations:
+
+1. **The JAX/optax classifier port** (`JAX_CLASSIFIER_PORT_FINDINGS.md`)
+   evaluated its from-scratch JAX reimplementation of the classifier
+   fit against the cached official test set, at the three real selected
+   `C` values from this locked result (`evolved_T=1000`,
+   `evolved_rewired=10`, `evolved_curr_random=1`). It found a real,
+   unresolved divergence from sklearn's fitted solution that grows with
+   `C` and does not close with recalibration -- disclosed there,
+   verified at the actual selected `C` values (not just a grid
+   extreme), and explicitly **not** used for, or folded into, any
+   result reported in this document.
+2. **The NVIDIA cuML `accel` cross-check** (`CUML_ACCEL_FINDINGS.md`)
+   replicated the complete six-condition, 270-fit CV-grid procedure
+   under a different GPU-native solver backend and evaluated it against
+   the same official test set, reaching the same four verdicts (primary
+   and all three secondary comparisons) at closely matching effect
+   sizes.
+
+Neither audit altered the locked sklearn analysis above or supplied a
+new confirmatory scientific claim. But as a factual matter, the test set
+is no longer untouched for future Stage 2A development, and this
+document should not claim otherwise.
+
+**This also changes how the cuML result should be described.** It is a
+strong **cross-backend implementation robustness check**: it shows the
+positive verdict is not peculiar to sklearn's particular optimizer. It
+is **not independent scientific corroboration** of the result, because
+it reuses the same training and test samples, the same oscillator
+features, the same graph instances, the same folds and `C` grid, and
+the same high-level selection and fitting code -- only the numerical
+classifier backend differs. `CUML_ACCEL_FINDINGS.md` itself has been
+amended to use this framing throughout, in place of the "independent
+confirmation/replication" language it originally used.
 
 ## Code
 
@@ -1143,9 +1294,107 @@ Remote-only GPU driver (`stage4_gpu_evolve.py`, same chunked approach as
 stage 3's) not committed, per this project's convention for ephemeral
 GPU-session code.
 
+## Reproducibility gaps (flagged by external review, not yet closed)
+
+**Not a blocker to accepting the scientific finding above -- it is a
+blocker to describing this branch as fully reproducible from its public
+contents**, and is recorded here rather than silently left implicit.
+The confirmatory scripts contain hard-coded private scratch paths, and
+the exact GPU driver that generated the official-test evolved states
+(`stage4_gpu_evolve.py`) is explicitly not committed, per this
+project's own stated convention for ephemeral GPU-session code -- a
+convention that is reasonable for diagnostic/exploratory GPU work, but
+leaves the one script that produced this document's headline numbers
+outside the reproducible record. The public test suite covers Stage
+2A's core feature construction (encoding, gauge features, the recovery
+policy), but there is no dedicated test for the confirmatory paired
+bootstrap, the McNemar implementation, artifact/index alignment between
+the cached GPU-evolved states and the official label ordering, or a
+regression check on the frozen headline numbers themselves.
+
+Recommended, before treating this branch as fully reproducible (not
+done here -- a scope decision for whoever picks this up, not
+implemented as part of this amendment):
+
+- Parameterize all artifact paths through CLI arguments or environment
+  variables, rather than hard-coded private scratch paths.
+- Commit the exact test-set GPU evolution driver (`stage4_gpu_evolve.py`),
+  even though it's ephemeral-session code by this project's usual
+  convention -- this specific script produced the confirmatory numbers
+  and is not exempt the way purely diagnostic GPU scripts are.
+- Add an artifact manifest recording hashes, dimensions, image ordering,
+  graph hashes, and the selected `C` values the confirmatory run
+  actually consumed.
+- Add unit tests for the paired class-stratified bootstrap, the
+  per-image log-loss class indexing, and the McNemar contingency-count
+  construction.
+- Add an optional, artifact-backed test asserting the frozen primary
+  effect (`d_i = -0.2491`) and its interval
+  (`[-0.2721, -0.2266]`) against a small cached reference, so a future
+  refactor that silently changes the numbers is caught mechanically.
+
 ## Next step
 
 None specified by this design -- the locked confirmatory evaluation is
 complete. Any further extension (topology-family generalization, the
 static-encoding control, Stage 2B denoising) is a new design decision,
-not a continuation of this one.
+not a continuation of this one. The reproducibility gaps immediately
+above are a candidate for near-term follow-up independent of any new
+scientific extension.
+
+## External review verdict (amendment record)
+
+An external review of this section's original text found the primary
+scientific result sound and recommended the specific corrections
+incorporated throughout this document (rather than a rewrite from
+scratch) -- summarized here as the record of what was reviewed and what
+changed.
+
+**Verdict**: the primary Stage 2A result survives review. The locked
+contrast, statistical procedure, classifier selection, final refit, and
+reported result align correctly with `DESIGN.md`'s pre-registered
+specification. The observed primary effect
+(`d_i = ell(evolved T) - ell(pre-evolution) = -0.2491`,
+`95% CI = [-0.2721, -0.2266]`), the accuracy increase (72.08% to
+80.58%), and the concordant McNemar result together support a bounded
+Level 3 claim: under this fixed support, graph instance, encoding,
+evolution horizon, gauge, standardization procedure, and linear
+readout, graph-level evolution produces a substantially more useful
+classification representation than the encoded pre-evolution state
+alone.
+
+**What review changed**: two inferential overstatements were corrected
+(the "one specific graph wins" / "the four graphs are not equivalent"
+claims, and the "test set touched only once" claims), and one
+reproducibility gap was documented as open rather than implicitly
+assumed closed. Three smaller wording precisions were also made: the
+class-0 diagnostic is described as reassuring rather than dispositive,
+the MLP baseline comparison is described as approximately
+parameter-matched rather than "equally-sized," and the
+locked-pipeline-specific decodability finding under near-total
+synchronization is stated with its precision qualifier rather than as
+an unqualified claim about the underlying representation.
+
+**What review did not change**: the primary confirmatory result itself,
+the JAX/optax investigation's handling (already meeting this project's
+evidentiary standard -- the unresolved performance gap is disclosed,
+verified at the real selected `C` values rather than only a grid
+extreme, and explicitly excluded from any reported result), or the
+overall accept decision. Side investigations are, per this review,
+appropriately honest, with the cuML cross-check now correctly framed as
+cross-backend implementation robustness rather than independent
+scientific replication.
+
+**Strongest defensible conclusion, as amended**: Stage 2A establishes
+external task utility for runtime graph-oscillator evolution under a
+bounded classification design. On the official KMNIST test set,
+evolution on the prespecified class-0-learned graph `T` reduced mean
+per-image log-loss by 0.2491 relative to the same dynamically encoded
+phase state before graph evolution, with a paired class-stratified 95%
+bootstrap interval of `[-0.2721, -0.2266]`. Accuracy increased from
+72.08% to 80.58%, with concordant McNemar evidence. All four tested
+graph instances improved descriptively over pre-evolution, but
+graph-to-graph superiority and topology-family generality were not
+confirmatory claims under this design. The oscillator representation
+beats an MLP with approximately matched trainable parameter count,
+while remaining clearly below a larger, competently-sized MLP.

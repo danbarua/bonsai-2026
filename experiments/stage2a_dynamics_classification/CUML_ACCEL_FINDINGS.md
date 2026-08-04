@@ -1,10 +1,14 @@
 # NVIDIA cuML `accel`: zero-code-change GPU acceleration check
 
 **Status: the one caveat found is resolved, and a full 6-condition,
-270-fit CV-grid replication independently reproduces every verdict of
-the locked confirmatory result (14.9x faster). Still not adopted for
-any reported result -- no reported result has needed it, and this
-project's own sklearn-based numbers remain what's reported.** Prompted
+270-fit CV-grid replication under a different numerical backend
+reproduces every verdict of the locked confirmatory result (14.9x
+faster). This is a cross-backend implementation robustness check, not
+independent scientific corroboration -- see "What this does and does
+not establish," below, for why that distinction matters. Still not
+adopted for any reported result -- no reported result has needed it,
+and this project's own sklearn-based numbers remain what's
+reported.** Prompted
 by the same question the JAX/optax classifier
 port was built to answer (is the slow, sklearn-based classifier CV
 fitting acceleratable?), tested here via a different route: NVIDIA
@@ -133,12 +137,14 @@ fixed data, that `n_iter` already *is* the exact margin (35% and 90%
 of the `10000` budget respectively), not an estimate a further sweep
 would refine.
 
-## Full 6-condition CV-grid replication: independent cross-check of the entire locked confirmatory result
+## Full 6-condition CV-grid replication: cross-backend robustness check on the entire locked confirmatory result
 
 Not "does one fit match" but "does a completely different, GPU-native
 implementation reach the same scientific conclusion" -- run at the
 user's request as a cheap piece of extra confidence, not because the
-locked sklearn result needed rechecking.
+locked sklearn result needed rechecking. This tests implementation
+robustness, not independent scientific replication -- see "What this
+does and does not establish," below.
 
 **Method**: this project's own real, unmodified `select_C_via_cv` and
 `fit_final_at_selected_C` (no reimplementation), called under
@@ -199,22 +205,34 @@ backends (-0.1737 vs -0.1743) *despite* the different selected `C` --
 direct confirmation that the near-tie above really is a near-tie in
 practice, not a hidden divergence papered over by the CI.
 
-**Total wall-clock for the entire independent replication (CV grid +
-final refits + bootstrap): ~17 minutes**, against sklearn's 4.1 hours
-for the CV grid alone.
+**Total wall-clock for the entire cross-backend robustness check (CV
+grid + final refits + bootstrap): ~17 minutes**, against sklearn's 4.1
+hours for the CV grid alone.
 
 ## What this establishes, stated plainly
 
-A completely independent, GPU-native reimplementation of the classifier
-backend -- different solver, different hardware, different numerical
-library end to end -- reproduces every one of the locked confirmatory
-result's four verdicts (primary and all three secondary), at closely
-matching effect sizes, using this project's own real, unmodified
-selection and fitting code. This is exactly the kind of cheap,
-independent confirmation the request was for: not a replacement for the
-sklearn-based locked result (which remains what's reported, and remains
-untouched by any of this), but real evidence that the scientific
-conclusion is not an artifact of one specific numerical implementation.
+**Amended by external review**: earlier drafts of this section
+described this as "independent confirmation" or "independent
+scientific corroboration." That overstated what was actually tested.
+This run reuses the same training and test samples, the same
+oscillator features, the same graph instances, the same folds and `C`
+grid, and the same high-level selection and fitting code as the locked
+sklearn result -- only the numerical classifier backend (a different
+solver, different hardware, different numerical library) differs. That
+makes this a **cross-backend implementation robustness check**: it
+reproduces every one of the locked confirmatory result's four verdicts
+(primary and all three secondary), at closely matching effect sizes,
+using this project's own real, unmodified selection and fitting code,
+and shows the positive verdict is not peculiar to sklearn's particular
+optimizer. It is **not** independent scientific corroboration -- true
+independence would require, at minimum, varying something the two runs
+currently share (different data draws, a different feature pipeline, or
+a genuinely separate implementation of the selection/fitting logic, not
+just a different backend under the same code). Not a replacement for
+the sklearn-based locked result (which remains what's reported, and
+remains untouched by any of this), but real, correctly-scoped evidence
+that the scientific conclusion is not an artifact of one specific
+numerical implementation.
 
 ## Next step, if pursued
 
