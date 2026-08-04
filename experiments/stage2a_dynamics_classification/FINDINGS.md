@@ -974,6 +974,75 @@ left implicit:
   outside that support -- a genuinely open question, addressed directly
   below.
 
+## The class-0-support audit: how much information the projection actually removes
+
+External review's own proposed audit, run in full: before asking what
+graph evolution does with what remains, quantify what the class-0-
+derived 505-node support projection removes in the first place.
+
+**Retained ink fraction, full 60,000-image training set**
+(`results/retained_ink_fraction_by_class.png`): `sum(pixel intensity
+inside the 505-node support) / sum(pixel intensity over all 784
+pixels)`, per image. Class 0 retains a median of **96.3%** of its own
+ink (mean 93.9%, tight distribution) -- expected, since the support is
+derived from class 0. **Every other class retains substantially less**:
+medians range from 65.4% (class 1) to 90.0% (class 5), with real spread
+-- some individual images retain as little as 21-43%. This is not a
+small effect.
+
+**Where the excluded ink actually falls**
+(`results/ink_outside_support_by_class.png`, class-mean heatmaps of ink
+lying outside the support): a consistent, visible band of excluded ink
+at the top-center notch and the bottom margin, present for classes 1-9
+specifically and much fainter for class 0 -- exactly the region the
+class-0-derived support's own shape (`results/
+topology_graph_structure.png`) doesn't cover. Real, systematic, not
+scattered noise.
+
+**Two baselines, run to separate the projection's cost from evolution's
+contribution** (`run_class0_support_audit_classify.py`, `cuml.accel`,
+same locked CV/fit procedure as every other condition -- audit-only,
+not part of the locked primary/secondary comparisons):
+
+| condition | dim | C | test accuracy | log-loss |
+|---|---:|---:|---:|---:|
+| raw pixels, full 784 (known) | 784 | 0.001 | 0.6960 | 0.9848 |
+| raw pixels, 505-restricted (new) | 505 | 0.01 | 0.6550 | 1.1527 |
+| encoded, 505-restricted = `encoded_pre_evolution` (known) | 1008 | 0.01 | 0.7208 | 0.9558 |
+| encoded, full 784, unrestricted (new) | 1566 | 0.01 | 0.7458 | 0.8667 |
+
+**The restriction has a real, measurable cost, in both representations**:
+raw pixels lose 4.10 points of accuracy (0.6960 -> 0.6550) when
+restricted to the support; the locally-encoded state loses 2.50 points
+(0.7458 -> 0.7208). Restricting to the class-0-derived support is not
+free -- it discards real, class-discriminatory signal, exactly as the
+retained-ink-fraction and heatmap results above already suggested
+directly.
+
+**But evolution's contribution is larger than what the restriction
+costs, not merely compensating for it**: `evolved_T` (505-restricted,
+evolved -- the locked primary condition, 0.8058 accuracy, 0.7067
+log-loss) beats even the *unrestricted*, un-evolved 784-dim encoded
+baseline (0.7458, 0.8667) by 6.00 points of accuracy and 0.16 log-loss
+-- a larger margin than the 2.50-point cost restriction itself imposed.
+**Stated plainly: even if the pre-evolution condition were given back
+every pixel the class-0 support excludes, graph evolution on the
+restricted 505-node `T` would still win.** This is reassuring for the
+primary result's interpretation, though it does not change the primary
+result's own numbers, which were never in question -- `evolved_T` vs.
+`pre-evolution` already used the identical support on both sides, so
+this audit closes a question about *interpretation*, not about the
+comparison's own validity.
+
+**What this does and does not settle**: it settles that the class-0
+support projection has a real, non-trivial, quantified cost, and that
+evolution's contribution exceeds that cost rather than merely offsetting
+it. It does not settle what a union mask or a fully class-agnostic
+support would show -- that remains a genuinely open, separately-scoped
+question (raised in this same review thread, not pursued here), since
+this audit only compares restricted-vs-unrestricted under the *existing*
+class-0-derived mask, not against an alternative mask altogether.
+
 ## Result 3: classifier CV fitting is NOT negligible -- it dominates everything else
 
 **246.8 minutes (4.1 hours)** for the 6 conditions' full CV fitting
