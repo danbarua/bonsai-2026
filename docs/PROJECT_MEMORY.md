@@ -473,7 +473,20 @@ before the result).
   (`00_...` through `39_...`, folder name matching its findings doc),
   not a shared library -- these results are settled and isolated
   snapshots protect against silent drift from later shared-code changes.
-  `benchmark_programme/docs/` holds the sequential findings documents.
+  `benchmark_programme/docs/` holds the sequential findings documents
+  (`00`-`39`). Note `40_2026_reboot_conversation_history.md` is a
+  different kind of entry despite continuing the same numbering -- a
+  chat-to-repo meta-index mined from the long-running conversation that
+  reopened this project in 2026, not a findings document itself (its
+  own header says as much: built "without treating the chat as ground
+  truth"). Worth reading for orientation, particularly its naming-traps
+  table (the three unrelated things all called "rewired," Stage 1A's
+  revision from clean-negative to genuinely-inconclusive rather than a
+  reconfirmation, and the Stage 1D-vs-2A dissociation -- T is generic on
+  the internal Delta_map endpoint but not the classification endpoint,
+  don't collapse the two) -- but treat its phase-by-phase narrative as
+  secondary to this document and the actual `FINDINGS.md`/`DESIGN.md`
+  files it maps against, not a replacement for them.
 - `experiments/` -- the ACTIVE dynamics-as-computation lineage (Part 3
   above): `stage0_simulator_calibration/`, `stage1a_infinitesimal_response/`,
   `stage1b_pilot/`, `stage1b2_structured_transformation/`. Cumulative,
