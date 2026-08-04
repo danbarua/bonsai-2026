@@ -640,3 +640,19 @@ verified to actually pass before being committed.
 - `CLAUDE.md` -- added methodological principle 18 (a pipeline stage's
   timing does not extrapolate to other stages), prompted directly by
   this investigation's own initial classifier-CV timing misestimate.
+
+**Reproducing this document's checks**: the two verify scripts are
+fast, synthetic-only, and always runnable (no cached real-artifact
+dependency):
+```bash
+uv run python experiments/stage2a_dynamics_classification/verify_stage2a_classifier_jax.py
+uv run python experiments/stage2a_dynamics_classification/verify_analyze_stage3_results_jax.py
+```
+`diagnose_classifier_jax_grad_norm_calibration.py` reproduces the
+real-data measurements (Step 1/Step 2 above) but needs the real cached
+Stage-3 training artifacts locally (`stage2a_paths.train_scratch_dir()`,
+or pulled from the public GCS bucket -- see `README.md`'s "Public
+artifact cache (GCS)") and is slow (~13 minutes):
+```bash
+uv run python experiments/stage2a_dynamics_classification/diagnose_classifier_jax_grad_norm_calibration.py
+```

@@ -22,38 +22,85 @@ for what's actually been found; this file is about how to run things.
 
 ## Directory contents
 
-- **Pipeline code**: `stage2a_core.py` (encode/evolve/gauge features),
-  `stage2a_classifier.py` (the locked CV/standardization/classifier
-  procedure), `stage2a_stats.py` (the confirmatory statistical
-  machinery -- paired bootstrap, McNemar, Holm correction), `stage2a_
-  pipeline.py` / `stage2a_pipeline_jax.py` (CPU and GPU-batched
-  pipeline orchestration), `stage2a_topologies.py` (the 4 confirmatory-
-  expansion graphs), `evolve_on_graph_jax.py` (the verified GPU
-  evolution kernel).
-- **Stage drivers**: `run_feasibility_stage1.py` /
-  `run_feasibility_stage2.py` (small-scale mechanical validation),
-  `run_feasibility_stage3_encode.py` + `stage3_gpu_evolve.py` (full
-  60,000-image training-set encode + GPU evolve),
-  `run_official_test_encode.py` + `stage4_gpu_evolve.py` (the official
-  10,000-image test set's one-and-only encode + GPU evolve),
-  `run_confirmatory_evaluation.py` (the locked confirmatory analysis
-  itself), `run_posthoc_graph_pairwise.py` (the post hoc, Holm-corrected
-  graph-to-graph comparison).
-- **Diagnostics**: `diagnose_*.py`, `verify_*.py`, `analyze_*.py`
-  scripts -- each self-documenting, referenced by name from the
-  `FINDINGS.md` section they support.
-- **`generate_artifact_manifest.py`**: produces `results/ARTIFACT_
-  MANIFEST.json` -- SHA256 hashes, dimensions, image ordering, graph
-  hashes, and the selected `C` values the confirmatory run actually
-  consumed. Run after reproducing the pipeline to verify your own
-  artifacts match the ones behind the reported numbers.
-- **`results/`**: gitignored cache of `.pkl`/`.npy` artifacts (large,
-  regenerable) plus a small number of genuinely committed outputs
-  (plots, `ARTIFACT_MANIFEST.json`) that belong in the reproducible
-  record.
-- **`scratch/`**: gitignored local scratch directory for the large
-  encode/GPU-evolve intermediate artifacts (`stage2a_paths.py`'s
-  default location, overridable via `STAGE2A_SCRATCH_ROOT`).
+**Convention, going forward**: any new script gets a one-line mention
+here, in the same commit that creates it. This directory has already
+been through three reproducibility/organization passes, each catching
+real files that had gone undocumented since the last one -- cheaper to
+keep this section current as files are added than to keep
+re-discovering the gap later.
+
+Organized by thread, not by glob (`diagnose_*.py`/`verify_*.py`/
+`analyze_*.py` alone previously let two files go unnoticed as orphans --
+enumerated explicitly here instead):
+
+1. **Core pipeline code** (imported by other scripts, not run
+   standalone): `stage2a_core.py` (encode/evolve/gauge features),
+   `stage2a_classifier.py` (the locked CV/standardization/classifier
+   procedure), `stage2a_stats.py` (the confirmatory statistical
+   machinery -- paired bootstrap, McNemar, Holm correction),
+   `stage2a_pipeline.py` / `stage2a_pipeline_jax.py` (CPU and
+   GPU-batched pipeline orchestration), `stage2a_topologies.py` (the 4
+   confirmatory-expansion graphs), `stage2a_paths.py` (scratch-artifact
+   path resolution), `evolve_on_graph_jax.py` (the verified GPU
+   evolution kernel).
+2. **Feasibility/confirmatory drivers** (the locked-result lineage):
+   `run_feasibility_stage1.py` / `run_feasibility_stage2.py`
+   (small-scale mechanical validation), `run_feasibility_stage3_encode.py`
+   + `stage3_gpu_evolve.py` (full 60,000-image training-set encode + GPU
+   evolve), `run_official_test_encode.py` + `stage4_gpu_evolve.py` (the
+   official 10,000-image test set's one-and-only encode + GPU evolve),
+   `run_confirmatory_evaluation.py` (the locked confirmatory analysis
+   itself), `run_posthoc_graph_pairwise.py` (the post hoc, Holm-corrected
+   graph-to-graph comparison), `generate_artifact_manifest.py` (below).
+3. **Diagnostics feeding the confirmatory thread**:
+   `diagnose_stage2_convergence.py`, `diagnose_stage2_convergence_hypotheses.py`,
+   `diagnose_rewired_currrandom_synchronization.py`,
+   `diagnose_topology_synchronizability.py`, `analyze_stage3_results.py`
+   + `analyze_stage3_results_jax.py` (the phase-2 combine-and-classify
+   step, numpy and JAX-batched-postprocessing variants) +
+   `verify_analyze_stage3_results_jax.py` (verifies the latter against
+   the former), `verify_stage2a_pipeline_equivalence.py`.
+4. **JAX classifier port thread** (`JAX_CLASSIFIER_PORT_FINDINGS.md`):
+   `stage2a_classifier_jax.py`, `verify_stage2a_classifier_jax.py`,
+   `diagnose_classifier_jax_grad_norm_calibration.py` -- investigative,
+   not used for any reported result; see that doc for why.
+5. **cuML cross-check thread** (`CUML_ACCEL_FINDINGS.md`): no dedicated
+   driver script -- reuses `analyze_stage3_results.py`,
+   `run_confirmatory_evaluation.py`, and
+   `run_class0_support_audit_classify.py` under `cuml.accel` via a
+   `--cuml` flag / `cuml.accel.install()` call, on this project's own
+   unmodified selection/fitting code.
+6. **Compute-cost accounting thread** (`COMPUTE_COST_DESIGN.md` /
+   `COMPUTE_COST_FINDINGS.md`): `measure_oscillator_cpu_latency.py`,
+   `prep_oscillator_latency_gpu_inputs.py` + `measure_oscillator_gpu_latency.py`
+   (remote-session GPU counterpart), `measure_mlp_cpu_latency.py`,
+   `build_cost_model.py` (the cost-model analysis and plot).
+7. **Class-0 support audit thread** (folded into `FINDINGS.md`, no
+   standalone doc): `run_class0_support_audit.py` (part 1: retained-ink
+   statistics, local/free), `run_class0_support_audit_classify.py`
+   (part 2: the two baseline classifier fits, `--cuml` optional).
+8. **Topology/correlation visualization thread**: `visualize_topologies.py`,
+   `visualize_normalized.py`, `plot_ink_correlation.py` +
+   `diagnose_ink_correlation.py` (the correlation-table companion
+   feeding the plot), `plot_decomposed_correlation.py` +
+   `diagnose_decomposed_correlation.py` (same pattern).
+
+**`generate_artifact_manifest.py`**: produces `results/ARTIFACT_
+MANIFEST.json` -- SHA256 hashes, dimensions, image ordering, graph
+hashes, and the selected `C` values the confirmatory run actually
+consumed. Run after reproducing the pipeline to verify your own
+artifacts match the ones behind the reported numbers. Scoped to the
+locked confirmatory pipeline's own artifacts (stage3/stage4 pkls) only
+-- does not cover the post hoc threads' own result pkls.
+
+**`results/`**: gitignored cache of `.pkl`/`.npy` artifacts (large,
+regenerable) plus a small number of genuinely committed outputs
+(plots, `ARTIFACT_MANIFEST.json`) that belong in the reproducible
+record.
+
+**`scratch/`**: gitignored local scratch directory for the large
+encode/GPU-evolve intermediate artifacts (`stage2a_paths.py`'s
+default location, overridable via `STAGE2A_SCRATCH_ROOT`).
 
 ## Reproducing the pipeline locally
 
@@ -93,6 +140,33 @@ uv run python experiments/stage2a_dynamics_classification/run_posthoc_graph_pair
 # Artifact manifest (hashes, dimensions, selected C, frozen headline numbers)
 uv run python experiments/stage2a_dynamics_classification/generate_artifact_manifest.py
 ```
+
+**Small-scale feasibility stages** (mechanical validation only, not
+confirmatory -- see `FINDINGS.md`'s "Feasibility Stage 1"/"Feasibility
+Stage 2" sections; each is self-contained, no prior encode/GPU step
+needed):
+```bash
+uv run python experiments/stage2a_dynamics_classification/run_feasibility_stage1.py   # 1,000 images, CPU, ~1 min
+uv run python experiments/stage2a_dynamics_classification/run_feasibility_stage2.py   # 5,000 images, CPU, ~6 min
+```
+
+**Class-0 support audit** (post hoc, per external review's request --
+see `FINDINGS.md`'s "class-0 confound" sections; part 1 is free/local,
+part 2 needs the same cached training-set artifacts as the main
+pipeline above and optionally accepts `--cuml` to fit under `cuml.accel`
+on a GPU session rather than local sklearn):
+```bash
+uv run python experiments/stage2a_dynamics_classification/run_class0_support_audit.py
+uv run python experiments/stage2a_dynamics_classification/run_class0_support_audit_classify.py            # local sklearn
+uv run python experiments/stage2a_dynamics_classification/run_class0_support_audit_classify.py --cuml      # cuml.accel, remote GPU session
+```
+
+**Follow-on threads** (JAX classifier port, NVIDIA cuML cross-check,
+compute-cost accounting) are not reproduced from this section --
+each owns its reproduction details directly in its own findings doc
+(`JAX_CLASSIFIER_PORT_FINDINGS.md`'s "Files" section,
+`CUML_ACCEL_FINDINGS.md`'s "Code" section, `COMPUTE_COST_FINDINGS.md`'s
+"Code" section), not centralized here.
 
 Override the scratch location if you don't want the default
 (`experiments/stage2a_dynamics_classification/scratch/`):

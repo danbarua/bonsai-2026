@@ -234,6 +234,18 @@ remains untouched by any of this), but real, correctly-scoped evidence
 that the scientific conclusion is not an artifact of one specific
 numerical implementation.
 
+## Code
+
+No dedicated driver script for this thread -- it reuses this project's
+own unmodified `analyze_stage3_results.py`, `run_confirmatory_evaluation.py`,
+and `run_class0_support_audit_classify.py` (the last via its `--cuml`
+flag), the whole point being that no reimplementation was needed.
+Reproducing this doc's numbers means running those same scripts on a
+`mighty-colab` A100 session with `cuml.accel.install()` called before
+`sklearn` is imported (see `README.md`'s "`cuml.accel`, if extending
+into that territory" for the exact install/activation sequence), rather
+than a separate command sequence specific to this doc.
+
 ## Next step, if pursued
 
 A real adoption decision (not attempted here) would still need: the

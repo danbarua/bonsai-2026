@@ -234,6 +234,18 @@ mlp.py` (the gating check) remains genuinely ephemeral -- a true
 one-off diagnostic that doesn't feed any number reported here, unlike
 the others.
 
+**Run order** (CPU-side scripts run locally; the GPU pair needs a
+`mighty-colab` session, see `README.md`'s "Reproducing the confirmatory
+GPU evolution" for the general upload/exec pattern):
+```bash
+uv run python experiments/stage2a_dynamics_classification/measure_oscillator_cpu_latency.py
+uv run python experiments/stage2a_dynamics_classification/measure_mlp_cpu_latency.py
+uv run python experiments/stage2a_dynamics_classification/prep_oscillator_latency_gpu_inputs.py
+# upload the staged inputs + evolve_on_graph_jax.py, then on the remote session:
+#   mighty-colab exec -s <session> -f measure_oscillator_gpu_latency.py
+uv run python experiments/stage2a_dynamics_classification/build_cost_model.py
+```
+
 ## Next step
 
 None specified by this design -- the question it was built to answer
