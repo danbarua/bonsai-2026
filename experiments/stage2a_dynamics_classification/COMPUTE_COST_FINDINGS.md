@@ -216,12 +216,23 @@ artifact of which basis is used.
 
 ## Code
 
-`measure_oscillator_cpu_latency.py`, `measure_oscillator_gpu_latency.py`,
-`measure_mlp_cpu_latency.py`, `build_cost_model.py` -- all ephemeral,
-scratchpad-only per this project's convention for GPU-session driver
-scripts and one-off analysis code; not committed. `check0_cuml_mlp.py`
-(the gating check) likewise ephemeral. The one committed artifact
-beyond this document is `results/compute_cost_vs_n.png`.
+**Amended**: originally left uncommitted per this project's ephemeral-
+GPU-script convention; committed alongside the reproducibility-gaps
+closure elsewhere in this project (`FINDINGS.md`'s "Reproducibility
+gaps" section) since these specific scripts produced this document's
+headline numbers, the same reasoning that applied to the confirmatory
+GPU drivers. `measure_oscillator_cpu_latency.py` (CPU single-image
+latency, all 4 topologies), `prep_oscillator_latency_gpu_inputs.py` +
+`measure_oscillator_gpu_latency.py` (the remote-session GPU counterpart
+-- the former stages the tiny inputs, the latter runs on the Colab
+kernel itself, not runnable locally as-is, same convention as
+`stage3_gpu_evolve.py`), `measure_mlp_cpu_latency.py` (MLP single-image
+latency), `build_cost_model.py` (the cost-model analysis and plot --
+transcribes the already-verified numbers above rather than re-deriving
+them from raw artifacts, disclosed in its own docstring). `check0_cuml_
+mlp.py` (the gating check) remains genuinely ephemeral -- a true
+one-off diagnostic that doesn't feed any number reported here, unlike
+the others.
 
 ## Next step
 

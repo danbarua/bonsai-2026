@@ -898,20 +898,81 @@ residual separately, per condition:
 | rewired | +0.187 | +0.325 | 1.7x |
 | curr_random | +0.134 | +0.240 | 1.8x |
 
-**The discriminatory component correlates more strongly than the
-common component with the surviving residual, at every single
-condition, by a consistent 1.7-2.3x margin.** This is not a foregone
-conclusion -- Pearson r is scale-invariant, so this isn't an artifact of
-the discriminatory component happening to have larger variance; it
-reflects an actual preferential preservation of the class-varying part
-of the signal, not just "there is ink somewhere in this general
-vicinity." Good news for the classification result specifically: what
-survives synchronization is weighted toward the part of the ink pattern
-that could plausibly help tell classes apart, not dominated by a shared
-baseline that couldn't. (Caveat: the population-common baseline here is
-estimated from only 10 images, one per class -- a small-sample proxy for
-"commonality across classes," sufficient to establish the direction and
-rough size of the effect, not a precise population estimate.)
+**Correction, caught on external review, load-bearing: the paragraph
+that previously stood here overclaimed "preferential preservation of
+the discriminatory component," and the conclusion was backwards.** The
+error: comparing `r(discriminatory)` against `r(common)` *within* each
+condition (0.854 vs. 0.370 at `pre_evolution`, etc.) only shows the
+discriminatory component is already more strongly correlated than the
+common component *before evolution does anything* -- that asymmetry is
+present at `pre_evolution` itself, not created by evolution. It says
+nothing about which component evolution preserves *better*. The correct
+comparison is retention *relative to `pre_evolution`*, per component:
+
+| graph | common retained | discriminatory retained |
+|---|---:|---:|
+| T | 93.0% | 74.8% |
+| lattice | 87.0% | 75.2% |
+| rewired | 50.5% | 38.1% |
+| curr_random | 36.2% | 28.1% |
+
+**At every single condition, the common component is retained at a
+*higher* percentage than the discriminatory component -- the opposite
+of "preferential preservation."** Evolution attenuates both, and
+attenuates the discriminatory correlation proportionally *more*. The
+representation is more strongly correlated with the class-discriminatory
+component at every stage (the original table, above) -- but that
+asymmetry is inherited from the encoding, not produced or amplified by
+evolution.
+
+**This makes the classification result more interesting, not less**:
+if evolution simply preserved discriminatory pixel-level ink better
+than common ink, that would be a fairly mundane explanation for the
+improvement. It does not. The improvement survives despite evolution
+eroding the discriminatory correlation *faster* than the common one --
+which means whatever the linear classifier is actually exploiting after
+evolution is not well described as "the same pixel-level discriminatory
+signal, just a bit fainter." The dynamics may be reorganizing,
+decorrelating, or redistributing the surviving information into
+directions a linear readout can use more effectively than the raw
+per-pixel correlation would suggest -- a real, open mechanistic
+question this correction leaves standing, not one it answers. (Caveat
+carried over: the population-common baseline is estimated from only 10
+images, one per class -- sufficient for the direction and rough size of
+this effect, not a precise population estimate.)
+
+**A further, related caveat, also raised on the same review, worth
+naming precisely**: all of the mechanistic plots and correlations in
+this section are conditional on the class-0-derived 505-node active
+support (`DESIGN.md`'s locked `active_indices`, shared identically by
+all four topologies and the pre-evolution condition -- see "The class-0
+confound `DESIGN.md` flagged," above, for the primary result's own
+disclosure of this). Three things follow, stated precisely rather than
+left implicit:
+
+- **The primary confirmatory result is unaffected.** `evolved_T` vs.
+  `pre-evolution` uses the identical mask on both sides -- the
+  improvement isolates the incremental effect of edge structure and
+  evolution *given* that fixed support, and cannot be attributed to one
+  condition simply retaining more pixels than the other.
+- **`active_indices` is not literally an ink silhouette.** It comes from
+  `build_class_topology`'s population-developmental statistic (an
+  all-pairs Hebbian-style measure across class-0 images), thresholded to
+  suppress background-background edges, then restricted to nodes
+  surviving in at least one sufficiently strong edge -- a class-0-derived
+  *correlated* support, broader than and not identical to a simple
+  ink-presence mask.
+- **The mechanistic plots establish survival *within* this support, not
+  a claim about ink outside it.** The local encoder's four-neighbor
+  coupling runs on all 784 pixels *before* the 505-node restriction is
+  applied -- an excluded pixel's own coordinate is discarded, but its
+  influence on nearby *retained* pixels during those 150 coupling steps
+  is not necessarily erased. What these plots show is: ink-related
+  information within the class-0-derived active support survives
+  evolution and synchronization, attenuated but never to zero. They do
+  not show what happens to class-discriminatory ink that falls entirely
+  outside that support -- a genuinely open question, addressed directly
+  below.
 
 ## Result 3: classifier CV fitting is NOT negligible -- it dominates everything else
 
