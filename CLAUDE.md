@@ -81,10 +81,6 @@ where a shared, hardened library actually earns its cost.
   code in `experiments/` and `benchmark_programme/`, is an open,
   useful stress test of whether this repository is genuinely
   self-sufficient for a fresh agent.
-- **`tools/notMNIST-to-MNIST/`** -- a third-party conversion tool
-  (cloned repo, has its own `.git`) used to produce notMNIST's
-  MNIST-format files. Reference only; the conversion has already been
-  done and the output lives in `datasets/notmnist/`.
 - **`tarballs/`** -- the original packaged deliverables (one per major
   milestone across the whole project) that `benchmark_programme/` and
   parts of `experiments/` were decanted from. Kept for provenance; not
@@ -139,6 +135,23 @@ where a shared, hardened library actually earns its cost.
   in this project already). The generic version of this machinery lives
   in `src/bonsai/stats/permutation.py` -- import and reuse it rather
   than writing new permutation-test code from scratch.
+
+## Documentation style
+
+Reader-facing docs (READMEs, findings docs) state current facts and
+point to the authoritative source for detail -- they don't narrate the
+editing process that produced them. Two concrete failures this
+convention exists to prevent, both caught in the same session
+(2026-08-04): a README that led with raw commands and only revealed a
+newly-added Makefile 70 lines later, reading as an after-action report
+rather than instructions for a reader arriving cold; and an AI-voice
+meta-comment ("don't duplicate this here, this is exactly the X
+convention applied to Y") that had leaked into README prose, narrating
+an editing decision instead of stating a fact. "Amended by external
+review" / "fixed in commit X" framing belongs in commit messages and
+`git log`, not in the document a reader consults to use the code
+today -- if a paragraph reads as explaining why *this* edit was made
+rather than what's true right now, cut it.
 
 ## Where the project actually is right now
 

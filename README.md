@@ -66,7 +66,6 @@ This project uses `hatchling` as a build backend and is compatible with `uv`.
 - `datasets/`: Local storage for MNIST-format datasets (MNIST, KMNIST, Fashion-MNIST, notMNIST).
 - `docs/`: Durable project documentation and memory.
 - `tests/`: Current quantitative verification suite.
-- `tools/`: Utility scripts (e.g., dataset conversion).
 
 ## Scripts
 
