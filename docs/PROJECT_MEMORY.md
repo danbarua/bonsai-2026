@@ -141,10 +141,14 @@ initial condition did not replicate in a second, and in one case
 partially inverted. **Capability remained unresolved: nonlinear behavior
 established (Level 1), structured transformation not yet shown.**
 
-### Stage 1B.2 (structured internal transformation, ESTABLISHED LOCALLY -- the project's current frontier)
+### Stage 1B.2 (structured internal transformation, ESTABLISHED LOCALLY)
 
-The most significant milestone in the dynamics programme to date.
-Controlled state-conditioning design: one prespecified baseline
+The milestone that first established Level 2 (structured internal
+transformation) in the dynamics programme -- since superseded as the
+programme's frontier by Stage 1C (trajectory generalization), Stage 1D
+(topology specificity), and Stage 2A (external task utility, Level 3),
+all below; this subsection's own finding still stands as originally
+established. Controlled state-conditioning design: one prespecified baseline
 trajectory (KMNIST class 0, T topology, seed=3000), four perturbation
 times along it, six fixed nearby-state replicas per time, 3 nodes x 2
 signs x 3 amplitudes = 18 inputs = 432 total trials. Primary statistic
@@ -356,11 +360,17 @@ on this held-out test set. Five of the six pairwise comparisons are
 extremely well-separated; the sixth (`rewired` vs. `curr_random`) is
 genuinely marginal (p~0.046, tracked as
 [issue #8](https://github.com/danbarua/bonsai-2026/issues/8)). This
-result is consistent with -- not merely compatible with -- Stage 1D's
-own closure (T indistinguishable from matched controls under the
-Stage 1B.2/1C mapping design): Stage 2A now shows the same genericity
-under an actual external task, not just under the internal
-Delta_map statistic.
+connects to, but is not the same claim as, Stage 1D's own closure (T
+indistinguishable from matched controls under the internal Delta_map
+statistic): Stage 1D found the graph families indistinguishable on
+internal mapping strength; Stage 2A finds that all four tested graph
+instances produce useful downstream transformations, so learned
+connectivity is not necessary and T is not uniquely advantageous --
+but their downstream task utility is not equivalent, since the specific
+graph instances produce measurably different classification outcomes
+(the ranking above). Delta_map equivalence does not imply task-utility
+equivalence -- this dissociation, not a repeat of Stage 1D's genericity
+finding, is what Stage 2A actually shows.
 
 **Settled**: for this task, this linear readout, and these four
 prespecified graph instances -- graph-level evolution on top of an
