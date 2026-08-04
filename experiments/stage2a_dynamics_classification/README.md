@@ -177,12 +177,23 @@ export STAGE2A_SCRATCH_ROOT=/path/to/your/scratch/dir
 
 ## Reproducing the confirmatory GPU evolution
 
-**Amended by external review**: the single generic example previously
-here (`theta0_batch.npy`, `topologies.pkl`) does not match either
-driver's actual expected filenames -- following it as written would not
-reproduce the run without inspecting the source first. Split into two
-exact, separate workflows below, training and official-test, each with
-real filenames and shapes throughout.
+**Amended by external review, twice.** First: the single generic
+example previously here (`theta0_batch.npy`, `topologies.pkl`) didn't
+match either driver's actual expected filenames. Second: the exact
+`mighty-colab` command sequences that replaced it assumed the shell's
+cwd was already `experiments/stage2a_dynamics_classification/` (bare
+filenames, bare `scratch/...` paths) -- silently contradicting this
+README's own "run from repository root" convention used everywhere
+else. Rather than document a fragile "cd here first, then run these
+exact commands" instruction, **the root-level `Makefile` is now the
+single source of truth for these commands** -- run everything below
+from the repository root via `make`, not by copying commands out of
+this section. This also means the Makefile and this README no longer
+duplicate the same filenames in two places that can drift apart.
+
+```bash
+make stage2a-help   # lists every stage2a-* target with a one-line description
+```
 
 The GPU-evolution step used [`mighty-colab`](https://pypi.org/project/mighty-colab/)
 (a Colab CLI/MCP wrapper) to provision an A100 session, upload inputs,
@@ -190,19 +201,21 @@ run the evolution kernel remotely, and download the resulting `theta_T`
 states. `stage3_gpu_evolve.py` / `stage4_gpu_evolve.py` are the exact
 scripts that ran on the remote kernel -- not runnable locally as-is
 (they read/write `/content/...`, the remote session's filesystem
-convention).
+convention). The `make` targets below `cd` into
+`experiments/stage2a_dynamics_classification/` internally (resolved via
+`git rev-parse --show-toplevel`, not a hardcoded path -- see the
+Makefile's own header comment) before invoking `mighty-colab`, so the
+commands it runs are identical to what worked before, just no longer
+something you have to get the cwd right for by hand.
 
 ### Workflow A: Stage 3, training-set evolution (60,000 images)
 
-**1. Local preparation.** `run_feasibility_stage3_encode.py` (already
-run in "Reproducing the pipeline locally," above) produces one combined
-package, `scratch/stage3_train/stage3_gpu_upload.pkl`
-(`{"theta0_batch": (60000, 505) float64, "topologies": {4 x (505, 505)
-float64}}`, ~250MB). That single pickle is too large for the upload
-endpoint (see "Upload size limit," below), so a separate script splits
-it into the exact files the remote driver expects:
+**1. Local preparation.** Encodes the full 60,000-image training set
+and splits the result into the exact files the remote driver expects
+(one combined `theta0_batch`+`topologies` pickle is too large for the
+upload endpoint -- see "Upload size limit," below):
 ```bash
-uv run python experiments/stage2a_dynamics_classification/prepare_stage3_gpu_upload.py
+make stage2a-prepare-train
 ```
 Produces, in `scratch/stage3_train/`: `theta0_chunk_00.npy` through
 `theta0_chunk_11.npy` (12 files, `(5000, 505)` float64 each, ~20MB
@@ -210,77 +223,54 @@ each) and `stage3_topologies.pkl` (`{4 x (505, 505)} float64`, ~8MB) --
 verified to reassemble byte-identical to the original before the script
 reports success, not just "the right shape."
 
-**2. Upload + GPU execution:**
+**2. Upload + GPU execution** (provisions an A100 session, uploads
+inputs, runs the evolution kernel, downloads `theta_T`, stops the
+session -- **bills while running**):
 ```bash
-mighty-colab sessions   # check for orphaned sessions first, they bill while running
-mighty-colab new -s stage3-evolve --gpu A100
-mighty-colab reinstall -s stage3-evolve jax[cuda12]==0.11.0 diffrax==0.7.2 equinox==0.13.8
-
-mighty-colab upload -s stage3-evolve evolve_on_graph_jax.py /content/evolve_on_graph_jax.py
-mighty-colab upload -s stage3-evolve scratch/stage3_train/stage3_topologies.pkl /content/stage3_topologies.pkl
-for i in 00 01 02 03 04 05 06 07 08 09 10 11; do
-  mighty-colab upload -s stage3-evolve scratch/stage3_train/theta0_chunk_$i.npy /content/theta0_chunk_$i.npy
-done
-
-mighty-colab exec -s stage3-evolve -f stage3_gpu_evolve.py
+make stage2a-evolve-train-gpu
 ```
 
-**3. Output, download, stop:**
+**3. Verify** your regenerated artifact matches the one behind the
+reported numbers -- regenerate the manifest and diff it against the
+committed one:
 ```bash
-# stage3_gpu_evolve.py writes /content/stage3_gpu_results.pkl
-mighty-colab download -s stage3-evolve /content/stage3_gpu_results.pkl scratch/stage3_train/stage3_gpu_results.pkl
-mighty-colab stop -s stage3-evolve   # GPU sessions are billed while running
+make stage2a-verify
 ```
-
-**4. Verify** your regenerated artifact matches the one behind the
-reported numbers -- regenerate the manifest and compare the
-`stage3_gpu_results.pkl` entry's `sha256` against the committed
-`results/ARTIFACT_MANIFEST.json`:
-```bash
-uv run python experiments/stage2a_dynamics_classification/generate_artifact_manifest.py
-git diff --stat experiments/stage2a_dynamics_classification/results/ARTIFACT_MANIFEST.json
-```
-A clean diff (or a diff touching only expected fields, e.g. a
-regeneration timestamp if one is added later) confirms byte-identical
-regeneration; a changed `sha256` for `stage3_gpu_results.pkl`
-specifically means your regenerated evolution output differs from the
-one the reported numbers are based on.
+A clean diff on the artifact/graph/array `sha256` fields confirms
+byte-identical regeneration; a changed `sha256` for
+`stage3_gpu_results.pkl` specifically means your regenerated evolution
+output differs from the one the reported numbers are based on.
+**`environment.git_commit_sha` will always differ once you're on a
+later commit than the one that generated the committed manifest --
+that field alone changing is not a reproduction failure, only the
+artifact-hash fields are load-bearing for this check** (`make
+stage2a-verify`'s own output repeats this note).
 
 ### Workflow B: Stage 4, official-test-set evolution (10,000 images)
 
-**1. Local preparation.** `run_official_test_encode.py` (already run
-above -- the one and only place this project touches test-set
-images/labels for the locked confirmatory analysis; do not run this
-speculatively) already produces the exact files the remote driver
-expects, no separate chunking step needed at this smaller scale:
-`scratch/stage4_test/stage4_gpu_upload_topologies.pkl`
+**1. Local preparation** -- the one and only place this project
+touches test-set images/labels for the locked confirmatory analysis;
+do not run this speculatively. Already produces the exact files the
+remote driver expects, no separate chunking step needed at this
+smaller scale:
+```bash
+make stage2a-prepare-test
+```
+Produces `scratch/stage4_test/stage4_gpu_upload_topologies.pkl`
 (`{"topologies": {4 x (505, 505)} float64}`, ~8MB) and
 `scratch/stage4_test/stage4_theta0_test.npy` (`(10000, 505)` float64,
 ~40MB -- small enough for a single-file upload).
 
-**2. Upload + GPU execution:**
+**2. Upload + GPU execution** (same pattern as Workflow A -- bills
+while running):
 ```bash
-mighty-colab sessions
-mighty-colab new -s stage4-evolve --gpu A100
-mighty-colab reinstall -s stage4-evolve jax[cuda12]==0.11.0 diffrax==0.7.2 equinox==0.13.8
-
-mighty-colab upload -s stage4-evolve evolve_on_graph_jax.py /content/evolve_on_graph_jax.py
-mighty-colab upload -s stage4-evolve scratch/stage4_test/stage4_gpu_upload_topologies.pkl /content/stage4_gpu_upload_topologies.pkl
-mighty-colab upload -s stage4-evolve scratch/stage4_test/stage4_theta0_test.npy /content/stage4_theta0_test.npy
-
-mighty-colab exec -s stage4-evolve -f stage4_gpu_evolve.py
+make stage2a-evolve-test-gpu
 ```
 
-**3. Output, download, stop:**
+**3. Verify**, same as Workflow A:
 ```bash
-# stage4_gpu_evolve.py writes /content/stage4_gpu_results.pkl
-mighty-colab download -s stage4-evolve /content/stage4_gpu_results.pkl scratch/stage4_test/stage4_gpu_results.pkl
-mighty-colab stop -s stage4-evolve
+make stage2a-verify
 ```
-
-**4. Verify**, same pattern as Workflow A -- `generate_artifact_manifest.py`,
-compare the `stage4_gpu_results.pkl` entry's `sha256` against the
-committed `results/ARTIFACT_MANIFEST.json`.
 
 **Upload size limit, worth knowing in advance**: a single large pickle
 (the original 250MB Stage 3 `theta0`+topologies package) hit the
@@ -303,7 +293,9 @@ patches sklearn's estimator classes at import time. Verified to
 accelerate `LogisticRegression`; verified **not** to accelerate
 `MLPClassifier` (silent CPU fallback, no error) -- check any new
 estimator directly before trusting it, per `CUML_ACCEL_FINDINGS.md`'s
-own check-0 precedent, rather than assuming coverage.
+own check-0 precedent, rather than assuming coverage. Not wired into a
+`make` target -- this is exploratory/interactive per
+`CUML_ACCEL_FINDINGS.md`, not a fixed reproduction sequence.
 
 ## Public artifact cache (GCS)
 
@@ -332,9 +324,11 @@ urllib.request.urlretrieve(
 )
 ```
 
-Or via `gcloud`/`gsutil` locally:
+Or via `gcloud`/`gsutil` locally, run from the repository root
+(`$STAGE2A_DIR` matching the Makefile's own variable,
+`experiments/stage2a_dynamics_classification` by default):
 ```bash
-gcloud storage cp gs://bonsai-2026-stage2a-cache/stage3_train/*.pkl ./scratch/stage3_train/
+gcloud storage cp gs://bonsai-2026-stage2a-cache/stage3_train/*.pkl "$STAGE2A_DIR/scratch/stage3_train/"
 ```
 
 **Why this exists**: re-uploading these artifacts from a local machine
@@ -352,9 +346,11 @@ in full. See the project's own reasoning on this (this thread's
 conversation, not otherwise documented) if replicating the pattern for
 a dataset or result where that reasoning wouldn't hold.
 
-**Verifying your own regenerated artifacts match**: run
-`generate_artifact_manifest.py` and compare SHA256 hashes against
-`results/ARTIFACT_MANIFEST.json`'s committed values.
+**Verifying your own regenerated artifacts match**: `make
+stage2a-verify` from the repository root (regenerates the manifest,
+diffs it against the committed one). As above, ignore
+`environment.git_commit_sha` in that diff -- compare the
+artifact/graph/array `sha256` fields specifically.
 
 ## Artifact replay vs. full raw-data regeneration
 

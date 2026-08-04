@@ -76,6 +76,14 @@ All research scripts should be executed from the project root using `uv run pyth
 - **`tools/notMNIST-to-MNIST/convert_to_mnist_format.py`**: Utility to convert notMNIST data to the standard MNIST IDX format.
 - **`main.py`**: A sample entry point (placeholder).
 
+The root `Makefile` wraps the Stage 2A reproduction workflow (local
+encode steps, remote GPU evolution via `mighty-colab`, artifact
+verification) behind `make stage2a-*` targets, so those commands don't
+need to be run from any particular subdirectory -- run `make
+stage2a-help` for the full list, or see
+`experiments/stage2a_dynamics_classification/README.md` for the
+workflow they belong to.
+
 ## Environment Variables
 
 No specific environment variables are required for basic operation. TODO: Document any future variables for remote execution or data paths.
