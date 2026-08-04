@@ -12,8 +12,8 @@ reported.** Prompted
 by the same question the JAX/optax classifier
 port was built to answer (is the slow, sklearn-based classifier CV
 fitting acceleratable?), tested here via a different route: NVIDIA
-RAPIDS' `cuml.accel`, which monkey-patches `sklearn.linear_model.
-LogisticRegression` (among other estimators) to dispatch to a GPU-native
+RAPIDS' `cuml.accel`, which monkey-patches `sklearn.linear_model.LogisticRegression`
+(among other estimators) to dispatch to a GPU-native
 implementation while keeping the exact same class name and `fit`/
 `predict_proba` API. Unlike the JAX port, this is **our actual,
 unmodified `stage2a_classifier._fit_one`** -- no reimplementation, no

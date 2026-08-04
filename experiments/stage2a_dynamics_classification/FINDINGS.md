@@ -832,8 +832,8 @@ structure echoing the digit's shape, while `rewired`/`curr_random`
 collapse to near-uniform color -- near-total synchronization, visible
 directly rather than only as a summary statistic.
 
-**A real tension this raises, and its resolution** (`results/
-phase_state_per_class_per_topology_normalized.png`): if `rewired`/
+**A real tension this raises, and its resolution**
+(`results/phase_state_per_class_per_topology_normalized.png`): if `rewired`/
 `curr_random`'s columns look nearly uniform by eye, how does a linear
 classifier extract enough signal from them to perform comparably to or
 better than `T` (the confirmatory result's own finding)? Resolved by
@@ -852,8 +852,8 @@ plot is honest evidence for the first, not the second, consistent with
 (not contradicting) the classification result.
 
 **The follow-up observation above was chased, and the mechanism behind
-the speckle pattern is now confirmed directly** (`results/
-ink_correlation_decay.png`): Pearson correlation between each active
+the speckle pattern is now confirmed directly**
+(`results/ink_correlation_decay.png`): Pearson correlation between each active
 pixel's ink intensity *in that specific image* and its z-scored
 residual phase deviation, per class, per condition -- not a comparison
 against any population baseline, just "is this pixel inked, in this
@@ -995,8 +995,8 @@ small effect.
 lying outside the support): a consistent, visible band of excluded ink
 at the top-center notch and the bottom margin, present for classes 1-9
 specifically and much fainter for class 0 -- exactly the region the
-class-0-derived support's own shape (`results/
-topology_graph_structure.png`) doesn't cover. Real, systematic, not
+class-0-derived support's own shape (`results/topology_graph_structure.png`)
+doesn't cover. Real, systematic, not
 scattered noise.
 
 **Two baselines, run to separate the projection's cost from evolution's
@@ -1527,8 +1527,8 @@ section does exactly that, properly, rather than leaving it as an
 unresolved caveat.
 
 **No new simulation, no new GPU time**: `ell_i` for all four evolved
-conditions was already computed and saved by `run_confirmatory_
-evaluation.py` (`results/stage4_confirmatory_results.pkl`). This is a
+conditions was already computed and saved by
+`run_confirmatory_evaluation.py` (`results/stage4_confirmatory_results.pkl`). This is a
 new bootstrap computation on existing data only
 (`run_posthoc_graph_pairwise.py`).
 
@@ -1686,8 +1686,8 @@ verified, and committed (not merely planned):
   including the chunked-upload workaround for the transfer endpoint's
   size limit.
 - **Artifact manifest** (`generate_artifact_manifest.py`, run against
-  the real cached artifacts -- not a template): `results/ARTIFACT_
-  MANIFEST.json` records SHA256 hashes for every pkl the confirmatory
+  the real cached artifacts -- not a template):
+  `results/ARTIFACT_MANIFEST.json` records SHA256 hashes for every pkl the confirmatory
   result depends on, per-topology adjacency and evolved-state hashes,
   training/test dimensions, image-ordering checks (label array hashes,
   `idx == arange(n)` confirmation), the selected `C` values actually

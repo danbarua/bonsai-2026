@@ -229,8 +229,8 @@ kernel itself, not runnable locally as-is, same convention as
 `stage3_gpu_evolve.py`), `measure_mlp_cpu_latency.py` (MLP single-image
 latency), `build_cost_model.py` (the cost-model analysis and plot --
 transcribes the already-verified numbers above rather than re-deriving
-them from raw artifacts, disclosed in its own docstring). `check0_cuml_
-mlp.py` (the gating check) remains genuinely ephemeral -- a true
+them from raw artifacts, disclosed in its own docstring).
+`check0_cuml_mlp.py` (the gating check) remains genuinely ephemeral -- a true
 one-off diagnostic that doesn't feed any number reported here, unlike
 the others.
 

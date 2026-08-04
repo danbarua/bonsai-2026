@@ -85,8 +85,7 @@ enumerated explicitly here instead):
    feeding the plot), `plot_decomposed_correlation.py` +
    `diagnose_decomposed_correlation.py` (same pattern).
 
-**`generate_artifact_manifest.py`**: produces `results/ARTIFACT_
-MANIFEST.json` -- SHA256 hashes, dimensions, image ordering, graph
+**`generate_artifact_manifest.py`**: produces `results/ARTIFACT_MANIFEST.json` -- SHA256 hashes, dimensions, image ordering, graph
 hashes, and the selected `C` values the confirmatory run actually
 consumed. Run after reproducing the pipeline to verify your own
 artifacts match the ones behind the reported numbers. Scoped to the
@@ -367,23 +366,23 @@ These are two different reproducibility claims. Both are now supported.
   -- classifier CV, the confirmatory bootstrap/McNemar, the post hoc
   pairwise comparison, the artifact manifest -- reruns from those
   artifacts and reproduces the reported numbers. This is what
-  `tests/test_stage2a_stats.py`'s `test_frozen_primary_effect_matches_
-  findings_md` (Tier 2) checks directly, and what most of "Reproducing
+  `tests/test_stage2a_stats.py`'s `test_frozen_primary_effect_matches_findings_md`
+  (Tier 2) checks directly, and what most of "Reproducing
   the pipeline locally," above, actually exercises once the
   encode/GPU-evolve artifacts exist.
 
 - **Full raw-data regeneration (from nothing but public KMNIST + public
   code).** `stage2a_topologies.build_all_topologies()` previously
   depended on a cross-stage historical artifact,
-  `experiments/stage1b2_structured_transformation/results/
-  class0_constructions.pkl` -- gitignored, not committed, not part of
+  `experiments/stage1b2_structured_transformation/results/class0_constructions.pkl`
+  -- gitignored, not committed, not part of
   the Stage 2A GCS bucket above (that bucket mirrors Stage 2A's own
   artifacts, not Stage 1B2's) -- in two places: `lattice` was read
   directly from that cache rather than reconstructed, and `T`'s own
   reconstruction hard-required the cache present just to verify against
   (even though the construction itself never needed it). **Both fixed**:
-  `T` now calls `build_and_verify_T(require_historical_verification=
-  False)` (still verifies against the cache opportunistically if
+  `T` now calls `build_and_verify_T(require_historical_verification=False)`
+  (still verifies against the cache opportunistically if
   present, skips the check rather than raising if not); `lattice` is
   now reconstructed via `build_lattice_topology`
   (`src/bonsai/dynamics/lattice_construction.py`) directly. `rewired`/
@@ -418,8 +417,8 @@ Two-tier convention (this project's established pattern, see the root
 `CLAUDE.md`): Tier 1 tests are self-contained on synthetic data, always
 run. Tier 2 tests are skipped cleanly (not failed) when the local-only
 cached artifacts they check against aren't present --
-`test_stage2a_stats.py`'s `test_frozen_primary_effect_matches_
-findings_md` is Tier 2, recomputing the primary bootstrap from
+`test_stage2a_stats.py`'s `test_frozen_primary_effect_matches_findings_md`
+is Tier 2, recomputing the primary bootstrap from
 `results/stage4_confirmatory_results.pkl` if present and asserting it
 still matches `FINDINGS.md`'s stated numbers, catching a future
 refactor that silently changes the statistic. `test_stage2a_classifier.py`,
