@@ -832,6 +832,35 @@ structure echoing the digit's shape, while `rewired`/`curr_random`
 collapse to near-uniform color -- near-total synchronization, visible
 directly rather than only as a summary statistic.
 
+**A real tension this raises, and its resolution** (`results/
+phase_state_per_class_per_topology_normalized.png`): if `rewired`/
+`curr_random`'s columns look nearly uniform by eye, how does a linear
+classifier extract enough signal from them to perform comparably to or
+better than `T` (the confirmatory result's own finding)? Resolved by
+the pipeline, not a contradiction: `StandardScaler` runs before
+classification, rescaling whatever variance is actually present --
+real but small -- up to unit scale before the classifier ever sees it.
+Measured directly: the gauge-shifted phase's raw standard deviation
+(mean across the 10 classes, one representative image each) is ~0.079
+rad for `rewired` and ~0.133 rad for `curr_random`, versus ~0.79 rad
+for the pre-evolution baseline and ~0.54-0.55 rad for `T`/`lattice` --
+roughly 4-10x smaller in absolute magnitude, genuinely small, but not
+zero. Per-panel z-scoring (the same rescaling `StandardScaler` performs)
+makes this residual visible directly. **"Looks uniform to the eye" and
+"carries zero exploitable information" are different claims** -- this
+plot is honest evidence for the first, not the second, consistent with
+(not contradicting) the classification result.
+
+One further, honestly-reported observation from this normalized view,
+not chased further here: the residual structure that becomes visible in
+`rewired`/`curr_random` reads as fine-grained, speckled, high-frequency
+variation, qualitatively different from `T`/`lattice`'s smooth,
+spatially-coherent fields that visibly echo the digit's stroke shape.
+Both carry real signal (per the resolution above and the confirmatory
+result's own accuracy numbers), but whatever the classifier is
+exploiting in `rewired`/`curr_random` does not appear, at least by eye,
+to be "a faint copy of the digit's shape" the way `T`/`lattice`'s does.
+
 ## Result 3: classifier CV fitting is NOT negligible -- it dominates everything else
 
 **246.8 minutes (4.1 hours)** for the 6 conditions' full CV fitting
