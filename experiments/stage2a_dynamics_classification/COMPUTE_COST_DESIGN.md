@@ -6,7 +6,24 @@ adjustment (measure both approaches' training AND inference on GPU,
 via `cuml.accel`, not CPU sklearn for one side and GPU for the other).
 Standalone from, and does not reopen or depend on re-running, the
 locked confirmatory result in `FINDINGS.md`. Follows this project's
-established convention: design first, reviewed, then measured.*
+established convention: design first, reviewed, then measured.
+**Locked as of round 2** -- reviewed and approved for measurement,
+below.*
+
+## A named, legitimate possible outcome, stated before measuring
+
+**Flagged in round 2, worth stating plainly now rather than letting it
+read as a disappointing result later if it's what the numbers show**:
+given `Train_readout` is dominated by a 9x5 CV grid search -- a
+combinatorially larger procedure than fitting one MLP -- it is entirely
+plausible that MLP training remains decisively cheaper than oscillator
+training even once both are measured on GPU. If MLP inference also
+turns out to be as trivial as expected (a small matrix multiply), the
+honest, complete answer this design produces may simply be: **no
+crossover exists at any plausible deployment scale, full stop.** That
+is a real, reportable result on its own terms -- not a failure to find
+one, and not grounds to keep looking for a scale where the picture
+flips.
 
 ## The asymmetry this quantifies -- corrected framing from round 1
 
