@@ -356,6 +356,54 @@ a dataset or result where that reasoning wouldn't hold.
 `generate_artifact_manifest.py` and compare SHA256 hashes against
 `results/ARTIFACT_MANIFEST.json`'s committed values.
 
+## Artifact replay vs. full raw-data regeneration
+
+**Amended by external review**: these are two different reproducibility
+claims, and this repository only fully supports one of them without an
+extra step.
+
+- **Artifact replay -- now largely supported.** Given the cached
+  intermediate artifacts (via the GCS bucket above, or your own prior
+  local run), every downstream step -- classifier CV, the confirmatory
+  bootstrap/McNemar, the post hoc pairwise comparison, the artifact
+  manifest -- reruns from those artifacts and reproduces the reported
+  numbers. This is what `tests/test_stage2a_stats.py`'s
+  `test_frozen_primary_effect_matches_findings_md` (Tier 2) checks
+  directly, and what most of "Reproducing the pipeline locally," above,
+  actually exercises once the encode/GPU-evolve artifacts exist.
+
+- **Full raw-data regeneration (from nothing but public KMNIST +
+  public code) -- not wholly self-contained.** `stage2a_topologies.
+  build_all_topologies()` depends, transitively, on
+  `build_and_verify_T()` (`experiments/stage1d_topology_specificity/
+  build_stage1d_constructions.py`), which verifies its from-raw-KMNIST
+  reconstruction of `T` against a cross-stage historical artifact,
+  `experiments/stage1b2_structured_transformation/results/
+  class0_constructions.pkl` -- gitignored, not committed (per this
+  project's convention for large cached artifacts), and not part of the
+  Stage 2A GCS bucket above (that bucket mirrors Stage 2A's own
+  artifacts, not Stage 1B2's). Without it, `build_all_topologies()`
+  raises rather than reconstructing `T` from scratch -- confirmed
+  directly, not assumed (this is exactly the gap
+  `tests/test_stage2a_topologies.py`'s Tier-2 skip condition checks
+  for, so a fresh clone missing this artifact skips that test cleanly
+  rather than erroring, but the same gap applies to actually *running*
+  the pipeline, not just testing it).
+
+  Two ways to close this, neither done here: (1) obtain
+  `class0_constructions.pkl` separately (it is this project's own
+  historical artifact, from an earlier stage, not a Stage 2A output --
+  see that stage's own `FINDINGS.md`/handoff docs for provenance), or
+  (2) reconstruct the lattice/T-verification path directly through
+  already-committed code without relying on the cached comparison
+  target -- a real option (the underlying construction code itself,
+  `src/bonsai/dynamics/learned_topology_construction.py` /
+  `lattice_construction.py`, is committed and already verified
+  byte-exact against this same historical artifact for class 0 --
+  `docs/PROJECT_MEMORY.md`'s "Construction-pipeline reproducibility"
+  section), just not wired into `stage2a_topologies.py` as a
+  from-scratch fallback path.
+
 ## Testing
 
 ```bash
