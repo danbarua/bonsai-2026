@@ -570,10 +570,53 @@ replacement for slow and right.
    accuracy question (item 1) is not, and is now the sole blocker to
    this port being trustworthy, independent of speed.
 
+## A reproducibility gap in this investigation itself, found and closed
+
+**Self-review finding, not part of external review's original pass**:
+`stage_2a_classifier_jax.py`'s own module docstring twice references
+`verify_stage_2a_classifier_jax.py` by name ("see
+verify_stage_2a_classifier_jax.py", "See
+verify_stage_2a_classifier_jax.py's debug history") -- but that file was
+never actually committed, only ever existing in an interactive session's
+local scratch directory. A dangling reference in committed code, the
+same category of gap external review flagged for the confirmatory
+pipeline (since resolved -- see `FINDINGS.md`'s "Reproducibility gaps"
+section), just in this investigation's own follow-on code instead.
+Closed the same way: two scripts committed.
+
+- `verify_stage_2a_classifier_jax.py` -- the file the docstring already
+  pointed at. Synthetic-data-only (fast, no dependency on cached real
+  artifacts): correctness (`best_C` match + reported loss-curve gap)
+  across three synthetic cases, plus a 10-repetition stress test of the
+  `vmap`/`lax.while_loop` NaN-guard fix (a smaller, always-runnable
+  version of the 13/20-run CPU/GPU stress test reported earlier in this
+  document).
+- `diagnose_classifier_jax_grad_norm_calibration.py` -- reproduces both
+  real-data measurements behind the `GRAD_NORM_REL` recalibration
+  (sklearn's own converged `||grad||` table, and the full real-data
+  sklearn-vs-JAX curve comparison on `evolved_T`), using the real cached
+  Stage-3 artifacts via the already-verified `build_results_structure`
+  rather than the ad hoc npz-sharding workaround the original
+  interactive session used to get data onto a Colab session (that
+  workaround was needed only for GPU upload-size limits, not for this
+  script's local-only CPU computation). Slow (~13 minutes -- a real
+  5-fold sklearn CV fit at `max_iter=10000` on ill-conditioned data) and
+  diagnostic-only, not run automatically. Reproduces the *qualitative*
+  finding exactly (`GRAD_NORM_REL=6e-3` retains margin; `best_C`
+  matches) but not byte-identical numbers -- the original interactive
+  run round-tripped features through float32 npz files as part of that
+  same now-unnecessary Colab-upload workaround, this script keeps full
+  float64 precision throughout; see the script's own docstring for the
+  measured difference.
+
 ## Files
 
 - `stage_2a_classifier_jax.py` -- the port (new, this investigation;
   updated during the follow-up with the `GRAD_NORM_REL` recalibration).
+- `verify_stage_2a_classifier_jax.py`,
+  `diagnose_classifier_jax_grad_norm_calibration.py` -- verification/
+  diagnostic scripts for the above, committed per the reproducibility
+  gap noted directly above (previously only in local scratch).
 - `analyze_stage_3_results_jax.py` -- R_post/feat_post JAX port (existed
   before this investigation; verified here as a side effect of building
   the real-data test).
