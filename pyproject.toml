@@ -34,6 +34,9 @@ packages = ["src/bonsai"]
 dev = [
     "pytest>=9.1.1",
 ]
+gpu = [
+    "mighty-colab>=0.1.21",
+]
 
 [tool.pytest.ini_options]
 markers = [

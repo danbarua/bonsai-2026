@@ -206,7 +206,12 @@ convention). The `make` targets below `cd` into
 `git rev-parse --show-toplevel`, not a hardcoded path -- see the
 Makefile's own header comment) before invoking `mighty-colab`, so the
 commands it runs are identical to what worked before, just no longer
-something you have to get the cwd right for by hand.
+something you have to get the cwd right for by hand. `mighty-colab`
+itself is a pinned dependency (`pyproject.toml`'s `[dependency-groups].gpu`,
+the official PyPI release) rather than something you install globally
+and hope matches -- `uv run --group gpu` (what the Makefile calls under
+the hood) installs it into this project's own `.venv` on first use, so
+a clean checkout needs no separate install step.
 
 ### Workflow A: Stage 3, training-set evolution (60,000 images)
 

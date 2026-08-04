@@ -27,6 +27,15 @@
 REPO_ROOT := $(shell git rev-parse --show-toplevel)
 STAGE2A_DIR := $(REPO_ROOT)/experiments/stage2a_dynamics_classification
 PYTHON ?= uv run python
+# mighty-colab is a pinned dependency-group (pyproject.toml's
+# [dependency-groups].gpu, not a project dependency proper -- it's an
+# ops/CLI tool, not imported by any Python code here), the official
+# PyPI release, not a locally hand-installed `uv tool`. `uv run --group
+# gpu` transparently syncs that group into .venv on first use, so a
+# clean checkout needs no separate `uv tool install` step -- matching
+# this project's existing "always uv run, never a bare global binary"
+# convention (CLAUDE.md).
+MIGHTY_COLAB ?= uv run --group gpu mighty-colab
 SESSION_TRAIN ?= stage3-evolve
 SESSION_TEST ?= stage4-evolve
 
@@ -42,17 +51,17 @@ stage2a-prepare-train:  ## Encode 60k KMNIST training images + split for GPU upl
 .PHONY: stage2a-evolve-train-gpu
 stage2a-evolve-train-gpu:  ## Upload + run Stage-3 (training set) GPU evolution via mighty-colab -- bills while running
 	cd $(STAGE2A_DIR) && \
-	mighty-colab sessions && \
-	mighty-colab new -s $(SESSION_TRAIN) --gpu A100 && \
-	mighty-colab reinstall -s $(SESSION_TRAIN) jax[cuda12]==0.11.0 diffrax==0.7.2 equinox==0.13.8 && \
-	mighty-colab upload -s $(SESSION_TRAIN) evolve_on_graph_jax.py /content/evolve_on_graph_jax.py && \
-	mighty-colab upload -s $(SESSION_TRAIN) scratch/stage3_train/stage3_topologies.pkl /content/stage3_topologies.pkl && \
+	$(MIGHTY_COLAB) sessions && \
+	$(MIGHTY_COLAB) new -s $(SESSION_TRAIN) --gpu A100 && \
+	$(MIGHTY_COLAB) reinstall -s $(SESSION_TRAIN) jax[cuda12]==0.11.0 diffrax==0.7.2 equinox==0.13.8 && \
+	$(MIGHTY_COLAB) upload -s $(SESSION_TRAIN) evolve_on_graph_jax.py /content/evolve_on_graph_jax.py && \
+	$(MIGHTY_COLAB) upload -s $(SESSION_TRAIN) scratch/stage3_train/stage3_topologies.pkl /content/stage3_topologies.pkl && \
 	for i in 00 01 02 03 04 05 06 07 08 09 10 11; do \
-		mighty-colab upload -s $(SESSION_TRAIN) scratch/stage3_train/theta0_chunk_$$i.npy /content/theta0_chunk_$$i.npy || exit 1; \
+		$(MIGHTY_COLAB) upload -s $(SESSION_TRAIN) scratch/stage3_train/theta0_chunk_$$i.npy /content/theta0_chunk_$$i.npy || exit 1; \
 	done && \
-	mighty-colab exec -s $(SESSION_TRAIN) -f stage3_gpu_evolve.py && \
-	mighty-colab download -s $(SESSION_TRAIN) /content/stage3_gpu_results.pkl scratch/stage3_train/stage3_gpu_results.pkl && \
-	mighty-colab stop -s $(SESSION_TRAIN)
+	$(MIGHTY_COLAB) exec -s $(SESSION_TRAIN) -f stage3_gpu_evolve.py && \
+	$(MIGHTY_COLAB) download -s $(SESSION_TRAIN) /content/stage3_gpu_results.pkl scratch/stage3_train/stage3_gpu_results.pkl && \
+	$(MIGHTY_COLAB) stop -s $(SESSION_TRAIN)
 
 .PHONY: stage2a-prepare-test
 stage2a-prepare-test:  ## Encode 10k KMNIST official test images (local, CPU, ~25s) -- the ONE place test-set images/labels are touched
@@ -61,15 +70,15 @@ stage2a-prepare-test:  ## Encode 10k KMNIST official test images (local, CPU, ~2
 .PHONY: stage2a-evolve-test-gpu
 stage2a-evolve-test-gpu:  ## Upload + run Stage-4 (official test set) GPU evolution via mighty-colab -- bills while running
 	cd $(STAGE2A_DIR) && \
-	mighty-colab sessions && \
-	mighty-colab new -s $(SESSION_TEST) --gpu A100 && \
-	mighty-colab reinstall -s $(SESSION_TEST) jax[cuda12]==0.11.0 diffrax==0.7.2 equinox==0.13.8 && \
-	mighty-colab upload -s $(SESSION_TEST) evolve_on_graph_jax.py /content/evolve_on_graph_jax.py && \
-	mighty-colab upload -s $(SESSION_TEST) scratch/stage4_test/stage4_gpu_upload_topologies.pkl /content/stage4_gpu_upload_topologies.pkl && \
-	mighty-colab upload -s $(SESSION_TEST) scratch/stage4_test/stage4_theta0_test.npy /content/stage4_theta0_test.npy && \
-	mighty-colab exec -s $(SESSION_TEST) -f stage4_gpu_evolve.py && \
-	mighty-colab download -s $(SESSION_TEST) /content/stage4_gpu_results.pkl scratch/stage4_test/stage4_gpu_results.pkl && \
-	mighty-colab stop -s $(SESSION_TEST)
+	$(MIGHTY_COLAB) sessions && \
+	$(MIGHTY_COLAB) new -s $(SESSION_TEST) --gpu A100 && \
+	$(MIGHTY_COLAB) reinstall -s $(SESSION_TEST) jax[cuda12]==0.11.0 diffrax==0.7.2 equinox==0.13.8 && \
+	$(MIGHTY_COLAB) upload -s $(SESSION_TEST) evolve_on_graph_jax.py /content/evolve_on_graph_jax.py && \
+	$(MIGHTY_COLAB) upload -s $(SESSION_TEST) scratch/stage4_test/stage4_gpu_upload_topologies.pkl /content/stage4_gpu_upload_topologies.pkl && \
+	$(MIGHTY_COLAB) upload -s $(SESSION_TEST) scratch/stage4_test/stage4_theta0_test.npy /content/stage4_theta0_test.npy && \
+	$(MIGHTY_COLAB) exec -s $(SESSION_TEST) -f stage4_gpu_evolve.py && \
+	$(MIGHTY_COLAB) download -s $(SESSION_TEST) /content/stage4_gpu_results.pkl scratch/stage4_test/stage4_gpu_results.pkl && \
+	$(MIGHTY_COLAB) stop -s $(SESSION_TEST)
 
 .PHONY: stage2a-analyze
 stage2a-analyze:  ## Feasibility stage-3 classifier CV model selection (~4hr on CPU sklearn -- see FINDINGS.md Result 3 first)
