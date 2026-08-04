@@ -297,7 +297,7 @@ a dataset or result where that reasoning wouldn't hold.
 ## Testing
 
 ```bash
-uv run pytest tests/test_stage2a_core.py tests/test_stage2a_stats.py -v
+uv run pytest tests/test_stage2a_core.py tests/test_stage2a_stats.py tests/test_stage2a_classifier.py tests/test_stage2a_pipeline.py tests/test_stage2a_topologies.py tests/test_stage2a_paths.py -v
 ```
 
 Two-tier convention (this project's established pattern, see the root
@@ -308,4 +308,14 @@ cached artifacts they check against aren't present --
 findings_md` is Tier 2, recomputing the primary bootstrap from
 `results/stage4_confirmatory_results.pkl` if present and asserting it
 still matches `FINDINGS.md`'s stated numbers, catching a future
-refactor that silently changes the statistic.
+refactor that silently changes the statistic. `test_stage2a_classifier.py`,
+`test_stage2a_pipeline.py`, and `test_stage2a_paths.py` are Tier 1 only
+(synthetic data, no cached-artifact dependency).
+`test_stage2a_topologies.py` is Tier 2 only -- `build_all_topologies()`
+needs real KMNIST data and a cached cross-directory historical artifact
+to reconstruct T against; there's no meaningful synthetic version of
+that check.
+
+Deliberately not covered by this test suite: the class-0-audit,
+compute-cost, and cuML-accel threads -- lower priority for a research
+codebase, noted as a scope decision rather than an oversight.
