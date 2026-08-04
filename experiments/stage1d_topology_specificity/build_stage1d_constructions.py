@@ -56,21 +56,56 @@ CACHE_PATH = os.path.join(RESULTS_DIR, "stage1d_constructions.pkl")
 PILOT_REALIZATION_SEEDS = [0, 1, 2]  # graph-realization seeds; NOT pinned by DESIGN.md, chosen here
 
 
-def build_and_verify_T():
+def build_and_verify_T(require_historical_verification=True):
     """Reconstructs active_indices, T, ink_mask_active from the raw KMNIST
-    class-0 images and asserts the result matches class0_constructions.pkl's
-    cached T byte-exact, so this reconstruction is provably the same T
-    Stage 1B2/1C/1C already used, not a new topology."""
+    class-0 images. The construction itself never depended on
+    class0_constructions.pkl -- only the verification step below did.
+
+    Default (require_historical_verification=True, unchanged from
+    before this parameter existed): asserts the result matches
+    class0_constructions.pkl's cached T byte-exact, so this
+    reconstruction is provably the same T Stage 1B2/1C/1D already used,
+    not a new topology. Every caller from before this parameter was
+    added gets exactly this behavior, still the default -- if the cache
+    is absent, this still raises (now with a clearer message; previously
+    a bare FileNotFoundError from the failed open()), not a silent
+    behavior change.
+
+    require_historical_verification=False (opt-in; added for Stage 2A's
+    full-raw-data-regeneration path -- see stage2a_dynamics_
+    classification/README.md's "Artifact replay vs. full raw-data
+    regeneration"): if class0_constructions.pkl is present, verifies
+    against it exactly as above (still checked when available, not
+    skipped just because it's optional); if absent, reconstructs T from
+    scratch and skips the comparison rather than raising. Returns
+    cached=None in that branch since there is no cache to return."""
     X_train, y_train, _, _ = load_mnist(KMNIST_DIR, gz=False)
     idx = np.where(y_train == 0)[0][:200]
     images = X_train[idx].astype(np.float64) / 255.0
     active_indices, W_T = build_class_topology(images)
 
-    with open(CLASS0_CONSTRUCTIONS_PATH, "rb") as f:
-        cached = pickle.load(f)[0]
-    assert len(active_indices) == cached["n_active"]
-    max_diff = np.max(np.abs(W_T - cached["constructions"]["T"]))
-    assert max_diff < 1e-9, f"reconstructed T does not match cached artifact (max diff {max_diff})"
+    cached = None
+    if os.path.exists(CLASS0_CONSTRUCTIONS_PATH):
+        with open(CLASS0_CONSTRUCTIONS_PATH, "rb") as f:
+            cached = pickle.load(f)[0]
+        assert len(active_indices) == cached["n_active"]
+        max_diff = np.max(np.abs(W_T - cached["constructions"]["T"]))
+        assert max_diff < 1e-9, f"reconstructed T does not match cached artifact (max diff {max_diff})"
+    elif require_historical_verification:
+        raise FileNotFoundError(
+            f"{CLASS0_CONSTRUCTIONS_PATH} not present locally, and "
+            f"require_historical_verification=True (the default). Either "
+            f"provide that historical artifact, or explicitly call "
+            f"build_and_verify_T(require_historical_verification=False) to "
+            f"reconstruct T from scratch without the byte-exact check "
+            f"against it.")
+    else:
+        print(f"NOTE: {CLASS0_CONSTRUCTIONS_PATH} not present locally -- "
+              f"reconstructed T from scratch WITHOUT verifying it matches "
+              f"the historical cached artifact byte-exact "
+              f"(require_historical_verification=False). The construction "
+              f"itself is identical either way; only this verification "
+              f"step was skipped.")
 
     mean_intensity = images.mean(axis=0).flatten()
     ink_mask_active = (mean_intensity > 0.15)[active_indices]

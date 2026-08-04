@@ -712,3 +712,1084 @@ already committed locally).
 Provision a fresh GPU session (this one to be stopped) and run the full
 60,000-image, 4-topology, 6-condition stage-3 pipeline for real -- not
 done here.
+
+# Stage 2A: Feasibility Stage 3 -- Full 60,000-Image Run
+
+**Status: mechanical/descriptive validation at full training-set scale,
+per `DESIGN.md`'s own framing throughout the feasibility ladder. This is
+NOT the locked confirmatory result.** The confirmatory claim (paired
+bootstrap on official-test-set log-loss, evolved vs. pre-evolution)
+still requires a separate, final step against the held-out official
+test set, not done here. Training-side CV log-loss is reported below
+descriptively, exactly as `DESIGN.md` permits at this stage, and no
+further than that.
+
+## Scope
+
+All 60,000 official KMNIST training images (no subsampling), all 10
+classes, `SEED`-independent (the full set, not a stratified draw). Six
+conditions: raw pixels (784-dim), encoded pre-evolution (1008-dim), and
+evolved on each of the 4 confirmatory-expansion topologies -- T,
+lattice, canonical rewired (seed=0), canonical curr_random (seed=0),
+each 1008-dim. Encoding used the primary locked seed (`ENCODER_SEED=0`)
+for every image.
+
+## Architecture: CPU encode, GPU evolve, CPU classify
+
+Per the explicit instruction to use the verified JAX/GPU pipeline for
+full-scale data generation: encoding ran locally (CPU, multiprocessing,
+unchanged `stage2a_core`/`stage2a_pipeline` code), evolution ran on a
+fresh `mighty-colab` A100 session (`stage2a-gpu-stage3`; no orphaned
+sessions found first; same pinned `jax[cuda12]==0.11.0` /
+`diffrax==0.7.2` / `equinox==0.13.8`, confirmed correct on first `exec`
+with no kernel restart needed this time), and classifier CV fitting ran
+locally afterward (CPU-only, sklearn) -- the GPU session was stopped
+immediately after evolution completed and its results were downloaded,
+since classifier fitting gains nothing from GPU and there is no reason
+to keep paying for idle-relative-to-task GPU time during it.
+
+**One real infrastructure snag, worth recording**: the single 250MB
+upload package (`theta0_batch` + all 4 topologies) was rejected by the
+`mighty-colab` upload endpoint with a 400 Bad Request -- the 10MB
+100-image package had worked fine, but 250MB exceeded some server-side
+limit. Worked around by splitting `theta0_batch` into 12 separate
+~20MB `.npy` chunks (uploaded individually, reassembled remotely via
+`np.concatenate`) plus the small 8MB topologies pickle uploaded
+separately. Both uploaded cleanly. This is an operational note for any
+future GPU work at this data scale, not a scientific finding.
+
+GPU evolution itself was chunked (`CHUNK_SIZE=1000`) rather than run as
+one 60,000-image batch, since `vmap` materializes a `(batch, n, n)`
+diff tensor per RHS evaluation -- at `batch=60000, n=505` that would be
+~120GB (float64), far beyond any single GPU's memory, whereas the
+100-image full-batch test's 204MB tensor gave no signal either way about
+this limit. `CHUNK_SIZE=1000` keeps the largest transient tensor at
+~2GB, conservatively safe; verified working with zero errors across all
+60 chunks x 4 topologies.
+
+## Result 1: data generation -- fast, clean, ahead of projection
+
+| phase | time | rate |
+|---|---:|---:|
+| encode (CPU, local, multiprocessing) | 68.1s | 1.135 ms/image |
+| GPU evolve, all 4 topologies | 114.0s | 0.475 ms/image/topology |
+| R_post/feat_post compute (CPU, local) | 6.4s | -- |
+| **total data-gen pipeline** | **188.5s (3.1 min)** | -- |
+
+Well under the ~7.3-minute (encode + GPU-evolve) projection from the
+100-image sanity run. GPU evolution rate (0.455-0.491 ms/image/topology
+across the 4 topologies) essentially matches the 100-image run's 0.67
+ms/image/topology, confirming the chunked approach scales cleanly with
+no throughput degradation at 600x more images.
+
+**One genuine surprise, stated plainly rather than smoothed over**: the
+measured 1.135 ms/image encode rate is roughly 4x faster than the ~4.6
+ms/image figure quoted in the pre-stage-3 timing investigation
+(`evolve_on_graph_jax.py`'s docstring, and the earlier projection
+"~4.6 minutes for 60,000 images"). That earlier figure appears to have
+been a single-threaded measurement; this run's local multiprocessing
+across ~9 workers accounts for most, but apparently not all, of the
+gap (a naive 9x parallel speedup on 4.6 ms/image would predict ~0.51
+ms/image, not the observed 1.135 ms/image) -- the discrepancy is not
+fully resolved and is noted honestly rather than assumed to be pure
+parallelism.
+
+Zero solver failures across all 240,000 (image, topology) evolutions;
+zero non-finite features anywhere (raw, pre-evolution, or evolved, any
+topology).
+
+## Result 2: R(theta) -- the synchronization asymmetry holds precisely at full scale
+
+| | min | max | mean | median | n < 0.01 | n > 0.99 (of 60,000) |
+|---|---:|---:|---:|---:|---:|---:|
+| pre-evolution (shared) | 0.321 | 0.991 | 0.733 | 0.739 | 0 | 4 |
+| T | 0.532 | 0.998 | 0.858 | 0.866 | 0 | 71 (0.12%) |
+| lattice | 0.525 | 0.998 | 0.865 | 0.872 | 0 | 64 (0.11%) |
+| rewired | 0.986 | 1.000 | 0.997 | 0.997 | 0 | **59,965 (99.94%)** |
+| curr_random | 0.973 | 1.000 | 0.991 | 0.991 | 0 | **36,547 (60.9%)** |
+
+This is not a weakening or drift of the 400-image sub-test's finding --
+it is a precise confirmation. That sub-test reported "R_post > 0.99 for
+~100%/~60% of images" for rewired/curr_random; at 150x the sample size,
+the real figures are 99.94% and 60.9% respectively, matching almost
+exactly. Rewired's near-total synchronization is in fact more extreme
+than "near-total" suggests: its *minimum* R_post across all 60,000
+images is 0.986 -- there is no image, of any class, that fails to
+synchronize almost completely under this topology. T and lattice show
+no such effect (0.11-0.12% above 0.99, an order of magnitude smaller
+than even curr_random's rate).
+
+**Visual supplement** (`results/topology_graph_structure.png`,
+`results/phase_state_per_class_per_topology.png`, added later during
+the compute-cost follow-on): the graph-structure plot makes the
+mechanism visible directly -- `rewired`/`curr_random` are dense with
+long-range edges connecting spatially distant nodes across the whole
+image, while `T`/`lattice` are almost entirely short-range/local,
+closely tracking the pixel grid's own spatial layout. The per-class
+phase-state grid shows the consequence: for every one of the 10
+classes, `T`/`lattice`'s evolved phase fields retain visible spatial
+structure echoing the digit's shape, while `rewired`/`curr_random`
+collapse to near-uniform color -- near-total synchronization, visible
+directly rather than only as a summary statistic.
+
+**A real tension this raises, and its resolution**
+(`results/phase_state_per_class_per_topology_normalized.png`): if `rewired`/
+`curr_random`'s columns look nearly uniform by eye, how does a linear
+classifier extract enough signal from them to perform comparably to or
+better than `T` (the confirmatory result's own finding)? Resolved by
+the pipeline, not a contradiction: `StandardScaler` runs before
+classification, rescaling whatever variance is actually present --
+real but small -- up to unit scale before the classifier ever sees it.
+Measured directly: the gauge-shifted phase's raw standard deviation
+(mean across the 10 classes, one representative image each) is ~0.079
+rad for `rewired` and ~0.133 rad for `curr_random`, versus ~0.79 rad
+for the pre-evolution baseline and ~0.54-0.55 rad for `T`/`lattice` --
+roughly 4-10x smaller in absolute magnitude, genuinely small, but not
+zero. Per-panel z-scoring (the same rescaling `StandardScaler` performs)
+makes this residual visible directly. **"Looks uniform to the eye" and
+"carries zero exploitable information" are different claims** -- this
+plot is honest evidence for the first, not the second, consistent with
+(not contradicting) the classification result.
+
+**The follow-up observation above was chased, and the mechanism behind
+the speckle pattern is now confirmed directly**
+(`results/ink_correlation_decay.png`): Pearson correlation between each active
+pixel's ink intensity *in that specific image* and its z-scored
+residual phase deviation, per class, per condition -- not a comparison
+against any population baseline, just "is this pixel inked, in this
+image":
+
+| condition | mean r (10 classes) | std |
+|---|---:|---:|
+| pre_evolution | +0.938 | 0.011 |
+| T | +0.725 | 0.053 |
+| lattice | +0.722 | 0.049 |
+| rewired | +0.373 | 0.039 |
+| curr_random | +0.274 | 0.031 |
+
+**Every one of the 10 classes, every condition: positive, and
+overwhelmingly significant** (worst case `p < 2e-7`, most `p < 1e-20`
+or smaller). This is exactly the mechanism the speckle pattern
+suggested by eye: red = inked here, blue = not inked here, and it holds
+all the way down to `curr_random`'s r=+0.27 -- small, but a genuine,
+consistent, monotonically-decaying-not-vanishing relationship, not
+noise. The decay order (`pre_evolution > T ≈ lattice > rewired >
+curr_random`) tracks the synchronization ordering exactly (Result 2,
+above) -- more synchronization, more of this signal washed out, but
+never all of it. This is a cleaner, more parsimonious finding than
+"qualitatively different signal": it is the *same* underlying signal
+(local ink presence) at every condition, just attenuated by a
+condition-dependent, but never total, factor.
+
+**A further, sharper decomposition, also tested rather than assumed**
+(`results/ink_correlation_decomposed.png`): "this pixel has ink" splits
+exactly into a **population-common component** (the per-pixel mean ink
+intensity across the 10 classes -- shared, not class-discriminatory by
+construction) and a **class-discriminatory component** (that class's
+deviation from the population mean at that pixel -- the part that
+actually varies by class). Correlating each sub-component against the
+residual separately, per condition:
+
+| condition | r(common) | r(discriminatory) | ratio |
+|---|---:|---:|---:|
+| pre_evolution | +0.370 | +0.854 | 2.3x |
+| T | +0.344 | +0.639 | 1.9x |
+| lattice | +0.322 | +0.642 | 2.0x |
+| rewired | +0.187 | +0.325 | 1.7x |
+| curr_random | +0.134 | +0.240 | 1.8x |
+
+**Correction, caught on external review, load-bearing: the paragraph
+that previously stood here overclaimed "preferential preservation of
+the discriminatory component," and the conclusion was backwards.** The
+error: comparing `r(discriminatory)` against `r(common)` *within* each
+condition (0.854 vs. 0.370 at `pre_evolution`, etc.) only shows the
+discriminatory component is already more strongly correlated than the
+common component *before evolution does anything* -- that asymmetry is
+present at `pre_evolution` itself, not created by evolution. It says
+nothing about which component evolution preserves *better*. The correct
+comparison is retention *relative to `pre_evolution`*, per component:
+
+| graph | common retained | discriminatory retained |
+|---|---:|---:|
+| T | 93.0% | 74.8% |
+| lattice | 87.0% | 75.2% |
+| rewired | 50.5% | 38.1% |
+| curr_random | 36.2% | 28.1% |
+
+**At every single condition, the common component is retained at a
+*higher* percentage than the discriminatory component -- the opposite
+of "preferential preservation."** Evolution attenuates both, and
+attenuates the discriminatory correlation proportionally *more*. The
+representation is more strongly correlated with the class-discriminatory
+component at every stage (the original table, above) -- but that
+asymmetry is inherited from the encoding, not produced or amplified by
+evolution.
+
+**This makes the classification result more interesting, not less**:
+if evolution simply preserved discriminatory pixel-level ink better
+than common ink, that would be a fairly mundane explanation for the
+improvement. It does not. The improvement survives despite evolution
+eroding the discriminatory correlation *faster* than the common one --
+which means whatever the linear classifier is actually exploiting after
+evolution is not well described as "the same pixel-level discriminatory
+signal, just a bit fainter." The dynamics may be reorganizing,
+decorrelating, or redistributing the surviving information into
+directions a linear readout can use more effectively than the raw
+per-pixel correlation would suggest -- a real, open mechanistic
+question this correction leaves standing, not one it answers. (Caveat
+carried over: the population-common baseline is estimated from only 10
+images, one per class -- sufficient for the direction and rough size of
+this effect, not a precise population estimate.)
+
+**A further, related caveat, also raised on the same review, worth
+naming precisely**: all of the mechanistic plots and correlations in
+this section are conditional on the class-0-derived 505-node active
+support (`DESIGN.md`'s locked `active_indices`, shared identically by
+all four topologies and the pre-evolution condition -- see "The class-0
+confound `DESIGN.md` flagged," above, for the primary result's own
+disclosure of this). Three things follow, stated precisely rather than
+left implicit:
+
+- **The primary confirmatory result is unaffected.** `evolved_T` vs.
+  `pre-evolution` uses the identical mask on both sides -- the
+  improvement isolates the incremental effect of edge structure and
+  evolution *given* that fixed support, and cannot be attributed to one
+  condition simply retaining more pixels than the other.
+- **`active_indices` is not literally an ink silhouette.** It comes from
+  `build_class_topology`'s population-developmental statistic (an
+  all-pairs Hebbian-style measure across class-0 images), thresholded to
+  suppress background-background edges, then restricted to nodes
+  surviving in at least one sufficiently strong edge -- a class-0-derived
+  *correlated* support, broader than and not identical to a simple
+  ink-presence mask.
+- **The mechanistic plots establish survival *within* this support, not
+  a claim about ink outside it.** The local encoder's four-neighbor
+  coupling runs on all 784 pixels *before* the 505-node restriction is
+  applied -- an excluded pixel's own coordinate is discarded, but its
+  influence on nearby *retained* pixels during those 150 coupling steps
+  is not necessarily erased. What these plots show is: ink-related
+  information within the class-0-derived active support survives
+  evolution and synchronization, attenuated but never to zero. They do
+  not show what happens to class-discriminatory ink that falls entirely
+  outside that support -- a genuinely open question, addressed directly
+  below.
+
+## The class-0-support audit: how much information the projection actually removes
+
+External review's own proposed audit, run in full: before asking what
+graph evolution does with what remains, quantify what the class-0-
+derived 505-node support projection removes in the first place.
+
+**Retained ink fraction, full 60,000-image training set**
+(`results/retained_ink_fraction_by_class.png`): `sum(pixel intensity
+inside the 505-node support) / sum(pixel intensity over all 784
+pixels)`, per image. Class 0 retains a median of **96.3%** of its own
+ink (mean 93.9%, tight distribution) -- expected, since the support is
+derived from class 0. **Every other class retains substantially less**:
+medians range from 65.4% (class 1) to 90.0% (class 5), with real spread
+-- some individual images retain as little as 21-43%. This is not a
+small effect.
+
+**Where the excluded ink actually falls**
+(`results/ink_outside_support_by_class.png`, class-mean heatmaps of ink
+lying outside the support): a consistent, visible band of excluded ink
+at the top-center notch and the bottom margin, present for classes 1-9
+specifically and much fainter for class 0 -- exactly the region the
+class-0-derived support's own shape (`results/topology_graph_structure.png`)
+doesn't cover. Real, systematic, not
+scattered noise.
+
+**Two baselines, run to separate the projection's cost from evolution's
+contribution** (`run_class0_support_audit_classify.py`, `cuml.accel`,
+same locked CV/fit procedure as every other condition -- audit-only,
+not part of the locked primary/secondary comparisons):
+
+| condition | dim | C | test accuracy | log-loss |
+|---|---:|---:|---:|---:|
+| raw pixels, full 784 (known) | 784 | 0.001 | 0.6960 | 0.9848 |
+| raw pixels, 505-restricted (new) | 505 | 0.01 | 0.6550 | 1.1527 |
+| encoded, 505-restricted = `encoded_pre_evolution` (known) | 1008 | 0.01 | 0.7208 | 0.9558 |
+| encoded, full 784, unrestricted (new) | 1566 | 0.01 | 0.7458 | 0.8667 |
+
+**The restriction has a real, measurable cost, in both representations**:
+raw pixels lose 4.10 points of accuracy (0.6960 -> 0.6550) when
+restricted to the support; the locally-encoded state loses 2.50 points
+(0.7458 -> 0.7208). Restricting to the class-0-derived support is not
+free -- it discards real, class-discriminatory signal, exactly as the
+retained-ink-fraction and heatmap results above already suggested
+directly.
+
+**But evolution's contribution is larger than what the restriction
+costs, not merely compensating for it**: `evolved_T` (505-restricted,
+evolved -- the locked primary condition, 0.8058 accuracy, 0.7067
+log-loss) beats even the *unrestricted*, un-evolved 784-dim encoded
+baseline (0.7458, 0.8667) by 6.00 points of accuracy and 0.16 log-loss
+-- a larger margin than the 2.50-point cost restriction itself imposed.
+**Stated plainly: even if the pre-evolution condition were given back
+every pixel the class-0 support excludes, graph evolution on the
+restricted 505-node `T` would still win.** This is reassuring for the
+primary result's interpretation, though it does not change the primary
+result's own numbers, which were never in question -- `evolved_T` vs.
+`pre-evolution` already used the identical support on both sides, so
+this audit closes a question about *interpretation*, not about the
+comparison's own validity.
+
+**What this does and does not settle**: it settles that the class-0
+support projection has a real, non-trivial, quantified cost, and that
+evolution's contribution exceeds that cost rather than merely offsetting
+it. It does not settle what a union mask or a fully class-agnostic
+support would show -- that remains a genuinely open, separately-scoped
+question (raised in this same review thread, not pursued here), since
+this audit only compares restricted-vs-unrestricted under the *existing*
+class-0-derived mask, not against an alternative mask altogether.
+
+## Result 3: classifier CV fitting is NOT negligible -- it dominates everything else
+
+**246.8 minutes (4.1 hours)** for the 6 conditions' full CV fitting
+(45 fold/C combinations each, 270 total, plus 6 final refits) --
+measured explicitly rather than continuing to assume it was cheap, per
+the instruction that motivated this measurement. This is **~79x** the
+entire data-generation pipeline's 188.5 seconds. Classifier fitting,
+not data generation, is now the dominant cost of this ladder's full-scale
+step, and any future re-run of this stage should budget for that
+directly rather than by extrapolating stage 1/2's much smaller-scale
+timings.
+
+**All 270 fold/C combinations converged, for every condition, with zero
+non-convergence events.** This directly resolves the concern flagged
+going into this stage: the pre-stage-3 investigation predicted
+non-convergence was "most likely to recur... for the higher-Fiedler-
+value topologies (rewired, curr_random) at weak regularization," given
+stage 2's evolved_T non-convergence at 5,000 images. At 60,000 images
+(12x stage 2's scale), it did not recur anywhere, for any condition,
+including rewired and curr_random despite their extreme R_post values
+above. The `max_iter=10000` amendment made after stage 2's diagnosis
+appears to have been not just a workaround for that one instance, but
+sufficient headroom at full scale too. No ill-conditioning-vs-
+separability diagnosis was needed, since there was no non-convergence to
+diagnose.
+
+## Result 4: descriptive training-CV log-loss ranking (NOT the confirmatory result)
+
+| condition | selected C | mean val. log-loss |
+|---|---:|---:|
+| raw_pixels | 0.001 | 0.6009 |
+| encoded_pre_evolution | 0.01 | 0.5609 |
+| evolved_lattice | 1000 | 0.4077 |
+| evolved_rewired | 10 | 0.3480 |
+| evolved_T | 1000 | 0.3415 |
+| evolved_curr_random | 1.0 | 0.3255 |
+
+All four evolved conditions beat both raw pixels and encoded
+pre-evolution by a wide, consistent margin -- descriptively consistent
+with this whole programme's motivating premise that evolution adds
+linearly-decodable structure. This is training-side CV log-loss only,
+never the locked confirmatory statistic (paired bootstrap on
+*official-test-set* log-loss, evolved vs. pre-evolution specifically),
+and must not be read as anything stronger than descriptive.
+
+**A second genuine surprise, stated plainly**: `curr_random` -- a
+topology with matched sparsity but no relationship to T's learned
+structure -- gives the *lowest* training-CV loss of all four evolved
+conditions (0.3255), edging out `evolved_T` (0.3415) despite T being
+the topology this whole construction was built around. And `rewired`,
+despite the almost-total phase synchronization documented above (R_post
+∈ [0.986, 1.0] for all 60,000 images), still gives the second-best
+evolved loss (0.3480) -- clearly better than `lattice` (0.4077) and far
+better than either pre-evolution condition. Naively, synchronization
+this severe should collapse most of the information that would
+distinguish one image's evolved state from another's; it evidently does
+not do so here, at least not enough to prevent a linear reference-node-
+gauge readout from separating classes better than the un-evolved
+features. Neither of these findings should be over-read as bearing on
+Stage 1D's own "no detectable difference" closure (a different metric
+-- paired bootstrap on the *tangent-departure* response measure -- and a
+different sample) but they are both real, and both reported as observed
+rather than smoothed toward the expected story.
+
+## Go/no-go summary
+
+- Solver failures: 0/240,000 (image, topology) evolutions.
+- Non-finite features: 0, any condition, any topology.
+- Classifier convergence: 270/270 fold/C fits converged, 6/6 final
+  refits converged.
+- **OVERALL: GO** (mechanical criteria only -- not a scientific result).
+
+## What remains open after this stage
+
+1. **The encoder-seed robustness check at full scale** (stage 2's
+   negligible-difference finding, re-tested at 60,000 images) was not
+   run in this pass. Given the now-measured classifier-fitting cost
+   (4.1 hours for 6 conditions), a partial re-fit (encoded_pre_evolution
+   + evolved_T only, matching stage 2's original scope) is a bounded but
+   real additional cost, plausibly on the order of an hour or more --
+   flagged for an explicit go-ahead rather than run automatically, given
+   that this stage's own instructions conditioned it on "not
+   prohibitively expensive," and the real cost is now known rather than
+   assumed.
+2. **The locked confirmatory endpoint itself**: paired bootstrap on
+   official-test-set log-loss (evolved vs. pre-evolution), the one
+   result this entire ladder has been building toward. Not started.
+
+## Code
+
+`run_feasibility_stage3_encode.py` (local CPU encode driver, all 60,000
+images), `stage2a_pipeline.py`'s new `run_encode_only_multi_topology` /
+`_process_one_image_encode_only` (encode-only split for the GPU
+hand-off, reusing `encode_and_restrict`/`order_parameter`/
+`reference_node_features` unchanged), `analyze_stage3_results.py`
+(local: reconstructs the full per-image results structure from the
+downloaded GPU evolution output + local encode results, via the same
+`s2a.order_parameter`/`s2a.reference_node_features` calls used
+everywhere else, then calls `check_go_no_go_multi_topology` and
+`run_classifier_conditions_multi_topology` unchanged). Remote-only GPU
+driver script (`stage3_gpu_evolve.py`, chunked evolution) not committed,
+per this project's convention for ephemeral GPU-session code -- reuses
+`evolve_on_graph_jax.py` (uploaded as-is, unchanged).
+
+## Explicit scope decision: full-scale encoder-seed robustness check not re-run
+
+**Decided, reasoned, and recorded here rather than silently skipped.**
+`DESIGN.md`'s robustness check is conditioned on "not prohibitively
+expensive" (it is a descriptive, non-blocking check, never able to
+override or replace the seed-0 primary analysis). It already ran once,
+at feasibility stage 2's 5,000-image scale, and passed cleanly: the
+change in mean validation log-loss (independent-per-image-seed vs. the
+shared seed-0 encoding) was **-1.5e-6** for `encoded_pre_evolution` and
+**-8.4e-5** for `evolved_T` -- both negligible, well inside noise, and
+in the *same* direction (independent seeds very slightly *lower* loss,
+not higher) for both conditions.
+
+Given classifier CV fitting was just measured at **4.1 hours for 6
+conditions at n=60,000** (Result 3, above), a full-scale re-check
+(re-encoding all 60,000 images under independent seeds, re-evolving on
+GPU, and refitting CV for at least `encoded_pre_evolution` and
+`evolved_T`) would plausibly cost **an hour or more** -- to re-test
+something that already passed once, with no reason to expect the
+direction or magnitude to change qualitatively at 12x the sample size.
+That is not consistent with "not prohibitively expensive" applied to a
+check whose only role is descriptive robustness support, not a locked
+gate. **Decision: not re-run at full scale.** The stage-2 result stands
+as the encoder-seed robustness evidence for this design.
+
+## Next step
+
+The locked confirmatory run itself: paired bootstrap, evolved vs.
+pre-evolution, on the official 10,000-image KMNIST test set -- touched
+for the first and only time in this project.
+
+# Stage 2A: The Locked Confirmatory Result
+
+**Status: this is it -- the one and only locked, pre-registered
+official-test-set evaluation this entire design has been building
+toward, per `DESIGN.md`'s "Confirmatory endpoint and test" section,
+executed exactly as locked. The official KMNIST test set was touched
+here for the first time in this project, and this sklearn evaluation
+remains the sole confirmatory result under this design -- nothing below
+retroactively alters it.**
+
+**Amended by external review (see "Post hoc reuse of the test set,"
+below): the test set was subsequently reused, after this locked
+evaluation, in explicitly post hoc classifier-backend audits (a JAX/optax
+port cross-check and an NVIDIA cuML `accel` cross-backend replication).
+Neither altered this locked analysis or supplied a new confirmatory
+claim, but the original framing here -- "will not be touched again" --
+is no longer accurate and has been corrected rather than left standing.**
+
+## Setup: no new model fitting, one refit at an already-selected C
+
+Per `DESIGN.md`, each condition's regularization `C` was already
+selected via full-training-set 5-fold CV in feasibility stage 3 --
+`{raw_pixels: 0.001, encoded_pre_evolution: 0.01, evolved_T: 1000,
+evolved_lattice: 1000, evolved_rewired: 10, evolved_curr_random: 1}`.
+No new hyperparameter search was run. This step does exactly one thing
+per condition: fit a fresh scaler and classifier on the *complete*
+60,000-image official training set at that already-locked `C`
+(`stage2a_classifier.fit_final_at_selected_C`, factored out of the
+existing `fit_condition` so no CV-search code path could be
+accidentally re-triggered), then apply that fit, unchanged, to the
+official test set's 10,000 images -- encoded and evolved on GPU exactly
+as stage 3's training data was (`run_official_test_encode.py` +
+`evolve_on_graph_jax.py`, zero solver failures across all 4 topologies,
+19.1s total GPU evolution for 10,000 images x 4 topologies).
+
+The six final refits took between 8.4s (`raw_pixels`) and 458.3s
+(`evolved_T`) -- `evolved_T`'s refit was the single slowest, consistent
+with it also being the condition whose selected `C=1000` sits closest
+to `max_iter`'s ceiling (5,123 of 10,000 iterations used, the most of
+any condition).
+
+## Test-set performance, all six conditions
+
+| condition | C | test accuracy | macro-F1 | mean log-loss |
+|---|---:|---:|---:|---:|
+| raw_pixels | 0.001 | 0.6960 | 0.6976 | 0.9848 |
+| encoded_pre_evolution | 0.01 | 0.7208 | 0.7221 | 0.9558 |
+| evolved_T | 1000 | 0.8058 | 0.8065 | 0.7067 |
+| evolved_lattice | 1000 | 0.7778 | 0.7787 | 0.7815 |
+| evolved_rewired | 10 | 0.8183 | 0.8191 | 0.6739 |
+| evolved_curr_random | 1 | 0.8221 | 0.8229 | 0.6509 |
+
+## Primary result: T-evolved vs. encoded-pre-evolution -- IMPROVEMENT, stated plainly
+
+`d_i = ell_i(evolved T) - ell_i(pre-evolution)`, 20,000 paired
+class-stratified bootstrap resamples of the 10,000 official test images:
+
+**Observed mean d_i = -0.2491. 95% percentile interval: [-0.2721,
+-0.2266]. The entire interval is below zero.**
+
+Per `DESIGN.md`'s pre-registered success criterion, this is
+unambiguously an **improvement** -- not a result requiring interpretation
+or a borderline call. Graph evolution on T, on top of the already-
+dynamically-encoded pre-evolution state, reduces mean per-image test
+log-loss by a large, non-straddling margin. Secondary confirmation via
+exact McNemar's test on classification disagreement: of the 1,618 test
+images where the two conditions' predictions disagreed, **1,234 were
+correct only under evolved_T** versus 384 correct only under
+pre-evolution (p = 6.68e-104) -- consistent in direction and scale with
+the log-loss result, not a separate or conflicting story.
+
+This resolves the question this whole design existed to ask, in the
+positive direction, for the first time in this project's history:
+graph evolution demonstrably adds classification value beyond the local
+encoding dynamics alone, under this task and this linear readout --
+"dynamics not useful" (`DESIGN.md`'s named outcome 3) is directly
+contradicted by this result, and "topologies equivalent" (named outcome
+1) is also inconsistent with it, since T's evolution alone produces this
+large, non-straddling improvement.
+
+**Amended by external review**: the primary, locked comparison here is
+`evolved_T` vs. `encoded_pre_evolution` only, and *that* comparison is
+what this bootstrap interval and McNemar test directly support --
+"dynamics useful" is established. It does **not**, on its own, establish
+named outcome 2's stronger second half, "one specific graph wins": that
+would require directly testing one evolved graph against another (e.g.
+`evolved_curr_random` vs. `evolved_rewired`), which was never run. The
+secondary comparisons below test each of the other three graphs
+separately against the same `pre-evolution` baseline -- non-straddling
+intervals there establish that each graph individually beats
+pre-evolution, not that the graphs differ significantly from each
+other. See "Secondary comparisons," below, for the corrected framing.
+
+## Secondary comparisons: all three other graphs also improve, none rescuing (or needed to rescue) anything
+
+Same direction convention and bootstrap procedure, each vs.
+`encoded_pre_evolution`, no cross-comparison correction (`DESIGN.md`:
+none of these is a second chance at the primary claim, so none needed
+correcting against the others):
+
+| comparison | observed mean d_i | 95% CI | verdict | McNemar p |
+|---|---:|---|---|---:|
+| evolved_lattice vs. pre | -0.1743 | [-0.1930, -0.1557] | IMPROVEMENT | 1.55e-56 |
+| evolved_rewired vs. pre | -0.2819 | [-0.3074, -0.2570] | IMPROVEMENT | 9.76e-133 |
+| evolved_curr_random vs. pre | -0.3049 | [-0.3303, -0.2797] | IMPROVEMENT | 8.42e-138 |
+
+All four prespecified graph instances improved over encoded
+pre-evolution, with entirely non-straddling intervals. **Amended by
+external review**: the tests performed here compare each graph
+separately against the common `pre-evolution` baseline; they do not
+directly test one evolved graph against another (e.g.
+`ell(curr_random) - ell(rewired)`), and separate non-straddling
+intervals against a shared baseline do not themselves establish that two
+evolved graphs differ significantly from one another. The originally
+stated "the four graphs are not equivalent" overclaimed what these tests
+support and has been removed. What the data do support, stated
+descriptively rather than as a confirmatory ranking claim: their
+observed test-set effects differed, with `curr_random` producing the
+lowest log-loss (-0.305), followed by `rewired` (-0.282), `T` (-0.249),
+and `lattice` (-0.174, smallest but still a clear improvement).
+Graph-to-graph superiority was not a confirmatory estimand under
+`DESIGN.md`'s locked design and is reported here descriptively, not
+inferentially. A formal task-utility ranking would require direct,
+paired graph-to-graph comparisons -- these could be computed from the
+already-saved per-image losses, but any such comparison would now be
+explicitly post hoc and should use multiplicity correction across
+however many pairwise tests it involved.
+
+**A genuine, small, honestly-reported rank swap between the CV-selection
+data and the held-out test set**: feasibility stage 3's training-CV
+delta-vs-pre-evolution ranking (most-to-least improvement) was
+`curr_random (-0.235) > T (-0.219) > rewired (-0.213) > lattice
+(-0.153)` -- T ahead of rewired. On the actual held-out test set, the
+order of exactly those two swaps: `curr_random > rewired > T > lattice`.
+`curr_random` (largest) and `lattice` (smallest) are stable across both;
+only the middle two trade places. This is a modest, reportable
+instability in the *exact* middle-of-the-pack ordering between
+model-selection data and truly held-out data -- not a reversal of the
+overall finding, and not treated as a family-level claim regardless
+(`DESIGN.md`'s fixed-prespecified-graph-instances scope), but worth
+stating rather than quietly picking whichever ordering looks cleaner.
+**This swap directly reinforces the caution above against a
+graph-to-graph superiority claim**: if `T` and `rewired`'s relative
+order isn't even stable between the CV-selection data and the held-out
+test set, treating their point-estimate ordering here as a confident
+ranking (rather than a descriptive observation) would be
+overinterpreting noise the data itself already shows is real. The broad
+pattern -- all four graphs clearly beat pre-evolution, `curr_random` and
+`lattice` anchoring the top and bottom -- is stable; the exact middle
+ordering is not.
+
+**On the Stage 1D dissociation, stated precisely rather than loosely**:
+Stage 1D found no detectable differences in internal mapping strength
+across these topology constructions (a different metric -- paired
+bootstrap on the tangent-departure response measure -- and a different
+sample). Stage 2A produced visibly different downstream task effects
+among these specific graph instances, as the table above shows. These
+two findings are not in tension -- "no detectable difference in one
+metric" and "visible difference in another" can both be true of the
+same graphs -- but this document does not treat it as a formal,
+confirmatory task-utility dissociation, since that would itself require
+the direct paired graph-to-graph comparisons flagged as not yet run
+above (and, if computed post hoc from the saved per-image losses,
+multiplicity-corrected).
+
+**`rewired`'s near-total phase synchronization (Result 2, above: R_post
+in [0.986, 1.0] for every one of the 60,000 training images) is now
+confirmed, on genuinely held-out test data, not to prevent it from being
+the second-strongest of the four evolved conditions.** This extends
+stage 3's training-CV surprise to the one evaluation that actually
+matters: extreme synchronization under this topology does not erase
+class information that remains **linearly decodable under the locked
+high-precision, per-feature-standardized pipeline used throughout this
+design**. That qualification is precise, not decorative: when phases
+become nearly synchronized, the informative differences between images
+can be small in absolute magnitude, and `StandardScaler`'s per-feature
+normalization can amplify a consistent, low-variance residual difference
+into a classifier-usable coordinate. That is legitimate predictive
+computation under this exact pipeline, not an artifact -- but it does
+not, on its own, establish robustness to feature quantization, phase
+noise, lower solver precision, or small perturbations at inference time.
+Those are open questions this result motivates, not ones it answers; a
+useful follow-up before making any stronger physical-computation or
+hardware-robustness claim about this topology, not a gap in the claim
+actually made here.
+
+## The class-0 confound `DESIGN.md` flagged: checked directly -- reassuring, not dispositive
+
+`DESIGN.md` warned that the primary comparison, while cleaner than
+initially thought (both conditions already share T's class-0-derived
+active-node support), "still may benefit class 0 differently... under
+evolution on T," and locked per-class recall as a required output for
+exactly this reason. Checked directly: the per-class recall delta
+(evolved_T minus pre-evolution) across all 10 classes is `[0.089, 0.102,
+0.038, 0.118, 0.103, 0.089, 0.056, 0.095, 0.072, 0.088]` -- **class 0's
+improvement (+0.089) ranks 5th of 10, squarely in the middle of the
+distribution**, not the largest (class 3, +0.118) or smallest (class 2,
++0.038). No obvious class-0-specific recall advantage was observed; the
+improvement is broadly distributed across classes, not concentrated in
+the one class whose topology happens to be under test.
+
+**Amended by external review**: this supports "no obvious
+class-0-specific recall advantage was observed," but does not fully
+support the stronger claim originally implied by this section's
+heading, "the class-0 confound has been ruled out." A class-0-derived
+support or edge structure could still provide generic features useful
+across several classes without producing a class-0-specific *recall*
+spike -- recall alone doesn't rule that out. More importantly, this
+issue does not threaten the primary causal contrast: the primary
+comparison already holds the class-0-derived active support fixed
+across both conditions (`evolved_T` and `encoded_pre_evolution` share
+the identical support), so whatever class-0-derived structure exists is
+common to both sides of the comparison, not a confound of it. What
+remains open is only the *interpretation* of what makes T's evolution
+useful, not the primary result itself. A stronger descriptive check,
+not yet run, would report per-class mean log-loss differences rather
+than recall alone -- computable directly from the already-saved `ell_i`
+values, without refitting or any new model-selection decision.
+
+## Baselines (context only -- never part of the locked primary/secondary comparisons)
+
+| baseline | params | test accuracy | macro-F1 | log-loss |
+|---|---:|---:|---:|---:|
+| raw pixels (linear) | 7,850 (784x10+10) | 0.6960 | 0.6976 | 0.9848 |
+| MLP, H=13 (parameter-matched) | 10,345 | 0.7534 | 0.7544 | 0.8971 |
+| MLP, H=128 (competent context) | 101,770 | 0.8863 | 0.8863 | 0.6160 |
+
+**At approximately matched trainable-parameter count** (oscillator
+readout: 10,090 params; `H=13` MLP: 10,345, `DESIGN.md`'s own matching),
+**every one of the four evolved conditions outperforms this MLP** --
+even the weakest, `evolved_lattice` (77.78% accuracy), beats
+`MLP_H13`'s 75.34% by 2.4 points, and the strongest,
+`evolved_curr_random` (82.21%), beats it by 6.9 points. This is a
+genuinely favorable comparison for the oscillator representation,
+reported descriptively per `DESIGN.md`'s context-only framing for
+baselines, not as a locked claim.
+
+**Amended by external review**: `H=13` is matched only on trainable
+parameter count in the final linear readout -- it is not matched on
+frozen graph parameters or the data-derived structure the graph itself
+encodes, preprocessing capacity, inference compute, or training/
+hyperparameter-search budget. The wording "equally-sized ordinary
+network" overstated how much this comparison actually controls for,
+and has been replaced with "an MLP with approximately matched trainable
+parameter count" throughout this section. The result remains favorable
+contextual evidence for the oscillator representation, but it is not a
+complete compute- or model-capacity-matched comparison; the separate
+compute-cost design (`COMPUTE_COST_DESIGN.md`) is the right place to
+settle that more rigorously.
+
+**Stated plainly, the other direction**: a larger, competently-sized
+MLP (`H=128`, ~10x the oscillator readout's parameter count) reaches
+88.63% test accuracy -- clearly ahead of every oscillator-evolved
+condition (best: `curr_random` at 82.21%). The oscillator dynamics
+improve on the pre-evolution baseline substantially, and beat an MLP
+with approximately matched trainable parameter count, but do not close
+the gap to a larger, competently-sized one. Both facts are true at once
+and neither is softened by the other.
+
+## What this settles, and what it does not
+
+**Settled**: for this task, this linear readout, and these four
+prespecified graph instances -- graph-level evolution on top of an
+already-dynamically-encoded phase state adds real, statistically
+unambiguous classification value on genuinely held-out data. This is
+the strongest positive Level 3 result this project has produced, and
+the first to survive contact with an official, untouched test set
+rather than training-derived validation data alone.
+
+**Not settled, and explicitly out of scope for this design** (per
+`DESIGN.md`'s "What this does not do"): whether this generalizes to a
+topology *family* rather than these four specific prespecified
+instances; whether the genuinely static `theta_static = pi*x` control
+(no local-convergence encoding at all) would show the local encoding
+step already carries most of the value; role-matched or per-class
+topology selection (circular for a real classifier, rejected by
+design); and denoising or generation (Stage 2B, deferred).
+
+This locked sklearn evaluation is the one and only *confirmatory*
+official-test-set evaluation for this design -- no further confirmatory
+evaluation against these 10,000 test images is planned or justified
+under this locked design. See "Post hoc reuse of the test set," below,
+for what has and has not happened to the test set since.
+
+## Post hoc reuse of the test set (amended by external review)
+
+**The original framing above -- that the official test set was touched
+once and would never be touched again -- is no longer factually
+correct, and is corrected here rather than left standing.** The locked
+sklearn evaluation documented in this section was the first use of the
+official test set and remains the sole confirmatory result; nothing
+below alters that analysis or its numbers. But the test set was
+subsequently reused twice, both explicitly post hoc and both
+classifier-*backend* audits rather than new scientific investigations:
+
+1. **The JAX/optax classifier port** (`JAX_CLASSIFIER_PORT_FINDINGS.md`)
+   evaluated its from-scratch JAX reimplementation of the classifier
+   fit against the cached official test set, at the three real selected
+   `C` values from this locked result (`evolved_T=1000`,
+   `evolved_rewired=10`, `evolved_curr_random=1`). It found a real,
+   unresolved divergence from sklearn's fitted solution that grows with
+   `C` and does not close with recalibration -- disclosed there,
+   verified at the actual selected `C` values (not just a grid
+   extreme), and explicitly **not** used for, or folded into, any
+   result reported in this document.
+2. **The NVIDIA cuML `accel` cross-check** (`CUML_ACCEL_FINDINGS.md`)
+   replicated the complete six-condition, 270-fit CV-grid procedure
+   under a different GPU-native solver backend and evaluated it against
+   the same official test set, reaching the same four verdicts (primary
+   and all three secondary comparisons) at closely matching effect
+   sizes.
+
+Neither audit altered the locked sklearn analysis above or supplied a
+new confirmatory scientific claim. But as a factual matter, the test set
+is no longer untouched for future Stage 2A development, and this
+document should not claim otherwise.
+
+**This also changes how the cuML result should be described.** It is a
+strong **cross-backend implementation robustness check**: it shows the
+positive verdict is not peculiar to sklearn's particular optimizer. It
+is **not independent scientific corroboration** of the result, because
+it reuses the same training and test samples, the same oscillator
+features, the same graph instances, the same folds and `C` grid, and
+the same high-level selection and fitting code -- only the numerical
+classifier backend differs. `CUML_ACCEL_FINDINGS.md` itself has been
+amended to use this framing throughout, in place of the "independent
+confirmation/replication" language it originally used.
+
+3. **A post hoc, exploratory graph-to-graph pairwise comparison** (below,
+   "Post hoc, exploratory: direct graph-to-graph pairwise comparison")
+   -- the third reuse of the test set, and the first that computes a new
+   statistic (paired bootstrap directly between two evolved graphs)
+   rather than auditing an existing one against a different backend. No
+   new simulation or GPU time: computed entirely from the per-image test
+   losses this locked evaluation already produced and saved.
+
+## Post hoc, exploratory: direct graph-to-graph pairwise comparison
+
+**Explicitly post hoc and exploratory -- not part of, and does not
+reopen or alter, the locked confirmatory result above.** Prompted
+directly by this document's own secondary-comparisons section flagging
+that a graph-to-graph superiority claim "would require direct, paired
+graph-to-graph comparisons... these could be computed from the
+already-saved per-image losses, but any such comparison would now be
+explicitly post hoc and should use multiplicity correction." This
+section does exactly that, properly, rather than leaving it as an
+unresolved caveat.
+
+**No new simulation, no new GPU time**: `ell_i` for all four evolved
+conditions was already computed and saved by
+`run_confirmatory_evaluation.py` (`results/stage4_confirmatory_results.pkl`). This is a
+new bootstrap computation on existing data only
+(`run_posthoc_graph_pairwise.py`).
+
+**Method, amended by external review**: the original version of this
+section used one bootstrap procedure for both the descriptive interval
+and the `p`-value feeding Holm correction. External review found that
+conflation wrong: a `p`-value read off a bootstrap distribution centred
+on the *observed* effect (how often it crosses zero) is closely related
+to inverting the percentile CI, not a properly null-calibrated
+`p`-value suitable for a family-wise-error claim -- adequate for the
+locked primary/secondary tests (where the pre-registered decision rule
+*is* "does the 95% CI exclude zero," so the two agree by construction),
+but not for this new, un-pre-registered six-comparison family. Two
+statistics are now computed separately:
+
+1. **Descriptive interval** (unchanged): `d_i = ell_i(graph_A) -
+   ell_i(graph_B)`, 20,000 paired class-stratified bootstrap resamples,
+   two-sided 95% percentile interval on mean `d_i`, same `seed=42`.
+2. **Inferential `p`-value, for Holm correction**: a paired sign-flip
+   permutation test (`stage2a_stats.paired_sign_flip_p`) -- independently
+   flipping each image's `d_i` sign directly simulates a null
+   distribution that actually destroys the effect being tested for
+   (`CLAUDE.md` principle 10: "a permutation scheme must actually
+   destroy the effect it's testing for under the null"), unlike the
+   discarded conflated procedure above. Unit-tested on synthetic data
+   first (`tests/test_stage2a_stats.py`) per that same principle's
+   explicit requirement: identical (zero-difference) input gives `p~1`;
+   maximally separated (large constant difference) input gives `p` at
+   the Monte Carlo floor.
+
+   **Exactness caveat**: this test's exact validity requires each `d_i`
+   to be exchangeable with `-d_i` under H0, a symmetry condition on
+   `d_i`'s distribution around zero that is stronger than merely
+   "no systematic difference" (`E[d_i]=0`) and is not separately
+   verified here. With `n=10,000` independent test images this is a
+   large-sample-justified approximation for the mean contrast, not an
+   exact test by construction alone (`stage2a_stats.py`'s
+   `paired_sign_flip_p` docstring carries the same caveat). This is
+   immaterial for the five comparisons below whose `p`-values sit at or
+   near the Monte Carlo floor -- approximation error is swamped by
+   effect size -- but is directly relevant to the one comparison that
+   sits close to the alpha=0.05 boundary (`rewired` vs. `curr_random`,
+   below): "significant under this test" there should be read as
+   "significant under a large-sample approximation," not as an exact
+   result.
+
+All six pairwise comparisons among the four evolved graphs, not a
+subset chosen after seeing which looked interesting. Because this is
+new, un-pre-registered multiple-comparison territory (`DESIGN.md` only
+locked the four graph-vs-pre-evolution tests, never graph-vs-graph),
+**Holm-Bonferroni correction across all six sign-flip-test `p`-values,
+as one family, is applied** -- not optional here, per this project's
+own standing rule (`CLAUDE.md` principle 3).
+
+| comparison | mean `d_i` | 95% CI (descriptive) | sign-flip raw `p` | Holm-adjusted `p` | survives (alpha=0.05) |
+|---|---:|---|---:|---:|---|
+| T vs. lattice | -0.0748 | [-0.0935, -0.0564] | 4.9998e-05 | 2.9999e-04 | **yes** |
+| T vs. curr_random | +0.0558 | [+0.0307, +0.0803] | 4.9998e-05 | 2.9999e-04 | **yes** |
+| lattice vs. rewired | +0.1076 | [+0.0844, +0.1312] | 4.9998e-05 | 2.9999e-04 | **yes** |
+| lattice vs. curr_random | +0.1305 | [+0.1070, +0.1543] | 4.9998e-05 | 2.9999e-04 | **yes** |
+| T vs. rewired | +0.0328 | [+0.0088, +0.0572] | 7.4496e-03 | 1.4899e-02 | **yes** |
+| rewired vs. curr_random | +0.0229 | [+0.0002, +0.0456] | 4.6148e-02 | 4.6148e-02 | **yes, marginal** |
+
+(Sign convention: positive `d_i` means the first-named graph's log-loss
+is higher, i.e. the second-named graph wins that pair. Sign-flip `p`
+computed via 20,000 permutations, Monte Carlo floor convention applied
+-- `4.9998e-05` is the floor at `N=20,000` permutations, not an exact
+zero.)
+
+**All six of six comparisons survive Holm correction at alpha=0.05,
+under the corrected sign-flip test -- which genuinely destroys the
+effect under its permutation null (unlike the discarded bootstrap-`p`
+approach it replaced), subject to the exactness caveat noted above --
+the same qualitative conclusion as before the correction, not a
+different one, but now resting on a method that actually supports the
+claim.** Five of the six are extremely well-separated (`p` at or near
+the Monte Carlo floor, surviving correction by a wide margin -- the
+exactness caveat is immaterial at this margin). The sixth --
+`rewired` vs. `curr_random`, the two closest performers -- remains
+genuinely marginal, and is exactly where that caveat is load-bearing:
+`p=0.0461` under the primary seed, and because it
+is the largest `p`-value in the family it receives no Holm penalty
+(correction factor 1) and survives at essentially its raw value, just
+under the 0.05 threshold. **Checked for stability, not just reported
+once**: re-run across 4 additional random seeds and at 50,000/100,000
+permutations, `p` ranged 0.0459-0.0497 -- consistently just under 0.05,
+not flipping sign under the resampling randomness itself, but with
+essentially no margin. Worth naming plainly, as before: this is a
+significant result, not a robust one -- a genuinely different draw of
+the underlying test-set images (not just resampling randomness within
+this one fixed test set) could plausibly flip it.
+
+**The full pairwise ranking is transitive and internally consistent**:
+`curr_random > rewired > T > lattice`, exactly matching the descriptive
+point-estimate ordering already reported in "Secondary comparisons,"
+above -- and now, for the first time, that ordering rests on a properly
+powered, multiplicity-corrected, direct pairwise test, not a point-
+estimate comparison against a shared baseline. This chain has three
+adjacent links, and they do not all carry the same weight: `T`-vs-
+`lattice` is at the Monte Carlo floor (well-separated); `T`-vs-`rewired`
+is Holm-significant but not at the floor (raw `p=7.4496e-03`); and
+`curr_random`-vs-`rewired` -- the same pair as the `rewired vs.
+curr_random` row in the table above -- is the one genuinely marginal
+link (`p=0.0461`, already discussed). **Restated precisely, now that it
+is justified**: `curr_random` (a topology with matched
+sparsity but no relationship to `T`'s learned structure) measurably
+outperforms `T` (the topology this whole design was built around) on
+this held-out test set (`d = +0.0558`, `[+0.0307, +0.0803]`, Holm-
+survives comfortably) -- a real, corrected, direct result, not the
+descriptive observation it was before this check.
+
+**What this does and does not establish, restated for this specific
+addendum**: this confirms the four graphs are not equivalent in task
+utility under this exact pipeline, on this one test set, for this one
+locked feature/classifier procedure -- it does not extend to a
+topology-*family* claim (still explicitly out of scope, per `DESIGN.md`
+and every prior section here), and it does not retroactively change the
+primary/secondary locked results above, which stand as reported
+regardless of this addendum's outcome.
+
+## Code
+
+`run_official_test_encode.py` (local CPU encode of the official test
+set, mirrors `run_feasibility_stage3_encode.py`), `run_confirmatory_evaluation.py`
+(the confirmatory analysis itself: final refits, primary/secondary
+bootstrap, McNemar, MLP baselines), `stage2a_classifier.py`'s new
+`fit_final_at_selected_C` (the refit-only half of `fit_condition`,
+factored out so no new CV search could run here even by accident).
+Remote-only GPU driver (`stage4_gpu_evolve.py`, same chunked approach as
+stage 3's) not committed, per this project's convention for ephemeral
+GPU-session code. `run_posthoc_graph_pairwise.py` (the post hoc
+graph-to-graph pairwise comparison, above -- no GPU dependency, reuses
+the already-saved per-image losses only).
+
+## Reproducibility gaps (flagged by external review, now closed)
+
+**Not a blocker to accepting the scientific finding above -- it was a
+blocker to describing this branch as fully reproducible from its public
+contents.** All five items external review flagged are now implemented,
+verified, and committed (not merely planned):
+
+- **Artifact paths parameterized** (`stage2a_paths.py`): every script
+  that reads or writes the large scratch artifacts now resolves its
+  directory through `train_scratch_dir()`/`test_scratch_dir()`,
+  overridable via `STAGE2A_SCRATCH_ROOT`, rather than a hard-coded
+  private path. Default location documented in `README.md`.
+- **Both exact GPU evolution drivers committed**: `stage4_gpu_evolve.py`
+  (test-set, the one flagged) and `stage3_gpu_evolve.py` (training-set
+  -- equally load-bearing for the same reason, committed alongside for
+  the same completeness, not explicitly named in the original
+  recommendation but the identical gap). Neither is runnable locally
+  as-is (both execute on a remote Colab kernel's `/content/...`
+  filesystem) -- `README.md`'s "Reproducing the confirmatory GPU
+  evolution" documents the exact `mighty-colab` upload/exec sequence,
+  including the chunked-upload workaround for the transfer endpoint's
+  size limit.
+- **Artifact manifest** (`generate_artifact_manifest.py`, run against
+  the real cached artifacts -- not a template):
+  `results/ARTIFACT_MANIFEST.json` records SHA256 hashes for every pkl the confirmatory
+  result depends on, per-topology adjacency and evolved-state hashes,
+  training/test dimensions, image-ordering checks (label array hashes,
+  `idx == arange(n)` confirmation), the selected `C` values actually
+  consumed (`{raw_pixels: 0.001, encoded_pre_evolution: 0.01,
+  evolved_T: 1000, evolved_lattice: 1000, evolved_rewired: 10,
+  evolved_curr_random: 1}`), and the frozen primary effect itself.
+- **Unit tests** (`tests/test_stage2a_stats.py`, 17 tests, all passing):
+  Tier 1 synthetic-data coverage for the paired class-stratified
+  bootstrap (including a deterministic zero-variance construction that
+  directly verifies genuine per-class stratification, not just
+  plausible-looking output), per-image log-loss class indexing
+  (including a non-default class-ordering case that would silently
+  mis-index on a positional bug), exact McNemar's contingency
+  construction, the bootstrap-derived p-value, and Holm-Bonferroni
+  (including a step-down-stopping edge case a naive implementation
+  could get wrong -- caught a real error in the test's own first draft,
+  not the implementation, when first run).
+- **Artifact-backed regression test**
+  (`test_frozen_primary_effect_matches_findings_md`, Tier 2, skips
+  cleanly if the confirmatory pkl isn't present locally): recomputes
+  the primary bootstrap directly from the already-saved per-image
+  losses and asserts it still lands at `d_i = -0.2491`,
+  `CI = [-0.2721, -0.2266]` -- passing now, and will catch a future
+  refactor that silently changes the statistic.
+
+The stats functions themselves were also consolidated during this work:
+`run_confirmatory_evaluation.py` originally defined
+`paired_class_stratified_bootstrap` and the other statistics itself,
+and `run_posthoc_graph_pairwise.py` had copied the bootstrap function
+verbatim rather than importing it (disclosed as deliberate at the time,
+for exact-fidelity reasons) -- both now import from the new
+`stage2a_stats.py`, so there is exactly one implementation to trust and
+test, not two that could silently drift apart. Re-ran the post hoc
+pairwise comparison after the refactor and confirmed bit-identical
+output against the pre-refactor numbers reported above.
+
+See `README.md` (new, added alongside this closure) for the full
+reproduction sequence, the `mighty-colab`/Colab-A100 GPU-session
+pattern, and the public GCS artifact cache
+(`gs://bonsai-2026-stage2a-cache`) this closure also made use of.
+
+## Next step
+
+None specified by this design -- the locked confirmatory evaluation is
+complete, and the reproducibility gaps that were the last open item are
+now closed (immediately above). Any further extension (topology-family
+generalization, the static-encoding control, Stage 2B denoising) is a
+new design decision, not a continuation of this one.
+
+## External review verdict (amendment record)
+
+An external review of this section's original text found the primary
+scientific result sound and recommended the specific corrections
+incorporated throughout this document (rather than a rewrite from
+scratch) -- summarized here as the record of what was reviewed and what
+changed.
+
+**Verdict**: the primary Stage 2A result survives review. The locked
+contrast, statistical procedure, classifier selection, final refit, and
+reported result align correctly with `DESIGN.md`'s pre-registered
+specification. The observed primary effect
+(`d_i = ell(evolved T) - ell(pre-evolution) = -0.2491`,
+`95% CI = [-0.2721, -0.2266]`), the accuracy increase (72.08% to
+80.58%), and the concordant McNemar result together support a bounded
+Level 3 claim: under this fixed support, graph instance, encoding,
+evolution horizon, gauge, standardization procedure, and linear
+readout, graph-level evolution produces a substantially more useful
+classification representation than the encoded pre-evolution state
+alone.
+
+**What review changed**: two inferential overstatements were corrected
+(the "one specific graph wins" / "the four graphs are not equivalent"
+claims, and the "test set touched only once" claims), and one
+reproducibility gap was documented as open rather than implicitly
+assumed closed. Three smaller wording precisions were also made: the
+class-0 diagnostic is described as reassuring rather than dispositive,
+the MLP baseline comparison is described as approximately
+parameter-matched rather than "equally-sized," and the
+locked-pipeline-specific decodability finding under near-total
+synchronization is stated with its precision qualifier rather than as
+an unqualified claim about the underlying representation.
+
+**What review did not change**: the primary confirmatory result itself,
+the JAX/optax investigation's handling (already meeting this project's
+evidentiary standard -- the unresolved performance gap is disclosed,
+verified at the real selected `C` values rather than only a grid
+extreme, and explicitly excluded from any reported result), or the
+overall accept decision. Side investigations are, per this review,
+appropriately honest, with the cuML cross-check now correctly framed as
+cross-backend implementation robustness rather than independent
+scientific replication.
+
+**Strongest defensible conclusion, as amended**: Stage 2A establishes
+external task utility for runtime graph-oscillator evolution under a
+bounded classification design. On the official KMNIST test set,
+evolution on the prespecified class-0-learned graph `T` reduced mean
+per-image log-loss by 0.2491 relative to the same dynamically encoded
+phase state before graph evolution, with a paired class-stratified 95%
+bootstrap interval of `[-0.2721, -0.2266]`. Accuracy increased from
+72.08% to 80.58%, with concordant McNemar evidence. All four tested
+graph instances improved descriptively over pre-evolution, but
+graph-to-graph superiority and topology-family generality were not
+confirmatory claims under this design. The oscillator representation
+beats an MLP with approximately matched trainable parameter count,
+while remaining clearly below a larger, competently-sized MLP.

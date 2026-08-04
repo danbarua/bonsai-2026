@@ -81,10 +81,6 @@ where a shared, hardened library actually earns its cost.
   code in `experiments/` and `benchmark_programme/`, is an open,
   useful stress test of whether this repository is genuinely
   self-sufficient for a fresh agent.
-- **`tools/notMNIST-to-MNIST/`** -- a third-party conversion tool
-  (cloned repo, has its own `.git`) used to produce notMNIST's
-  MNIST-format files. Reference only; the conversion has already been
-  done and the output lives in `datasets/notmnist/`.
 - **`tarballs/`** -- the original packaged deliverables (one per major
   milestone across the whole project) that `benchmark_programme/` and
   parts of `experiments/` were decanted from. Kept for provenance; not
@@ -140,10 +136,30 @@ where a shared, hardened library actually earns its cost.
   in `src/bonsai/stats/permutation.py` -- import and reuse it rather
   than writing new permutation-test code from scratch.
 
+## Documentation style
+
+Reader-facing docs (READMEs, findings docs) state current facts and
+point to the authoritative source for detail -- they don't narrate the
+editing process that produced them. Two concrete failures this
+convention exists to prevent, both caught in the same session
+(2026-08-04): a README that led with raw commands and only revealed a
+newly-added Makefile 70 lines later, reading as an after-action report
+rather than instructions for a reader arriving cold; and an AI-voice
+meta-comment ("don't duplicate this here, this is exactly the X
+convention applied to Y") that had leaked into README prose, narrating
+an editing decision instead of stating a fact. "Amended by external
+review" / "fixed in commit X" framing belongs in commit messages and
+`git log`, not in the document a reader consults to use the code
+today -- if a paragraph reads as explaining why *this* edit was made
+rather than what's true right now, cut it.
+
 ## Where the project actually is right now
 
 One closed programme (benchmark-feature, Part 1), one open one
-(dynamics-as-computation, Part 3, currently at Stage 1D). See
+(dynamics-as-computation, Part 3, currently at Stage 2A -- Level 3
+established under a bounded classification design; topology-family
+generality and other follow-ons remain open, tracked as GitHub issues).
+See
 `docs/PROJECT_MEMORY.md` Parts 1 and 3 for current status, what's
 closed vs. open, and the priority-ordered open questions -- that status
 changes as findings land and is kept there, not duplicated here.
@@ -286,6 +302,18 @@ without reading that document's full findings history first.
     that matters is verification of existing, committed code versus
     generation of a new claim -- not merely whether the data happens to
     be gitignored.
+18. **Extrapolating one pipeline stage's small-scale timing to full
+    scale does not license assuming *other* stages scale the same way.**
+    Stage 2A's own history is the concrete example: data generation
+    (embarrassingly parallel, genuinely linear in image count) was
+    correctly extrapolated from n=1,000 all the way to n=60,000;
+    classifier CV fitting (iterative optimization, not guaranteed to
+    stay flat as n grows, especially for ill-conditioned features) was
+    dismissed as "a few seconds, not separately timed" at that same
+    n=1,000 and turned out to dominate total runtime by ~79x at full
+    scale. Different computations need their own timing checks, even
+    within the same pipeline -- one stage behaving linearly is not
+    evidence another does.
 
 # IntelliJ MCP Server Companion
 This project is open in Pycharm IDE (IntelliJ IDEA platform). 

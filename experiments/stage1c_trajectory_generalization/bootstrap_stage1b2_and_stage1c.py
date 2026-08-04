@@ -19,8 +19,8 @@ docs/PROJECT_MEMORY.md's repeated "Stage 1B2 is frozen" convention):
 
 1. Check datasets/kmnist/ has the 4 raw KMNIST IDX files. If not, this
    script stops with instructions -- it does not fetch them itself (this
-   project acquires datasets manually; see tools/notMNIST-to-MNIST/ for
-   the equivalent precedent with notMNIST).
+   project acquires datasets manually; see datasets/notmnist/ for the
+   equivalent precedent with notMNIST).
 2. Build experiments/stage1b2_structured_transformation/results/class0_constructions.pkl
    via src/bonsai/dynamics/construction_bundle.py's
    build_class_construction_bundle() directly from the raw KMNIST class-0
@@ -88,7 +88,7 @@ def step1_check_kmnist():
             "(the official KMNIST dataset repository, rois-codh/kmnist on GitHub, publishes "
             "them in this exact IDX format) and place them at the paths above -- matching "
             "this project's existing convention of manual dataset acquisition (see "
-            "tools/notMNIST-to-MNIST/ for the equivalent precedent with notMNIST).")
+            "datasets/notmnist/ for the equivalent precedent with notMNIST).")
         sys.exit(1)
     log("OK: all 4 raw KMNIST files present.")
 

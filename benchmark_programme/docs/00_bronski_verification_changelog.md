@@ -62,8 +62,8 @@ from frequency differences), which is exactly the condition Dan's suspected
 test hit.
 
 **Empirical confirmation, not just theoretical argument:** ran the exact
-scenario from the previously-failing `test_fixed_point_stability_with_small_
-frequency_differences` test with both sign conventions. Correct sign (paper):
+scenario from the previously-failing
+`test_fixed_point_stability_with_small_frequency_differences` test with both sign conventions. Correct sign (paper):
 coherence held at exactly 1.0 for the whole run. Bug's sign: coherence
 collapsed to near-zero within ~10 steps. Also explains why *increasing*
 coupling strength made the old bugged test's failure worse, not better —

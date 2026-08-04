@@ -41,6 +41,16 @@ definitions rather than assumed from familiarity:
   the side-investigation in `analyze_stage1b2_concentration_regime.py` /
   `CONCENTRATION_REGIME_NOTE.md`, not part of Stage 1B2's original locked
   design or its primary metrics.
+- **[Stage 1D]**: introduced in
+  `experiments/stage1d_topology_specificity/` for the T-vs-matched-controls
+  comparison on the Delta_map endpoint. `lattice` and `curr_random` are
+  reused unchanged in Stage 2A (same construction functions, different
+  endpoint); `rewired` and `hist_random` as defined here are specific to
+  Stage 1D's own comparison -- see the "rewired" disambiguation entry
+  below before assuming a `rewired` mention elsewhere means this one.
+- **[Stage 2A]**: introduced in
+  `experiments/stage2a_dynamics_classification/` for the Level 3
+  (external classification task) design.
 
 ---
 
@@ -106,8 +116,103 @@ definitions rather than assumed from familiarity:
   (structured-transformation) strength metric, defined in
   `src/bonsai/stats/permutation.py` -- see
   `experiments/stage1b2_structured_transformation/FINDINGS.md` for its
-  exact definition. First appears in `stage1b_pilot/FINDINGS.md`; also
-  referenced in `experiments/stage1d/DESIGN.md` as a planned future stage.
+  exact definition. First appears in `stage1b_pilot/FINDINGS.md`; also the
+  endpoint Stage 1D (below) uses to compare T against matched controls --
+  T sits in a tight cluster with all four, no detectable advantage for
+  learned wiring on this endpoint specifically (a different, narrower
+  claim than Stage 2A's classification result, below -- see the "rewired"
+  disambiguation entry for why the two must not be collapsed).
+- **T (learned topology)** *[general]*: the graph learned from a class's
+  image population (`src/bonsai/dynamics/learned_topology_construction.py`),
+  the one construction with real data-derived structure among the four
+  Stage 1D/2A graph instances -- as opposed to `lattice`, `rewired`,
+  `hist_random`, and `curr_random` below, which are all generic,
+  structure-matched controls with no dependence on what the images
+  actually look like beyond coarse statistics (edge count, degree
+  sequence, or ink-active support).
+- **lattice** *[Stage 1D]*: a deterministic 4-connectivity pixel-grid
+  graph (`src/bonsai/dynamics/lattice_construction.py`) restricted to T's
+  active support, edge weight rescaled so total coupling weight matches
+  T's -- the "not even random, just adjacent pixels" control. Reused
+  unchanged in Stage 2A.
+- **rewired** *[ambiguous -- disambiguate before using]*: THREE different
+  objects share this name across the project, not one graph family
+  reused everywhere -- confirmed and tabulated in
+  `benchmark_programme/docs/40_2026_reboot_conversation_history.md`'s
+  naming-traps section:
+  1. Stage 1A / re-verification's degree-preserving rewiring of class
+     topologies, endpoint = infinitesimal/AUC-style response vs T.
+  2. Stage 1D's `rewired` construction
+     (`src/bonsai/dynamics/degree_preserving_rewiring.py`, double-edge-swap,
+     preserves T's unweighted degree sequence, not exactly its weighted
+     degree), endpoint = Delta_map. Reused unchanged in Stage 2A, where
+     the endpoint is classification.
+  3. The closed benchmark-feature programme's causal ablation
+     (`benchmark_programme/docs/13_causal_ablation_findings.md`), endpoint
+     = classifier accuracy drop.
+  Same scrambling *idea* (degree-preserving edge swaps) in all three, but
+  different graphs, metrics, and decision rules -- a verdict about one is
+  not a verdict about the others.
+- **hist_random (historical random)** *[Stage 1D]*: a structurally
+  reconstructed match for a historical, pre-this-project cached random
+  control (`src/bonsai/dynamics/historical_matched_sparsity_random.py`,
+  "half-edge style," coupling-budget normalized). Structural equivalence
+  established (correct rescaling formula, independently-sampled support,
+  weights drawn from T's own pool); the exact historical edge-count rule
+  and RNG seed remain unrecovered despite a 600-way sweep -- not the same
+  algorithm as `curr_random`, below, even though both are informally
+  "the random control" in loose conversation. Not used in Stage 2A (only
+  `lattice`, `rewired`, and `curr_random` are Stage 2A's four instances,
+  alongside T itself).
+- **curr_random (current random)** *[Stage 1D onward]*: a different,
+  intentional edge-count-matched random construction
+  (`src/bonsai/dynamics/matched_sparsity_ablation.py`) -- keeps T's exact
+  edge count and redistributes weights, rather than `hist_random`'s
+  half-edge-style resampling. Reused unchanged in Stage 2A. Always use
+  one of "hist_random" or "curr_random" explicitly; "random" or
+  "matched-sparsity random" unqualified is ambiguous between the two.
+- **evolved_X / encoded_pre_evolution** *[Stage 2A]*: the six named
+  feature conditions compared in Stage 2A's confirmatory result --
+  `encoded_pre_evolution` is the locally-encoded phase state *before* any
+  graph-level evolution runs; `evolved_T` / `evolved_lattice` /
+  `evolved_rewired` / `evolved_curr_random` are that same state after
+  evolving on each of the four graph instances above. The primary locked
+  result is `evolved_T` vs. `encoded_pre_evolution`; the other three
+  `evolved_*` feed the secondary comparisons and the post hoc pairwise
+  ranking.
+- **go/no-go (mechanical checks)** *[Stage 1D onward]*: cheap, purely
+  structural validity checks (no NaN/Inf, expected shapes, solver success
+  flags, finite loss) run before trusting a batch of results enough to
+  feed a locked statistical analysis -- distinct from the actual
+  scientific result; a go/no-go pass means "safe to analyze," not
+  "significant."
+- **C_GRID** *[Stage 2A]*: the locked, prespecified 9-value logistic
+  regression regularization grid (`1e-4` through `1e4`, log-spaced) that
+  `select_C_via_cv` searches -- fixed before any Stage 2A result existed,
+  per `DESIGN.md`.
+- **R_post / feat_post** *[Stage 2A]*: `R_post` is the post-evolution
+  Kuramoto order parameter (how synchronized the oscillator population is
+  after graph evolution); `feat_post` is the post-evolution feature
+  vector fed to the classifier. Both computed per (topology, image) pair
+  by `analyze_stage3_results.py` / its JAX port.
+- **sign-flip p (paired sign-flip test)** *[Stage 2A]*:
+  `stage2a_stats.paired_sign_flip_p` -- a permutation test that
+  independently flips each image's paired log-loss difference `d_i`
+  sign to build a null distribution that genuinely destroys the effect
+  under test (`CLAUDE.md` principle 10), used for the post hoc
+  graph-to-graph pairwise comparison's Holm-corrected p-values. Exact
+  validity requires a symmetry assumption on `d_i` stronger than "no
+  systematic difference" -- see the function's own docstring and
+  `FINDINGS.md`'s "Exactness caveat" for where that matters (the one
+  marginal comparison) and where it doesn't (the five floor-level ones).
+- **theta_static** *[Stage 2A, planned -- not yet run]*: a proposed
+  control encoding (`theta = pi * x`, direct phase-from-pixel-intensity,
+  no local-convergence encoding step at all) that would test whether the
+  local encoding step already carries most of Stage 2A's classification
+  value, independent of graph evolution. Named in `DESIGN.md`'s scope
+  exclusions and `FINDINGS.md`'s "not settled" list; tracked as GitHub
+  issue #10. Not yet implemented -- unlike `evolved_X` above, this is a
+  planned comparison, not a completed one.
 
 ## Glossary (plain English)
 
@@ -169,4 +274,72 @@ of the project (see the tag key above for exactly what each one covers).
 
 - **Delta_map** *[Stage 1B pilot onward]* — The main score for “does the
   network turn different kicks into reliably different spatial patterns?”
-  Higher = clearer structured transformation.
+  Higher = clearer structured transformation. Also the score Stage 1D
+  used to ask “does the *learned* graph do this better than a generic
+  one?” — answer: no, not detectably, on this specific score. That’s a
+  different, narrower question than Stage 2A’s “does it help
+  classification?”, below, where the answer is a clear yes.
+
+- **T (learned topology)** *[general]* — The one graph among the four
+  compared in Stage 1D/2A that’s actually derived from what the images
+  look like. The other three (`lattice`, `rewired`, `hist_random`,
+  `curr_random`) are all generic stand-ins that don’t know anything
+  about the specific images beyond crude statistics like edge count.
+
+- **lattice** *[Stage 1D]* — The simplest possible control: just connect
+  each pixel to its neighbours on the grid, no learning involved at all.
+
+- **rewired** *[ambiguous — disambiguate before using]* — Watch out: this
+  word means three genuinely different graphs in three different parts
+  of the project (an early infinitesimal-response check, Stage 1D’s
+  Delta_map comparison, and the old benchmark programme’s classifier
+  ablation). Same basic idea (scramble the wiring but keep the same rough
+  connectivity) each time, but different graphs and different questions
+  being asked of them — see the technical entry above for exactly which
+  is which.
+
+- **hist_random (historical random)** *[Stage 1D]* — A best-effort
+  rebuild of an older “random control” graph from before this project’s
+  current tooling. It behaves the same way structurally, but the exact
+  recipe (how many edges, which random seed) was never fully pinned
+  down, so it’s not a byte-for-byte match to the original.
+
+- **curr_random (current random)** *[Stage 1D onward]* — This project’s
+  own, cleanly defined “random control”: same edge count as the learned
+  graph, weights shuffled around. A different recipe from `hist_random`
+  — don’t assume “random” alone means one or the other.
+
+- **evolved_X / encoded_pre_evolution** *[Stage 2A]* — `encoded_pre_evolution`
+  is “what the network looks like right after encoding an image, before
+  letting the graph dynamics run.” `evolved_T` etc. is “what it looks
+  like after letting it run on graph X.” Stage 2A’s headline result
+  compares these two for the learned graph and finds evolving genuinely
+  helps classification.
+
+- **go/no-go (mechanical checks)** *[Stage 1D onward]* — Quick sanity
+  checks (nothing broke, no missing values, solvers actually finished)
+  run before trusting a batch of results enough to do real statistics on
+  it. Passing go/no-go doesn’t mean the result is interesting — just that
+  it’s safe to look at.
+
+- **C_GRID** *[Stage 2A]* — The fixed list of regularization strengths
+  the classifier’s cross-validation searches over, decided in advance so
+  nobody can quietly pick a value after seeing what looks good.
+
+- **R_post / feat_post** *[Stage 2A]* — “How synchronized is the network
+  after it’s done evolving” (`R_post`) and “what feature vector do we
+  actually hand to the classifier afterward” (`feat_post`).
+
+- **sign-flip p (paired sign-flip test)** *[Stage 2A]* — A way of asking
+  “if there really were no difference between two graphs, how often
+  would random chance alone produce a gap this big?” by literally
+  flipping the sign of each image’s result at random and seeing how often
+  that matches what was actually observed. Trustworthy for the clearly
+  one-sided comparisons; a bit more of an approximation for the one
+  genuinely close call (`rewired` vs. `curr_random`).
+
+- **theta_static** *[Stage 2A, planned — not yet run]* — A proposed
+  “no dynamics at all” control: turn each pixel straight into a phase
+  value and stop there. Would tell us how much of Stage 2A’s
+  classification value comes from the encoding step alone, independent
+  of any graph evolution. Not built yet.
