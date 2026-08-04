@@ -396,7 +396,16 @@ Level 3 question: does **graph-level evolution** after local encoding improve cl
 
 **What was tried / why / what happened**
 
-Post-hoc Holm-corrected pairwise graph comparisons (all six pairs among T, lattice, rewired, curr_random): ranking holds; curr_random and rewired can beat T on this task. Mechanistic context (Fiedler / multistability) kept interpretive, not causal claim. Compute-cost accounting: no deployment crossover vs competent MLP. Class-0 support audit. cuML corroboration vs JAX classifier port (latter not adopted). Reproducibility passes, unit tests, README, GitHub issues for non-blocking debt. Stage 2A near merge to `main`.
+Post-hoc Holm-corrected pairwise graph comparisons (all six pairs among T, lattice, rewired, curr_random): ranking holds; curr_random and rewired can beat T on this task. Mechanistic context (Fiedler / multistability) kept interpretive, not causal claim. Compute-cost accounting: no deployment crossover vs competent MLP. Class-0 support audit. cuML corroboration vs JAX classifier port (latter not adopted). Reproducibility passes, unit tests, README, GitHub issues for non-blocking debt. Stage 2A merged to `main`.
+
+**Post-2A correction (disk, not chat):** The Holm-corrected pairwise comparison 
+described above used p-values from a bootstrap centred on the observed effect 
+— not a genuine null simulation. External review caught this after the chat 
+ended; it was replaced with a proper paired sign-flip permutation test. The 
+qualitative ranking is unchanged (all 6 of 6 still survive Holm at α=0.05), 
+but rewired-vs-curr_random — the closest pair — is now explicitly flagged as 
+genuinely marginal (p≈0.046, stable across reruns but with essentially no 
+margin), not a comfortable survival like the other five.
 
 **Repo mapping**
 
@@ -409,8 +418,9 @@ Post-hoc Holm-corrected pairwise graph comparisons (all six pairs among T, latti
 
 - Stage 1D: T ≈ controls on **Δ_map**  
 - Stage 2A: evolution helps on **classification**; **T is not best** among the four graph instances  
+- Stage 2A ranking: curr_random > rewired > T > lattice — five of the six pairwise gaps are decisive; rewired-vs-curr_random is real but marginal, not decisive
 
-Do not collapse these into “T doesn’t matter” or “T wins.”
+Do not collapse these into "T doesn't matter" or "T wins."
 
 ---
 
