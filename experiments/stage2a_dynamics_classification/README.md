@@ -177,55 +177,117 @@ export STAGE2A_SCRATCH_ROOT=/path/to/your/scratch/dir
 
 ## Reproducing the confirmatory GPU evolution
 
+**Amended by external review**: the single generic example previously
+here (`theta0_batch.npy`, `topologies.pkl`) does not match either
+driver's actual expected filenames -- following it as written would not
+reproduce the run without inspecting the source first. Split into two
+exact, separate workflows below, training and official-test, each with
+real filenames and shapes throughout.
+
 The GPU-evolution step used [`mighty-colab`](https://pypi.org/project/mighty-colab/)
-(a Colab CLI/MCP wrapper) to provision an A100 session, upload the
-`theta0` batch + topologies, run the evolution kernel remotely, and
-download the resulting `theta_T` states. `stage3_gpu_evolve.py` /
-`stage4_gpu_evolve.py` are the exact scripts that ran on the remote
-kernel -- they are not runnable locally as-is (they read/write
-`/content/...`, the remote session's filesystem convention).
+(a Colab CLI/MCP wrapper) to provision an A100 session, upload inputs,
+run the evolution kernel remotely, and download the resulting `theta_T`
+states. `stage3_gpu_evolve.py` / `stage4_gpu_evolve.py` are the exact
+scripts that ran on the remote kernel -- not runnable locally as-is
+(they read/write `/content/...`, the remote session's filesystem
+convention).
 
-**Pattern for spinning up a fresh test run on a Colab A100** (adjust
-session names freely; `mighty-colab` also exposes these as MCP tools if
-you're driving this from an agent rather than a shell):
+### Workflow A: Stage 3, training-set evolution (60,000 images)
 
+**1. Local preparation.** `run_feasibility_stage3_encode.py` (already
+run in "Reproducing the pipeline locally," above) produces one combined
+package, `scratch/stage3_train/stage3_gpu_upload.pkl`
+(`{"theta0_batch": (60000, 505) float64, "topologies": {4 x (505, 505)
+float64}}`, ~250MB). That single pickle is too large for the upload
+endpoint (see "Upload size limit," below), so a separate script splits
+it into the exact files the remote driver expects:
 ```bash
-# 1. Check for orphaned sessions first (they bill while running)
-mighty-colab sessions
+uv run python experiments/stage2a_dynamics_classification/prepare_stage3_gpu_upload.py
+```
+Produces, in `scratch/stage3_train/`: `theta0_chunk_00.npy` through
+`theta0_chunk_11.npy` (12 files, `(5000, 505)` float64 each, ~20MB
+each) and `stage3_topologies.pkl` (`{4 x (505, 505)} float64`, ~8MB) --
+verified to reassemble byte-identical to the original before the script
+reports success, not just "the right shape."
 
-# 2. Provision
-mighty-colab new -s my-session --gpu A100
+**2. Upload + GPU execution:**
+```bash
+mighty-colab sessions   # check for orphaned sessions first, they bill while running
+mighty-colab new -s stage3-evolve --gpu A100
+mighty-colab reinstall -s stage3-evolve jax[cuda12]==0.11.0 diffrax==0.7.2 equinox==0.13.8
 
-# 3. Install pinned deps (single atomic install+restart if the
-#    package/version might already be imported in a live kernel;
-#    `install` alone is enough on a genuinely fresh session)
-mighty-colab reinstall -s my-session jax[cuda12]==0.11.0 diffrax==0.7.2 equinox==0.13.8
+mighty-colab upload -s stage3-evolve evolve_on_graph_jax.py /content/evolve_on_graph_jax.py
+mighty-colab upload -s stage3-evolve scratch/stage3_train/stage3_topologies.pkl /content/stage3_topologies.pkl
+for i in 00 01 02 03 04 05 06 07 08 09 10 11; do
+  mighty-colab upload -s stage3-evolve scratch/stage3_train/theta0_chunk_$i.npy /content/theta0_chunk_$i.npy
+done
 
-# 4. Upload the evolution kernel + your theta0/topologies package
-mighty-colab upload -s my-session evolve_on_graph_jax.py /content/evolve_on_graph_jax.py
-mighty-colab upload -s my-session path/to/theta0_batch.npy /content/theta0_batch.npy
-mighty-colab upload -s my-session path/to/topologies.pkl /content/topologies.pkl
-
-# 5. Run the driver (stage3_gpu_evolve.py / stage4_gpu_evolve.py, or your
-#    own script following the same chunked-batch pattern -- see either
-#    script's own comments for why CHUNK_SIZE=1000: vmap materializes a
-#    (batch, n, n) diff tensor per RHS evaluation, which does not fit in
-#    GPU memory for a full 60,000-image batch at once)
-mighty-colab exec -s my-session -f stage3_gpu_evolve.py
-
-# 6. Download results, stop the session (GPU sessions are billed while running)
-mighty-colab download -s my-session /content/stage3_gpu_results.pkl ./stage3_gpu_results.pkl
-mighty-colab stop -s my-session
+mighty-colab exec -s stage3-evolve -f stage3_gpu_evolve.py
 ```
 
+**3. Output, download, stop:**
+```bash
+# stage3_gpu_evolve.py writes /content/stage3_gpu_results.pkl
+mighty-colab download -s stage3-evolve /content/stage3_gpu_results.pkl scratch/stage3_train/stage3_gpu_results.pkl
+mighty-colab stop -s stage3-evolve   # GPU sessions are billed while running
+```
+
+**4. Verify** your regenerated artifact matches the one behind the
+reported numbers -- regenerate the manifest and compare the
+`stage3_gpu_results.pkl` entry's `sha256` against the committed
+`results/ARTIFACT_MANIFEST.json`:
+```bash
+uv run python experiments/stage2a_dynamics_classification/generate_artifact_manifest.py
+git diff --stat experiments/stage2a_dynamics_classification/results/ARTIFACT_MANIFEST.json
+```
+A clean diff (or a diff touching only expected fields, e.g. a
+regeneration timestamp if one is added later) confirms byte-identical
+regeneration; a changed `sha256` for `stage3_gpu_results.pkl`
+specifically means your regenerated evolution output differs from the
+one the reported numbers are based on.
+
+### Workflow B: Stage 4, official-test-set evolution (10,000 images)
+
+**1. Local preparation.** `run_official_test_encode.py` (already run
+above -- the one and only place this project touches test-set
+images/labels for the locked confirmatory analysis; do not run this
+speculatively) already produces the exact files the remote driver
+expects, no separate chunking step needed at this smaller scale:
+`scratch/stage4_test/stage4_gpu_upload_topologies.pkl`
+(`{"topologies": {4 x (505, 505)} float64}`, ~8MB) and
+`scratch/stage4_test/stage4_theta0_test.npy` (`(10000, 505)` float64,
+~40MB -- small enough for a single-file upload).
+
+**2. Upload + GPU execution:**
+```bash
+mighty-colab sessions
+mighty-colab new -s stage4-evolve --gpu A100
+mighty-colab reinstall -s stage4-evolve jax[cuda12]==0.11.0 diffrax==0.7.2 equinox==0.13.8
+
+mighty-colab upload -s stage4-evolve evolve_on_graph_jax.py /content/evolve_on_graph_jax.py
+mighty-colab upload -s stage4-evolve scratch/stage4_test/stage4_gpu_upload_topologies.pkl /content/stage4_gpu_upload_topologies.pkl
+mighty-colab upload -s stage4-evolve scratch/stage4_test/stage4_theta0_test.npy /content/stage4_theta0_test.npy
+
+mighty-colab exec -s stage4-evolve -f stage4_gpu_evolve.py
+```
+
+**3. Output, download, stop:**
+```bash
+# stage4_gpu_evolve.py writes /content/stage4_gpu_results.pkl
+mighty-colab download -s stage4-evolve /content/stage4_gpu_results.pkl scratch/stage4_test/stage4_gpu_results.pkl
+mighty-colab stop -s stage4-evolve
+```
+
+**4. Verify**, same pattern as Workflow A -- `generate_artifact_manifest.py`,
+compare the `stage4_gpu_results.pkl` entry's `sha256` against the
+committed `results/ARTIFACT_MANIFEST.json`.
+
 **Upload size limit, worth knowing in advance**: a single large pickle
-(the original 250MB `theta0`+topologies package) hit the transfer
-endpoint's size limit. The working pattern is to shard large arrays
-into ~20MB `.npy` chunks (`theta0_chunk_00.npy`, `theta0_chunk_01.npy`,
-...), upload each separately, and reassemble with `np.concatenate` on
-the remote side -- `stage3_gpu_evolve.py`'s own inline comment shows
-the reassembly. Small files (under ~50MB) upload fine as a single
-transfer.
+(the original 250MB Stage 3 `theta0`+topologies package) hit the
+transfer endpoint's size limit -- this is why Workflow A's chunking step
+exists and Workflow B's doesn't need one (Stage 4's combined package is
+only ~48MB total, under the limit that broke Stage 3's single-file
+upload). Small files (under ~50MB) upload fine as a single transfer.
 
 **`cuml.accel`, if extending into that territory** (see
 `CUML_ACCEL_FINDINGS.md`): install via
