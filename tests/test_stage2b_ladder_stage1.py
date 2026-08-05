@@ -12,6 +12,7 @@ Each of these has a specific failure it exists to prevent, named at the
 test. None of them is a restatement of the driver's own source.
 """
 import ast
+import re
 import importlib
 import os
 import subprocess
@@ -356,6 +357,47 @@ def test_the_batched_evolution_binding_is_the_batched_one(driver):
     assert "from evolve_on_graph_jax import batched_evolve_on_graph_jax" in source
     import evolve_on_graph_jax as ev
     assert ev.batched_evolve_on_graph_jax is not ev.evolve_on_graph_jax
+
+
+# ---- the README's test table is a narrowing, so assert it matches ----
+
+def test_the_readme_test_table_lists_exactly_the_stage2b_test_files():
+    """Both directions, per principle 21.
+
+    The table used to carry per-file counts as well. They drifted four
+    times -- once with three rows stale simultaneously, and once from a
+    MERGE, where nobody wrote a wrong number and the numbers became wrong
+    anyway because two branches each added tests. Counts are derived and
+    `make stage2b-test` prints them, so they were removed rather than
+    guarded. What remains is a list, and a list standing in for a derivable
+    set is exactly what this checks."""
+    readme = (REPO_ROOT / "experiments" / "stage2b_denoising" / "README.md").read_text()
+    listed = set(re.findall(r"`(test_stage2b_[a-z0-9_]+\.py)`", readme))
+    declared = _make_var("STAGE2B_TEST_FILES")
+    assert declared is not None
+    expected = {Path(token).name for token in declared.split() if token.endswith(".py")}
+    on_disk = {p.name for p in (REPO_ROOT / "tests").glob("test_stage2b_*.py")}
+    assert expected == on_disk, "STAGE2B_TEST_FILES and tests/ disagree"
+
+    missing = sorted(on_disk - listed)
+    assert not missing, (
+        f"the README's table omits {missing}. A reader takes that table as the "
+        f"whole of what `make stage2b-test` runs.")
+    stale = sorted(listed - on_disk)
+    assert not stale, f"the README's table names files that no longer exist: {stale}"
+
+
+def test_the_readme_carries_no_hand_maintained_test_counts():
+    """The removal is the fix; without this the counts creep back.
+
+    Prose like "its 148 tests" or "503 collected" is a copy of a number
+    `make stage2b-test` already prints, and every copy has gone stale."""
+    readme = (REPO_ROOT / "experiments" / "stage2b_denoising" / "README.md").read_text()
+    offenders = re.findall(r"\b\d{2,4}\s+(?:fast\s+)?tests?\b|\b\d{2,4}\s+collected\b",
+                           readme)
+    assert not offenders, (
+        f"the README states test counts in prose: {offenders}. They are derived "
+        f"numbers -- let `make stage2b-test` report them.")
 
 
 def test_driver_compiles_under_the_projects_interpreter():

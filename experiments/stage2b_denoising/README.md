@@ -100,12 +100,13 @@ a map to the targets, not a copy of them.
 
 ```bash
 make help            # from the repository root -- every target, grouped
-make stage2b-test    # the fast suite: 503 tests, no network, no cloud
+make stage2b-test    # the fast suite -- no network, no cloud
 ```
 
-The feasibility ladder itself has no targets yet, because no ladder
-stage has been run. They get added as each rung is actually executed —
-not written speculatively against a pipeline nobody has driven.
+Ladder targets get added as each rung is actually driven, not written
+speculatively. Stage 1 has them: `stage2b-stage-inputs` puts KMNIST in
+the bucket once, and `stage2b-ladder-stage1` runs the rung. Later rungs
+have none yet.
 
 ## Cloud execution: scripts, not notebooks
 
@@ -130,7 +131,7 @@ and the module still agree.
 
 `stage2b_gcs.py` imports `google.cloud.storage` **lazily**, inside the
 functions that need a client. This is load-bearing, not stylistic: it
-is what lets the whole module and its 148 tests run in an environment
+is what lets the whole module and its tests run in an environment
 where the package is not installed and there is no network. Three tests
 enforce it structurally in subprocesses — two block `google` via a
 `sys.meta_path` finder, the third asserts nothing under `google.` enters
@@ -278,26 +279,35 @@ disclosed amendment to `DESIGN.md`, not a keyword argument.
 ## Testing
 
 ```bash
-make stage2b-test              # 503 fast tests, ~30s, no network
+make stage2b-test              # the fast suite, ~40s, no network
 make stage2b-test-roundtrip    # real Colab+GCS round trip; bills while running
 make test                      # the whole repository suite
 ```
 
-| file | tests | covers |
-|---|---|---|
-| `test_stage2b_gcs.py` | 148 | transport, guards, chunked resumable upload, content verification |
-| `test_stage2b_cnn.py` | 76 | architecture, shared masking, training loop |
-| `test_stage2b_stats.py` | 66 | sign-flip, Holm families, winner rule |
-| `test_stage2b_ridge.py` | 66 | SVD ridge vs sklearn oracle, alpha selection, the n-dependent centering tolerance |
-| `test_stage2b_partition.py` | 49 | split ordering, nested stratified draw |
-| `test_stage2b_corruption.py` | 42 | RNG determinism, clip rates vs the design table |
-| `test_stage2b_encoder_gate.py` | 24 | rho gate, non-finite handling |
-| `test_stage2b_gcs_roundtrip.py` | 18 | 17 fast credential-gate checks + 1 slow round trip |
-| `test_stage2b_contracts.py` | 10 | cross-module contracts no single module's tests can see |
-| `test_stage2b_gcs_makefile.py` | 5 | Makefile and module agree on the bucket; every GCS-touching script has a target |
+| file | covers |
+|---|---|
+| `test_stage2b_gcs.py` | transport, guards, chunked resumable upload, content verification |
+| `test_stage2b_cnn.py` | architecture, shared masking, training loop |
+| `test_stage2b_stats.py` | sign-flip, Holm families, winner rule |
+| `test_stage2b_ridge.py` | SVD ridge vs sklearn oracle, alpha selection, the n-dependent centering tolerance |
+| `test_stage2b_partition.py` | split ordering, nested stratified draw |
+| `test_stage2b_corruption.py` | RNG determinism, clip rates vs the design table |
+| `test_stage2b_encoder_gate.py` | rho gate, non-finite handling |
+| `test_stage2b_gcs_roundtrip.py` | credential-gate checks, plus the one slow round trip |
+| `test_stage2b_contracts.py` | cross-module contracts no single module's tests can see |
+| `test_stage2b_gcs_makefile.py` | Makefile and module agree on the bucket; every GCS-touching script has a target |
+| `test_stage2b_ladder_stage1.py` | the ladder driver's constants, call sites and Makefile agreement |
 
-504 collected, 503 of them fast — the table is the whole of what
-`make stage2b-test` runs, and the one exclusion is the slow round trip.
+This table is the whole of what `make stage2b-test` runs, and the one
+exclusion is the slow round trip. It carries no test counts, deliberately:
+per-file counts are a hand-maintained copy of a derived number, and this
+one drifted four separate times before it was removed — three rows stale at
+once in one instance, and in another it went stale from a *merge*, where
+nobody wrote a wrong number and the numbers became wrong anyway. Principle
+21's rule is derive the set or assert it matches; the count is derived by
+`make stage2b-test`, which prints it, so the file list is what is asserted
+here (`tests/test_stage2b_ladder_stage1.py`) and the numbers are not
+duplicated.
 
 The round trip is the only test that leaves this machine. It provisions
 a CPU runtime, writes an object to GCS from it, and reads that object
