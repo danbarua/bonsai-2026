@@ -41,8 +41,10 @@ numbered part objects under `{name}.parts/`, each recorded in a
 `{local_path}.upload.json` checkpoint only after the remote confirms it
 arrived, and the parts are composed into the object at the end. A re-run
 resumes after the last confirmed part rather than sending the whole
-artifact again. `upload_file` remains the single-request path, and is
-what `ensure_artifact` uses unless asked for `chunked=True`.
+artifact again. `upload_file` remains the single-request path, and
+`ensure_artifact` chooses between the two on the artifact's size --
+`should_chunk` is the rule -- rather than on the call site having
+remembered to ask. `chunked=True` and `chunked=False` force either route.
 
 ## Content integrity, on both transfer routes
 
@@ -712,6 +714,51 @@ def checkpoint_path(local_path):
     return f"{str(local_path)}{CHECKPOINT_SUFFIX}"
 
 
+def _check_chunk_size(chunk_size):
+    if not isinstance(chunk_size, int) or isinstance(chunk_size, bool) or chunk_size <= 0:
+        raise ValueError(f"chunk_size must be a positive int, got {chunk_size!r}")
+    return chunk_size
+
+
+def _check_chunked(chunked):
+    if chunked is not None and not isinstance(chunked, bool):
+        raise TypeError(
+            f"chunked must be True, False, or None (decide on size), got {chunked!r}")
+    return chunked
+
+
+def should_chunk(size_bytes, *, chunked=None, chunk_size=CHUNK_SIZE_DEFAULT):
+    """Whether an artifact of `size_bytes` goes up the chunked route.
+
+    The rule `ensure_artifact` applies, as a pure function -- decidable
+    without a bucket, a file, or a client, so it can be checked on its
+    own the way `object_path` can.
+
+    `chunked=None` decides on size: chunked as soon as the artifact needs
+    more than one chunk, which at the default `chunk_size` is anything
+    over 64 MiB. `chunked=True` and `chunked=False` force either route
+    regardless of size, and are the only values accepted besides None --
+    a truthy string or a stray `1` would otherwise select a transfer
+    route by accident.
+
+    ## Why the threshold is `chunk_size` and not `CHUNK_SIZE_DEFAULT`
+
+    The two are the same number on a default call, and the two rules are
+    observationally identical for any `chunk_size >= CHUNK_SIZE_DEFAULT`:
+    `upload_file_chunked` sends anything that fits in one chunk through
+    `upload_file` anyway, so a 242MB artifact at `chunk_size=256MiB`
+    takes the single request under either rule. They differ only below
+    the default -- 8 MiB chunks on a 32MB file -- where this rule sends
+    four resumable parts and a fixed 64 MiB threshold would send one
+    unresumable request. Deciding against the chunk size actually in use
+    is the rule that says what it means: chunk when there is more than
+    one chunk to send, and so something for a resume to pick up."""
+    if _check_chunked(chunked) is not None:
+        return chunked
+    _check_chunk_size(chunk_size)
+    return int(size_bytes) > chunk_size
+
+
 def _file_identity(local_path):
     st = os.stat(local_path)
     return {"size_bytes": int(st.st_size), "mtime_ns": int(st.st_mtime_ns)}
@@ -995,8 +1042,7 @@ def upload_file_chunked(local_path, name, *, bucket, allow_test_split=False,
     local_path = str(local_path)
     if not os.path.isfile(local_path):
         raise FileNotFoundError(f"nothing to upload: {local_path} is not a file")
-    if not isinstance(chunk_size, int) or isinstance(chunk_size, bool) or chunk_size <= 0:
-        raise ValueError(f"chunk_size must be a positive int, got {chunk_size!r}")
+    _check_chunk_size(chunk_size)
 
     identity = _file_identity(local_path)
     size_bytes = identity["size_bytes"]
@@ -1187,7 +1233,7 @@ class StepResult(NamedTuple):
 
 
 def ensure_artifact(name, local_path, *, produce, bucket, allow_test_split=False,
-                    force=False, chunked=False, chunk_size=CHUNK_SIZE_DEFAULT,
+                    force=False, chunked=None, chunk_size=CHUNK_SIZE_DEFAULT,
                     verify_content=True):
     """Skip if already done, else compute and upload.
 
@@ -1219,17 +1265,36 @@ def ensure_artifact(name, local_path, *, produce, bucket, allow_test_split=False
     `force=True` recomputes and overwrites an existing object -- for the
     case where the artifact is known stale, not as a routine flag.
 
-    `chunked=True` sends the artifact through `upload_file_chunked`, so a
-    session that dies mid-upload resumes after the last confirmed chunk
-    instead of starting the transfer again. It is opt-in rather than the
-    default because the resulting object is a composite one, with the
-    checksum-metadata difference noted there; pass it at the steps that
-    push gigabytes, which is where the whole transfer being lost actually
-    costs something."""
+    `chunked` selects the upload route and defaults to deciding on size
+    (`should_chunk`): an artifact needing more than one chunk goes
+    through `upload_file_chunked`, so a session that dies mid-upload
+    resumes after the last confirmed chunk instead of sending the whole
+    transfer again, and anything smaller takes the single request there
+    is nothing to resume inside. `chunked=True` and `chunked=False`
+    force either route regardless of size.
+
+    The decision is made here rather than left to the caller because
+    resumability must not depend on a call site remembering to ask for
+    it. That is the failure shape PROJECT_MEMORY.md already records
+    once: `mighty-colab exec --timeout`, a flag carried by every
+    hand-run command and dropped when those commands were frozen into
+    Makefile targets, so the targets could never once complete as
+    written. A caller that forgot `chunked=True` on a 242MB artifact
+    would get a non-resumable upload and nothing to indicate it. Stage
+    1's ~8MB artifacts still go up in one request; stage 3's
+    242MB-class ones chunk without being asked."""
     name = _check_object_path_allowed(name, allow_test_split)
     local_path = str(local_path)
     if not callable(produce):
         raise TypeError("produce must be a callable taking the local path and writing it")
+    # Both route arguments are checked here rather than where they are
+    # read, which is after `produce` has run: a step that computes for an
+    # hour on a GPU and then raises on a malformed argument loses the
+    # hour, and uploads nothing for the next run to resume from. The
+    # `produce` check above is here for the same reason.
+    _check_chunked(chunked)
+    if chunked is None:
+        _check_chunk_size(chunk_size)
 
     if not force and object_exists(name, bucket=bucket, allow_test_split=allow_test_split):
         downloaded = False
@@ -1249,7 +1314,7 @@ def ensure_artifact(name, local_path, *, produce, bucket, allow_test_split=False
             f"produce() returned without writing {local_path!r}; nothing to upload to "
             f"{name!r}. A step whose artifact is missing must fail here rather than record "
             f"itself as complete -- otherwise the next run would skip it.")
-    if chunked:
+    if should_chunk(os.path.getsize(local_path), chunked=chunked, chunk_size=chunk_size):
         upload_file_chunked(local_path, name, bucket=bucket,
                             allow_test_split=allow_test_split, chunk_size=chunk_size,
                             verify_content=verify_content)

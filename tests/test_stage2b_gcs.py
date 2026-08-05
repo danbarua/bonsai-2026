@@ -1338,6 +1338,150 @@ def test_a_chunked_ensure_artifact_still_needs_the_test_split_opt_in(bucket, tmp
     assert bucket.objects == {}
 
 
+# ---- which route `ensure_artifact` takes, and who decides ----
+#
+# `chunked` used to default to False, so an artifact went up resumably
+# only where the call site had remembered to ask -- the shape of failure
+# PROJECT_MEMORY.md records for `mighty-colab exec --timeout`, a flag
+# every hand-run command carried and no Makefile target did. The default
+# is now the size decision, with the bool as an override in both
+# directions.
+#
+# The route is pinned through `ensure_artifact` against the fake bucket
+# rather than by watching which function gets called. Above the threshold
+# the two routes are told apart by the composition; at or below it both
+# send one request, and what separates them is that the chunked route
+# clears any parts an earlier attempt left under `{name}.parts/` and the
+# single-request route never touches them.
+
+
+def _producer_bytes(n_bytes):
+    def produce(local_path):
+        Path(local_path).write_bytes(_payload_bytes(n_bytes))
+    return produce
+
+
+def _seed_stale_part(bucket, name):
+    """A part object left behind by an earlier, dead chunked attempt. It
+    survives a single-request upload and is cleared by a chunked one."""
+    stale = _part(name, 0)
+    bucket.objects[stale] = b"left by a dead attempt"
+    return stale
+
+
+def test_should_chunk_decides_on_size_at_the_chunk_boundary():
+    """The rule, as a pure function: more than one chunk to send means
+    there is something for a resume to pick up."""
+    assert gcs.should_chunk(CHUNK, chunk_size=CHUNK) is False
+    assert gcs.should_chunk(CHUNK + 1, chunk_size=CHUNK) is True
+    assert gcs.should_chunk(0, chunk_size=CHUNK) is False
+
+
+def test_the_default_threshold_is_the_default_chunk_size():
+    """A call that names no chunk size decides at 64 MiB -- Stage 1's
+    ~8MB artifacts in one request, Stage 3's 242MB-class ones chunked."""
+    assert gcs.should_chunk(8 * 1024 * 1024) is False
+    assert gcs.should_chunk(gcs.CHUNK_SIZE_DEFAULT) is False
+    assert gcs.should_chunk(gcs.CHUNK_SIZE_DEFAULT + 1) is True
+    assert gcs.should_chunk(242 * 1000 * 1000) is True
+
+
+def test_the_explicit_override_beats_the_size_in_both_directions():
+    assert gcs.should_chunk(0, chunked=True, chunk_size=CHUNK) is True
+    assert gcs.should_chunk(10 ** 9, chunked=False, chunk_size=CHUNK) is False
+
+
+@pytest.mark.parametrize("chunked", [1, 0, "yes", "", []])
+def test_a_chunked_value_that_is_neither_a_bool_nor_none_is_refused(chunked):
+    """`chunked` is tri-state, so a truthy stand-in for True would select
+    a transfer route by accident rather than by decision."""
+    with pytest.raises(TypeError, match="chunked"):
+        gcs.should_chunk(0, chunked=chunked, chunk_size=CHUNK)
+
+
+def test_ensure_artifact_chunks_an_artifact_over_the_threshold_unasked(bucket, tmp_path):
+    """The point of the change: a caller that does not mention chunking
+    still gets the resumable upload on a large artifact."""
+    name = gcs.object_path(**TRAIN_ARGS)
+    local = tmp_path / "work" / "features.npz"
+    r = gcs.ensure_artifact(name, local, produce=_producer_bytes(CHUNK * 10), bucket=bucket,
+                            chunk_size=CHUNK)
+    assert (r.skipped, r.produced, r.uploaded) == (False, True, True)
+    assert bucket.objects[name] == _payload_bytes(CHUNK * 10)
+    assert bucket.composes                      # it went up as parts and was composed
+    assert list(bucket.objects) == [name]
+
+
+@pytest.mark.parametrize("n_bytes", [CHUNK // 2, CHUNK])
+def test_ensure_artifact_sends_an_artifact_within_one_chunk_in_one_request(
+        bucket, tmp_path, n_bytes):
+    """The other side of the same threshold, at it and below it -- a size
+    exactly on the boundary alone would read the same under a comparison
+    flipped the other way. There is nothing to resume inside a single
+    request, so the small artifacts keep going up exactly as they did,
+    and the single-request route leaves an earlier attempt's parts alone,
+    which is what distinguishes it here."""
+    name = gcs.object_path(**TRAIN_ARGS)
+    stale = _seed_stale_part(bucket, name)
+    local = tmp_path / "work" / "features.npz"
+    gcs.ensure_artifact(name, local, produce=_producer_bytes(n_bytes), bucket=bucket,
+                        chunk_size=CHUNK)
+    assert bucket.objects[name] == _payload_bytes(n_bytes)
+    assert bucket.composes == []
+    assert bucket.uploads == [name]
+    assert stale in bucket.objects              # the chunked route would have cleared it
+
+
+def test_chunked_true_forces_the_chunked_route_below_the_threshold(bucket, tmp_path):
+    name = gcs.object_path(**TRAIN_ARGS)
+    stale = _seed_stale_part(bucket, name)
+    local = tmp_path / "work" / "features.npz"
+    gcs.ensure_artifact(name, local, produce=_producer_bytes(CHUNK), bucket=bucket,
+                        chunked=True, chunk_size=CHUNK)
+    assert bucket.objects[name] == _payload_bytes(CHUNK)
+    assert stale not in bucket.objects          # only the chunked route clears parts
+    assert list(bucket.objects) == [name]
+
+
+def test_chunked_false_forces_the_single_request_route_above_the_threshold(bucket, tmp_path):
+    """The override has to hold in the direction the size decision would
+    otherwise overrule, or it is not an override."""
+    name = gcs.object_path(**TRAIN_ARGS)
+    stale = _seed_stale_part(bucket, name)
+    local = tmp_path / "work" / "features.npz"
+    gcs.ensure_artifact(name, local, produce=_producer_bytes(CHUNK * 10), bucket=bucket,
+                        chunked=False, chunk_size=CHUNK)
+    assert bucket.objects[name] == _payload_bytes(CHUNK * 10)
+    assert bucket.composes == []
+    assert bucket.uploads == [name]             # one request, not ten parts
+    assert stale in bucket.objects
+
+
+def test_ensure_artifact_refuses_a_chunked_value_that_is_neither_a_bool_nor_none(
+        bucket, tmp_path):
+    calls = []
+    with pytest.raises(TypeError, match="chunked"):
+        gcs.ensure_artifact(gcs.object_path(**TRAIN_ARGS), tmp_path / "f.npz",
+                            produce=_producer(counter=calls), bucket=bucket, chunked="yes")
+    assert calls == []                          # refused before the step ran
+
+
+@pytest.mark.parametrize("chunk_size", [0, -1, 1.5, True, None, "100"])
+def test_the_size_decision_rejects_a_malformed_chunk_size(bucket, tmp_path, chunk_size):
+    """`ensure_artifact` now reads `chunk_size` on every call rather than
+    only when handing it to `upload_file_chunked`, so a malformed one
+    fails the same way here as it does there -- and before `produce`
+    runs, not after. A Stage 2B step computes for minutes to hours on a
+    GPU; raising on a malformed argument once that is done would throw
+    the work away and upload nothing for the next run to resume from."""
+    calls = []
+    with pytest.raises(ValueError, match="chunk_size"):
+        gcs.ensure_artifact(gcs.object_path(**TRAIN_ARGS), tmp_path / "f.npz",
+                            produce=_producer(counter=calls), bucket=bucket,
+                            chunk_size=chunk_size)
+    assert calls == []
+
+
 def test_a_chunked_upload_and_its_resume_run_with_the_google_package_blocked():
     """The load-bearing constraint, applied to the new code path: a fresh
     interpreter where `google` cannot be imported still runs a chunked
