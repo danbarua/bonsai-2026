@@ -197,6 +197,18 @@ followed by **7 full-training SVDs for the final ridge refits** at each
 condition's selected alpha. Runtime accounting and cloud-job planning
 use 42.
 
+**The seven ridge conditions, and why the statistics families have
+six keys.** The seven fitted conditions are `raw_505`, `raw_784`,
+`pre_evolution`, `evolved_T`, `evolved_lattice`, `evolved_rewired`,
+`evolved_curr_random`. The statistics operate on a DIFFERENT set of six
+keys: `pre_evolution`, the four evolved graphs, and the identity
+baseline. `raw_505` and `raw_784` are descriptive comparators only --
+named watched-outcome 5 is about them -- and belong to neither
+multiplicity family; the identity baseline belongs to neither family
+either (it enters through the hierarchical gate above), and is fitted by
+nothing, so it is not one of the 42 SVDs. Seven for compute accounting,
+six for the statistics: neither number is a typo for the other.
+
 **sklearn (`Ridge(solver="svd")`) is the verification oracle -- not in
 the production path, never deleted.** **Equivalence gate, literal**: at
 both the 1,000- and 5,000-image stages, JAX and sklearn must produce
@@ -205,6 +217,37 @@ and (b) identical alpha selection. Any exceedance halts pending
 investigation. Diagnostic only, not a second halt rule: max absolute
 coefficient difference recorded at a looser tolerance for visibility --
 prediction agreement is what matters for the endpoint.
+
+**Post-lock amendment (before feasibility stage 1): the scaler-centering
+guard's tolerance is n-dependent.** The per-fold guard on the
+standardized training features halts when
+`||mean(X_train_scaled)|| >= 1e-9 * (n / 1000) ** 0.5`, where `n` is the
+row count of the matrix being checked -- the fold's training rows, not
+the rung's nominal corpus size. It was previously a fixed `1e-10`.
+
+Anchor and exponent come from different kinds of evidence, deliberately.
+The anchor is measured: 1e-9 is a 12.7x margin over the worst value the
+GPU spike recorded at n=1,000 on production-path evolved features
+(`curr_random`, 7.87e-11 -- `README.md` holds the tables). The exponent
+is mechanical: `||mean(X_scaled)||` grows because the mean of `n`
+float64 values carries ~sqrt(n) accumulated rounding, amplified by
+division by a small column standard deviation. 0.5 upper-bounds the
+0.405 growth measured on `curr_random`, the binding condition, so its
+margin widens with `n` rather than eroding -- 14.8x at the measured
+n=5,000, ~18x projected at n=54,000. Two of the non-binding conditions
+grew faster than sqrt(n) on the same two points and so narrow instead,
+from margins three orders wide; `README.md`'s table carries every
+condition's exponent. A fixed absolute tolerance on a sqrt(n)-growing
+quantity halts eventually on any features at all, which is the failure
+this replaces rather than a property of these features.
+
+The guard keeps its detection power at both ends. 7.35e-9 at n=54,000
+is four or more orders below the ~3e-4 level at which `||mean(X)||`
+begins degrading the 1e-8 equivalence gate above (measured, `README.md`),
+and about nine orders below the O(1) offset a genuinely broken scaler
+produces. The exponent 0.66 fitted from the earlier CPU-evolved table is
+superseded: it measures a different pipeline from the one the anchor
+comes from.
 
 **Model selection**: alpha chosen by clipped validation MSE
 (`argmin_alpha MSE(clip(x_hat_alpha, 0, 1), x_0)`); ridge fitted
@@ -338,8 +381,13 @@ during selection.
 Generation, features, and statistics run entirely in the cloud
 environment; artifacts pushed to Google Cloud Storage from within it --
 never round-tripped through local upload (Stage 2A's 242MB-vs-~6-15MB
-Colab upload limit, already hit once). Final deliverable: Colab
-notebook; notebook structure and GCS paths are implementation details.
+Colab upload limit, already hit once). Colab/GCP is a compute
+RUNTIME for this implementation only -- not a commitment about
+final deliverable format. The visuals/plots delivery format is an
+explicitly DEFERRED decision, made once results exist, and is not
+part of this locked design. Do not treat notebook packaging as a
+pending or implied task at any point before then. GCS paths are
+implementation details.
 FINDINGS.md in-repo remains the record of note.
 
 ## Feasibility ladder
@@ -398,3 +446,11 @@ Does not revisit Stage 2A's open items (#9, #10, #11).
 - Final ChatGPT round: intercept-aware ridge formula; SVD count 42;
   literal optax configuration; rescaled-identity descriptive baseline;
   encoder-gate numerical completeness; task naming convention. LOCKED.
+- Post-lock amendment, before feasibility stage 1: n-dependent
+  scaler-centering tolerance, `1e-9 * (n / 1000) ** 0.5`, over a fixed
+  `1e-10` a sqrt(n)-growing quantity outgrows; the seven ridge
+  conditions and the distinct six-key statistics set, enumerated beside
+  the SVD count.
+- Post-lock amendment, computational strategy: Colab-notebook
+  final-deliverable wording removed as an implied task; delivery format
+  deferred, Colab/GCP a compute runtime.

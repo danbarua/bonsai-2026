@@ -50,6 +50,11 @@ mention here, in the same commit that creates it.
   the training loop with its raw-loss / clipped-selection split.
 - **`stage2b_partition.py`** — the validation split and the nested
   stratified ladder draw (the 1,000 is a prefix of the 5,000).
+- **`stage2b_conditions.py`** — the condition vocabulary in one place:
+  the statistics keys (`pre_evolution` plus the four graphs), the object-
+  path segments (`evolved_T` and the rest), and the mapping between them,
+  so no driver has to reinvent which spelling belongs where. Depends on
+  nothing.
 - **`stage2b_gcs.py`** — artifact transport: object paths, the
   test-split guards, idempotent `ensure_artifact`, chunked checkpointed
   upload that resumes after a process death, and content verification on
@@ -72,6 +77,15 @@ mention here, in the same commit that creates it.
 - **`colab_gcs_roundtrip_probe.py`** — the plain Python script the
   round-trip test executes *on* the Colab runtime. Not a notebook, and
   not run locally.
+- **`stage2b_verify_gpu.py`** — runs `DESIGN.md`'s ridge equivalence gate
+  on a real GPU, at both ladder scales, on synthetic ill-conditioned
+  matrices shaped like the real ones. Refuses to pass on a CPU fallback
+  or with x64 not realised on the device. Uploaded and run by
+  `make stage2b-verify-gpu`.
+- **`stage2b_verify_cnn_gpu.py`** — compares the CNN's float32 forward
+  pass CPU versus GPU, at XLA's default precision and pinned, because
+  reduced-precision convolutions would move the validation metric early
+  stopping reads. Uploaded and run by `make stage2b-verify-cnn-gpu`.
 - **`smoke_stage2b_gcs.py`** — a manually-run smoke check against the
   real bucket: both round trips, a chunked upload resumed mid-transfer,
   the content digest the real service records for the resulting
@@ -86,7 +100,7 @@ a map to the targets, not a copy of them.
 
 ```bash
 make help            # from the repository root -- every target, grouped
-make stage2b-test    # the fast suite: 451 tests, no network, no cloud
+make stage2b-test    # the fast suite: 503 tests, no network, no cloud
 ```
 
 The feasibility ladder itself has no targets yet, because no ladder
@@ -96,11 +110,9 @@ not written speculatively against a pipeline nobody has driven.
 ## Cloud execution: scripts, not notebooks
 
 Stage 2B runs **plain Python scripts** on Colab runtimes via
-`mighty-colab`. Notebooks are deferred to the end of the project.
-`DESIGN.md` contains a stale line calling a Colab notebook the "final
-deliverable" — it is known-stale and should not be acted on; correcting
-it is a documentation amendment nobody has needed badly enough to make
-yet.
+`mighty-colab`. Colab is a compute runtime here, nothing more; how
+results and visuals eventually get delivered is a deferred decision and
+not a pending task.
 
 Artifacts move to GCS **from within the cloud environment**, never
 round-tripped through a local upload — Stage 2A already hit Colab's
@@ -118,7 +130,7 @@ and the module still agree.
 
 `stage2b_gcs.py` imports `google.cloud.storage` **lazily**, inside the
 functions that need a client. This is load-bearing, not stylistic: it
-is what lets the whole module and its 137 tests run in an environment
+is what lets the whole module and its 148 tests run in an environment
 where the package is not installed and there is no network. Three tests
 enforce it structurally in subprocesses — two block `google` via a
 `sys.meta_path` finder, the third asserts nothing under `google.` enters
@@ -161,11 +173,14 @@ Whether the real service populates `crc32c` for a composed object is the
 one part of this no unit test can settle. `smoke_stage2b_gcs.py` asks it
 directly, against the real bucket, and reports what came back.
 
-## Measured before the ladder: the centering guard will fire
+## Measured before the ladder: what sets the centering tolerance
 
-`assert_scaler_centered` halts when `||mean(X_scaled)|| > 1e-10`, and its
-own docstring flags the tolerance as an open question. Measured on real
-corrupted-encoded-evolved features (worst CV fold, per condition):
+`assert_scaler_centered` halts when
+`||mean(X_scaled)|| >= mean_x_tol_for(n)`, which is
+`1e-9 * (n / 1000) ** 0.5` on the row count of the matrix it is handed
+(`DESIGN.md`, "Readout"). The measurements below are what that tolerance
+is derived from. Measured on real corrupted-encoded-evolved features
+(worst CV fold, per condition), CPU evolution path:
 
 | condition | n=300 | n=1,000 | fitted exponent |
 |---|---|---|---|
@@ -180,27 +195,38 @@ spike: 5,000 images encoded locally in 3.7 s on 9 cores, evolved under
 all four graphs via the verified `evolve_on_graph_jax` kernel at 2.3 s
 per graph, all 5,000 solves reporting success):
 
-| condition | n=1,000 | n=5,000 | vs 1e-10 |
-|---|---|---|---|
-| pre_evolution | 8.00e-14 | 1.66e-13 | 602x margin |
-| lattice | 7.13e-13 | 1.76e-12 | 57x margin |
-| T | 1.08e-12 | 3.24e-12 | 31x margin |
-| rewired | 1.72e-11 | 3.94e-11 | 2.5x margin |
-| **curr_random** | 7.87e-11 | **1.51e-10** | **FIRES** |
+| condition | n=1,000 | n=5,000 | fitted exponent | vs `mean_x_tol_for(5000)` = 2.24e-9 |
+|---|---|---|---|---|
+| pre_evolution | 8.00e-14 | 1.66e-13 | 0.45 | 13,470x margin |
+| lattice | 7.13e-13 | 1.76e-12 | 0.56 | 1,270x margin |
+| T | 1.08e-12 | 3.24e-12 | 0.68 | 690x margin |
+| rewired | 1.72e-11 | 3.94e-11 | 0.51 | 57x margin |
+| **curr_random** | 7.87e-11 | **1.51e-10** | **0.405** | **14.8x margin** |
 
-So it is not a projection: `curr_random` exceeds the guard at ladder
-stage 2, and `rewired` sits 2.5x from it there — meaning a tolerance
-widened only far enough for `curr_random` at stage 2 would halt again on
-`rewired` at stage 3.
+`curr_random` is the binding condition and 0.405 is the growth the
+tolerance's exponent has to dominate. It does: 0.5 upper-bounds it, so
+the margin widens with `n` — 12.7x at n=1,000, 14.8x at n=5,000, ~18x
+projected at n=54,000. `rewired`, the next-closest, projects to ~1.3e-10
+at n=54,000 against a 7.35e-9 tolerance, ~55x. Both projections
+extrapolate each condition's own measured exponent past the largest
+corpus anyone has measured, which is 5,000.
 
-The ordering is the synchronization mechanism — Stage 2A measured order
-parameters of 0.997 (`rewired`) and 0.991 (`curr_random`), so those
-graphs drive node phases nearly image-independent and their cos/sin
-columns barely vary. But the *growth* is not a worsening pathology: an
-exponent near 0.5 is ordinary floating-point accumulation, the mean of n
-values carrying ~sqrt(n) rounding, amplified by division by a small
-column std. A fixed absolute tolerance on a sqrt(n)-growing quantity
-fires eventually for any features at all.
+`T` and `lattice` do grow faster than sqrt(n) on these two points (0.68
+and 0.56), so their margins narrow rather than widen — from 690x and
+1,270x at n=5,000 to ~450x and ~1,100x projected at n=54,000. Neither
+comes near binding, and neither is the condition the anchor was set
+against.
+
+The *ordering* is the synchronization mechanism — Stage 2A measured
+order parameters of 0.997 (`rewired`) and 0.991 (`curr_random`), so
+those graphs drive node phases nearly image-independent and their
+cos/sin columns barely vary. The *growth* is not a worsening pathology:
+an exponent near 0.5 is ordinary floating-point accumulation, the mean
+of n values carrying ~sqrt(n) rounding, amplified by division by a small
+column std. That is why the tolerance carries the same exponent rather
+than a fitted one — a fixed absolute tolerance on a sqrt(n)-growing
+quantity fires eventually for any features at all, and the first table's
+0.66 belongs to a different pipeline from the anchor's.
 
 **What the guard protects, and how much room there is.** The tolerance
 is not arbitrary: sklearn's `Ridge(fit_intercept=True)` centres `X`
@@ -216,17 +242,18 @@ mean offset and comparing both paths:
 | 3.2e-5 | 1.3e-09 |
 | 3.2e-4 | 1.3e-07 — breaches the 1e-8 gate |
 
-So the equivalence gate survives until roughly 1e-4, five orders beyond
-the worst value the ladder is projected to produce. The guard as set
-will halt on a number that causes no harm to the thing it exists to
-protect.
+So the equivalence gate survives until roughly 1e-4. That is what fixes
+the tolerance from above: 7.35e-9 at n=54,000 sits four or more orders
+below the level at which `||mean(X)||` starts costing anything, and
+about nine orders below the O(1) offset a genuinely broken scaler
+produces. The guard has room on both sides.
 
-This is recorded, not acted on. `stage2b_ridge.py` states plainly that
-the tolerance "is a locked-design question, not an implementation
-choice", so changing it is a disclosed amendment to `DESIGN.md` rather
-than an edit. The measurement exists so that decision is made from
-numbers before the ladder runs, instead of from a halt in the middle of
-stage 2.
+One thing the n-dependent tolerance does not address: a
+nearly-but-not-exactly-constant feature column is divided by its tiny
+scale and produces `||mean(X_scaled)||` around 9.7e-7 — some 400x above
+the n=5,000 tolerance, and a different mechanism from float
+accumulation. `assert_scaler_centered`'s docstring carries the measured
+boundaries. It still halts there, and that remains open.
 
 ## Guards you must not route around
 
@@ -251,21 +278,26 @@ disclosed amendment to `DESIGN.md`, not a keyword argument.
 ## Testing
 
 ```bash
-make stage2b-test              # 451 fast tests, ~30s, no network
+make stage2b-test              # 503 fast tests, ~30s, no network
 make stage2b-test-roundtrip    # real Colab+GCS round trip; bills while running
 make test                      # the whole repository suite
 ```
 
 | file | tests | covers |
 |---|---|---|
-| `test_stage2b_gcs.py` | 137 | transport, guards, chunked resumable upload, content verification |
+| `test_stage2b_gcs.py` | 148 | transport, guards, chunked resumable upload, content verification |
 | `test_stage2b_cnn.py` | 76 | architecture, shared masking, training loop |
 | `test_stage2b_stats.py` | 66 | sign-flip, Holm families, winner rule |
+| `test_stage2b_ridge.py` | 66 | SVD ridge vs sklearn oracle, alpha selection, the n-dependent centering tolerance |
 | `test_stage2b_partition.py` | 49 | split ordering, nested stratified draw |
-| `test_stage2b_ridge.py` | 47 | SVD ridge vs sklearn oracle, alpha selection |
-| `test_stage2b_corruption.py` | 35 | RNG determinism, clip rates vs the design table |
+| `test_stage2b_corruption.py` | 42 | RNG determinism, clip rates vs the design table |
 | `test_stage2b_encoder_gate.py` | 24 | rho gate, non-finite handling |
 | `test_stage2b_gcs_roundtrip.py` | 18 | 17 fast credential-gate checks + 1 slow round trip |
+| `test_stage2b_contracts.py` | 10 | cross-module contracts no single module's tests can see |
+| `test_stage2b_gcs_makefile.py` | 5 | Makefile and module agree on the bucket; every GCS-touching script has a target |
+
+504 collected, 503 of them fast — the table is the whole of what
+`make stage2b-test` runs, and the one exclusion is the slow round trip.
 
 The round trip is the only test that leaves this machine. It provisions
 a CPU runtime, writes an object to GCS from it, and reads that object

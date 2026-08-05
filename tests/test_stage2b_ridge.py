@@ -69,11 +69,38 @@ def test_fit_outputs_are_float64():
 
 # ---- the centering guard ----
 
+def test_mean_x_tol_is_the_locked_anchor_and_exponent():
+    """The tolerance is a design constant now, not an implementation
+    choice: pin the anchor, the anchor's n, and the exponent, so a later
+    edit to any of the three has to be a deliberate one."""
+    assert ridge.MEAN_X_TOL_ANCHOR == 1e-9
+    assert ridge.MEAN_X_TOL_ANCHOR_N == 1000
+    assert ridge.MEAN_X_TOL_EXPONENT == 0.5
+    assert ridge.mean_x_tol_for(1000) == 1e-9
+
+
+@pytest.mark.parametrize("n,factor", [
+    (250, 0.5), (1000, 1.0), (4000, 2.0), (5000, np.sqrt(5.0)),
+    (16000, 4.0), (54000, np.sqrt(54.0)),
+])
+def test_mean_x_tol_scales_as_sqrt_n(n, factor):
+    """sqrt(n), not any other power: a 16x corpus must move the tolerance
+    by 4x. A constant tolerance, or a linear one, fails every row here
+    except n=1,000."""
+    np.testing.assert_allclose(ridge.mean_x_tol_for(n), 1e-9 * factor,
+                                rtol=1e-12, atol=0)
+
+
+def test_mean_x_tol_rejects_an_empty_matrix():
+    with pytest.raises(ValueError, match="at least one row"):
+        ridge.mean_x_tol_for(0)
+
+
 def test_scaler_centering_guard_passes_on_standardized_features():
     X, _, _ = _synthetic_regression()
     X_scaled = StandardScaler().fit_transform(X)
     norm = ridge.assert_scaler_centered(X_scaled)
-    assert norm < ridge.MEAN_X_TOL
+    assert norm < ridge.mean_x_tol_for(X_scaled.shape[0])
 
 
 def test_scaler_centering_guard_raises_on_uncentered_features():
@@ -84,6 +111,47 @@ def test_scaler_centering_guard_raises_on_uncentered_features():
         ridge.assert_scaler_centered(X + 5.0)
 
 
+@pytest.mark.parametrize("n", [200, 1000, 5000, 20000])
+def test_guard_still_fires_on_an_uncentered_matrix_at_every_scale(n):
+    """Detection power under the n-dependent tolerance, shown rather than
+    assumed. The tolerance grows with n; a genuinely uncentered matrix
+    grows not at all, so the guard must keep firing at every scale the
+    ladder will reach. Offset 5.0 is nine orders above the largest
+    tolerance tested here."""
+    rng = np.random.default_rng(40)
+    X = rng.normal(size=(n, 20)) + 5.0
+    with pytest.raises(AssertionError, match="not centered"):
+        ridge.assert_scaler_centered(X)
+
+
+@pytest.mark.parametrize("n", [200, 1000, 5000])
+def test_guard_derives_its_tolerance_from_the_matrix_it_is_given(n):
+    """The tolerance in the failure message is the one for THIS matrix's
+    row count -- the thing a default argument cannot do. An offset placed
+    just above `mean_x_tol_for(n)` must fire, and the message must quote
+    that same n-dependent value rather than some fixed number."""
+    tol = ridge.mean_x_tol_for(n)
+    X = np.zeros((n, 4)) + 10.0 * tol
+    with pytest.raises(AssertionError, match=f"{tol:.3e}"):
+        ridge.assert_scaler_centered(X)
+    # and the same matrix passes when handed a tolerance wide enough
+    assert ridge.assert_scaler_centered(X, tol=1e3 * tol) > 0.0
+
+
+def test_guard_tolerance_is_the_folds_row_count_not_the_corpus():
+    """A matrix that passes at n rows can fail at fewer, because the
+    tolerance shrinks. Constructed at the boundary: an offset between
+    `mean_x_tol_for(n_small)` and `mean_x_tol_for(n_large)` fires on the
+    smaller matrix and passes on the larger one."""
+    n_small, n_large = 1000, 5000
+    lo, hi = ridge.mean_x_tol_for(n_small), ridge.mean_x_tol_for(n_large)
+    assert lo < hi
+    offset = float(np.sqrt(lo * hi))    # strictly between the two tolerances
+    assert ridge.assert_scaler_centered(np.zeros((n_large, 1)) + offset) > 0.0
+    with pytest.raises(AssertionError, match="not centered"):
+        ridge.assert_scaler_centered(np.zeros((n_small, 1)) + offset)
+
+
 @pytest.mark.parametrize("col_std,expect_pass", [
     (1e-2, True),      # ordinary low-variance column: fine
     (1e-4, True),      # residual amplified to ~1e-11, still inside tolerance
@@ -91,15 +159,18 @@ def test_scaler_centering_guard_raises_on_uncentered_features():
     (1e-15, True),     # sklearn declares it constant and sets scale to 1
 ])
 def test_centering_guard_behaviour_on_near_constant_columns(col_std, expect_pass):
-    """Characterizes an OPEN REVIEW ITEM, and pins current behaviour so a
-    later decision is measured against a known baseline.
+    """Characterizes an OPEN ITEM, and pins current behaviour so a later
+    decision is measured against a known baseline.
 
     A column that is nearly-but-not-exactly constant trips the guard: it
     sits above sklearn's constant-feature bound, so it is divided by its
-    tiny scale, amplifying the float64 centering residual past 1e-10.
-    That is a property of the data, not a broken scaler, which is what
-    the guard was specified to catch -- so this test asserts what
-    happens, and does not assert that what happens is right."""
+    tiny scale, amplifying the float64 centering residual (~9.7e-7 at
+    std 1e-9) some 400x past the n=5,000 tolerance. That is a property of
+    the data, not a broken scaler, which is what the guard was specified
+    to catch -- so this test asserts what happens, and does not assert
+    that what happens is right. The n-dependent tolerance tracks sqrt(n)
+    accumulation only and does not address this regime; every verdict
+    below is the same one the fixed 1e-10 tolerance gave."""
     rng = np.random.default_rng(30)
     n, p = 5000, 200
     X = rng.normal(size=(n, p))
@@ -139,9 +210,11 @@ def test_margin_reports_a_passing_matrix_without_raising():
     X, _, _ = _synthetic_regression()
     X_scaled = StandardScaler().fit_transform(X)
     margin = ridge.scaler_centering_margin(X_scaled, X)
+    tol = ridge.mean_x_tol_for(X.shape[0])
     assert margin["within_tol"] is True
-    assert 0.0 <= margin["mean_x_norm"] < ridge.MEAN_X_TOL
-    assert margin["margin_ratio"] == margin["mean_x_norm"] / ridge.MEAN_X_TOL
+    assert margin["tol"] == tol
+    assert 0.0 <= margin["mean_x_norm"] < tol
+    assert margin["margin_ratio"] == margin["mean_x_norm"] / tol
     assert 0 <= margin["min_col_std_col"] < X.shape[1]
 
 
@@ -154,7 +227,7 @@ def test_margin_reports_a_miscentered_matrix_instead_of_raising():
         ridge.assert_scaler_centered(X + 5.0)
     margin = ridge.scaler_centering_margin(X + 5.0, X)
     assert margin["within_tol"] is False
-    assert margin["mean_x_norm"] > ridge.MEAN_X_TOL
+    assert margin["mean_x_norm"] > ridge.mean_x_tol_for(X.shape[0])
     assert margin["margin_ratio"] > 1.0
 
 
@@ -419,7 +492,7 @@ def test_cross_validate_alpha_reproducible_and_shapes():
     np.testing.assert_array_equal(r1["mean_clipped_val_mse"], r2["mean_clipped_val_mse"])
     assert r1["fold_clipped_val_mse"].shape == (5, 9)
     assert r1["fold_cond"].shape == (5,)
-    assert np.all(r1["fold_mean_x_norm"] < ridge.MEAN_X_TOL)
+    assert np.all(r1["fold_mean_x_norm"] < r1["fold_mean_x_tol"])
 
 
 def test_cross_validate_selects_strong_regularization_for_pure_noise():
@@ -465,7 +538,10 @@ def test_cross_validate_alpha_records_the_margin_every_fold():
     assert result["fold_min_col_std"].shape == (5,)
     assert result["fold_min_col_std_col"].shape == (5,)
     assert result["fold_worst_mean_col"].shape == (5,)
-    assert result["mean_x_tol"] == ridge.MEAN_X_TOL
+    assert result["fold_mean_x_tol"].shape == (5,)
+    # the tolerance is per-fold, and there is no corpus-level scalar that
+    # could be mistaken for the value any fold was checked against
+    assert "mean_x_tol" not in result
     # every fold reported a real column, none a placeholder
     assert np.all(result["fold_min_col_std"] > 0)
     assert np.all((result["fold_min_col_std_col"] >= 0)
@@ -491,6 +567,26 @@ def test_cross_validate_margin_agrees_with_recomputing_it_on_the_same_folds():
         assert result["fold_min_col_std_col"][f] == expected["min_col_std_col"]
         assert result["fold_worst_mean_col"][f] == expected["worst_mean_col"]
         assert result["fold_mean_x_norm"][f] == expected["mean_x_norm"]
+        assert result["fold_mean_x_tol"][f] == expected["tol"]
+
+
+def test_cross_validate_tolerance_is_the_training_folds_own_row_count():
+    """The tolerance recorded per fold is `mean_x_tol_for(len(tr))` -- the
+    rows the guard actually saw -- not `mean_x_tol_for(len(X))`. At n=250
+    a training fold is 200 rows, so the two differ by sqrt(5/4) and this
+    test separates them; computing the tolerance from the corpus size
+    would report a threshold 1.118x looser than the one enforced."""
+    from sklearn.model_selection import StratifiedKFold
+
+    X, Y, y = _synthetic_regression(n=250, p=25, k=6, seed=6)
+    result = ridge.cross_validate_alpha(X, Y, y)
+    corpus_tol = ridge.mean_x_tol_for(len(X))
+    skf = StratifiedKFold(n_splits=ridge.N_SPLITS, shuffle=True,
+                          random_state=ridge.FOLD_SEED)
+    for f, (tr, _va) in enumerate(skf.split(X, y)):
+        assert len(tr) < len(X)
+        assert result["fold_mean_x_tol"][f] == ridge.mean_x_tol_for(len(tr))
+        assert result["fold_mean_x_tol"][f] < corpus_tol
 
 
 def test_cross_validate_margin_does_not_disturb_selection_or_scores():
@@ -533,6 +629,19 @@ def test_svd_ridge_fit_alone_does_not_claim_a_margin():
     X, Y, _ = _synthetic_regression(n=150, p=15, k=4, seed=13)
     fit = ridge.svd_ridge_fit(StandardScaler().fit_transform(X), Y)
     assert "centering_margin" not in fit
+
+
+@pytest.mark.parametrize("check_centered", [True, False])
+def test_svd_ridge_fit_records_the_tolerance_it_was_checked_against(check_centered):
+    """The threshold is no longer a greppable module constant, so the fit
+    carries it. It is derived from the row count, which is known whether
+    or not the guard ran -- so `mean_x_tol` is always a real number, and
+    only `mean_x_norm` goes nan when the check is skipped."""
+    X, Y, _ = _synthetic_regression(n=150, p=15, k=4, seed=13)
+    fit = ridge.svd_ridge_fit(StandardScaler().fit_transform(X), Y,
+                              check_centered=check_centered)
+    assert fit["mean_x_tol"] == ridge.mean_x_tol_for(150)
+    assert bool(np.isnan(fit["mean_x_norm"])) == (not check_centered)
 
 
 def test_ridge_equivalence_check_passes_on_synthetic_data():
