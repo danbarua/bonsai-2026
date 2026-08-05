@@ -121,11 +121,22 @@ def test_the_two_split_roots_do_not_nest():
 # ---- the lazy import ----
 
 def test_module_import_does_not_pull_in_google_cloud_storage():
-    """Importing this module must not import the library. The local
-    development environment does not have it, and the path/prefix/
-    credential logic has to stay usable and testable there."""
-    assert not any(name == "google" or name.startswith("google.")
-                   for name in sys.modules)
+    """Importing this module must not import the library.
+
+    Checked in a fresh interpreter, not against this process's
+    `sys.modules`: locally the latter is trivially google-free because the
+    library is absent, so it would assert nothing about `stage2b_gcs`, and
+    on a runtime that has the `gpu` group installed any unrelated import
+    of `google.auth` by another test or plugin would fail it while this
+    module was perfectly correct. `google` is deliberately NOT blocked
+    here -- the point is that the module does not reach for it when it
+    could."""
+    code = (f"import sys; sys.path.insert(0, {str(_STAGE2B_DIR)!r});"
+            "import stage2b_gcs;"
+            "print(any(n == 'google' or n.startswith('google.') for n in sys.modules))")
+    out = subprocess.run([sys.executable, "-c", code], capture_output=True, text=True,
+                         check=True).stdout.strip()
+    assert out == "False"
 
 
 def test_pure_logic_runs_with_the_google_package_blocked():
@@ -455,6 +466,32 @@ def test_delete_refuses_a_non_test_prefix_unless_separately_forced(bucket, tmp_p
     deleted = gcs.delete_prefix(gcs.TRAIN_ROOT, bucket=bucket, force_non_test_prefix=True)
     assert deleted == sorted(train)
     assert set(bucket.objects) == set(test)
+
+
+def test_a_forced_delete_cannot_reach_test_objects_via_a_truncated_prefix(bucket, tmp_path):
+    """The guard has to hold on the objects MATCHED, not on the prefix
+    string. `stage2b/t` is not under the test root, so the string checks
+    let it through on `force_non_test_prefix` alone -- and it matches the
+    whole test side as well as the whole training side."""
+    train, test = _populate(bucket, tmp_path)
+    for prefix in ("stage2b/t", gcs.ROOT_PREFIX, "stage2b/"):
+        with pytest.raises(PermissionError, match="test-split root"):
+            gcs.delete_prefix(prefix, bucket=bucket, force_non_test_prefix=True)
+        with pytest.raises(PermissionError, match="test-split root"):
+            gcs.delete_prefix(prefix, bucket=bucket, force_non_test_prefix=True,
+                              dry_run=True)
+    assert set(bucket.objects) == set(train + test)
+    assert bucket.deletes == []
+
+
+def test_a_prefix_spanning_both_sides_works_once_both_flags_are_given(bucket, tmp_path):
+    """The refusal is a missing opt-in, not a prohibition: saying both
+    things explicitly deletes both sides."""
+    train, test = _populate(bucket, tmp_path)
+    deleted = gcs.delete_prefix(gcs.ROOT_PREFIX, bucket=bucket, allow_test_split=True,
+                                force_non_test_prefix=True)
+    assert deleted == sorted(train + test)
+    assert bucket.objects == {}
 
 
 def test_deleting_the_test_prefix_needs_the_test_split_opt_in(bucket, tmp_path):

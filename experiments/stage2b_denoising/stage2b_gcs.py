@@ -299,10 +299,10 @@ def _storage_module():
         from google.cloud import storage
     except ImportError as exc:                      # pragma: no cover - needs the library absent
         raise ImportError(
-            "google-cloud-storage is required for Stage 2B's GCS transport but is not "
-            "installed. It belongs to this project's `gpu` dependency group and is expected "
-            "on the cloud runtime, not in the local development environment -- which is why "
-            "it is imported here rather than at module scope."
+            "google-cloud-storage (>=2.19.0) is required for Stage 2B's GCS transport but "
+            "is not installed. It is expected on the cloud runtime, not in the local "
+            "development environment -- which is why it is imported here rather than at "
+            "module scope."
         ) from exc
     return storage
 
@@ -404,6 +404,19 @@ def delete_prefix(prefix, *, bucket, allow_test_split=False,
       `force_non_test_prefix=True`. Wiping the training side is a real
       operation, not a forbidden one, but it is not something a cleanup
       call should be able to do by having the wrong string passed to it.
+    - Whatever the prefix *string* looks like, the objects it actually
+      MATCHES are checked too: if any of them is test-side,
+      `allow_test_split=True` is required. The two rules above reason
+      about the string, and a truncated prefix makes the string and the
+      matched set disagree -- `"stage2b/t"` is not under the test root and
+      so needs only `force_non_test_prefix`, yet it matches the whole test
+      side as well as the whole training side. The check on the matched
+      names is what actually holds; the string checks are the early,
+      legible half of it.
+
+    Matching is plain string prefix, as the GCS API does it -- it is not
+    segment-aware, so a prefix is only as precise as it is long. Build one
+    with `stage_prefix` or `condition_prefix` rather than by hand.
     """
     prefix = str(prefix)
     if not prefix:
@@ -422,6 +435,14 @@ def delete_prefix(prefix, *, bucket, allow_test_split=False,
             f"force_non_test_prefix=True to mean it.")
 
     names = sorted(blob.name for blob in bucket.list_blobs(prefix=prefix))
+    reaches_test = [name for name in names if is_test_split_path(name)]
+    if reaches_test and not allow_test_split:
+        raise PermissionError(
+            f"refusing to delete under {prefix!r}: it matches {len(reaches_test)} object(s) "
+            f"under the test-split root {TEST_SPLIT_ROOT!r} (e.g. {reaches_test[0]!r}), even "
+            f"though the prefix itself is not under it. Touching a test-side object needs "
+            f"allow_test_split=True; force_non_test_prefix does not cover it.")
+
     if dry_run:
         return names
     for name in names:
@@ -480,6 +501,14 @@ def ensure_artifact(name, local_path, *, produce, bucket, allow_test_split=False
     The point is that a dead cloud session loses at most the step that was
     in flight. Re-running the same script on a fresh runtime downloads
     what is already there and resumes.
+
+    An existing local file is trusted when the object is already in the
+    bucket: it is not re-downloaded and not compared against the remote
+    copy. That is right for the case this exists for -- a fresh runtime
+    starts with an empty disk, so there is nothing stale to trust -- but
+    it does mean reusing one `local_path` across two different objects
+    gives the second one the first one's file. Give each artifact its own
+    local path.
 
     `force=True` recomputes and overwrites an existing object -- for the
     case where the artifact is known stale, not as a routine flag."""
