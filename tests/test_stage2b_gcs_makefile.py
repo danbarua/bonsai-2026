@@ -18,6 +18,7 @@ CLAUDE.md principle 20: this is the executable form of a fact that would
 otherwise live in a Makefile comment nobody re-checks. Tier 1 throughout
 -- parses two files, touches no network and provisions nothing.
 """
+import ast
 import re
 import sys
 from pathlib import Path
@@ -94,53 +95,126 @@ def test_the_stage2b_test_target_lists_every_stage2b_test_file():
         f"collect: {stale}")
 
 
-def test_every_gcs_touching_target_exports_the_bucket():
-    """`GCS_ENV` carries both the bucket and the credentials path. Any
-    target that reaches GCS must use it rather than relying on ambient
-    environment -- otherwise `make` and a bare `uv run` disagree."""
-    text = MAKEFILE.read_text()
-    gcs_env = _make_var("GCS_ENV")
-    assert gcs_env is not None and "BONSAI_GCS_BUCKET" in gcs_env, (
-        f"GCS_ENV should carry the bucket; got {gcs_env!r}")
-
-    recipes = {}
-    current, body = None, []
-    for line in text.splitlines():
+def _recipes():
+    """Every Makefile recipe, as {target_name: recipe_text}."""
+    out, current, body = {}, None, []
+    for line in MAKEFILE.read_text().splitlines():
         if line.startswith("\t"):
             if current:
                 body.append(line)
             continue
         if current:
-            recipes[current] = "\n".join(body)
+            out[current] = "\n".join(body)
             current, body = None, []
         m = re.match(r"^([A-Za-z0-9_-]+):(?!=)", line)
         if m:
             current, body = m.group(1), []
     if current:
-        recipes[current] = "\n".join(body)
+        out[current] = "\n".join(body)
+    return out
 
-    # Scripts and tests that construct a real GCS client. A target naming
-    # any of these is reaching the bucket and must say which one.
-    #
-    # EXTEND THIS when a new script builds a client -- the ladder driver
-    # will. It is an allowlist, so an unlisted script is not caught being
-    # unparameterised; it is simply not looked at, and this check passes
-    # vacuously for whatever target runs it.
-    gcs_scripts = ("smoke_stage2b_gcs.py", "test_stage2b_gcs_roundtrip.py")
-    touching = {name: body for name, body in recipes.items()
-                if any(script in body for script in gcs_scripts)}
 
-    assert touching, (
-        "parsed no GCS-touching targets -- this test's parser has gone stale and the "
-        "check below is vacuous")
+def _builds_a_live_gcs_client(path):
+    """Whether this file constructs a real GCS client, by reading its AST.
 
-    offenders = []
-    for name, body in sorted(touching.items()):
-        ok = "$(GCS_ENV)" in body
-        print(f"[bucket] {name}: {'exports' if ok else 'DOES NOT export'} $(GCS_ENV)")
-        if not ok:
-            offenders.append(name)
+    Discovered rather than listed. An allowlist of known GCS scripts would
+    not catch the next one -- it would simply not look at it, and pass
+    vacuously for whatever target runs it. The ladder driver is exactly
+    that next one.
+
+    `get_bucket` is the single chokepoint: every transport function takes
+    an already-built `bucket`, so a file that reaches GCS calls it. The
+    discriminator is whether the call passes `client=` -- a caller
+    injecting a stand-in (as the unit tests do) never opens a socket,
+    while one that does not gets a live client built from credentials or
+    an anonymous session. That is the real semantic, not a proxy for it.
+
+    Direct `google.cloud` imports count too, so a file bypassing this
+    module entirely is still seen.
+    """
+    tree = ast.parse(path.read_text(), filename=str(path))
+    for node in ast.walk(tree):
+        if isinstance(node, ast.Call):
+            func = node.func
+            name = func.attr if isinstance(func, ast.Attribute) else getattr(func, "id", None)
+            if name == "get_bucket":
+                if not any(kw.arg == "client" for kw in node.keywords):
+                    return True
+        if isinstance(node, ast.Import):
+            if any(alias.name.startswith("google.cloud") for alias in node.names):
+                return True
+        if isinstance(node, ast.ImportFrom):
+            if (node.module or "").startswith("google.cloud"):
+                return True
+    return False
+
+
+def _live_gcs_files():
+    """Stage 2B files that reach real GCS, discovered by AST.
+
+    `stage2b_gcs.py` is excluded: it is the module that *defines* the
+    client construction, so it necessarily imports the library.
+    """
+    candidates = sorted(
+        list((REPO_ROOT / "experiments" / "stage2b_denoising").glob("*.py"))
+        + list((REPO_ROOT / "tests").glob("test_stage2b_*.py")))
+    return [p for p in candidates
+            if p.name != "stage2b_gcs.py" and _builds_a_live_gcs_client(p)]
+
+
+# Runs on the Colab VM, uploaded and executed by the round-trip test
+# rather than invoked by a target here. It is covered transitively, so it
+# is not expected to appear in any recipe. Every other live-GCS file must.
+REMOTE_EXECUTED = {"colab_gcs_roundtrip_probe.py"}
+
+
+def test_every_target_running_a_live_gcs_file_exports_the_bucket():
+    """`GCS_ENV` carries both the bucket and the credentials path. A target
+    that reaches GCS must pass them explicitly rather than inheriting
+    whatever the ambient environment holds -- otherwise `make` and a bare
+    `uv run` of the same script disagree about which bucket they mean."""
+    gcs_env = _make_var("GCS_ENV")
+    assert gcs_env is not None and "BONSAI_GCS_BUCKET" in gcs_env, (
+        f"GCS_ENV should carry the bucket; got {gcs_env!r}")
+
+    live = _live_gcs_files()
+    print(f"\n[bucket] files building a live GCS client (AST-discovered):")
+    for path in live:
+        print(f"[bucket]   {path.relative_to(REPO_ROOT)}")
+    assert live, (
+        "discovered no files building a live GCS client -- the detector has gone stale "
+        "and every check below is vacuous")
+
+    recipes = _recipes()
+    offenders, orphans = [], []
+    for path in live:
+        if path.name in REMOTE_EXECUTED:
+            print(f"[bucket] {path.name}: runs on the VM, covered by the round trip")
+            continue
+        naming = {t: body for t, body in recipes.items() if path.name in body}
+        if not naming:
+            orphans.append(path.name)
+            continue
+        for target, body in sorted(naming.items()):
+            ok = "$(GCS_ENV)" in body
+            print(f"[bucket] {target} -> {path.name}: "
+                  f"{'exports' if ok else 'DOES NOT export'} $(GCS_ENV)")
+            if not ok:
+                offenders.append(f"{target} (runs {path.name})")
 
     assert not offenders, (
         f"these targets reach GCS without exporting the bucket and credentials: "
         f"{offenders}. They would use whatever the ambient environment holds.")
+    assert not orphans, (
+        f"these files build a live GCS client but no target runs them: {orphans}. "
+        f"Either add a target that exports $(GCS_ENV), or -- if it is executed "
+        f"remotely like the round-trip probe -- add it to REMOTE_EXECUTED with a "
+        f"reason.")
+
+
+def test_the_remote_executed_exemption_does_not_rot():
+    """An exemption naming a file that no longer exists is an exemption
+    nobody notices is dead."""
+    names = {p.name for p in (REPO_ROOT / "experiments" / "stage2b_denoising").glob("*.py")}
+    missing = sorted(REMOTE_EXECUTED - names)
+    assert not missing, f"REMOTE_EXECUTED names files that no longer exist: {missing}"

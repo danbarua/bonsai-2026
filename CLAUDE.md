@@ -357,6 +357,38 @@ without reading that document's full findings history first.
     used), not merely assert. A bare green PASS records that assertions
     held, not what happened on the wire -- and for a slow test run
     deliberately and rarely, that transcript is most of its value.
+21. **A hand-maintained list standing in for a derivable set will
+    silently under-cover, and the broader tool you verify with is what
+    hides it.** Derive the set, or assert the list equals it. This
+    project has now produced the same bug four times, each time as a
+    list that looked authoritative: `stage2a-verify` gated on nothing;
+    all three Stage 2A GPU targets omitted `exec --timeout` and so could
+    never complete; `STAGE2B_TEST_FILES` omitted two test files; and a
+    `gcs_scripts` allowlist would have passed vacuously for the next
+    script that touched GCS rather than flagging it. The second half of
+    the principle is the part that keeps biting: `STAGE2B_TEST_FILES`
+    was verified with `pytest tests/` -- a glob -- so both missing files
+    ran, the suite was green, and the gap was invisible from the very
+    command used to check it. **When the artifact under test is a
+    narrowing (an explicit list, a filtered target, a subset), verifying
+    it with the broader form proves the code works and says nothing
+    about the narrowing.** The fix is mechanical: enumerate from the
+    filesystem or the AST instead of by hand, and where a list must stay
+    explicit, test that it matches the derived set in both directions
+    (missing entries, and entries naming things that no longer exist).
+    Any exemption gets a named constant and a reason, plus its own test
+    that the exemption still refers to something real. Concretely,
+    `tests/test_stage2b_gcs_makefile.py` discovers GCS-touching files by
+    walking each file's AST for a `get_bucket` call that does not inject
+    a client, so a future ladder driver is guard-railed on the day it is
+    written rather than whenever someone remembers the allowlist.
+    Corollary, and the direct analogue of principle 10 one layer down:
+    **a guard you have not seen fail is not yet a guard.** Both checks
+    added here were confirmed by deliberately breaking what they watch
+    (drifting the Makefile's bucket value; dropping in a GCS-touching
+    script with no target) and observing the specific expected failure,
+    exactly as a permutation scheme must be shown to destroy the effect
+    it tests for.
 
 # IntelliJ MCP Server Companion
 This project is open in Pycharm IDE (IntelliJ IDEA platform). 
