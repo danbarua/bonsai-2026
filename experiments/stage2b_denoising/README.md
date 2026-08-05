@@ -50,6 +50,11 @@ mention here, in the same commit that creates it.
   the training loop with its raw-loss / clipped-selection split.
 - **`stage2b_partition.py`** — the validation split and the nested
   stratified ladder draw (the 1,000 is a prefix of the 5,000).
+- **`stage2b_conditions.py`** — the condition vocabulary in one place:
+  the statistics keys (`pre_evolution` plus the four graphs), the object-
+  path segments (`evolved_T` and the rest), and the mapping between them,
+  so no driver has to reinvent which spelling belongs where. Depends on
+  nothing.
 - **`stage2b_gcs.py`** — artifact transport: object paths, the
   test-split guards, idempotent `ensure_artifact`, chunked checkpointed
   upload that resumes after a process death, and content verification on
@@ -60,6 +65,15 @@ mention here, in the same commit that creates it.
 - **`colab_gcs_roundtrip_probe.py`** — the plain Python script the
   round-trip test executes *on* the Colab runtime. Not a notebook, and
   not run locally.
+- **`stage2b_verify_gpu.py`** — runs `DESIGN.md`'s ridge equivalence gate
+  on a real GPU, at both ladder scales, on synthetic ill-conditioned
+  matrices shaped like the real ones. Refuses to pass on a CPU fallback
+  or with x64 not realised on the device. Uploaded and run by
+  `make stage2b-verify-gpu`.
+- **`stage2b_verify_cnn_gpu.py`** — compares the CNN's float32 forward
+  pass CPU versus GPU, at XLA's default precision and pinned, because
+  reduced-precision convolutions would move the validation metric early
+  stopping reads. Uploaded and run by `make stage2b-verify-cnn-gpu`.
 - **`smoke_stage2b_gcs.py`** — a manually-run smoke check against the
   real bucket: both round trips, a chunked upload resumed mid-transfer,
   the content digest the real service records for the resulting
