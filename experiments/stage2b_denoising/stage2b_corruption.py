@@ -139,19 +139,53 @@ def _check_split_allowed(split, allow_test_split):
             "allow_test_split=True, and it must do so deliberately.")
 
 
+def _check_unit_interval(x0, what):
+    """The [0, 1] input range, asserted rather than adapted to.
+
+    Same argument as the 784-pixel size check below it:
+    `bonsai.data.mnist_loader.load_mnist` returns uint8 0-255, and the
+    forward process is arithmetically happy to accept that scale. It
+    produces a corpus where ~99% of pixels saturate at 1.0 -- no error
+    raised anywhere, a plausible-looking result, and every MSE, clip rate
+    and diagnostic downstream computed on a corpus the locked
+    `alpha_bar = 0.5` censoring profile does not describe. The
+    corresponding analytical table would be unrecognizable, but only a
+    human reading two tables side by side would ever see that.
+
+    Non-finite values are refused first because they defeat the range
+    comparison itself: `nan < 0.0` and `nan > 1.0` are both False, so a
+    NaN passes a min/max test and propagates into every downstream MSE."""
+    if not np.all(np.isfinite(x0)):
+        n_bad = int(np.count_nonzero(~np.isfinite(x0)))
+        raise ValueError(
+            f"{what} contains {n_bad} non-finite value(s); corruption is defined "
+            f"on finite clean intensities in [0, 1]")
+    lo, hi = float(np.min(x0)), float(np.max(x0))
+    if lo < 0.0 or hi > 1.0:
+        raise ValueError(
+            f"{what} must be in [0, 1], got range [{lo:g}, {hi:g}]. The most likely "
+            f"cause is a missing /255.0: `load_mnist` returns uint8 0-255, and the "
+            f"corruption is defined on unit-interval intensities (DESIGN.md's "
+            f"alpha_bar=0.5 censoring profile is tabulated for x_0 in [0, 1]). "
+            f"Rescale rather than relying on the clip: at 0-255 scale nearly every "
+            f"pixel saturates at 1.0 and no error is raised.")
+
+
 def corrupt_image(x0, split, index, alpha_bar=ALPHA_BAR, allow_test_split=False):
     """Corrupts one image. `x0` must be (28, 28) or (784,), in [0, 1];
     the returned arrays match its shape. Row-major flattening, matching
     the rest of this project's 28x28 <-> 784 convention.
 
-    The size is asserted rather than adapted to. The spec locks
-    `standard_normal(784)`; silently drawing a shorter vector for, say, a
-    505-restricted array would produce a valid-looking result from a
-    realization that is not the locked one -- the same class of silent
-    adaptation the index-semantics note above is about. Corruption
-    happens on the full grid, before any restriction."""
+    The size and the input range are asserted rather than adapted to. The
+    spec locks `standard_normal(784)`; silently drawing a shorter vector
+    for, say, a 505-restricted array would produce a valid-looking result
+    from a realization that is not the locked one -- the same class of
+    silent adaptation the index-semantics note above is about. Corruption
+    happens on the full grid, before any restriction. `[0, 1]` is checked
+    for the same reason -- see `_check_unit_interval`."""
     _check_split_allowed(split, allow_test_split)
     x0 = np.asarray(x0, dtype=np.float64)
+    _check_unit_interval(x0, "clean image")
     shape = x0.shape
     flat = x0.reshape(-1)
     if flat.size != N_PIXELS:
@@ -166,10 +200,13 @@ def corrupt_image(x0, split, index, alpha_bar=ALPHA_BAR, allow_test_split=False)
 def corrupt_corpus(images, split, indices, alpha_bar=ALPHA_BAR, allow_test_split=False):
     """Corrupts a corpus. `indices` is REQUIRED and must be each image's
     index within its own official split -- see the module docstring's
-    "Index semantics" note. Returns (x_t, x_t_clip), both matching
-    `images`' shape."""
+    "Index semantics" note. `images` must be in [0, 1]; the range is
+    checked once over the whole corpus, so the error reports the corpus's
+    range rather than the first offending image's. Returns
+    (x_t, x_t_clip), both matching `images`' shape."""
     _check_split_allowed(split, allow_test_split)
     images = np.asarray(images, dtype=np.float64)
+    _check_unit_interval(images, "clean corpus")
     indices = np.asarray(indices)
     if indices.shape != (images.shape[0],):
         raise ValueError(f"indices must have one entry per image: expected shape "
@@ -222,6 +259,28 @@ def analytical_clip_rates(x0, alpha_bar=ALPHA_BAR):
     p_below = norm.cdf((0.0 - mu) / sigma)
     p_above = 1.0 - norm.cdf((1.0 - mu) / sigma)
     return p_below, p_above, p_below + p_above
+
+
+def predicted_clip_rates(x0, alpha_bar=ALPHA_BAR):
+    """The censoring rates the analytical profile predicts for THIS
+    corpus: the per-pixel probabilities of `analytical_clip_rates`
+    averaged over the corpus's own clean intensities. Keys mirror
+    `empirical_clip_rates`, so the confirmation DESIGN.md asks for
+    ("reported as confirmation, not discovery") is a comparison of two
+    dicts rather than a human reading two tables side by side.
+
+    `ANALYTICAL_CLIP_TABLE` states the rates at five fixed intensities; a
+    real corpus is a mixture of intensities and has no row in that table.
+    This is the mixture's prediction, and it is exact under the model --
+    each pixel's epsilon is drawn independently, so the corpus rate is
+    the mean of independent Bernoulli probabilities.
+
+    Pure and diagnostic: it returns numbers for a driver to report. It
+    gates nothing and `corruption_diagnostics` does not call it."""
+    below, above, _total = analytical_clip_rates(
+        np.asarray(x0, dtype=np.float64).reshape(-1), alpha_bar)
+    return {"below_zero": float(np.mean(below)), "above_one": float(np.mean(above)),
+            "total": float(np.mean(below + above)), "n": int(below.size)}
 
 
 def empirical_clip_rates(x_t):

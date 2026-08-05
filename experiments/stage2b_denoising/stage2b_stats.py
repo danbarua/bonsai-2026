@@ -40,10 +40,18 @@ from scipy.stats import ttest_1samp
 _THIS_DIR = os.path.dirname(os.path.abspath(__file__))
 _STAGE2A_DIR = os.path.join(_THIS_DIR, "..", "stage2a_dynamics_classification")
 sys.path.insert(0, os.path.abspath(_STAGE2A_DIR))
+if _THIS_DIR not in sys.path:
+    sys.path.insert(0, _THIS_DIR)
 
 from stage2a_stats import (  # noqa: E402
     holm_bonferroni,
     paired_class_stratified_bootstrap,
+)
+from stage2b_conditions import (  # noqa: E402
+    CONTROL_GRAPHS,
+    EVOLVED_GRAPHS,
+    PRE_EVOLUTION,
+    PRIMARY_GRAPH,
 )
 
 # ---- Locked constants (DESIGN.md) ----
@@ -65,13 +73,15 @@ SIGN_FLIP_CHUNK = 2048
 
 ALPHA = 0.05
 
-# Condition names. `EVOLVED_GRAPHS` is ordered, and that order defines
-# Family 2's canonical pair keys -- do not reorder it without accepting
-# that every pair key changes.
-PRE_EVOLUTION = "pre_evolution"
-PRIMARY_GRAPH = "T"
-EVOLVED_GRAPHS = ("T", "lattice", "rewired", "curr_random")
-CONTROL_GRAPHS = ("lattice", "rewired", "curr_random")
+# Condition names come from `stage2b_conditions`, imported above and
+# re-exported here so `stats.EVOLVED_GRAPHS` keeps working. That module
+# also holds the object-path spelling of the same conditions
+# (`"T"` <-> `"evolved_T"`), which is the reason the vocabulary lives
+# outside this module rather than in it: the mapping is shared with
+# artifact paths, and neither side should have to import the other.
+# `EVOLVED_GRAPHS` is ordered, and that order defines Family 2's
+# canonical pair keys -- do not reorder it without accepting that every
+# pair key changes.
 
 # How this module compares an adjusted p against alpha, in BOTH families.
 #

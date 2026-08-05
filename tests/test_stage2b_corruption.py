@@ -215,6 +215,70 @@ def test_corpus_requires_one_index_per_image_and_rejects_duplicates():
         corr.corrupt_corpus(images, "train", np.array([0, 1, 1]))
 
 
+# ---- input range: [0, 1], asserted rather than adapted to ----
+
+def test_corpus_rejects_uint8_scale_input():
+    """`bonsai.data.mnist_loader.load_mnist` returns uint8 0-255. Handed
+    straight to the corruption, that is accepted arithmetically and
+    produces a corpus in which ~99% of pixels saturate at 1.0 -- no
+    error, a plausible-looking result, and every downstream MSE wrong.
+    Refused for the same reason the 784-pixel size is refused rather than
+    adapted to."""
+    images = (np.random.default_rng(0).random((4, 28, 28)) * 255).astype(np.uint8)
+    with pytest.raises(ValueError, match="255"):
+        corr.corrupt_image(images[0], "train", 0)
+    with pytest.raises(ValueError, match="255"):
+        corr.corrupt_corpus(images, "train", np.arange(4))
+
+
+def test_input_range_error_reports_the_observed_range():
+    """The message has to say what was actually seen -- a caller holding
+    an array of unknown provenance learns the scale from the error
+    instead of going back to instrument the loader."""
+    images = np.zeros((3, 784))
+    images[1, 2] = 7.5
+    images[2, 3] = -0.25
+    with pytest.raises(ValueError) as excinfo:
+        corr.corrupt_corpus(images, "train", np.arange(3))
+    message = str(excinfo.value)
+    assert "7.5" in message and "-0.25" in message
+    assert "255" in message
+
+
+def test_unit_interval_boundaries_are_accepted():
+    """0.0 and 1.0 are legal clean intensities -- DESIGN.md's censoring
+    table tabulates both endpoints. A comparison written one step too
+    strict would reject the two most common pixel values in the corpus."""
+    for value in (0.0, 1.0):
+        x_t, x_t_clip = corr.corrupt_image(np.full((28, 28), value), "train", 3)
+        assert np.all(np.isfinite(x_t)) and x_t_clip.min() >= 0.0
+    images = np.stack([np.zeros((28, 28)), np.ones((28, 28))])
+    corr.corrupt_corpus(images, "train", np.arange(2))
+
+
+def test_valid_unit_interval_input_is_unaffected_by_the_check():
+    """The guard rejects; it does not touch the values that pass it."""
+    images = np.random.default_rng(1).random((5, 784))
+    x_t, x_t_clip = corr.corrupt_corpus(images, "train", np.arange(5))
+    for i in range(5):
+        expected_t, expected_c = corr.forward_corrupt(
+            images[i], corr.epsilon_for("train", i))
+        np.testing.assert_array_equal(x_t[i], expected_t)
+        np.testing.assert_array_equal(x_t_clip[i], expected_c)
+
+
+def test_non_finite_input_is_rejected():
+    """NaN defeats the range comparison itself: `nan < 0` and `nan > 1`
+    are both False, so an unchecked NaN would pass a min/max test and
+    propagate silently into every downstream MSE."""
+    images = np.zeros((2, 784))
+    images[0, 0] = np.nan
+    with pytest.raises(ValueError, match="finite"):
+        corr.corrupt_corpus(images, "train", np.arange(2))
+    with pytest.raises(ValueError, match="finite"):
+        corr.corrupt_image(np.full(784, np.inf), "train", 0)
+
+
 # ---- the censoring profile: analytical form and the DESIGN.md table ----
 
 def test_analytical_rates_reproduce_the_design_table():
@@ -261,6 +325,45 @@ def test_empirical_clip_rates_match_the_analytical_table():
         assert rates["below_zero"] == pytest.approx(p_below, abs=5e-3)
         assert rates["above_one"] == pytest.approx(p_above, abs=5e-3)
         assert rates["n"] == n_images * 784
+
+
+def test_predicted_clip_rates_match_the_measured_ones_on_a_mixed_corpus():
+    """The table's five rows are constant-intensity predictions; a real
+    corpus is a mixture and matches no row. `predicted_clip_rates` is the
+    mixture's prediction, and this is the comparison DESIGN.md describes
+    as confirmation -- pinned rather than left to a human reading the
+    measured rates against the tabulated ones.
+
+    Tolerance is computed here, from the model: each pixel clips
+    independently with its own probability, so the standard error of the
+    corpus rate is `sqrt(sum p(1-p)) / n`. Four sigma."""
+    rng = np.random.default_rng(11)
+    n_images = 300
+    images = np.clip(rng.beta(0.6, 0.6, size=(n_images, 28, 28)), 0.0, 1.0)
+    x_t, _clip = corr.corrupt_corpus(images, "train", np.arange(n_images) + 70_000)
+
+    predicted = corr.predicted_clip_rates(images)
+    observed = corr.empirical_clip_rates(x_t)
+    p_below, p_above, _t = corr.analytical_clip_rates(images.reshape(-1))
+    n = p_below.size
+    assert predicted["n"] == observed["n"] == n
+
+    for key, p in (("below_zero", p_below), ("above_one", p_above)):
+        se = float(np.sqrt(np.sum(p * (1.0 - p)))) / n
+        assert observed[key] == pytest.approx(predicted[key], abs=4.0 * se)
+    # the corpus is genuinely a mixture: no table row predicts it
+    for _x0, table_below, _table_above, _total in corr.ANALYTICAL_CLIP_TABLE:
+        assert abs(predicted["below_zero"] - table_below) > 1e-3
+
+
+def test_predicted_clip_rates_reduce_to_the_table_at_constant_intensity():
+    """A corpus at one intensity has to reproduce that intensity's row --
+    the bridge between the mixture prediction and the tabulated one."""
+    for x0, p_below, p_above, _total in corr.ANALYTICAL_CLIP_TABLE:
+        predicted = corr.predicted_clip_rates(np.full((5, 784), x0))
+        assert predicted["below_zero"] == pytest.approx(p_below, abs=5e-4)
+        assert predicted["above_one"] == pytest.approx(p_above, abs=5e-4)
+        assert predicted["n"] == 5 * 784
 
 
 def test_empirical_clip_rates_report_the_two_directions_separately():
