@@ -131,11 +131,15 @@ def scaler_centering_margin(X_scaled, X_raw=None, tol=MEAN_X_TOL):
     tiny scale, amplifying the float64 centering residual past the
     tolerance. Recording it every call turns "how close is this condition
     to the regime that trips the guard" into a measured per-fold number.
-    A Stage 2B-relevant reference point, measured on 500 real KMNIST
-    training images across the six ridge conditions: `min_col_std` runs
-    from 3.40e-01 (raw pixels) down to 6.70e-05 (`curr_random`),
-    ordered by how strongly the graph synchronizes, with the guard
-    passing throughout.
+
+    Why a phase-feature condition can approach that regime at all: a
+    strongly synchronizing graph drives a node's phase nearly
+    image-independent, so its cos/sin columns vary little across images.
+    Stage 2A measured mean order parameters of 0.997 (`rewired`) and
+    0.991 (`curr_random`) -- see
+    `experiments/stage2a_dynamics_classification/FINDINGS.md` -- so
+    `min_col_std` is expected to be smallest for exactly those two
+    conditions and largest for raw pixels.
 
     Near-constant columns are reported, never dropped -- they carry
     small-but-nonzero variance that Stage 2A's findings give reason to
