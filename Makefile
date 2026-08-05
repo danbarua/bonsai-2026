@@ -213,6 +213,35 @@ stage2b-test-roundtrip:  ## Real Colab+GCS round trip -- provisions a CPU runtim
 test:  ## Run the whole default suite (every stage, slow reproduction checks excluded)
 	cd $(REPO_ROOT) && uv run pytest tests/ -m "not slow" -q
 
+##@ Stage 2B verification against real infrastructure
+
+STAGE2B_DIR := $(REPO_ROOT)/experiments/stage2b_denoising
+SESSION_2B_VERIFY ?= stage2b-verify
+
+# DESIGN.md specifies the ridge equivalence gate (JAX SVD vs sklearn,
+# max abs clipped-prediction difference <= 1e-8 and identical alpha
+# selection) at the 1,000- and 5,000-image ladder stages -- but every run
+# of it so far has been on CPU, because that is all this machine has.
+# Whether JAX's float64 SVD on a GPU meets the same gate is a separate
+# question from whether the code is right, and it is the question that
+# matters before a ladder rung is ever driven on one.
+.PHONY: stage2b-verify-gpu
+stage2b-verify-gpu:  ## Run the ridge equivalence gate on a real GPU -- bills while running
+	cd $(STAGE2B_DIR) && \
+	$(MIGHTY_COLAB) sessions && \
+	if $(MIGHTY_COLAB) status -s $(SESSION_2B_VERIFY) 2>&1 | grep -q "not found"; then \
+		$(MIGHTY_COLAB) new -s $(SESSION_2B_VERIFY) --gpu T4; \
+	else \
+		echo "[make] Reusing existing session $(SESSION_2B_VERIFY)"; \
+	fi && \
+	$(MIGHTY_COLAB) upload -s $(SESSION_2B_VERIFY) stage2b_ridge.py /content/stage2b_ridge.py && \
+	$(MIGHTY_COLAB) exec -s $(SESSION_2B_VERIFY) -f stage2b_verify_gpu.py --timeout 900 && \
+	$(MIGHTY_COLAB) stop -s $(SESSION_2B_VERIFY)
+
+.PHONY: stage2b-smoke-gcs
+stage2b-smoke-gcs:  ## Real-bucket GCS smoke check: transport, chunked resumable upload, both delete refusals
+	cd $(REPO_ROOT) && uv run --group gpu python $(STAGE2B_DIR)/smoke_stage2b_gcs.py
+
 .PHONY: help
 help:  ## List every target in this file, grouped by section
 	@awk 'BEGIN {FS = ":.*##"} /^##@/ {printf "\n%s\n", substr($$0, 5)} /^[a-zA-Z0-9_-]+:.*##/ {printf "  %-28s %s\n", $$1, $$2}' $(MAKEFILE_LIST)

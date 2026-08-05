@@ -101,6 +101,64 @@ def _check_refusals(bucket):
         raise SystemExit(1)
 
 
+def _chunked_resume(bucket, workdir):
+    """The chunked upload, against the real bucket, resumed mid-transfer.
+
+    Everything else here exercises paths a fake bucket already covers.
+    This one does not: `upload_file_chunked` composes numbered part
+    objects into the final object, and whether real GCS `compose`
+    accepts this part naming -- and whether a composite object reads back
+    byte-identical -- cannot be answered by a stand-in. The interruption
+    is the point: an uninterrupted chunked upload would not exercise the
+    checkpoint at all.
+    """
+    payload = bytes((i * 7 + 11) % 256 for i in range(300_000))
+    local = os.path.join(workdir, "chunked_probe.bin")
+    with open(local, "wb") as handle:
+        handle.write(payload)
+
+    name = gcs.object_path(stage=1, split="train", condition=SMOKE_CONDITION,
+                           kind="chunked_probe", ext="bin")
+    chunk = 64 * 1024
+
+    class _Interrupt(RuntimeError):
+        pass
+
+    # Die after the second confirmed chunk, exactly as a killed process
+    # would, leaving the checkpoint on disk.
+    real_confirm = gcs._confirm_part
+    seen = []
+
+    def _dying_confirm(bkt, part, expected_size):
+        real_confirm(bkt, part, expected_size)
+        seen.append(part)
+        if len(seen) == 2:
+            raise _Interrupt("simulated process death after 2 confirmed chunks")
+
+    gcs._confirm_part = _dying_confirm
+    try:
+        gcs.upload_file_chunked(local, name, bucket=bucket, chunk_size=chunk)
+    except _Interrupt:
+        pass
+    finally:
+        gcs._confirm_part = real_confirm
+
+    checkpoint = gcs.checkpoint_path(local)
+    _check(os.path.exists(checkpoint), "checkpoint survived the simulated death")
+
+    gcs.upload_file_chunked(local, name, bucket=bucket, chunk_size=chunk)
+    _check(gcs.object_exists(name, bucket=bucket), f"resumed upload completed: {name}")
+
+    readback = os.path.join(workdir, "chunked_readback.bin")
+    gcs.download_file(name, readback, bucket=bucket)
+    with open(readback, "rb") as handle:
+        got = handle.read()
+    _check(got == payload,
+           f"composed object is byte-identical to the local file ({len(payload)} bytes)")
+    _check(not os.path.exists(checkpoint), "checkpoint cleaned up after success")
+    return name
+
+
 def main():
     parser = argparse.ArgumentParser(description=__doc__.splitlines()[0])
     parser.add_argument("--bucket", default=gcs.GCS_BUCKET)
@@ -125,11 +183,14 @@ def main():
         test_name, test_prefix = _round_trip(bucket, workdir, stage=gcs.TEST_SPLIT_STAGE,
                                              split="test", allow_test_split=True)
 
+        print("\nchunked resumable upload (real compose, resumed mid-transfer)")
+        chunked_name = _chunked_resume(bucket, workdir)
+
         print("\ndelete refusals")
         _check_refusals(bucket)
 
         if args.keep:
-            print(f"\n--keep: leaving {train_name} and {test_name} in place")
+            print(f"\n--keep: leaving {train_name}, {test_name} and {chunked_name} in place")
             return
 
         print("\ncleanup")
@@ -139,6 +200,7 @@ def main():
                "test-side probe is gone")
 
         deleted = gcs.delete_prefix(train_prefix, bucket=bucket, force_non_test_prefix=True)
+        _check(chunked_name in deleted, "deleted the chunked probe")
         _check(train_name in deleted,
                f"deleted the training-side probe ({len(deleted)} object(s))")
         _check(not gcs.object_exists(train_name, bucket=bucket),
