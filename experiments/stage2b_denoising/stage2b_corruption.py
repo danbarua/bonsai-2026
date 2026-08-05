@@ -295,6 +295,84 @@ def empirical_clip_rates(x_t):
             "n": int(x_t.size)}
 
 
+def clip_rate_agreement(x0, x_t, alpha_bar=ALPHA_BAR, n_sigma=5):
+    """Empirical censoring rates against the analytical profile's own
+    prediction for THIS corpus, with the Monte Carlo tolerance the
+    comparison needs.
+
+    `x0` is the clean corpus, `x_t` the PRE-clip corrupted array it
+    produced. Both are flattened; only their sizes are compared, so a
+    caller may pass the full 784 grid or a restriction of both to the 505
+    active support. Size agreement is checkable here, pixel-wise
+    ALIGNMENT is not -- handing in an `x_t` from a different corpus of
+    the same size produces a well-formed result with no complaint.
+
+    Passing `x_t_clip` instead of `x_t` is the footgun this function
+    cannot refuse: both measured rates collapse to zero and every z goes
+    enormous. That is not raised as an error, because a legitimately
+    small corpus can also clip nowhere.
+
+    The tolerance is exact, not fudged. Each pixel's epsilon is drawn
+    independently, so the count of clipped pixels is a sum of independent
+    Bernoullis with the per-pixel probabilities of
+    `analytical_clip_rates`, and the standard error of the corpus rate is
+
+        SE = sqrt( sum_i p_i * (1 - p_i) ) / N
+
+    with `N` the total pixel count. `below_zero` and `above_one` are
+    mutually exclusive within a pixel, so `p_total = p_below + p_above`
+    and its variance follows from `p_total` directly.
+
+    `n_sigma` defaults to 5, transcribed rather than invented:
+    `tests/test_stage2b_corruption.py`'s
+    `test_empirical_clip_rates_match_the_analytical_table` (~line 317)
+    already frames its own tolerance as "roughly 5 sigma".
+
+    Returns, for each of `below_zero`, `above_one` and `total`:
+    `predicted`, `empirical`, `se`, `z`, `within_tolerance`; plus the
+    scalars needed to read them -- `n_sigma`, `n_pixels` (the TOTAL
+    number of pixel observations compared, i.e. images x pixels-per-image,
+    not the module's per-image `N_PIXELS`) and `alpha_bar`.
+
+    The three z-values are not independent: `total` is determined by
+    `below_zero` and `above_one`, so three checks passing is not three
+    independent confirmations.
+
+    Pure and diagnostic: it returns numbers for a driver to report. It
+    gates nothing, and nothing in this module calls it."""
+    x0 = np.asarray(x0, dtype=np.float64)
+    _check_unit_interval(x0, "clean corpus")
+    x_t = np.asarray(x_t, dtype=np.float64).reshape(-1)
+
+    predicted = predicted_clip_rates(x0, alpha_bar)
+    if predicted["n"] != x_t.size:
+        raise ValueError(
+            f"x_0 and x_t must cover the same pixels: x_0 has {predicted['n']} "
+            f"values, x_t has {x_t.size}. Comparing a full 784-grid corpus "
+            f"against a 505-restricted one silently mixes two censoring "
+            f"populations.")
+    empirical = empirical_clip_rates(x_t)
+
+    p_below, p_above, p_total = analytical_clip_rates(x0.reshape(-1), alpha_bar)
+    n = float(predicted["n"])
+
+    out = {"n_sigma": float(n_sigma), "n_pixels": int(predicted["n"]),
+           "alpha_bar": float(alpha_bar)}
+    for key, p in (("below_zero", p_below), ("above_one", p_above),
+                   ("total", p_total)):
+        se = float(np.sqrt(np.sum(p * (1.0 - p)))) / n
+        diff = empirical[key] - predicted[key]
+        if se == 0.0:
+            z = 0.0 if diff == 0.0 else np.inf * np.sign(diff)
+        else:
+            z = diff / se
+        out[key] = {"predicted": float(predicted[key]),
+                    "empirical": float(empirical[key]),
+                    "se": se, "z": float(z),
+                    "within_tolerance": bool(abs(z) <= n_sigma)}
+    return out
+
+
 def _mse_per_image(a, b):
     a = np.asarray(a, dtype=np.float64).reshape(a.shape[0], -1)
     b = np.asarray(b, dtype=np.float64).reshape(b.shape[0], -1)
