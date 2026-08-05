@@ -336,6 +336,27 @@ without reading that document's full findings history first.
     failure from principle 8's shared-seed-across-workers problem:
     correct per-worker seeding does not protect against a within-worker
     chunking change altering the stream.
+20. **Hand-verified functionality becomes an executable test once it is
+    confirmed and locked.** A property established by running commands
+    interactively is real, but it lives only in a session transcript:
+    nobody can re-check it, and nothing fails when a later change breaks
+    it. Convert it into a unit or integration test so it becomes living
+    documentation of what was verified and how. Concretely, this project
+    hand-checked that the Stage 2B GCS bucket's public-read grant works
+    (an anonymous client fetching an object a Colab session wrote) --
+    a claim genuinely distinct from the authenticated readback the
+    round-trip test already made, since "readable from outside the
+    session" and "readable without credentials" are different
+    properties. That check is now an assertion in
+    `tests/test_stage2b_gcs_roundtrip.py` rather than a paragraph in a
+    chat log. The same applies to any manual spike that ends in "yes,
+    that works": if it was worth verifying by hand, it is worth pinning,
+    and the pin is what stops it silently regressing. Corollary for
+    tests that exercise real infrastructure: have them REPORT their
+    evidence (object names, byte counts, which credential path was
+    used), not merely assert. A bare green PASS records that assertions
+    held, not what happened on the wire -- and for a slow test run
+    deliberately and rarely, that transcript is most of its value.
 
 # IntelliJ MCP Server Companion
 This project is open in Pycharm IDE (IntelliJ IDEA platform). 
