@@ -472,6 +472,44 @@ stages 1-2 is specified but has only ever run on CPU.
      finding as provisional and unsaved until it's actually in a commit
      -- not "will write it up at the end," since there may be no end.
 
+**GPU numerics are a property of the DEVICE, not of the code** (added
+2026-08-05, Stage 2B). Two lessons, both measured rather than reasoned
+about, and both applying to any future GPU work here:
+
+- **On A100, XLA computes float32 convolutions at TF32 precision by
+  default** -- roughly 10 explicit mantissa bits instead of 24. Measured
+  on Stage 2B's CNN: the same model and input gave a max relative
+  difference of 1.058e-04 against CPU at default precision, and 1.172e-07
+  (float32 epsilon) with precision pinned. That is normally a good trade.
+  It is not one wherever a downstream comparison has no tolerance band --
+  Stage 2B's early stopping is `min_delta=0.0` with a strict `<`, so a
+  1e-4 shift moves which epoch is checkpointed, which seed is selected,
+  and the reported metric. Silently. The fix is a per-call
+  `jax.default_matmul_precision` pin routed through a single forward
+  helper (`stage2b_cnn.CNN_MATMUL_PRECISION`), not a global
+  `jax.config` flag -- a module that owns a global flag changes the
+  numerics of every other module in the process.
+- **A T4 pass does not clear this, and looks like it does.** T4 has no
+  TF32 hardware (Ampere and later only), so it cannot exhibit the effect
+  and reports clean agreement at default precision. The first run of
+  Stage 2B's CNN check was on T4 and would have closed the question as
+  verified. Any device-numerics check must be run on the device the
+  pipeline actually targets, and must report whether the default path was
+  already clean -- otherwise a pass on incapable hardware is
+  indistinguishable from a pass that exercised the fix. Float64 work
+  (Stage 2B's ridge) is immune to this entire class and its GPU result
+  transfers to neither question.
+
+**`mighty-colab exec` exits 0 even when the remote script raises**
+(verified directly: a script that raised `SystemExit` with a failure
+message still let a `make` target report success). Any Makefile target
+that runs a remote verification must capture the output and decide the
+verdict by grepping the script's own success sentinel, not by chaining
+`&&` on the exec's exit status. This is the same shape as the
+`stage2a-verify` no-op-gate bug (`git diff --stat` always exits 0), and
+it was reintroduced in new code before being caught -- by a check that
+genuinely failed.
+
 **Practical lessons from operating across both**:
 - `execute_terminal_command` with `reuseExistingTerminalWindow=true` can
   silently kill a long-running foreground process in that same window --
