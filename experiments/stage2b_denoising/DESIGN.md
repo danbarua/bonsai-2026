@@ -381,8 +381,13 @@ during selection.
 Generation, features, and statistics run entirely in the cloud
 environment; artifacts pushed to Google Cloud Storage from within it --
 never round-tripped through local upload (Stage 2A's 242MB-vs-~6-15MB
-Colab upload limit, already hit once). Final deliverable: Colab
-notebook; notebook structure and GCS paths are implementation details.
+Colab upload limit, already hit once). Colab/GCP is a compute
+RUNTIME for this implementation only -- not a commitment about
+final deliverable format. The visuals/plots delivery format is an
+explicitly DEFERRED decision, made once results exist, and is not
+part of this locked design. Do not treat notebook packaging as a
+pending or implied task at any point before then. GCS paths are
+implementation details.
 FINDINGS.md in-repo remains the record of note.
 
 ## Feasibility ladder
@@ -446,3 +451,6 @@ Does not revisit Stage 2A's open items (#9, #10, #11).
   `1e-10` a sqrt(n)-growing quantity outgrows; the seven ridge
   conditions and the distinct six-key statistics set, enumerated beside
   the SVD count.
+- Post-lock amendment, computational strategy: Colab-notebook
+  final-deliverable wording removed as an implied task; delivery format
+  deferred, Colab/GCP a compute runtime.

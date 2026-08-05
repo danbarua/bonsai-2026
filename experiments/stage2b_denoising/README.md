@@ -84,11 +84,9 @@ not written speculatively against a pipeline nobody has driven.
 ## Cloud execution: scripts, not notebooks
 
 Stage 2B runs **plain Python scripts** on Colab runtimes via
-`mighty-colab`. Notebooks are deferred to the end of the project.
-`DESIGN.md` contains a stale line calling a Colab notebook the "final
-deliverable" — it is known-stale and should not be acted on; correcting
-it is a documentation amendment nobody has needed badly enough to make
-yet.
+`mighty-colab`. Colab is a compute runtime here, nothing more; how
+results and visuals eventually get delivered is a deferred decision and
+not a pending task.
 
 Artifacts move to GCS **from within the cloud environment**, never
 round-tripped through a local upload — Stage 2A already hit Colab's
