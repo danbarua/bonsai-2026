@@ -51,8 +51,9 @@ mention here, in the same commit that creates it.
 - **`stage2b_partition.py`** — the validation split and the nested
   stratified ladder draw (the 1,000 is a prefix of the 5,000).
 - **`stage2b_gcs.py`** — artifact transport: object paths, the
-  test-split guards, idempotent `ensure_artifact`, and chunked
-  checkpointed upload that resumes after a process death.
+  test-split guards, idempotent `ensure_artifact`, chunked checkpointed
+  upload that resumes after a process death, and content verification on
+  every transfer.
 
 **Cloud-side and manual scripts:**
 
@@ -60,8 +61,10 @@ mention here, in the same commit that creates it.
   round-trip test executes *on* the Colab runtime. Not a notebook, and
   not run locally.
 - **`smoke_stage2b_gcs.py`** — a manually-run smoke check against the
-  real bucket, including both delete refusals. Deliberately not
-  collected by pytest.
+  real bucket: both round trips, a chunked upload resumed mid-transfer,
+  the content digest the real service records for the resulting
+  composite object, and both delete refusals. Deliberately not collected
+  by pytest.
 
 ## Running things
 
@@ -71,7 +74,7 @@ a map to the targets, not a copy of them.
 
 ```bash
 make help            # from the repository root -- every target, grouped
-make stage2b-test    # the fast suite: 432 tests, no network, no cloud
+make stage2b-test    # the fast suite: 451 tests, no network, no cloud
 ```
 
 The feasibility ladder itself has no targets yet, because no ladder
@@ -95,11 +98,48 @@ service-account key.
 
 `stage2b_gcs.py` imports `google.cloud.storage` **lazily**, inside the
 functions that need a client. This is load-bearing, not stylistic: it
-is what lets the whole module and its 118 tests run in an environment
-where the package is not installed and there is no network. Two tests
-enforce it structurally in subprocesses — one blocks `google` via a
-`sys.meta_path` finder, the other asserts nothing under `google.` enters
-`sys.modules`. Don't hoist that import.
+is what lets the whole module and its 137 tests run in an environment
+where the package is not installed and there is no network. Three tests
+enforce it structurally in subprocesses — two block `google` via a
+`sys.meta_path` finder, the third asserts nothing under `google.` enters
+`sys.modules`. Don't hoist that import, and don't hoist the
+`google_crc32c` one either.
+
+## What a downloaded artifact is guaranteed to be
+
+Every GCS transfer verifies content, by default, in both directions.
+The check is on `crc32c` — the checksum GCS computes for **every**
+object it stores, a composed one included. That choice is what makes one
+verification path serve both upload routes: a composite object carries
+no `md5_hash`, so an MD5-verifying consumer would behave differently
+depending on whether `upload_file` or `upload_file_chunked` produced
+what it is reading, and a downloader has no business knowing which.
+
+- A **download** is verified while it is still the `.part` sidecar, so a
+  file whose bytes are wrong never reaches the destination path. The
+  sidecar goes too, and any good file already at that path is left
+  alone. The atomic rename covers a transfer that *stopped*; this covers
+  one that *finished with the wrong contents*.
+- An **upload** is compared against the local file once it lands, and an
+  object that fails is deleted. `ensure_artifact` reads an object's
+  existence as proof its step is done, so one known to be wrong must not
+  sit there making that claim.
+- An object carrying **no checksum raises** `ChecksumMissingError`.
+  Nothing is treated as fine merely because it could not be checked.
+- `verify_content=False` opts out, at the call site, visibly. Science
+  runs should not have to remember to ask for correctness.
+
+Computing the local side uses `google-crc32c`, a hard dependency of
+`google-cloud-storage` and therefore present wherever a real transfer
+happens. Where neither is installed — this local environment — a
+pure-Python CRC32C stands in so the check still runs under the injected
+fake buckets instead of silently becoming a no-op. It is slow, and it is
+never on a real gigabyte transfer's path; `checksum_backend()` reports
+which one is live.
+
+Whether the real service populates `crc32c` for a composed object is the
+one part of this no unit test can settle. `smoke_stage2b_gcs.py` asks it
+directly, against the real bucket, and reports what came back.
 
 ## Guards you must not route around
 
@@ -124,14 +164,14 @@ disclosed amendment to `DESIGN.md`, not a keyword argument.
 ## Testing
 
 ```bash
-make stage2b-test              # 432 fast tests, ~35s, no network
+make stage2b-test              # 451 fast tests, ~30s, no network
 make stage2b-test-roundtrip    # real Colab+GCS round trip; bills while running
 make test                      # the whole repository suite
 ```
 
 | file | tests | covers |
 |---|---|---|
-| `test_stage2b_gcs.py` | 118 | transport, guards, chunked resumable upload |
+| `test_stage2b_gcs.py` | 137 | transport, guards, chunked resumable upload, content verification |
 | `test_stage2b_cnn.py` | 76 | architecture, shared masking, training loop |
 | `test_stage2b_stats.py` | 66 | sign-flip, Holm families, winner rule |
 | `test_stage2b_partition.py` | 49 | split ordering, nested stratified draw |
@@ -172,3 +212,7 @@ Things this stage's construction produced that outlive it:
   already death-safe via a `.part` sidecar and `os.replace`; uploads
   were not, which is the direction that matters when an ephemeral Colab
   session is pushing gigabytes out.
+- **Atomicity is not correctness.** A transfer that completes and a
+  transfer that is right are separate properties, and the `.part`
+  sidecar only ever established the first. Bytes that arrive whole and
+  wrong are the failure mode that produces numbers instead of an error.
