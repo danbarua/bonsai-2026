@@ -197,3 +197,14 @@ datasets/*/
 # disk, not tracked (this project has no shared .claude/settings.json).
 .claude/settings.local.json
 experiments/stage2a_dynamics_classification/scratch/
+
+# GCP service-account keys (Stage 2B's Colab/GCS access). These are live
+# credentials, not config: anyone holding one has the service account's
+# bucket permissions. `gcloud iam service-accounts keys create <name>.json`
+# writes to the CURRENT directory, so the repo root is exactly where one
+# lands by default -- hence the broad patterns rather than one filename.
+# Upload the key to the Colab session directly; never commit it.
+bonsai-colab-storage-key.json
+*-storage-key.json
+*service-account*.json
+gcp-*-key.json
