@@ -44,6 +44,41 @@ resumes after the last confirmed part rather than sending the whole
 artifact again. `upload_file` remains the single-request path, and is
 what `ensure_artifact` uses unless asked for `chunked=True`.
 
+## Content integrity, on both transfer routes
+
+Atomicity is not correctness: a `.part` rename guarantees the whole
+transfer landed, not that the bytes are the artifact's. Stage 2B pulls
+down multi-gigabyte feature arrays and runs statistics on them, so a
+silently corrupted download is the worst failure available -- it
+produces numbers rather than an error.
+
+The digest is `crc32c`, base64-encoded exactly as GCS reports it, and it
+is GCS's own: the service computes and records one for every object it
+stores, a composed one included. `md5_hash` is not populated for
+composite objects, so a consumer verifying MD5 would behave differently
+depending on which upload route produced what it is reading; `crc32c`
+gives one uniform check for both, and covers objects written before any
+of this existed.
+
+Every transfer is verified by default. An upload compares the object's
+recorded checksum against the local file's, and an object that fails is
+deleted rather than left behind -- `ensure_artifact` treats an object's
+existence as proof its step is done, and a known-wrong object must not
+make that claim. A download verifies the `.part` sidecar BEFORE renaming
+it, so a file that fails never reaches the destination path.
+`verify_content=False` opts out, at the call site, visibly. An object
+carrying no checksum raises `ChecksumMissingError`: GCS records one for
+everything it stores, so an absent field means the content could not be
+checked, not that it is intact.
+
+Computing the local side needs `google-crc32c`, a hard dependency of
+`google-cloud-storage` and so present wherever a real transfer happens.
+Where neither is installed -- this project's local development
+environment -- a pure-Python CRC32C stands in, so verification still runs
+under the fake buckets the tests inject rather than quietly becoming a
+no-op. It is correspondingly slow, and never on the path of a real
+gigabyte transfer.
+
 ## Lazy import, deliberately
 
 `google.cloud.storage` is imported inside `_storage_module()`, never at
@@ -120,6 +155,7 @@ The bucket is public-read, so a script that only downloads needs no key
 at all -- `anonymous=True` builds a credential-free client. Anonymous
 clients cannot write.
 """
+import base64
 import hashlib
 import json
 import os
@@ -161,6 +197,12 @@ CHECKPOINT_SUFFIX = ".upload.json"
 CHECKPOINT_FORMAT = "stage2b-chunked-upload/1"
 _OCTET_STREAM = "application/octet-stream"
 
+# ---- Content integrity ----
+CHECKSUM_FIELD = "crc32c"               # the GCS object property both upload routes land in
+DIGEST_BLOCK_SIZE = 4 * 1024 * 1024     # a gigabyte artifact is digested in blocks, not read whole
+_CRC32C_POLYNOMIAL = 0x82F63B78         # CRC-32C (Castagnoli), reflected
+_CRC32C_TABLE = None
+
 
 class ChunkedUploadError(OSError):
     """A part upload returned without the object arriving intact.
@@ -168,6 +210,23 @@ class ChunkedUploadError(OSError):
     Deliberately not a `FileNotFoundError`: a missing local file and a
     part that did not land are different failures, and a caller catching
     one should not silently swallow the other."""
+
+
+class ChecksumMismatchError(OSError):
+    """An object's own checksum and the local bytes disagree.
+
+    Which side is wrong is not knowable from here -- the message names
+    the object and both digests so it can be worked out. What is knowable
+    is that the transfer must not be treated as good."""
+
+
+class ChecksumMissingError(OSError):
+    """An object carries no checksum to verify against.
+
+    Separate from a mismatch because the remedy differs: a mismatch means
+    something is corrupt, this means nothing could be checked. GCS records
+    a `crc32c` for every object it stores, so this should not happen
+    against the real bucket at all."""
 
 
 # ---- Credentials: resolved, never read ----
@@ -380,6 +439,181 @@ def get_bucket(*, bucket_name=GCS_BUCKET, client=None, credentials=None,
     return client.bucket(bucket_name)
 
 
+# ---- Content integrity: the digest, and the comparison it feeds ----
+
+def _google_crc32c():
+    """`google_crc32c`, imported on demand, or None where it is absent.
+
+    Lazily imported for the same reason `google.cloud.storage` is: it is
+    a hard dependency of that library and ships with it, so it is present
+    on the cloud runtime and absent locally, and nothing here may make
+    the module unimportable in the second case."""
+    try:
+        import google_crc32c
+    except ImportError:
+        return None
+    return google_crc32c
+
+
+def checksum_backend():
+    """Which CRC32C implementation is in use: `google-crc32c` (the
+    compiled one GCS's own client uses) or `python` (the fallback). Worth
+    reporting from a script that verifies a real transfer."""
+    return "python" if _google_crc32c() is None else "google-crc32c"
+
+
+def _crc32c_table():
+    global _CRC32C_TABLE
+    if _CRC32C_TABLE is None:
+        table = []
+        for index in range(256):
+            value = index
+            for _ in range(8):
+                value = (value >> 1) ^ (_CRC32C_POLYNOMIAL if value & 1 else 0)
+            table.append(value)
+        _CRC32C_TABLE = tuple(table)
+    return _CRC32C_TABLE
+
+
+def _crc32c_python(data, value=0):
+    """CRC-32C over `data`, continuing a running `value`.
+
+    The fallback for an environment without `google-crc32c`, which is
+    this project's local one. Pinned against the algorithm's published
+    check value (`123456789` -> 0xE3069283) and cross-checked against
+    `google_crc32c` wherever that is installed, because a checksum that
+    is merely self-consistent would agree with itself while disagreeing
+    with the service (CLAUDE.md principle 16)."""
+    table = _crc32c_table()
+    value ^= 0xFFFFFFFF
+    for byte in data:
+        value = table[(value ^ byte) & 0xFF] ^ (value >> 8)
+    return value ^ 0xFFFFFFFF
+
+
+class _RunningCrc32c:
+    """A CRC32C accumulated over successive blocks, in whichever
+    implementation is available, reported in GCS's own encoding."""
+
+    def __init__(self):
+        module = _google_crc32c()
+        self._checksum = None if module is None else module.Checksum()
+        self._value = 0
+
+    def update(self, data):
+        if self._checksum is None:
+            self._value = _crc32c_python(data, self._value)
+        else:
+            self._checksum.update(data)
+
+    def encoded(self):
+        digest = (self._value.to_bytes(4, "big") if self._checksum is None
+                  else self._checksum.digest())
+        return base64.b64encode(digest).decode("ascii")
+
+
+def crc32c_of_bytes(data):
+    """The CRC32C of some bytes, base64-encoded as GCS reports it -- so a
+    comparison against `blob.crc32c` is a string comparison with no
+    decoding step to get wrong."""
+    running = _RunningCrc32c()
+    running.update(bytes(data))
+    return running.encoded()
+
+
+def crc32c_of_file(path):
+    """The CRC32C of a file's contents, read in blocks. A Stage 2B
+    artifact does not fit comfortably in memory and is not read whole to
+    be checked."""
+    running = _RunningCrc32c()
+    with open(str(path), "rb") as handle:
+        for block in iter(lambda: handle.read(DIGEST_BLOCK_SIZE), b""):
+            running.update(block)
+    return running.encoded()
+
+
+def _blob_checksum(blob):
+    """The object's recorded `crc32c`, or None if the field is not
+    populated. A freshly-built handle carries no metadata until it is
+    reloaded, which is why the reload is here rather than assumed -- the
+    same shape as `_remote_size`."""
+    value = getattr(blob, CHECKSUM_FIELD, None)
+    if value is None:
+        reload_ = getattr(blob, "reload", None)
+        if callable(reload_):
+            reload_()
+            value = getattr(blob, CHECKSUM_FIELD, None)
+    return None if value is None else str(value)
+
+
+def _compare_checksum(blob, name, local_digest, *, action, local_label):
+    """Raises unless the object's checksum and the local bytes agree.
+    Returns the digest they agreed on."""
+    recorded = _blob_checksum(blob)
+    if recorded is None:
+        raise ChecksumMissingError(
+            f"{name!r} carries no {CHECKSUM_FIELD}. GCS records one for every object it "
+            f"stores, composite ones included, so an absent field means the content could "
+            f"not be checked -- not that it is intact. Pass verify_content=False to proceed "
+            f"without a check, deliberately.")
+    if recorded != local_digest:
+        raise ChecksumMismatchError(
+            f"{action} {name!r} does not match: the object's {CHECKSUM_FIELD} is {recorded}, "
+            f"the {local_label}'s is {local_digest}.")
+    return recorded
+
+
+def _discard_object(bucket, name):
+    """Removes an object that failed verification.
+
+    `ensure_artifact` treats an object's existence as proof its step is
+    done and skips the step on the next run. An object already known to
+    be wrong must not be left behind making that claim. Best-effort: the
+    verification failure is the error worth raising, not whatever the
+    cleanup delete does."""
+    try:
+        bucket.blob(name).delete()
+    except Exception:                                # noqa: BLE001 - cleanup, not the failure
+        pass
+
+
+def _verify_uploaded(bucket, name, local_digest):
+    """Checks what actually landed, and removes it if it is wrong.
+
+    Built on a fresh handle rather than the one the upload returned, so
+    the service is asked again about the stored object instead of being
+    taken at its word about the write. One extra metadata request, next
+    to a transfer measured in gigabytes."""
+    try:
+        return _compare_checksum(bucket.blob(name), name, local_digest,
+                                 action="the upload to", local_label="local file")
+    except (ChecksumMismatchError, ChecksumMissingError):
+        _discard_object(bucket, name)
+        raise
+
+
+def object_checksum(name, *, bucket, allow_test_split=False):
+    """The `crc32c` GCS recorded for an object, or None if the field is
+    not populated. Metadata only -- the object is not downloaded."""
+    name = _check_object_path_allowed(name, allow_test_split)
+    return _blob_checksum(bucket.blob(name))
+
+
+def verify_object(name, local_path, *, bucket, allow_test_split=False):
+    """Checks a local file against the object's own checksum without
+    transferring anything, and returns the digest they agreed on.
+
+    The check `download_file` and the upload paths run, callable on its
+    own -- for a script confirming a local copy is still the artifact, or
+    demonstrating that verification is live rather than vacuous."""
+    name = _check_object_path_allowed(name, allow_test_split)
+    local_path = str(local_path)
+    if not os.path.isfile(local_path):
+        raise FileNotFoundError(f"nothing to verify: {local_path} is not a file")
+    return _compare_checksum(bucket.blob(name), name, crc32c_of_file(local_path),
+                             action="the object at", local_label="local file")
+
+
 # ---- Transport ----
 
 def object_exists(name, *, bucket, allow_test_split=False):
@@ -390,13 +624,21 @@ def object_exists(name, *, bucket, allow_test_split=False):
     return bool(bucket.blob(name).exists())
 
 
-def upload_file(local_path, name, *, bucket, allow_test_split=False):
-    """Uploads a local file to an object path. Returns the object path."""
+def upload_file(local_path, name, *, bucket, allow_test_split=False, verify_content=True):
+    """Uploads a local file to an object path. Returns the object path.
+
+    `verify_content` (on by default) compares the object's own `crc32c`
+    against the local file's once the upload returns, and deletes the
+    object if they disagree rather than leaving a known-wrong artifact in
+    the bucket for the next run to skip past. It costs one more read of
+    the local file, which is disk against a transfer that is network."""
     name = _check_object_path_allowed(name, allow_test_split)
     local_path = str(local_path)
     if not os.path.isfile(local_path):
         raise FileNotFoundError(f"nothing to upload: {local_path} is not a file")
     bucket.blob(name).upload_from_filename(local_path)
+    if verify_content:
+        _verify_uploaded(bucket, name, crc32c_of_file(local_path))
     return name
 
 
@@ -629,7 +871,8 @@ def _delete_parts(bucket, name, allow_test_split):
 
 
 def upload_file_chunked(local_path, name, *, bucket, allow_test_split=False,
-                        chunk_size=CHUNK_SIZE_DEFAULT, verify_digests=False):
+                        chunk_size=CHUNK_SIZE_DEFAULT, verify_digests=False,
+                        verify_content=True):
     """Uploads a local file in chunks, resuming where a previous run died.
     Returns the object path.
 
@@ -654,11 +897,12 @@ def upload_file_chunked(local_path, name, *, bucket, allow_test_split=False,
     of Stage 2B's transport that nothing verifies. Composition needs only
     the same four blob operations already in use, plus `compose`.
 
-    Two trade-offs come with that, stated rather than discovered later:
-    a composed object carries a CRC32C but no MD5, so a consumer that
-    verifies MD5 on download sees something different from what
-    `upload_file` produces; and the parts are real objects in the bucket
-    until the upload finishes.
+    One trade-off comes with that, stated rather than discovered later:
+    the parts are real objects in the bucket until the upload finishes.
+    A composed object also carries no MD5, which is why the content check
+    is on `crc32c` -- GCS records that one for composite and
+    single-request objects alike, so both routes leave a downloader the
+    same thing to verify against.
 
     ## What is recorded, and when
 
@@ -677,9 +921,18 @@ def upload_file_chunked(local_path, name, *, bucket, allow_test_split=False,
     an in-place edit that preserved size and mtime; it costs a full read
     of the file.
 
-    Order at the end is compose, then delete the parts, then remove the
-    checkpoint, so a death at any point leaves state a re-run can
-    reconcile rather than state it must trust.
+    Order at the end is compose, verify, then delete the parts, then
+    remove the checkpoint, so a death at any point leaves state a re-run
+    can reconcile rather than state it must trust. `verify_content` (on
+    by default, and distinct from `verify_digests` above -- that one
+    re-reads local chunks when deciding what a checkpoint may still
+    claim, this one checks the finished object) compares the composed
+    object's `crc32c` against the whole local file's. It is the only
+    check here that can see parts composed in the wrong order: every one
+    of them exists, every one is the right length, and the object is the
+    right size. A failure deletes the composed object and leaves the
+    parts and the checkpoint in place, since they are the state a retry
+    would want.
 
     A file that fits in one chunk is uploaded directly by `upload_file` --
     there is nothing to resume inside a single request -- and still clears
@@ -711,7 +964,8 @@ def upload_file_chunked(local_path, name, *, bucket, allow_test_split=False,
 
     checkpoint = checkpoint_path(local_path)
     if n_chunks <= 1:
-        upload_file(local_path, name, bucket=bucket, allow_test_split=allow_test_split)
+        upload_file(local_path, name, bucket=bucket, allow_test_split=allow_test_split,
+                    verify_content=verify_content)
         _delete_parts(bucket, name, allow_test_split)
         _remove_checkpoint(checkpoint)
         return name
@@ -737,24 +991,46 @@ def upload_file_chunked(local_path, name, *, bucket, allow_test_split=False,
                 name, local_path, identity, chunk_size, n_chunks, confirmed))
 
     _compose_parts(bucket, name, [part_name(name, i) for i in range(n_chunks)])
+    if verify_content:
+        _verify_uploaded(bucket, name, crc32c_of_file(local_path))
     _delete_parts(bucket, name, allow_test_split)
     _remove_checkpoint(checkpoint)
     return name
 
 
-def download_file(name, local_path, *, bucket, allow_test_split=False):
+def download_file(name, local_path, *, bucket, allow_test_split=False, verify_content=True):
     """Downloads an object to a local path, creating the parent directory.
 
     The download goes to a `.part` sidecar and is renamed into place only
     once it completes, so a session that dies mid-transfer leaves no
     truncated file that the next run would mistake for a finished
-    artifact. Returns the local path."""
+    artifact. Returns the local path.
+
+    `verify_content` (on by default) checks the sidecar against the
+    object's own `crc32c` BEFORE the rename, so a transfer whose bytes
+    are wrong never reaches the destination path -- the `.part`
+    discipline covers a transfer that stopped, and this covers one that
+    finished with the wrong contents. The sidecar is removed on failure
+    too: nothing that failed verification is left lying next to the
+    destination to be renamed by hand. An existing good file at
+    `local_path` is untouched by a failed download."""
     name = _check_object_path_allowed(name, allow_test_split)
     local_path = str(local_path)
     parent = os.path.dirname(os.path.abspath(local_path))
     os.makedirs(parent, exist_ok=True)
     partial = local_path + ".part"
-    bucket.blob(name).download_to_filename(partial)
+    blob = bucket.blob(name)
+    blob.download_to_filename(partial)
+    if verify_content:
+        try:
+            _compare_checksum(blob, name, crc32c_of_file(partial),
+                              action="the download of", local_label="downloaded file")
+        except (ChecksumMismatchError, ChecksumMissingError):
+            try:
+                os.remove(partial)
+            except OSError:
+                pass
+            raise
     os.replace(partial, local_path)
     return local_path
 
@@ -867,7 +1143,8 @@ class StepResult(NamedTuple):
 
 
 def ensure_artifact(name, local_path, *, produce, bucket, allow_test_split=False,
-                    force=False, chunked=False, chunk_size=CHUNK_SIZE_DEFAULT):
+                    force=False, chunked=False, chunk_size=CHUNK_SIZE_DEFAULT,
+                    verify_content=True):
     """Skip if already done, else compute and upload.
 
         r = stage2b_gcs.ensure_artifact(path, local, produce=build_it, bucket=bucket)
@@ -887,7 +1164,13 @@ def ensure_artifact(name, local_path, *, produce, bucket, allow_test_split=False
     starts with an empty disk, so there is nothing stale to trust -- but
     it does mean reusing one `local_path` across two different objects
     gives the second one the first one's file. Give each artifact its own
-    local path.
+    local path. `verify_object` is the call for checking a local file
+    that was never transferred by this function.
+
+    `verify_content` (on by default) reaches every transfer this makes:
+    the upload on either route, and the download taken when a previous
+    session's object is already in the bucket. It does not reach the
+    trusted-existing-local-file branch above, which transfers nothing.
 
     `force=True` recomputes and overwrites an existing object -- for the
     case where the artifact is known stale, not as a routine flag.
@@ -907,7 +1190,8 @@ def ensure_artifact(name, local_path, *, produce, bucket, allow_test_split=False
     if not force and object_exists(name, bucket=bucket, allow_test_split=allow_test_split):
         downloaded = False
         if not os.path.isfile(local_path):
-            download_file(name, local_path, bucket=bucket, allow_test_split=allow_test_split)
+            download_file(name, local_path, bucket=bucket, allow_test_split=allow_test_split,
+                          verify_content=verify_content)
             downloaded = True
         return StepResult(object_path=name, local_path=local_path, skipped=True,
                           produced=False, uploaded=False, downloaded=downloaded,
@@ -923,9 +1207,11 @@ def ensure_artifact(name, local_path, *, produce, bucket, allow_test_split=False
             f"itself as complete -- otherwise the next run would skip it.")
     if chunked:
         upload_file_chunked(local_path, name, bucket=bucket,
-                            allow_test_split=allow_test_split, chunk_size=chunk_size)
+                            allow_test_split=allow_test_split, chunk_size=chunk_size,
+                            verify_content=verify_content)
     else:
-        upload_file(local_path, name, bucket=bucket, allow_test_split=allow_test_split)
+        upload_file(local_path, name, bucket=bucket, allow_test_split=allow_test_split,
+                    verify_content=verify_content)
     return StepResult(object_path=name, local_path=local_path, skipped=False,
                       produced=True, uploaded=True, downloaded=False,
                       size_bytes=os.path.getsize(local_path))

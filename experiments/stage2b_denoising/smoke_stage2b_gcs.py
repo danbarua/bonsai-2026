@@ -19,10 +19,17 @@ segment that no real artifact uses:
    download, byte-compare, list.
 3. Round-trips a probe object on the test side, which requires
    `allow_test_split=True` -- the same opt-in stage 4 uses.
-4. Confirms the two delete refusals actually refuse (a training-side
+4. Runs a chunked upload, kills it mid-transfer, and resumes it, so the
+   real `compose` and the on-disk checkpoint are both exercised.
+5. Checks content verification against the resulting COMPOSITE object,
+   and reports what the service recorded for it. This is the one thing
+   the unit tests cannot settle: `stage2b_gcs` verifies on `crc32c`
+   because GCS populates it for composed objects where `md5_hash` is
+   absent, and only the real service can confirm that.
+6. Confirms the two delete refusals actually refuse (a training-side
    prefix without `force_non_test_prefix`, and a prefix outside
    `stage2b/` even when forced).
-5. Deletes both probes and confirms they are gone. `--keep` skips this.
+7. Deletes the probes and confirms they are gone. `--keep` skips this.
 
 Exits non-zero on the first failure.
 """
@@ -156,7 +163,66 @@ def _chunked_resume(bucket, workdir):
     _check(got == payload,
            f"composed object is byte-identical to the local file ({len(payload)} bytes)")
     _check(not os.path.exists(checkpoint), "checkpoint cleaned up after success")
-    return name
+    return name, local
+
+
+def _composite_digest(bucket, workdir, name, local):
+    """Whether a composite object really carries the digest the whole
+    verification path is built on.
+
+    This is the one question no stand-in bucket can answer. GCS does not
+    populate `md5_hash` for a composed object; it is documented to
+    populate `crc32c` for every object including composites, and
+    `stage2b_gcs` relies on that to give a downloader one field to check
+    whatever route produced what it is reading. A fake asserts that by
+    construction. Only the real service settles it.
+
+    The digest is reported, not merely asserted (CLAUDE.md principle 20):
+    what the service returned for a composed object is most of this
+    check's value, and a bare PASS would not record it.
+    """
+    blob = bucket.blob(name)
+    blob.reload()
+    _say(f"backend:   {gcs.checksum_backend()}")
+    _say(f"crc32c:    {blob.crc32c!r} (composite object, {blob.size} bytes)")
+    _say(f"md5_hash:  {blob.md5_hash!r}")
+
+    _check(blob.crc32c is not None,
+           f"the composed object carries a {gcs.CHECKSUM_FIELD}")
+    _check(blob.crc32c == gcs.crc32c_of_file(local),
+           "the service's checksum for the composed object equals the local file's")
+
+    if blob.md5_hash is None:
+        _say("ok: no md5_hash on the composite, as expected -- this is why the check "
+             "is on crc32c")
+    else:
+        _say(f"NOTE: this composite DOES carry an md5_hash ({blob.md5_hash!r}). Harmless, "
+             f"but it contradicts the reasoning in stage2b_gcs's module docstring and "
+             f"should be corrected there.")
+
+    # Verification has to be able to FAIL on a real object, or passing
+    # proves nothing about it.
+    wrong = os.path.join(workdir, "not_the_artifact.bin")
+    with open(local, "rb") as handle:
+        payload = bytearray(handle.read())
+    payload[len(payload) // 2] ^= 0xFF
+    with open(wrong, "wb") as handle:
+        handle.write(bytes(payload))
+
+    try:
+        gcs.verify_object(name, wrong, bucket=bucket)
+    except gcs.ChecksumMismatchError as exc:
+        _say("ok: a one-bit-different local file is refused against the real object")
+        _say(f"    {exc}")
+    else:
+        print("FAIL: verification passed a file that is NOT the object's content",
+              flush=True)
+        raise SystemExit(1)
+
+    # And the download path refuses to land it.
+    target = os.path.join(workdir, "verified_download.bin")
+    gcs.download_file(name, target, bucket=bucket)
+    _check(os.path.isfile(target), "a verified download of the composite landed")
 
 
 def main():
@@ -184,7 +250,10 @@ def main():
                                              split="test", allow_test_split=True)
 
         print("\nchunked resumable upload (real compose, resumed mid-transfer)")
-        chunked_name = _chunked_resume(bucket, workdir)
+        chunked_name, chunked_local = _chunked_resume(bucket, workdir)
+
+        print("\ncontent verification on a real composite object")
+        _composite_digest(bucket, workdir, chunked_name, chunked_local)
 
         print("\ndelete refusals")
         _check_refusals(bucket)
