@@ -732,6 +732,92 @@ def test_one_graph_wins_reports_every_graph_and_every_opponent():
         assert set(opponents) == set(stats.EVOLVED_GRAPHS) - {graph}
 
 
+# ---- the alpha comparison: strict `<` in BOTH families ----
+#
+# DESIGN.md words Family 1's threshold explicitly ("Holm-adjusted
+# p < 0.05") and leaves Family 2's unworded ("after Family-2 Holm
+# correction"). The module applies the Family-1 rule to both. The only
+# input that can tell strict `<` apart from the step-down rule's `<=` is
+# an adjusted p landing exactly on alpha, so that is what these tests
+# construct -- by running the real pipeline and then overwriting one
+# adjusted p, since no synthetic MSE fixture lands a t-test tail on
+# 0.05 exactly. `holm_rejected` is left True in each case, which is what
+# the unmodified `stage2a_stats.holm_bonferroni` returns at `p == alpha`;
+# the assertions therefore pin the module's OWN comparison, not the
+# imported function's.
+
+_ALPHA = 0.05
+_JUST_BELOW_ALPHA = np.nextafter(_ALPHA, 0.0)
+
+
+def test_family1_qualification_boundary_is_strict_at_exactly_alpha():
+    """Family 1: an adjusted p exactly equal to alpha does NOT qualify,
+    and the next representable double below alpha does."""
+    mse, y = _graded(order=("lattice", "T", "rewired", "curr_random"))
+    _primary, fam1, fam2, _v = _run_all(mse, y, alpha=_ALPHA)
+
+    # sanity: lattice is favorable, so only the p comparison decides
+    assert fam1["per_test"]["lattice"]["favorable"] is True
+
+    fam1["holm_rejected"]["lattice"] = True          # what `<=` would say
+    for adj_p, expected in ((_ALPHA, False), (_JUST_BELOW_ALPHA, True)):
+        fam1["holm_adjusted_p"]["lattice"] = adj_p
+        verdict = stats.one_graph_wins(_primary, fam1, fam2, alpha=_ALPHA)
+        qual = verdict["qualification"]["lattice"]
+        assert qual["holm_significant"] is expected, f"adjusted p = {adj_p!r}"
+        assert qual["qualifies"] is expected
+        # the imported step-down decision is recorded, unchanged, alongside
+        assert qual["holm_rejected"] is True
+
+
+def test_family2_pairwise_boundary_is_strict_at_exactly_alpha():
+    """Family 2: same boundary, same direction. `pairwise_outcome` reads
+    alpha from the family dict, so both orientations of the pair agree."""
+    mse, _y = _graded()
+    fam2 = stats.family2_pairwise(mse, alpha=_ALPHA, run_sign_flip=False)
+    key = "T_vs_lattice"
+    fam2["holm_rejected"][key] = True                # what `<=` would say
+
+    for adj_p, expected in ((_ALPHA, False), (_JUST_BELOW_ALPHA, True)):
+        fam2["holm_adjusted_p"][key] = adj_p
+        out = stats.pairwise_outcome(fam2, "T", "lattice")
+        assert out["holm_significant"] is expected, f"adjusted p = {adj_p!r}"
+        assert out["holm_rejected"] is True
+        assert out["alpha"] == _ALPHA
+        # reading the pair from the other side must not change significance
+        mirror = stats.pairwise_outcome(fam2, "lattice", "T")
+        assert mirror["holm_significant"] is expected
+
+
+def test_beats_all_uses_the_strict_comparison_not_the_step_down_flag():
+    """The boundary propagates into `beats_all`, and so into
+    `unique_winner`: T sweeps its three pairs, but one of them adjusts to
+    exactly alpha, so it does not beat all three."""
+    mse, y = _graded(order=("T", "lattice", "rewired", "curr_random"))
+    primary, fam1, fam2, verdict = _run_all(mse, y, alpha=_ALPHA)
+    assert verdict["unique_winner"] == "T"           # before the boundary edit
+
+    key = "T_vs_curr_random"
+    fam2["holm_adjusted_p"][key] = _ALPHA
+    fam2["holm_rejected"][key] = True
+    edged = stats.one_graph_wins(primary, fam1, fam2, alpha=_ALPHA)
+    assert edged["beats_others"]["T"]["beats_all"] is False
+    assert edged["unique_winner"] is None
+    # T still qualifies -- only the Family-2 comparison moved
+    assert edged["qualification"]["T"]["qualifies"] is True
+
+
+def test_alpha_comparison_note_is_carried_in_the_verdict():
+    """A reporting caller must see why the threshold is strict without
+    reading the source."""
+    mse, y = _graded()
+    _p, _f1, _f2, verdict = _run_all(mse, y)
+    note = verdict["alpha_comparison"]
+    assert note == stats.ALPHA_COMPARISON_NOTE
+    assert "strict" in note.lower()
+    assert "holm_rejected" in note
+
+
 # ---- identity baselines: the hierarchical gate ----
 
 def _with_identity(mse, identity_mse):

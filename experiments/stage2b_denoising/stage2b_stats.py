@@ -73,6 +73,27 @@ PRIMARY_GRAPH = "T"
 EVOLVED_GRAPHS = ("T", "lattice", "rewired", "curr_random")
 CONTROL_GRAPHS = ("lattice", "rewired", "curr_random")
 
+# How this module compares an adjusted p against alpha, in BOTH families.
+#
+# DESIGN.md words Family 1's qualification as "Family-1 Holm-adjusted
+# p < 0.05" -- strict -- and words Family 2 only as "after Family-2 Holm
+# correction", without naming the comparison. Read literally those two
+# can differ, at the single measure-zero point where an adjusted p lands
+# exactly on alpha. This module applies DESIGN.md's own explicit Family-1
+# rule to both families: strict `<`, the standard convention for
+# "rejects at level alpha". That resolves a wording inconsistency in the
+# locked design by using one of its own stated rules; it is not a change
+# to the design and does not alter any comparison whose adjusted p is not
+# exactly equal to alpha.
+ALPHA_COMPARISON_NOTE = (
+    "Both families qualify on strict `Holm-adjusted p < alpha`. "
+    "DESIGN.md states this explicitly for Family 1 and leaves Family 2's "
+    "comparison unworded; the Family-1 rule is applied to both. The "
+    "imported `holm_bonferroni`'s own step-down decision is recorded "
+    "alongside as `holm_rejected` and is unmodified -- it differs only "
+    "for an adjusted p exactly equal to alpha."
+)
+
 SIGN_EXCHANGEABILITY_CAVEAT = (
     "Sign-exchangeability assumption: exact sign-flip validity requires "
     "each d_i to be exchangeable with -d_i under H0, i.e. a symmetry "
@@ -513,7 +534,21 @@ def pairwise_outcome(family2, graph, other):
 
     Reading the stored mean without this negation inverts the direction
     for exactly half of the comparisons, and does so silently -- it is
-    the specific error this helper exists to make impossible."""
+    the specific error this helper exists to make impossible.
+
+    Two significance fields, deliberately both present:
+
+      - `holm_significant` is this module's own alpha comparison,
+        `Holm-adjusted p < alpha` (strict), read from `family2["alpha"]`.
+        This is the field the "one graph wins" rule consumes.
+      - `holm_rejected` is the imported `holm_bonferroni`'s own step-down
+        decision, recorded unchanged. `holm_bonferroni` is Stage 2A's and
+        is not modified here.
+
+    The two are equivalent except for an adjusted p exactly equal to
+    alpha, where the step-down rule's `<=` rejects and the strict
+    comparison does not. `ALPHA_COMPARISON_NOTE` records why strict `<`
+    is the one used."""
     key = pair_key(graph, other)
     if key in family2["per_test"]:
         mean_diff = family2["per_test"][key]["t_test"]["mean"]
@@ -524,6 +559,7 @@ def pairwise_outcome(family2, graph, other):
             raise KeyError(f"no Family-2 pair for {graph!r} and {other!r}")
         mean_diff = -family2["per_test"][key]["t_test"]["mean"]
         graph_is_first = False
+    alpha = family2["alpha"]
     return {
         "pair_key": key,
         "graph": graph,
@@ -532,7 +568,9 @@ def pairwise_outcome(family2, graph, other):
         "mean_diff": float(mean_diff),   # MSE(graph) - MSE(other), always
         "favorable": bool(mean_diff < 0),
         "holm_adjusted_p": family2["holm_adjusted_p"][key],
+        "holm_significant": bool(family2["holm_adjusted_p"][key] < alpha),
         "holm_rejected": bool(family2["holm_rejected"][key]),
+        "alpha": float(alpha),
     }
 
 
@@ -558,11 +596,15 @@ def one_graph_wins(primary, family1, family2, alpha=ALPHA):
     qualification and unique-winner status are never decided by the same
     correction.
 
-    `alpha` is applied to Family 1 as DESIGN.md words it, "Holm-adjusted
-    p < 0.05" (strict inequality on the adjusted value). The imported
-    `holm_bonferroni`'s own step-down decision is recorded alongside as
-    `holm_rejected`; the two differ only for an adjusted p exactly equal
-    to alpha."""
+    `alpha` is compared strictly -- `Holm-adjusted p < alpha` -- in BOTH
+    families, under the same field name `holm_significant` on each side.
+    DESIGN.md words that rule explicitly for Family 1 and leaves Family
+    2's comparison unworded; applying the Family-1 rule to both resolves
+    the wording inconsistency without changing the locked design. See
+    `ALPHA_COMPARISON_NOTE`. The imported `holm_bonferroni`'s own
+    step-down decision is recorded alongside as `holm_rejected` and is
+    unmodified; the two differ only for an adjusted p exactly equal to
+    alpha."""
     qualification = {}
 
     qualification[PRIMARY_GRAPH] = {
@@ -575,13 +617,15 @@ def one_graph_wins(primary, family1, family2, alpha=ALPHA):
     for graph in CONTROL_GRAPHS:
         favorable = family1["per_test"][graph]["favorable"]
         adj_p = family1["holm_adjusted_p"][graph]
+        holm_significant = bool(adj_p < alpha)
         qualification[graph] = {
             "rule": "favorable direction AND Family-1 Holm-adjusted p < alpha",
             "rule_source": "Family 1 (vs. pre_evolution, Holm across three)",
             "favorable": bool(favorable),
             "holm_adjusted_p": adj_p,
+            "holm_significant": holm_significant,
             "holm_rejected": bool(family1["holm_rejected"][graph]),
-            "qualifies": bool(favorable and adj_p < alpha),
+            "qualifies": bool(favorable and holm_significant),
         }
 
     beats_others = {}
@@ -590,7 +634,7 @@ def one_graph_wins(primary, family1, family2, alpha=ALPHA):
                     for other in EVOLVED_GRAPHS if other != graph}
         beats_others[graph] = {
             "per_opponent": outcomes,
-            "beats_all": bool(all(o["favorable"] and o["holm_rejected"]
+            "beats_all": bool(all(o["favorable"] and o["holm_significant"]
                                   for o in outcomes.values())),
         }
 
@@ -607,6 +651,7 @@ def one_graph_wins(primary, family1, family2, alpha=ALPHA):
         "beats_others": beats_others,
         "unique_winner": winners[0] if winners else None,
         "alpha": float(alpha),
+        "alpha_comparison": ALPHA_COMPARISON_NOTE,
         "rule": ("T qualifies iff the primary bootstrap interval lies entirely "
                  "below zero; a control graph qualifies iff its direction is "
                  "favorable and its Family-1 Holm-adjusted p < alpha; a graph is "
