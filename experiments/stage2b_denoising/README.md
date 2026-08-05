@@ -141,6 +141,59 @@ Whether the real service populates `crc32c` for a composed object is the
 one part of this no unit test can settle. `smoke_stage2b_gcs.py` asks it
 directly, against the real bucket, and reports what came back.
 
+## Measured before the ladder: the centering guard will fire
+
+`assert_scaler_centered` halts when `||mean(X_scaled)|| > 1e-10`, and its
+own docstring flags the tolerance as an open question. Measured on real
+corrupted-encoded-evolved features (worst CV fold, per condition):
+
+| condition | n=300 | n=1,000 | fitted exponent |
+|---|---|---|---|
+| pre_evolution | 4.34e-14 | 8.00e-14 | 0.51 |
+| lattice | 5.18e-13 | 8.60e-13 | 0.42 |
+| T | 5.52e-13 | 1.17e-12 | 0.62 |
+| rewired | 8.80e-12 | 1.94e-11 | 0.66 |
+| curr_random | 3.65e-11 | 8.07e-11 | 0.66 |
+
+Projected: `curr_random` crosses 1e-10 at **ladder stage 2**
+(n=5,000 → 2.3e-10) and `rewired` at **stage 3** (n=54,000 → 2.6e-10),
+with `curr_random` reaching 1.1e-9 there.
+
+The ordering is the synchronization mechanism — Stage 2A measured order
+parameters of 0.997 (`rewired`) and 0.991 (`curr_random`), so those
+graphs drive node phases nearly image-independent and their cos/sin
+columns barely vary. But the *growth* is not a worsening pathology: an
+exponent near 0.5 is ordinary floating-point accumulation, the mean of n
+values carrying ~sqrt(n) rounding, amplified by division by a small
+column std. A fixed absolute tolerance on a sqrt(n)-growing quantity
+fires eventually for any features at all.
+
+**What the guard protects, and how much room there is.** The tolerance
+is not arbitrary: sklearn's `Ridge(fit_intercept=True)` centres `X`
+internally while the JAX path centres only `Y`, so the two agree to
+DESIGN.md's 1e-8 equivalence gate *because* `||mean(X)||` is negligible.
+Measured at Stage 2B's real shape (n=1,000, p=1,008, t=505), injecting a
+mean offset and comparing both paths:
+
+| `\|\|mean(X)\|\|` | JAX-vs-sklearn prediction difference |
+|---|---|
+| 3.2e-9 | 4.9e-14 |
+| 3.2e-7 | 1.4e-13 |
+| 3.2e-5 | 1.3e-09 |
+| 3.2e-4 | 1.3e-07 — breaches the 1e-8 gate |
+
+So the equivalence gate survives until roughly 1e-4, five orders beyond
+the worst value the ladder is projected to produce. The guard as set
+will halt on a number that causes no harm to the thing it exists to
+protect.
+
+This is recorded, not acted on. `stage2b_ridge.py` states plainly that
+the tolerance "is a locked-design question, not an implementation
+choice", so changing it is a disclosed amendment to `DESIGN.md` rather
+than an edit. The measurement exists so that decision is made from
+numbers before the ladder runs, instead of from a halt in the middle of
+stage 2.
+
 ## Guards you must not route around
 
 Three of these exist because the locked design's integrity depends on
