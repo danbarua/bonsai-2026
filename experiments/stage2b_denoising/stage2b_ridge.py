@@ -18,7 +18,12 @@ ever changed.
 `assert_scaler_centered` is the guard that makes that shortcut's absence
 meaningful: a broken scaler cannot quietly invent intercept structure,
 because `||mean(X_train_scaled)||` is checked against 1e-10 before any
-solve.
+solve. `scaler_centering_margin` returns that same statistic as a number,
+alongside the smallest raw per-column standard deviation and its column
+index, so a caller can record how far a fit sat from the guard and how
+close its features came to the near-constant regime that drives the
+guard's value. Diagnostic only: it never raises, drops nothing, and no
+fitting decision reads it.
 
 **sklearn (`Ridge(solver="svd")`) is the verification oracle -- not in
 the production path, never deleted.** `ridge_equivalence_check` runs
@@ -105,6 +110,83 @@ def assert_scaler_centered(X_scaled, tol=MEAN_X_TOL):
         f"{worst} has mean {mean_vec[worst]:.6e} "
         f"(a near-constant column is a likely cause -- see this function's docstring)")
     return norm
+
+
+def scaler_centering_margin(X_scaled, X_raw=None, tol=MEAN_X_TOL):
+    """`assert_scaler_centered`'s statistic as a returned number, plus the
+    raw column-variance context that explains where it comes from.
+
+    Same object as the guard, different interface: `mean_x_norm` here is
+    `||mean(X_scaled)||` computed exactly as `assert_scaler_centered`
+    computes it, so a passing run records how far it actually sat from
+    `MEAN_X_TOL` rather than only that it was somewhere below it. This
+    function never raises; the halt rule stays entirely in
+    `assert_scaler_centered`.
+
+    `min_col_std` is the smallest per-column standard deviation of the
+    UNSCALED features (`ddof=0`, matching `StandardScaler`'s own
+    `sqrt(var_)`), with the column index alongside it. That is the
+    quantity the guard's near-constant-column tension is about: a column
+    whose raw std sits in roughly `1e-12 < std < 1e-5` is divided by its
+    tiny scale, amplifying the float64 centering residual past the
+    tolerance. Recording it every call turns "how close is this condition
+    to the regime that trips the guard" into a measured per-fold number.
+    A Stage 2B-relevant reference point, measured on 500 real KMNIST
+    training images across the six ridge conditions: `min_col_std` runs
+    from 3.40e-01 (raw pixels) down to 6.70e-05 (`curr_random`),
+    ordered by how strongly the graph synchronizes, with the guard
+    passing throughout.
+
+    Near-constant columns are reported, never dropped -- they carry
+    small-but-nonzero variance that Stage 2A's findings give reason to
+    treat as signal, unlike the encoding pipeline's reference-node
+    columns, which are exactly constant by construction.
+
+    Parameters
+    ----------
+    X_scaled : (n, p) standardized features -- the matrix the guard sees.
+    X_raw    : (n, p) the same features BEFORE standardization. Optional;
+               when omitted, `min_col_std` is nan and `min_col_std_col`
+               is -1, since raw column spread cannot be recovered from
+               the standardized matrix.
+    tol      : the tolerance to report the margin against; the guard's
+               own `MEAN_X_TOL` by default.
+
+    Returns a dict. `within_tol` is descriptive, not a gate -- the gate
+    is `assert_scaler_centered`.
+
+    Scope limit: this reports on whatever it is called with, but a
+    caller that computes it around `svd_ridge_fit` reaches it only on the
+    path where the guard passes -- an assertion there propagates and
+    leaves no return value, so the diagnosable record in that case is the
+    assertion message (which names `||mean(X_scaled)||` and the
+    worst-mean column) and not `min_col_std`."""
+    X_scaled = np.asarray(X_scaled, dtype=np.float64)
+    mean_vec = X_scaled.mean(axis=0)
+    norm = float(np.linalg.norm(mean_vec))
+    worst = int(np.argmax(np.abs(mean_vec)))
+
+    if X_raw is None:
+        min_col_std, min_col_std_col = float("nan"), -1
+    else:
+        X_raw = np.asarray(X_raw, dtype=np.float64)
+        if X_raw.shape != X_scaled.shape:
+            raise ValueError(f"X_raw shape {X_raw.shape} does not match "
+                             f"X_scaled shape {X_scaled.shape}")
+        col_std = X_raw.std(axis=0, ddof=0)
+        min_col_std_col = int(np.argmin(col_std))
+        min_col_std = float(col_std[min_col_std_col])
+
+    return {
+        "mean_x_norm": norm,
+        "tol": float(tol),
+        "margin_ratio": norm / float(tol),
+        "within_tol": bool(norm < tol),
+        "worst_mean_col": worst,
+        "worst_mean_value": float(mean_vec[worst]),
+        "min_col_std": min_col_std,
+        "min_col_std_col": min_col_std_col,
+    }
 
 
 def svd_ridge_fit(X_train_scaled, Y_train, alphas=ALPHA_GRID, check_centered=True):

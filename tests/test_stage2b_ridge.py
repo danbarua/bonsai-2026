@@ -121,6 +121,130 @@ def test_centering_guard_message_names_the_worst_column():
         ridge.assert_scaler_centered(X_scaled)
 
 
+# ---- the centering margin: the guard's statistic, returned not asserted ----
+
+def test_margin_norm_is_bit_identical_to_the_guards_own_statistic():
+    """The margin function must be the same object as the guard, not a
+    parallel computation of something similar. Exact equality, not
+    approximate: both take `norm(mean(axis=0))` of the same float64
+    array, so any difference at all would mean they compute different
+    things."""
+    X, _, _ = _synthetic_regression()
+    X_scaled = StandardScaler().fit_transform(X)
+    margin = ridge.scaler_centering_margin(X_scaled)
+    assert margin["mean_x_norm"] == ridge.assert_scaler_centered(X_scaled)
+
+
+def test_margin_reports_a_passing_matrix_without_raising():
+    X, _, _ = _synthetic_regression()
+    X_scaled = StandardScaler().fit_transform(X)
+    margin = ridge.scaler_centering_margin(X_scaled, X)
+    assert margin["within_tol"] is True
+    assert 0.0 <= margin["mean_x_norm"] < ridge.MEAN_X_TOL
+    assert margin["margin_ratio"] == margin["mean_x_norm"] / ridge.MEAN_X_TOL
+    assert 0 <= margin["min_col_std_col"] < X.shape[1]
+
+
+def test_margin_reports_a_miscentered_matrix_instead_of_raising():
+    """The same input that makes `assert_scaler_centered` raise must make
+    the margin function return a number -- that difference is the whole
+    point of having both."""
+    X, _, _ = _synthetic_regression()
+    with pytest.raises(AssertionError, match="not centered"):
+        ridge.assert_scaler_centered(X + 5.0)
+    margin = ridge.scaler_centering_margin(X + 5.0, X)
+    assert margin["within_tol"] is False
+    assert margin["mean_x_norm"] > ridge.MEAN_X_TOL
+    assert margin["margin_ratio"] > 1.0
+
+
+@pytest.mark.parametrize("col_std,expect_within_tol", [
+    (1e-2, True),
+    (1e-9, False),
+])
+def test_margin_names_the_near_constant_column_in_both_regimes(col_std, expect_within_tol):
+    """Same construction as the guard-characterization test above, at the
+    column std that passes and the one that fires. `min_col_std_col`
+    identifies the planted column either way, which is what makes the
+    margin informative where the pass/fail boolean is not: the number
+    moves continuously across a boundary the guard only reports as
+    crossed or not."""
+    rng = np.random.default_rng(30)
+    n, p = 5000, 200
+    X = rng.normal(size=(n, p))
+    X[:, 3] = 1.0 + rng.normal(size=n) * col_std
+    X_scaled = StandardScaler().fit_transform(X)
+    margin = ridge.scaler_centering_margin(X_scaled, X)
+    assert margin["min_col_std_col"] == 3
+    # loose order-of-magnitude bound: an exact pin would be brittle
+    # against this seed's particular realization
+    assert 0.1 * col_std < margin["min_col_std"] < 10.0 * col_std
+    assert margin["within_tol"] is expect_within_tol
+    if not expect_within_tol:
+        assert margin["worst_mean_col"] == 3
+
+
+def test_margin_min_col_std_matches_the_scalers_own_variance():
+    """Principle 16: this recomputes a statistic `StandardScaler` already
+    measured, so it must agree with the scaler's own `sqrt(var_)` -- the
+    raw std -- and NOT with `scale_`, which substitutes 1.0 for columns
+    sklearn declares constant and would therefore hide exactly the
+    lowest-variance column this diagnostic exists to name.
+
+    Column 11 is exactly constant, which is the case that separates the
+    two: sklearn rescues it to `scale_ = 1.0` while its true std is 0.
+    Column 12 is near-constant at std 1e-9, which sklearn does NOT rescue
+    -- the regime the centering guard's tension is about."""
+    rng = np.random.default_rng(33)
+    X = rng.normal(size=(400, 30))
+    X[:, 11] = 1.0
+    X[:, 12] = 1.0 + rng.normal(size=400) * 1e-9
+    scaler = StandardScaler().fit(X)
+    margin = ridge.scaler_centering_margin(scaler.transform(X), X)
+
+    np.testing.assert_allclose(margin["min_col_std"], np.sqrt(scaler.var_).min(),
+                                rtol=1e-12, atol=0)
+    assert margin["min_col_std_col"] == 11
+    assert margin["min_col_std"] == 0.0
+    # scale_ reports ~1 for that same column and so names a different,
+    # higher-variance column as the minimum -- the concrete reason this
+    # diagnostic reads var_ rather than scale_
+    assert scaler.scale_[11] == 1.0
+    assert int(np.argmin(scaler.scale_)) == 12
+    # the near-constant column is NOT rescued: scale_ tracks its tiny std
+    assert scaler.scale_[12] < 1e-8
+
+
+def test_margin_omits_raw_column_std_when_unscaled_features_not_supplied():
+    """Raw column spread cannot be recovered from a standardized matrix,
+    so it is reported as absent rather than as some derived stand-in."""
+    X, _, _ = _synthetic_regression()
+    margin = ridge.scaler_centering_margin(StandardScaler().fit_transform(X))
+    assert np.isnan(margin["min_col_std"])
+    assert margin["min_col_std_col"] == -1
+
+
+def test_margin_rejects_mismatched_raw_and_scaled_shapes():
+    X, _, _ = _synthetic_regression()
+    X_scaled = StandardScaler().fit_transform(X)
+    with pytest.raises(ValueError, match="does not match"):
+        ridge.scaler_centering_margin(X_scaled, X[:, :5])
+
+
+def test_margin_does_not_drop_or_alter_any_column():
+    """The near-constant columns this diagnostic names are explicitly kept
+    -- they carry small-but-nonzero variance. A reported column count that
+    ever differed from the input's would mean feature selection had
+    entered a path specified to have none."""
+    rng = np.random.default_rng(34)
+    X = rng.normal(size=(300, 25))
+    X[:, 7] = 1.0 + rng.normal(size=300) * 1e-9
+    X_scaled = StandardScaler().fit_transform(X)
+    fit = ridge.svd_ridge_fit(X_scaled, rng.uniform(0, 1, size=(300, 4)),
+                              check_centered=False)
+    assert fit["W"].shape[1] == X.shape[1]
+
+
 def test_svd_ridge_fit_raises_on_uncentered_input_by_default():
     X, Y, _ = _synthetic_regression()
     with pytest.raises(AssertionError, match="not centered"):
