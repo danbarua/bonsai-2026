@@ -185,3 +185,34 @@ TEST_FILES := tests/test_stage2a_core.py tests/test_stage2a_stats.py \
 .PHONY: stage2a-test
 stage2a-test:  ## Run the Stage 2A test suite (Tier 2 cases skip cleanly without local cached artifacts)
 	cd $(REPO_ROOT) && uv run pytest $(TEST_FILES) -v
+
+STAGE2B_TEST_FILES := tests/test_stage2b_corruption.py tests/test_stage2b_encoder_gate.py \
+                      tests/test_stage2b_ridge.py tests/test_stage2b_stats.py \
+                      tests/test_stage2b_cnn.py tests/test_stage2b_partition.py \
+                      tests/test_stage2b_gcs.py tests/test_stage2b_gcs_roundtrip.py
+
+.PHONY: stage2b-test
+stage2b-test:  ## Run the Stage 2B test suite (fast only; the Colab round trip is excluded)
+	cd $(REPO_ROOT) && uv run pytest $(STAGE2B_TEST_FILES) -m "not slow" -q
+
+# The round trip is the only Stage 2B test that leaves this machine: it
+# provisions a real Colab CPU runtime, writes an object to GCS from it,
+# and reads that object back here both with credentials and anonymously.
+# It bills while running (seconds, on CPU) and needs the service-account
+# key, so it is `slow`-marked and excluded from every other target.
+# `-s` is deliberate, not a debugging leftover -- the step-by-step
+# evidence is most of what this test is for (CLAUDE.md principle 20).
+BONSAI_GCS_CREDENTIALS ?= $(HOME)/.config/colab-cli/bonsai-colab-storage-key.json
+
+.PHONY: stage2b-test-roundtrip
+stage2b-test-roundtrip:  ## Real Colab+GCS round trip -- provisions a CPU runtime, bills while running
+	cd $(REPO_ROOT) && BONSAI_GCS_CREDENTIALS="$(BONSAI_GCS_CREDENTIALS)" \
+		uv run --group gpu pytest tests/test_stage2b_gcs_roundtrip.py -m slow -s
+
+.PHONY: test
+test:  ## Run the whole default suite (every stage, slow reproduction checks excluded)
+	cd $(REPO_ROOT) && uv run pytest tests/ -m "not slow" -q
+
+.PHONY: help
+help:  ## List every target in this file, grouped by section
+	@awk 'BEGIN {FS = ":.*##"} /^##@/ {printf "\n%s\n", substr($$0, 5)} /^[a-zA-Z0-9_-]+:.*##/ {printf "  %-28s %s\n", $$1, $$2}' $(MAKEFILE_LIST)
