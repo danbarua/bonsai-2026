@@ -35,7 +35,7 @@ dev = [
     "pytest>=9.1.1",
 ]
 gpu = [
-    "mighty-colab>=0.1.23",
+    "mighty-colab>=0.2.1",
     "google-cloud-storage>=2.19.0",
 ]
 
