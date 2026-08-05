@@ -67,6 +67,7 @@ import os
 import shutil
 import subprocess
 import sys
+import textwrap
 import uuid
 import warnings
 from pathlib import Path
@@ -232,6 +233,17 @@ def _require_storage_library():
                     f"enable this test. ({exc.__class__.__name__})")
 
 
+def _evidence(line):
+    """Report one step's evidence.
+
+    Plain `print`, deliberately: under `-s` it streams live, and without
+    `-s` pytest captures it and replays it on failure. Both are useful.
+    What it must never become is a logger that a default-suite run has to
+    configure away -- this test is deselected from that run entirely, so
+    there is nothing to be quiet for."""
+    print(f"[roundtrip] {line}", flush=True)
+
+
 def _run_cli(step, args, timeout, executable):
     """One `mighty-colab` invocation, with an explicit timeout and a
     failure message that names the step."""
@@ -347,8 +359,20 @@ def test_object_written_from_colab_is_readable_from_outside(roundtrip, tmp_path)
     the same bytes back.
 
     Both the object's name and its content are unique to this run, so a
-    stale object cannot satisfy either half."""
+    stale object cannot satisfy either half.
+
+    **Run this with `-s`.** It reports each step's evidence as it goes,
+    and on a rarely-run, explicitly-requested slow test that transcript
+    is the point: a bare green PASS tells you the assertions held, not
+    what actually happened on the wire. Without `-s`, pytest captures the
+    output and shows it only if the test fails -- which is precisely
+    backwards for a check whose whole job is to demonstrate that real
+    infrastructure works. Verbosity costs nothing here; nobody is
+    scrolling past this in a default suite run, because it is deselected
+    from one."""
     ctx = roundtrip
+    _evidence(f"session         : {ctx.session} (CPU runtime)")
+    _evidence(f"object          : {ctx.object_name}")
 
     _run_cli("install google-cloud-storage on the Colab runtime",
              ["install", "google-cloud-storage", "-s", ctx.session],
@@ -373,6 +397,7 @@ def test_object_written_from_colab_is_readable_from_outside(roundtrip, tmp_path)
     assert f"{probe.OK_SENTINEL} {ctx.object_name}" in run.stdout, (
         f"the probe did not report writing {ctx.object_name}. Either it never ran, or it "
         f"never reached its success sentinel.\n{transcript}")
+    _evidence("probe on the VM :\n" + textwrap.indent(run.stdout.strip(), "    | "))
 
     # The assertion this whole test exists for: the object is visible, and
     # correct, from outside the session that wrote it.
@@ -380,11 +405,28 @@ def test_object_written_from_colab_is_readable_from_outside(roundtrip, tmp_path)
         f"{ctx.object_name} was reported written from the Colab session but is not visible "
         f"to this process.\n{transcript}")
 
+    expected = probe.probe_text(ctx.nonce).encode("utf-8")
     readback = tmp_path / "probe_readback.txt"
     gcs.download_file(ctx.object_name, str(readback), bucket=ctx.bucket)
-    assert readback.read_bytes() == probe.probe_text(ctx.nonce).encode("utf-8"), (
+    assert readback.read_bytes() == expected, (
         f"{ctx.object_name} read back from outside the session does not match what the probe "
         f"was asked to write.")
+    _evidence(f"authenticated   : {len(expected)} bytes, exact match, read by this process")
+
+    # The bucket is public-read, and Stage 2A's precedent depends on that
+    # (a Colab driver pulling inputs with no credentials at all). The
+    # authenticated readback above cannot show it: it proves the object
+    # left the session, not that an anonymous consumer can fetch it. A
+    # separate anonymous client is the only thing that distinguishes
+    # "readable from outside this session" from "readable without
+    # credentials", and those are different claims.
+    anon_bucket = gcs.get_bucket(anonymous=True)
+    anon_readback = tmp_path / "probe_readback_anon.txt"
+    gcs.download_file(ctx.object_name, str(anon_readback), bucket=anon_bucket)
+    assert anon_readback.read_bytes() == expected, (
+        f"{ctx.object_name} is readable with credentials but not anonymously -- the bucket's "
+        f"public-read grant is not doing what the Stage 2A precedent assumes.")
+    _evidence(f"anonymous       : {len(expected)} bytes, exact match, no credentials used")
 
 
 # ---- Fast checks on the credential gate itself (no network, no cloud) ----
