@@ -1042,3 +1042,85 @@ def test_train_cnn_rejects_mismatched_input_and_target_shapes():
     with pytest.raises(ValueError, match="shapes differ"):
         cnn.train_cnn(x, y, x, x, mask, init_key=cnn.seed_keys(0)[0],
                       shuffle_key=cnn.seed_keys(0)[1], **_fast(max_epochs=1))
+
+
+# ---- Tier 2: the real class-0 active support, skipped cleanly if absent ----
+#
+# CLAUDE.md principle 16: `build_active_support_mask` has been exercised
+# extensively above, but only ever against SYNTHETIC supports built by
+# `_support()`. Passing `expect_n_active=505` on a synthetic 505-element
+# array does not establish that the REAL class-0 support is 505 elements,
+# nor that the mask this function builds selects the same coordinates
+# Stage 2A's already-running pipeline restricts to. That is caller-side
+# glue between a verified component and a verified constant, and it is
+# exactly the seam principle 16 is about.
+
+_KMNIST_TRAIN_IMAGES = _REPO_ROOT / "datasets" / "kmnist" / "train-images-idx3-ubyte"
+_kmnist_present = _KMNIST_TRAIN_IMAGES.exists()
+
+
+def _real_active_indices():
+    """The real active support, via the loader Stage 2A already uses --
+    imported and called, never reconstructed here (principle 16: a
+    reimplemented helper is a distinct risk from a wrong one)."""
+    sys.path.insert(0, str(_REPO_ROOT / "experiments" / "stage2a_dynamics_classification"))
+    from stage2a_core import load_T
+    active_indices, _W_T, _ink_mask_active, _nodes_T = load_T()
+    return np.asarray(active_indices)
+
+
+@pytest.mark.skipif(not _kmnist_present, reason="datasets/kmnist not present locally")
+def test_real_class0_support_builds_the_expected_mask():
+    """The real support is 505 coordinates AND the mask selects exactly
+    those coordinates -- not merely 505 of them.
+
+    The count assertion alone is insufficient and is the reason this test
+    exists in this shape: a bug that selected a different 505 coordinates
+    (an off-by-one in the flattening, a transposed grid, a sorted-vs-draw
+    order confusion) satisfies `sum(mask) == 505` perfectly while scoring
+    the model on the wrong pixels."""
+    active_indices = _real_active_indices()
+
+    # The locked constant is about the REAL support, so assert it there
+    # rather than only passing it as a synthetic expectation.
+    assert active_indices.size == cnn.N_ACTIVE == 505
+
+    mask = cnn.build_active_support_mask(active_indices, expect_n_active=cnn.N_ACTIVE)
+    assert mask.shape == (SIDE, SIDE)
+
+    selected = np.flatnonzero(np.asarray(mask, dtype=np.float64).reshape(-1))
+    assert selected.size == 505
+    np.testing.assert_array_equal(selected, np.sort(active_indices))
+    # The real support is already sorted, so mask order and index order
+    # coincide directly -- asserted rather than assumed, since a future
+    # unsorted support would make the comparison above silently weaker.
+    np.testing.assert_array_equal(active_indices, np.sort(active_indices))
+
+
+@pytest.mark.skipif(not _kmnist_present, reason="datasets/kmnist not present locally")
+def test_real_mask_restricts_identically_to_stage2a_encode_and_restrict():
+    """Cross-check against an independent, already-trusted consumer of the
+    same `active_indices`.
+
+    The test above compares the mask to the index array it was built from
+    -- the function agreeing with its own input. This one compares it to
+    how Stage 2A's own pipeline restricts a full 784-grid field
+    (`theta_0_784[active_indices]`, the operation `encode_and_restrict`
+    performs and every Stage 2A result already depends on). Masking with
+    this mask and indexing with those indices must select the same
+    coordinates in the same order."""
+    active_indices = _real_active_indices()
+    mask = cnn.build_active_support_mask(active_indices, expect_n_active=cnn.N_ACTIVE)
+
+    rng = np.random.default_rng(0)
+    field_784 = rng.uniform(-np.pi, np.pi, 784)
+
+    # Stage 2A's restriction, as encode_and_restrict performs it.
+    stage2a_restricted = field_784[active_indices]
+
+    # The CNN mask's restriction of the same field.
+    flat_mask = np.asarray(mask, dtype=np.float64).reshape(-1)
+    mask_restricted = field_784[flat_mask.astype(bool)]
+
+    assert mask_restricted.shape == stage2a_restricted.shape == (505,)
+    np.testing.assert_array_equal(mask_restricted, stage2a_restricted)
