@@ -389,6 +389,36 @@ without reading that document's full findings history first.
     script with no target) and observing the specific expected failure,
     exactly as a permutation scheme must be shown to destroy the effect
     it tests for.
+22. **A tolerance on a statistic must scale with the statistic's
+    MEASURED growth law, not sit at a constant the statistic will
+    outgrow.** A threshold is a claim about a quantity's magnitude, and
+    if that quantity grows with n while the threshold does not, the
+    threshold stops meaning what it was set to mean -- it eventually
+    halts on healthy data and, worse, it was never calibrated for the
+    regime it now fires in. The live precedent is `GRAD_NORM_REL` in
+    `experiments/stage2a_dynamics_classification/stage2a_classifier_jax.py`:
+    the L-BFGS convergence threshold is applied as
+    `GRAD_NORM_REL * C * n_train`, LINEAR in n, because the objective is
+    an unweighted sum over samples scaled by C. The anti-precedent is
+    `GRAD_NORM_TOL=1e-6`, the fixed absolute threshold it REPLACED --
+    removed precisely because it did not scale, and measured to be three
+    to eleven orders off across the C grid. Stage 2B's scaler-centering
+    guard is the second instance and a different growth law: sqrt(n),
+    because the quantity is `||mean(X_scaled)||` and the mean of n
+    float64 values carries ~sqrt(n) accumulated rounding. Same principle,
+    different exponent -- which is the point. Do not carry an exponent
+    across problems; derive it from the mechanism and check it against
+    measurement. Two further requirements, both of which this instance
+    had to satisfy: (a) prefer the exponent the MECHANISM implies when it
+    upper-bounds the measured growth (0.5 over the measured 0.405), so
+    the margin widens with n instead of eroding; (b) never mix an anchor
+    measured on one pipeline with a slope measured on another -- Stage 2B
+    had a 0.66 exponent from a CPU-evolved table and an anchor from a
+    GPU-evolved one, and the combination described neither, however
+    reasonable each half looked alone. A scaling tolerance also needs the
+    detection power it existed for shown intact at every scale, not
+    assumed: the guard must still fire on a genuinely broken input at the
+    largest n, or widening it has simply switched it off.
 
 # IntelliJ MCP Server Companion
 This project is open in Pycharm IDE (IntelliJ IDEA platform). 

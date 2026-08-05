@@ -17,12 +17,12 @@ ever changed.
 
 `assert_scaler_centered` is the guard that makes that shortcut's absence
 meaningful: a broken scaler cannot quietly invent intercept structure,
-because `||mean(X_train_scaled)||` is checked against 1e-10 before any
-solve. `scaler_centering_margin` returns that same statistic as a number,
+because `||mean(X_train_scaled)||` is checked against `mean_x_tol_for(n)`
+before any solve. `scaler_centering_margin` returns that same statistic as a number,
 alongside the smallest raw per-column standard deviation and its column
 index, so every fold records how far it sat from the guard and how close
-its features came to the near-constant regime that drives the guard's
-value. Diagnostic only: it never raises, drops nothing, and no fitting
+its features came to the near-constant regime the guard also fires in.
+Diagnostic only: it never raises, drops nothing, and no fitting
 decision reads it.
 
 **sklearn (`Ridge(solver="svd")`) is the verification oracle -- not in
@@ -68,14 +68,66 @@ if jnp.zeros(1, dtype=jnp.float64).dtype != jnp.float64:  # pragma: no cover
 # ---- Locked constants (DESIGN.md, "Readout") ----
 ALPHA_GRID = (1e-2, 1e-1, 1.0, 10.0, 1e2, 1e3, 1e4, 1e5, 1e6)
 ALPHA_TIE_TOL = 1e-10      # "mean validation MSE within 1e-10 absolute"
-MEAN_X_TOL = 1e-10         # ||mean(X_train_scaled)|| guard
 N_SPLITS = 5
 FOLD_SEED = 42
 EQUIVALENCE_TOL = 1e-8     # max abs clipped-validation-prediction difference
 
+# ---- The ||mean(X_train_scaled)|| guard's tolerance (DESIGN.md, "Readout") ----
+MEAN_X_TOL_ANCHOR = 1e-9   # tolerance at MEAN_X_TOL_ANCHOR_N rows
+MEAN_X_TOL_ANCHOR_N = 1000
+MEAN_X_TOL_EXPONENT = 0.5  # sqrt(n) -- float accumulation in a mean
 
-def assert_scaler_centered(X_scaled, tol=MEAN_X_TOL):
+
+def mean_x_tol_for(n):
+    """The centering guard's tolerance at `n` rows:
+    `1e-9 * (n / 1000) ** 0.5`.
+
+    `n` is the row count of the matrix actually being checked -- a CV
+    fold's training rows, not the ladder rung's nominal corpus size. At a
+    5-fold split those differ by sqrt(5/4), and the guard is a statement
+    about the matrix in front of it.
+
+    ## Where the anchor and the exponent come from
+
+    Both are read off the GPU-spike measurements in this directory's
+    `README.md` -- the production evolution path, features encoded and
+    evolved by the same kernels the ladder will use. The anchor is 1e-9
+    at n=1,000: a 12.7x margin over the worst value measured there
+    (`curr_random`, 7.87e-11).
+
+    The exponent is not fitted to those points, it is the mechanism.
+    `||mean(X_scaled)||` grows because the mean of n float64 values
+    carries ~sqrt(n) accumulated rounding, amplified by division by a
+    small column standard deviation. Taking 0.5 rather than the measured
+    growth matters in the direction that protects the guard: 0.5
+    upper-bounds `curr_random`'s measured 0.405, so the margin GROWS with
+    n instead of eroding -- 14.8x at n=5,000 against the measured
+    1.51e-10, and ~18x projected at n=54,000 (projection, from that same
+    0.405 exponent; the largest corpus actually measured is 5,000).
+
+    Headroom above, in both directions the guard has to stay useful in.
+    A tolerance of 7.35e-9 at n=54,000 is still four or more orders below
+    the ~3e-4 level at which `||mean(X)||` starts degrading DESIGN.md's
+    1e-8 JAX-vs-sklearn equivalence gate (measured, `README.md`), and
+    about nine orders below the O(1) offset a genuinely broken scaler --
+    the thing the guard exists to catch -- would produce.
+
+    The exponent 0.66 fitted from `README.md`'s first (CPU-evolved,
+    n=300 -> 1,000) table is superseded and not used: it measures a
+    different pipeline from the one the anchor comes from, and a slope
+    from one table with an anchor from another describes neither."""
+    n = int(n)
+    if n < 1:
+        raise ValueError(f"mean_x_tol_for needs at least one row, got n={n}")
+    return MEAN_X_TOL_ANCHOR * (n / MEAN_X_TOL_ANCHOR_N) ** MEAN_X_TOL_EXPONENT
+
+
+def assert_scaler_centered(X_scaled, tol=None):
     """Guard on the standardized training features: `||mean(X)|| < tol`.
+
+    `tol` defaults to `mean_x_tol_for(X_scaled.shape[0])` -- derived from
+    the matrix passed in, because the tolerance is n-dependent and a
+    default argument cannot be.
 
     The intercept formula `b = mean(Y) - mean(X) @ W` is only benign
     because `mean(X)` is numerically zero after standardization. If a
@@ -84,42 +136,48 @@ def assert_scaler_centered(X_scaled, tol=MEAN_X_TOL):
     starts being real, invented intercept structure -- silently, since
     the ridge still fits and still produces predictions.
 
-    KNOWN TENSION, open for review before the first real run: a NEARLY-
+    KNOWN TENSION, not resolved by the n-dependent tolerance: a NEARLY-
     but-not-exactly-constant feature column also trips this. sklearn's
     `StandardScaler` only rescues a column as constant when its variance
     falls below roughly `(n * mean * eps)^2`; a column just above that
     bound is divided by its tiny scale, which amplifies the float64
-    centering residual from ~1e-16 to well past 1e-10. Measured at
-    n=5,000 with a unit-mean column: the guard passes at column std 1e-4
-    (norm 1.1e-11) and at 1e-12 and below (sklearn declares those
-    constant), and FIRES across roughly 1e-12 < std < 1e-5 (norm 9.7e-7
-    at std 1e-9). Stage 2A's cos/sin features under a near-synchronized
-    regime can plausibly land there. That is a near-constant feature, not
-    a broken scaler, so quietly loosening `tol` would defeat the guard's
-    stated purpose -- the resolution is a locked-design question, not an
-    implementation choice. The failure message therefore names the worst
+    centering residual from ~1e-16 to many orders past the tolerance.
+    Measured at n=5,000 with a unit-mean column: the guard passes at
+    column std 1e-4 (norm 1.1e-11) and at 1e-12 and below (sklearn
+    declares those constant), and FIRES across roughly
+    1e-12 < std < 1e-5 (norm 9.7e-7 at std 1e-9, some 400x above the
+    n=5,000 tolerance). Stage 2A's cos/sin features under a
+    near-synchronized regime can plausibly land there. `mean_x_tol_for`
+    tracks the sqrt(n) accumulation growth and nothing else; a
+    near-constant column is a different mechanism, several orders larger,
+    and still halts. That is a property of the data rather than a broken
+    scaler, so it remains open. The failure message names the worst
     offending column so a halt is diagnosable immediately.
 
     Returns the measured L2 norm; raises AssertionError on exceedance."""
-    mean_vec = np.asarray(X_scaled, dtype=np.float64).mean(axis=0)
+    X_scaled = np.asarray(X_scaled, dtype=np.float64)
+    if tol is None:
+        tol = mean_x_tol_for(X_scaled.shape[0])
+    mean_vec = X_scaled.mean(axis=0)
     norm = float(np.linalg.norm(mean_vec))
     worst = int(np.argmax(np.abs(mean_vec)))
     assert norm < tol, (
         f"standardized training features are not centered: "
-        f"||mean(X_train_scaled)|| = {norm:.6e} >= {tol:.1e}; worst column "
+        f"||mean(X_train_scaled)|| = {norm:.6e} >= {tol:.3e} "
+        f"(tolerance at n={X_scaled.shape[0]} rows); worst column "
         f"{worst} has mean {mean_vec[worst]:.6e} "
         f"(a near-constant column is a likely cause -- see this function's docstring)")
     return norm
 
 
-def scaler_centering_margin(X_scaled, X_raw=None, tol=MEAN_X_TOL):
+def scaler_centering_margin(X_scaled, X_raw=None, tol=None):
     """`assert_scaler_centered`'s statistic as a returned number, plus the
     raw column-variance context that explains where it comes from.
 
     Same object as the guard, different interface: `mean_x_norm` here is
     `||mean(X_scaled)||` computed exactly as `assert_scaler_centered`
     computes it, so a passing run records how far it actually sat from
-    `MEAN_X_TOL` rather than only that it was somewhere below it. This
+    the tolerance rather than only that it was somewhere below it. This
     function never raises; the halt rule stays entirely in
     `assert_scaler_centered`.
 
@@ -154,7 +212,9 @@ def scaler_centering_margin(X_scaled, X_raw=None, tol=MEAN_X_TOL):
                is -1, since raw column spread cannot be recovered from
                the standardized matrix.
     tol      : the tolerance to report the margin against; the guard's
-               own `MEAN_X_TOL` by default.
+               own `mean_x_tol_for(X_scaled.shape[0])` by default, so the
+               reported `tol` and `margin_ratio` are n-dependent exactly
+               as the halt rule is.
 
     Returns a dict. `within_tol` is descriptive, not a gate -- the gate
     is `assert_scaler_centered`.
@@ -167,6 +227,8 @@ def scaler_centering_margin(X_scaled, X_raw=None, tol=MEAN_X_TOL):
     names `||mean(X_scaled)||` and the worst-mean column) and not
     `min_col_std`."""
     X_scaled = np.asarray(X_scaled, dtype=np.float64)
+    if tol is None:
+        tol = mean_x_tol_for(X_scaled.shape[0])
     mean_vec = X_scaled.mean(axis=0)
     norm = float(np.linalg.norm(mean_vec))
     worst = int(np.argmax(np.abs(mean_vec)))
@@ -209,7 +271,10 @@ def svd_ridge_fit(X_train_scaled, Y_train, alphas=ALPHA_GRID, check_centered=Tru
     Returns a dict with `W` (n_alpha, p, k), `b` (n_alpha, k), the
     singular values, the condition number (DESIGN.md's required stage-2
     diagnostic, free from the decomposition already computed), and the
-    measured `||mean(X_train_scaled)||`."""
+    measured `||mean(X_train_scaled)||` alongside the `mean_x_tol` it was
+    checked against. That tolerance is derived from the row count, so it
+    is reported whether or not `check_centered` ran; `mean_x_norm` is nan
+    when it did not."""
     X = jnp.asarray(np.asarray(X_train_scaled, dtype=np.float64))
     Y = jnp.asarray(np.asarray(Y_train, dtype=np.float64))
     if Y.ndim != 2:
@@ -217,6 +282,7 @@ def svd_ridge_fit(X_train_scaled, Y_train, alphas=ALPHA_GRID, check_centered=Tru
                          "shared alpha across all output columns")
     alphas_arr = jnp.asarray(np.asarray(alphas, dtype=np.float64))
 
+    mean_x_tol = mean_x_tol_for(X.shape[0])
     mean_x_norm = assert_scaler_centered(X_train_scaled) if check_centered else float("nan")
 
     y_mean = Y.mean(axis=0)                       # (k,)
@@ -238,7 +304,7 @@ def svd_ridge_fit(X_train_scaled, Y_train, alphas=ALPHA_GRID, check_centered=Tru
         "alphas": np.asarray(alphas, dtype=np.float64),
         "singular_values": s_np, "cond": cond,
         "y_mean": np.asarray(y_mean), "x_mean": np.asarray(x_mean),
-        "mean_x_norm": mean_x_norm,
+        "mean_x_norm": mean_x_norm, "mean_x_tol": mean_x_tol,
     }
 
 
@@ -308,10 +374,15 @@ def cross_validate_alpha(X, Y, y_strat, alphas=ALPHA_GRID, n_splits=N_SPLITS,
     every condition a caller compares.
 
     `fold_mean_x_norm` carries the centering guard's own statistic per
-    fold; `fold_min_col_std` / `fold_min_col_std_col` /
-    `fold_worst_mean_col` come from `scaler_centering_margin` and are
-    recorded for every fold whether or not the guard was anywhere near
-    firing. They change nothing about the fit or the selected alpha."""
+    fold, and `fold_mean_x_tol` the tolerance that fold was actually
+    checked against -- per fold rather than once, because the tolerance
+    is `mean_x_tol_for(n_train_rows)` and a training fold has 4/5 of the
+    corpus, not all of it. There is deliberately no corpus-level scalar:
+    it would sit sqrt(5/4) above every value the guard actually used.
+    `fold_min_col_std` / `fold_min_col_std_col` / `fold_worst_mean_col`
+    come from `scaler_centering_margin` and are recorded for every fold
+    whether or not the guard was anywhere near firing. They change
+    nothing about the fit or the selected alpha."""
     X = np.asarray(X, dtype=np.float64)
     Y = np.asarray(Y, dtype=np.float64)
     skf = StratifiedKFold(n_splits=n_splits, shuffle=True, random_state=random_state)
@@ -320,6 +391,7 @@ def cross_validate_alpha(X, Y, y_strat, alphas=ALPHA_GRID, n_splits=N_SPLITS,
     fold_raw = np.empty((n_splits, n_alpha), dtype=np.float64)
     fold_cond = np.empty(n_splits, dtype=np.float64)
     fold_mean_x_norm = np.empty(n_splits, dtype=np.float64)
+    fold_mean_x_tol = np.empty(n_splits, dtype=np.float64)
     fold_min_col_std = np.empty(n_splits, dtype=np.float64)
     fold_min_col_std_col = np.empty(n_splits, dtype=np.int64)
     fold_worst_mean_col = np.empty(n_splits, dtype=np.int64)
@@ -333,6 +405,7 @@ def cross_validate_alpha(X, Y, y_strat, alphas=ALPHA_GRID, n_splits=N_SPLITS,
         fold_raw[f] = mse_per_alpha(fit, X_va, Y[va], clipped=False)
         fold_cond[f] = fit["cond"]
         fold_mean_x_norm[f] = fit["mean_x_norm"]
+        fold_mean_x_tol[f] = margin["tol"]
         fold_min_col_std[f] = margin["min_col_std"]
         fold_min_col_std_col[f] = margin["min_col_std_col"]
         fold_worst_mean_col[f] = margin["worst_mean_col"]
@@ -345,10 +418,10 @@ def cross_validate_alpha(X, Y, y_strat, alphas=ALPHA_GRID, n_splits=N_SPLITS,
         "mean_raw_val_mse": fold_raw.mean(axis=0),
         "fold_clipped_val_mse": fold_clipped, "fold_raw_val_mse": fold_raw,
         "fold_cond": fold_cond, "fold_mean_x_norm": fold_mean_x_norm,
+        "fold_mean_x_tol": fold_mean_x_tol,
         "fold_min_col_std": fold_min_col_std,
         "fold_min_col_std_col": fold_min_col_std_col,
         "fold_worst_mean_col": fold_worst_mean_col,
-        "mean_x_tol": float(MEAN_X_TOL),
     }
 
 
