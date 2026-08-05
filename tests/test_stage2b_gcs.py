@@ -1459,19 +1459,27 @@ def test_chunked_false_forces_the_single_request_route_above_the_threshold(bucke
 
 def test_ensure_artifact_refuses_a_chunked_value_that_is_neither_a_bool_nor_none(
         bucket, tmp_path):
+    calls = []
     with pytest.raises(TypeError, match="chunked"):
         gcs.ensure_artifact(gcs.object_path(**TRAIN_ARGS), tmp_path / "f.npz",
-                            produce=_producer(), bucket=bucket, chunked="yes")
+                            produce=_producer(counter=calls), bucket=bucket, chunked="yes")
+    assert calls == []                          # refused before the step ran
 
 
 @pytest.mark.parametrize("chunk_size", [0, -1, 1.5, True, None, "100"])
 def test_the_size_decision_rejects_a_malformed_chunk_size(bucket, tmp_path, chunk_size):
     """`ensure_artifact` now reads `chunk_size` on every call rather than
     only when handing it to `upload_file_chunked`, so a malformed one
-    fails the same way here as it does there."""
+    fails the same way here as it does there -- and before `produce`
+    runs, not after. A Stage 2B step computes for minutes to hours on a
+    GPU; raising on a malformed argument once that is done would throw
+    the work away and upload nothing for the next run to resume from."""
+    calls = []
     with pytest.raises(ValueError, match="chunk_size"):
         gcs.ensure_artifact(gcs.object_path(**TRAIN_ARGS), tmp_path / "f.npz",
-                            produce=_producer(), bucket=bucket, chunk_size=chunk_size)
+                            produce=_producer(counter=calls), bucket=bucket,
+                            chunk_size=chunk_size)
+    assert calls == []
 
 
 def test_a_chunked_upload_and_its_resume_run_with_the_google_package_blocked():

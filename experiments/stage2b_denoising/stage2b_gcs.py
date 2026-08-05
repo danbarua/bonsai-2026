@@ -720,6 +720,13 @@ def _check_chunk_size(chunk_size):
     return chunk_size
 
 
+def _check_chunked(chunked):
+    if chunked is not None and not isinstance(chunked, bool):
+        raise TypeError(
+            f"chunked must be True, False, or None (decide on size), got {chunked!r}")
+    return chunked
+
+
 def should_chunk(size_bytes, *, chunked=None, chunk_size=CHUNK_SIZE_DEFAULT):
     """Whether an artifact of `size_bytes` goes up the chunked route.
 
@@ -746,10 +753,7 @@ def should_chunk(size_bytes, *, chunked=None, chunk_size=CHUNK_SIZE_DEFAULT):
     unresumable request. Deciding against the chunk size actually in use
     is the rule that says what it means: chunk when there is more than
     one chunk to send, and so something for a resume to pick up."""
-    if chunked is not None:
-        if not isinstance(chunked, bool):
-            raise TypeError(
-                f"chunked must be True, False, or None (decide on size), got {chunked!r}")
+    if _check_chunked(chunked) is not None:
         return chunked
     _check_chunk_size(chunk_size)
     return int(size_bytes) > chunk_size
@@ -1283,6 +1287,14 @@ def ensure_artifact(name, local_path, *, produce, bucket, allow_test_split=False
     local_path = str(local_path)
     if not callable(produce):
         raise TypeError("produce must be a callable taking the local path and writing it")
+    # Both route arguments are checked here rather than where they are
+    # read, which is after `produce` has run: a step that computes for an
+    # hour on a GPU and then raises on a malformed argument loses the
+    # hour, and uploads nothing for the next run to resume from. The
+    # `produce` check above is here for the same reason.
+    _check_chunked(chunked)
+    if chunked is None:
+        _check_chunk_size(chunk_size)
 
     if not force and object_exists(name, bucket=bucket, allow_test_split=allow_test_split):
         downloaded = False
