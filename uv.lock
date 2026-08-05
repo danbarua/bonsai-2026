@@ -1381,7 +1381,7 @@ wheels = [
 
 [[package]]
 name = "mighty-colab"
-version = "0.2.1"
+version = "0.2.2"
 source = { registry = "https://pypi.org/simple" }
 dependencies = [
     { name = "click" },
@@ -1403,9 +1403,9 @@ dependencies = [
     { name = "typing-extensions" },
     { name = "websocket-client" },
 ]
-sdist = { url = "https://files.pythonhosted.org/packages/46/06/02823c3e851d5cd53e3c49b5eb0506a76c6b8e10068b1a48a6e7510d057c/mighty_colab-0.2.1.tar.gz", hash = "sha256:d9dae8e5977315ddead1bcaa67f361998082156514fc2b9fcbd19d23f67f7a2f", size = 1242508, upload-time = "2026-08-05T16:06:56.794Z" }
+sdist = { url = "https://files.pythonhosted.org/packages/ee/95/55430525af8e61ac65657499cecf41ada804180eb3e0e9ab2ca149554746/mighty_colab-0.2.2.tar.gz", hash = "sha256:fb668bff253385884f3af38bd96be1e871f6bf089dfed1c451fc6de25de139ea", size = 1243917, upload-time = "2026-08-05T17:31:15.782Z" }
 wheels = [
-    { url = "https://files.pythonhosted.org/packages/d6/e1/63441eb73bbf0284d6f002603c4af0e703de4ca0ec51c67337e1fc401785/mighty_colab-0.2.1-py3-none-any.whl", hash = "sha256:53feb0aff7e9a11fa693d0951bbbf50a0d58cd7f8ec2fe3378411d78334e6b72", size = 96595, upload-time = "2026-08-05T16:06:55.707Z" },
+    { url = "https://files.pythonhosted.org/packages/06/de/8a59dc2d50c2c58826e5e32531d2bc75ce10bfa7bf2e1502bdfb6907eed5/mighty_colab-0.2.2-py3-none-any.whl", hash = "sha256:53bb169e2e28b0ba941047182823e71b5dd1163ca1177bccd36e822e9aef2370", size = 97366, upload-time = "2026-08-05T17:31:14.313Z" },
 ]
 
 [[package]]
