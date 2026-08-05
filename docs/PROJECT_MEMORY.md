@@ -410,17 +410,41 @@ corruption/RNG, the encoder rho-gate, the intercept-aware SVD ridge with
 sklearn as oracle, the confirmatory statistics (studentized sign-flip,
 two Holm families, branched winner rule), the equinox+optax CNN
 baseline, the partition/nested-ladder draw, and GCS transport with
-resumable chunked upload. 432 fast tests, plus a slow Colab+GCS round
-trip verified against the real bucket (authenticated *and* anonymous
-readback). Execution-environment decisions are settled, not pending:
-plain Python scripts on Colab runtimes via `mighty-colab`, artifacts to
-a public-read GCS bucket from within the cloud environment.
+resumable chunked upload and crc32c content verification on every
+transfer. 576 fast tests. Execution-environment decisions are settled,
+not pending: plain Python scripts on Colab runtimes via `mighty-colab`,
+artifacts to a public-read GCS bucket from within the cloud environment.
+
+**Verified against real infrastructure, not fakes**: a Colab-to-GCS
+round trip read back both authenticated and anonymously; the GCS smoke
+check including a chunked upload resumed mid-transfer and the crc32c
+the real service records for the resulting composite object; DESIGN.md's
+ridge equivalence gate on an A100 at both ladder scales (8.6e-13 and
+3.0e-13 against a 1e-8 gate, the n=5,000 case at cond(X)=2e16); and the
+CNN's float32 forward pass, which found a real defect -- see Part 4's
+TF32 entry.
 
 **Not done**: no feasibility-ladder rung has been executed. There are no
 driver scripts wiring the modules into a runnable stage 1, no
-`FINDINGS.md`, and no number of any kind about denoising. Nothing on
-GPU has been exercised -- the ridge's 1e-8 equivalence gate at ladder
-stages 1-2 is specified but has only ever run on CPU.
+`FINDINGS.md`, and no number of any kind about denoising. A cold-context
+audit ranked that missing glue layer as the top remaining risk,
+precisely because it is where Stage 1D's bug lived: every module is
+individually well tested and nothing has ever joined two of them. Graph
+evolution -- the manipulation this stage is about -- has no Stage 2B
+module at all and will be Stage 2A code called from a script nobody has
+written.
+
+**Known before the ladder runs**: `stage2b_ridge`'s centering guard
+(`||mean(X_scaled)|| <= 1e-10`) is projected to fire on `curr_random` at
+ladder stage 2 and on `rewired` at stage 3, measured on real
+corrupted-encoded-evolved features. The growth fits an exponent near
+0.5 -- ordinary sqrt(n) floating-point accumulation, so a fixed absolute
+tolerance fires eventually for any features. The coupled 1e-8
+JAX-vs-sklearn equivalence gate survives until roughly 1e-4, five orders
+beyond the worst projected value, so the guard as set would halt on a
+number that harms nothing. Changing it is a disclosed DESIGN.md
+amendment, not an edit; the numbers are in that directory's `README.md`
+so the decision is made from measurement rather than mid-halt.
 
 ## Part 4: Infrastructure and execution environment
 
