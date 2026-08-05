@@ -307,7 +307,7 @@ def test_masked_mse_denominator_is_the_support_size_not_the_grid_size():
     assert got != pytest.approx(1.0 / N_PIX, rel=1e-6)
 
 
-def test_2x2_both_losses_respond_to_the_same_coordinates(monkeypatch):
+def test_2x2_both_losses_respond_to_the_same_coordinates():
     """The discrimination test the scope-matching requirement needs.
 
     An in-support coordinate must move BOTH the training loss and the
@@ -775,6 +775,38 @@ def test_run_record_contains_no_evaluation_derived_quantity():
 
 
 # ---- input shape handling ----
+
+def test_the_partial_last_batch_of_an_epoch_is_trained_on():
+    """54,000 / 128 leaves a final batch of 104 images. Those images are
+    included, not dropped -- so they must produce gradients.
+
+    Discriminating construction: with n=10 and batch_size=8 the last batch
+    holds exactly two images, identified through the same
+    `epoch_permutation` the loop uses. Perturbing only those two images'
+    on-support targets must change the fitted weights; if the remainder
+    batch were skipped they would never be seen and the weights would be
+    bit-identical."""
+    mask, active, _ = _support()
+    rng = np.random.default_rng(15)
+    x = rng.uniform(0, 1, (10, SIDE, SIDE))
+    y = rng.uniform(0, 1, (10, SIDE, SIDE))
+    init_key, shuffle_key = cnn.seed_keys(0)
+
+    order = np.asarray(cnn.epoch_permutation(shuffle_key, 10, 0))
+    tail = order[8:]
+    assert tail.size == 2, "this test needs a genuinely partial final batch"
+
+    y_perturbed = y.reshape(10, -1).copy()
+    y_perturbed[np.ix_(tail, active)] += 0.5
+    y_perturbed = y_perturbed.reshape(y.shape)
+
+    kwargs = dict(init_key=init_key, shuffle_key=shuffle_key,
+                  **_fast(max_epochs=1, batch_size=8))
+    a = cnn.train_cnn(x, y, x, y, mask, **kwargs)
+    b = cnn.train_cnn(x, y_perturbed, x, y, mask, **kwargs)
+    assert any(not np.array_equal(np.asarray(pa), np.asarray(pb))
+               for pa, pb in zip(_params(a["model"]), _params(b["model"])))
+
 
 @pytest.mark.parametrize("shape", [(10, N_PIX), (10, SIDE, SIDE), (10, 1, SIDE, SIDE)])
 def test_train_cnn_accepts_the_three_equivalent_image_layouts(shape):
