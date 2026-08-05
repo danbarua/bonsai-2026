@@ -881,10 +881,18 @@ def test_descriptive_counts_and_beats_all_share_one_direction_read():
             assert set(row["holm_surviving_wins"]) <= set(row["directional_wins"])
 
 
-def test_descriptive_ranking_does_not_alter_the_unique_winner_verdict():
-    """The field is a pure readout: deleting it from the result changes
-    nothing about the rule's own outputs, on every fixture in this file
-    that exercises `one_graph_wins`."""
+def test_unique_winner_is_exactly_the_qualifying_sweeper():
+    """`unique_winner` names a graph iff that graph both qualifies and
+    beats all three others -- restated against the verdict's own published
+    sub-results, so the rule a reader reconstructs from `qualification`
+    and `beats_others` is the rule the field actually reports.
+
+    Deliberately NOT a test that adding `descriptive_ranking` left the
+    rule alone: both sides of this comparison come out of the same call,
+    so it could only fail on a Python-level bug. That claim rests on the
+    change's diff instead -- no edit inside the qualification,
+    `beats_all`, or `winners` logic -- and on the pre-existing tests in
+    this file passing unmodified."""
     for mse, y in (_near_miss(), _graded(), _graded(order=(
             "curr_random", "rewired", "lattice", "T"))):
         primary, fam1, fam2, verdict = _run_all(mse, y)

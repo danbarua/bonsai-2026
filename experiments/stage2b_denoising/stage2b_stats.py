@@ -621,6 +621,14 @@ def _descriptive_ranking(beats_others):
     leading all three of its pairs. `order_is_strict` records that this
     held -- it is False only under an exact tie between two conditions'
     means, where the ordering degenerates and should not be read as one.
+
+    `order` sorts the graphs by that point estimate alone (via directional
+    win count, which is equivalent to it here). It says NOTHING about
+    whether adjacent entries separate: two graphs can sit one apart in
+    `order` on a difference far smaller than its own standard error. Read
+    each graph's `n_holm_surviving_wins` for that. `order` is a listing of
+    which point estimate came out ahead, not a ranking of graph quality,
+    and quoting it as the latter is exactly the reading the note forbids.
     """
     graphs = tuple(beats_others)
     per_graph = {}
