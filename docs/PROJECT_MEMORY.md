@@ -395,17 +395,32 @@ Full detail: `experiments/stage2a_dynamics_classification/FINDINGS.md`
 and every disclosed caveat above); `DESIGN.md` (the locked design, read
 before the result).
 
-**Stage 2B (denoising, #13): design locked, not yet implemented.**
+**Stage 2B (denoising, #13): design locked, components built and
+tested, no ladder rung run yet.**
 `experiments/stage2b_denoising/DESIGN.md` -- seven drafts, four external
 review rounds plus an adversarial blind-spot review and an outsider peer
 review, all incorporated; asks the Stage-2A-shaped question (does
 runtime graph evolution add value on top of the same already-
 dynamically-encoded local phase state) for single-step active-support
 reconstruction under a fixed, majority-censored clipped-Gaussian
-corruption, instead of classification. Status: locked, not yet
-implemented, feasibility stage 1 (mechanical correctness, the
-encoder-on-noisy-inputs gate, the first ridge equivalence check) not yet
-started -- pending cloud/GCS execution environment decisions.
+corruption, instead of classification.
+
+**Built** (see that directory's `README.md` for the per-module map):
+corruption/RNG, the encoder rho-gate, the intercept-aware SVD ridge with
+sklearn as oracle, the confirmatory statistics (studentized sign-flip,
+two Holm families, branched winner rule), the equinox+optax CNN
+baseline, the partition/nested-ladder draw, and GCS transport with
+resumable chunked upload. 432 fast tests, plus a slow Colab+GCS round
+trip verified against the real bucket (authenticated *and* anonymous
+readback). Execution-environment decisions are settled, not pending:
+plain Python scripts on Colab runtimes via `mighty-colab`, artifacts to
+a public-read GCS bucket from within the cloud environment.
+
+**Not done**: no feasibility-ladder rung has been executed. There are no
+driver scripts wiring the modules into a runnable stage 1, no
+`FINDINGS.md`, and no number of any kind about denoising. Nothing on
+GPU has been exercised -- the ridge's 1e-8 equivalence gate at ladder
+stages 1-2 is specified but has only ever run on CPU.
 
 ## Part 4: Infrastructure and execution environment
 
