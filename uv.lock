@@ -235,7 +235,7 @@ requires-dist = [
 dev = [{ name = "pytest", specifier = ">=9.1.1" }]
 gpu = [
     { name = "google-cloud-storage", specifier = ">=2.19.0" },
-    { name = "mighty-colab", specifier = ">=0.2.1" },
+    { name = "mighty-colab", specifier = ">=0.2.2" },
 ]
 
 [[package]]
