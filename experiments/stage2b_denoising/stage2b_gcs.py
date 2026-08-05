@@ -578,7 +578,12 @@ def _discard_object(bucket, name):
 
 
 def _verify_uploaded(bucket, name, local_digest):
-    """Checks what actually landed, and removes it if it is wrong."""
+    """Checks what actually landed, and removes it if it is wrong.
+
+    Built on a fresh handle rather than the one the upload returned, so
+    the service is asked again about the stored object instead of being
+    taken at its word about the write. One extra metadata request, next
+    to a transfer measured in gigabytes."""
     try:
         return _compare_checksum(bucket.blob(name), name, local_digest,
                                  action="the upload to", local_label="local file")
@@ -625,7 +630,8 @@ def upload_file(local_path, name, *, bucket, allow_test_split=False, verify_cont
     `verify_content` (on by default) compares the object's own `crc32c`
     against the local file's once the upload returns, and deletes the
     object if they disagree rather than leaving a known-wrong artifact in
-    the bucket for the next run to skip past."""
+    the bucket for the next run to skip past. It costs one more read of
+    the local file, which is disk against a transfer that is network."""
     name = _check_object_path_allowed(name, allow_test_split)
     local_path = str(local_path)
     if not os.path.isfile(local_path):
