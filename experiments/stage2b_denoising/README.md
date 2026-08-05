@@ -155,9 +155,23 @@ corrupted-encoded-evolved features (worst CV fold, per condition):
 | rewired | 8.80e-12 | 1.94e-11 | 0.66 |
 | curr_random | 3.65e-11 | 8.07e-11 | 0.66 |
 
-Projected: `curr_random` crosses 1e-10 at **ladder stage 2**
-(n=5,000 → 2.3e-10) and `rewired` at **stage 3** (n=54,000 → 2.6e-10),
-with `curr_random` reaching 1.1e-9 there.
+**Measured at stage-2 scale, on GPU-evolved features** (a ~2-minute A100
+spike: 5,000 images encoded locally in 3.7 s on 9 cores, evolved under
+all four graphs via the verified `evolve_on_graph_jax` kernel at 2.3 s
+per graph, all 5,000 solves reporting success):
+
+| condition | n=1,000 | n=5,000 | vs 1e-10 |
+|---|---|---|---|
+| pre_evolution | 8.00e-14 | 1.66e-13 | 602x margin |
+| lattice | 7.13e-13 | 1.76e-12 | 57x margin |
+| T | 1.08e-12 | 3.24e-12 | 31x margin |
+| rewired | 1.72e-11 | 3.94e-11 | 2.5x margin |
+| **curr_random** | 7.87e-11 | **1.51e-10** | **FIRES** |
+
+So it is not a projection: `curr_random` exceeds the guard at ladder
+stage 2, and `rewired` sits 2.5x from it there — meaning a tolerance
+widened only far enough for `curr_random` at stage 2 would halt again on
+`rewired` at stage 3.
 
 The ordering is the synchronization mechanism — Stage 2A measured order
 parameters of 0.997 (`rewired`) and 0.991 (`curr_random`), so those
