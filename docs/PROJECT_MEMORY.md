@@ -76,8 +76,9 @@ The numbered list of methodological principles this project holds
 itself to now lives in `CLAUDE.md`'s "Methodological discipline this
 project holds itself to" section -- kept there, not here, so a fresh
 one-shot agent gets them without needing this document's full findings
-history first. The numbering is unchanged by the move (still 1-17);
-references elsewhere as "principle N" mean that list.
+history first. The numbering was unchanged by the move and the list has
+grown since; references elsewhere as "principle N" mean that list, which
+is authoritative for its own current length.
 
 ## Part 3: The dynamics-as-computation programme
 

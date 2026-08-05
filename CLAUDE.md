@@ -314,6 +314,28 @@ without reading that document's full findings history first.
     scale. Different computations need their own timing checks, even
     within the same pipeline -- one stage behaving linearly is not
     evidence another does.
+19. **A chunked or batched RNG draw is not automatically the same stream
+    as the unchunked one, and the difference can be silent.**
+    `numpy.random.Generator.integers` at sub-64-bit widths (e.g.
+    `dtype=uint8`) buffers bits from the underlying bit generator, so the
+    same seed yields a *different* sequence depending on how many
+    elements are requested per call -- a chunked implementation and an
+    unchunked one diverge, and both still produce entirely plausible
+    p-values with no error raised anywhere. `Generator.random` consumes
+    exactly one 64-bit draw per element and does not have this behavior;
+    `Generator.integers` at int64 width also does not. Found in Stage
+    2B's studentized sign-flip test, where sign matrices are drawn in
+    chunks of 512-4096: drawing signs by thresholding `random()` floats
+    is chunk-stream-invariant, while the "obvious simplification" to
+    `integers(0, 2, dtype=uint8)` is not. The guard is a test, not a
+    comment: sweep several chunk sizes (include a non-divisor of the
+    total and the degenerate chunk-of-1) and assert a bit-identical
+    p-value, so a later simplification fails loudly instead of quietly
+    changing the number. Applies to any chunked or vectorized Monte
+    Carlo work here, not just this one test -- and note it is a distinct
+    failure from principle 8's shared-seed-across-workers problem:
+    correct per-worker seeding does not protect against a within-worker
+    chunking change altering the stream.
 
 # IntelliJ MCP Server Companion
 This project is open in Pycharm IDE (IntelliJ IDEA platform). 
