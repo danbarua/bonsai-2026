@@ -40,15 +40,30 @@ SESSION_TRAIN ?= stage3-evolve
 SESSION_TEST ?= stage4-evolve
 SESSION_CLASS0 ?= class0-audit-gpu
 
+# `mighty-colab exec --timeout` defaults to 30 SECONDS, and it bounds the
+# gap between outputs, not the run: a remote script that goes quiet for
+# longer than this dies with `TimeoutError: Timeout waiting for output`
+# even though the kernel is working normally. Every long-running driver
+# here goes quiet for far longer than 30s -- `stage3_gpu_evolve.py` prints
+# once per topology, `class0_support_audit_classify_gpu.py` once per
+# download and then not at all while cuML fits -- so each GPU target must
+# pass this explicitly. A generous value costs nothing on a healthy run
+# and bounds what a genuinely hung kernel can bill.
+EXEC_TIMEOUT ?= 3600
+
 # GPU-target idempotency: `mighty-colab new -s <name>` provisions a fresh
 # session unconditionally, so re-running a GPU target after a partial
 # failure (a dropped upload, a flaky exec) would try to allocate a second
 # session under the same name instead of resuming the one already up --
 # and `mighty-colab status -s <name>` returns exit code 0 even when the
-# session doesn't exist (prints "Session '<name>' not found." but does not
-# fail), verified directly, not assumed -- so the two GPU targets below
-# grep that message rather than trusting the exit status, and only call
-# `new` when a session by that name genuinely isn't there yet.
+# session doesn't exist (prints "Session '<name>' not found." to stdout but
+# does not fail) -- verified directly, not assumed, and re-verified against
+# 0.2.1 after that release moved several other commands' error text to
+# stderr. So the GPU targets below grep that message rather than trusting
+# the exit status, redirect stderr into the grep so a future move of this
+# message does not silently break the guard, and only call `new` when a
+# session by that name genuinely isn't there yet.
+# Pinned by tests/test_mighty_colab_contract.py.
 
 .PHONY: stage2a-help
 stage2a-help:  ## List every stage2a-* target, grouped by pipeline stage
@@ -93,7 +108,7 @@ stage2a-evolve-train-gpu:  ## Upload + run Stage-3 (training set) GPU evolution 
 		$(MIGHTY_COLAB) upload -s $(SESSION_TRAIN) scratch/stage3_train/theta0_chunk_$$i.npy /content/theta0_chunk_$$i.npy || exit 1; \
 	done && \
 	rc=0; \
-	$(MIGHTY_COLAB) exec -s $(SESSION_TRAIN) -f stage3_gpu_evolve.py || rc=$$?; \
+	$(MIGHTY_COLAB) exec -s $(SESSION_TRAIN) -f stage3_gpu_evolve.py --timeout $(EXEC_TIMEOUT) || rc=$$?; \
 	if [ $$rc -eq 0 ]; then \
 		$(MIGHTY_COLAB) download -s $(SESSION_TRAIN) /content/stage3_gpu_results.pkl scratch/stage3_train/stage3_gpu_results.pkl || rc=$$?; \
 	fi; \
@@ -114,7 +129,7 @@ stage2a-evolve-test-gpu:  ## Upload + run Stage-4 (official test set) GPU evolut
 	$(MIGHTY_COLAB) upload -s $(SESSION_TEST) scratch/stage4_test/stage4_gpu_upload_topologies.pkl /content/stage4_gpu_upload_topologies.pkl && \
 	$(MIGHTY_COLAB) upload -s $(SESSION_TEST) scratch/stage4_test/stage4_theta0_test.npy /content/stage4_theta0_test.npy && \
 	rc=0; \
-	$(MIGHTY_COLAB) exec -s $(SESSION_TEST) -f stage4_gpu_evolve.py || rc=$$?; \
+	$(MIGHTY_COLAB) exec -s $(SESSION_TEST) -f stage4_gpu_evolve.py --timeout $(EXEC_TIMEOUT) || rc=$$?; \
 	if [ $$rc -eq 0 ]; then \
 		$(MIGHTY_COLAB) download -s $(SESSION_TEST) /content/stage4_gpu_results.pkl scratch/stage4_test/stage4_gpu_results.pkl || rc=$$?; \
 	fi; \
@@ -181,7 +196,7 @@ stage2a-class0-classify-gpu:  ## Part 2's cuml.accel GPU variant via mighty-cola
 	$(MIGHTY_COLAB) upload -s $(SESSION_CLASS0) stage2a_classifier.py /content/stage2a_classifier.py && \
 	$(MIGHTY_COLAB) upload -s $(SESSION_CLASS0) stage2a_stats.py /content/stage2a_stats.py && \
 	rc=0; \
-	$(MIGHTY_COLAB) exec -s $(SESSION_CLASS0) -f class0_support_audit_classify_gpu.py || rc=$$?; \
+	$(MIGHTY_COLAB) exec -s $(SESSION_CLASS0) -f class0_support_audit_classify_gpu.py --timeout $(EXEC_TIMEOUT) || rc=$$?; \
 	if [ $$rc -eq 0 ]; then \
 		$(MIGHTY_COLAB) download -s $(SESSION_CLASS0) /content/class0_support_audit_classify_results.pkl results/class0_support_audit_classify_results.pkl || rc=$$?; \
 	fi; \
@@ -241,13 +256,17 @@ VERIFY_GPU ?= A100
 # Whether JAX's float64 SVD on a GPU meets the same gate is a separate
 # question from whether the code is right, and it is the question that
 # matters before a ladder rung is ever driven on one.
-# NOTE, load-bearing: `mighty-colab exec` exits 0 even when the remote
-# script raises -- verified directly (a script that raised SystemExit
-# with a failure message still let this target report success). So both
-# GPU targets below capture the output, tear the session down
-# unconditionally, and then decide the verdict by grepping for the
-# script's own success sentinel. Chaining `&& stop` on the exec's exit
-# status is exactly the trap that made `stage2a-verify` a no-op gate.
+# NOTE, load-bearing: the verdict comes from the script's own success
+# sentinel, not from the exec exit status alone. Since 0.2.0 `mighty-colab
+# exec` does propagate an uncaught remote exception as a non-zero exit (it
+# always exited 0 before that, which is why the sentinel was introduced),
+# but an exit code still cannot distinguish "ran and passed" from "exited
+# cleanly without ever reaching its verdict" -- a truncated or short-
+# circuited script exits 0 either way. So both GPU targets below capture
+# the output, tear the session down unconditionally, and require BOTH a
+# zero exit and the sentinel. Chaining `&& stop` on the exec's exit status
+# is the trap that made `stage2a-verify` a no-op gate and, once exec could
+# fail, would have left a billing A100 running on every failure.
 .PHONY: stage2b-verify-gpu
 stage2b-verify-gpu:  ## Run the ridge equivalence gate on a real GPU -- bills while running
 	cd $(STAGE2B_DIR) && \
@@ -258,7 +277,7 @@ stage2b-verify-gpu:  ## Run the ridge equivalence gate on a real GPU -- bills wh
 		echo "[make] Reusing existing session $(SESSION_2B_VERIFY)"; \
 	fi && \
 	$(MIGHTY_COLAB) upload -s $(SESSION_2B_VERIFY) stage2b_ridge.py /content/stage2b_ridge.py && \
-	rc=0; out=$$($(MIGHTY_COLAB) exec -s $(SESSION_2B_VERIFY) -f stage2b_verify_gpu.py --timeout 900 2>&1) || rc=$$?; \
+	rc=0; out=$$($(MIGHTY_COLAB) exec -s $(SESSION_2B_VERIFY) -f stage2b_verify_gpu.py --timeout $(EXEC_TIMEOUT) 2>&1) || rc=$$?; \
 	echo "$$out"; \
 	$(MIGHTY_COLAB) stop -s $(SESSION_2B_VERIFY); \
 	if [ $$rc -ne 0 ] || ! echo "$$out" | grep -q GPU_VERIFY_OK; then \
@@ -282,7 +301,7 @@ stage2b-verify-cnn-gpu:  ## Compare the CNN float32 forward pass CPU vs GPU -- b
 	fi && \
 	$(MIGHTY_COLAB) install -s $(SESSION_2B_VERIFY) equinox optax && \
 	$(MIGHTY_COLAB) upload -s $(SESSION_2B_VERIFY) stage2b_cnn.py /content/stage2b_cnn.py && \
-	rc=0; out=$$($(MIGHTY_COLAB) exec -s $(SESSION_2B_VERIFY) -f stage2b_verify_cnn_gpu.py --timeout 900 2>&1) || rc=$$?; \
+	rc=0; out=$$($(MIGHTY_COLAB) exec -s $(SESSION_2B_VERIFY) -f stage2b_verify_cnn_gpu.py --timeout $(EXEC_TIMEOUT) 2>&1) || rc=$$?; \
 	echo "$$out"; \
 	$(MIGHTY_COLAB) stop -s $(SESSION_2B_VERIFY); \
 	if [ $$rc -ne 0 ] || ! echo "$$out" | grep -q CNN_GPU_VERIFY_OK; then \
