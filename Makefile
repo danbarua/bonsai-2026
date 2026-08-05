@@ -35,6 +35,16 @@ PYTHON ?= uv run python
 # clean checkout needs no separate `uv tool install` step -- matching
 # this project's existing "always uv run, never a bare global binary"
 # convention (CLAUDE.md).
+#
+# To pick up a newly published release:
+#
+#     uv sync --group gpu --upgrade-package mighty-colab
+#
+# `--reinstall-package` is the wrong tool for that job -- it reinstalls
+# whatever `uv.lock` already pins, so it repairs a broken install but
+# leaves the version exactly where it was. Only `--upgrade-package` moves
+# the lock entry. Both are quiet no-ops when nothing has changed, so the
+# version reported afterwards is the check, not the command's output.
 MIGHTY_COLAB ?= uv run --group gpu mighty-colab
 SESSION_TRAIN ?= stage3-evolve
 SESSION_TEST ?= stage4-evolve
