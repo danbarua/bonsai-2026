@@ -133,7 +133,21 @@ def evaluate_rho_gate(delta_clean, delta_noisy, thetas_clean=None, thetas_noisy=
 
     Returns a dict recording every quantity DESIGN.md requires logged
     regardless of outcome. `passed` is True only if rho <= threshold AND
-    no automatic-failure condition fired."""
+    no automatic-failure condition fired.
+
+    Two scoping notes worth knowing when reading the log:
+
+    - The non-finite-PHASE check sees only the coordinates the caller
+      passed in `thetas_*`, i.e. the active support. A non-finite phase
+      OUTSIDE that support is still caught, but by the non-finite
+      final-Delta condition (measured over the encoder's full 28x28
+      iteration domain), not by the phase condition -- so the two counts
+      are not interchangeable.
+    - The medians and percentiles are computed over all values, so a
+      single non-finite final-Delta makes them nan. That is faithful to
+      the data and the gate has already failed automatically at that
+      point, but it does mean the logged medians carry no information
+      about the healthy images in that case."""
     delta_clean = np.asarray(delta_clean, dtype=np.float64)
     delta_noisy = np.asarray(delta_noisy, dtype=np.float64)
     if delta_clean.shape != delta_noisy.shape:
