@@ -401,6 +401,7 @@ def family1_vs_pre_evolution(mse_by_condition, y, alpha=ALPHA,
             "favorable": bool(t_result["mean"] < 0),
         }
     adjusted, rejected = holm_bonferroni(raw_p, alpha=alpha)
+    underflow = _underflow_summary(raw_p, per_test)
     return {
         "family": "family1",
         "description": "three controls vs. pre_evolution",
@@ -411,6 +412,7 @@ def family1_vs_pre_evolution(mse_by_condition, y, alpha=ALPHA,
         "per_test": per_test,
         "alpha": float(alpha),
         "n_tests": len(CONTROL_GRAPHS),
+        **underflow,
     }
 
 
@@ -452,6 +454,7 @@ def family2_pairwise(mse_by_condition, alpha=ALPHA, run_sign_flip=True,
                 d, n_flips=n_flips, seed=sign_flip_seed, chunk_size=chunk_size)
         per_test[key] = record
     adjusted, rejected = holm_bonferroni(raw_p, alpha=alpha)
+    underflow = _underflow_summary(raw_p, per_test)
     return {
         "family": "family2",
         "description": "six pairwise comparisons among the four evolved graphs",
@@ -462,10 +465,39 @@ def family2_pairwise(mse_by_condition, alpha=ALPHA, run_sign_flip=True,
         "per_test": per_test,
         "alpha": float(alpha),
         "n_tests": len(family2_pairs()),
+        **underflow,
         "sign_flip_role": ("robustness only -- the Family-2 decision rule is the "
                            "Holm-corrected paired t-test; sign-flip p-values are "
                            "not Holm-corrected and are not a second family"),
         "sign_flip_assumption": SIGN_EXCHANGEABILITY_CAVEAT if run_sign_flip else None,
+    }
+
+
+def _underflow_summary(raw_p, per_test):
+    """Which of a family's t-test p-values reached floating-point zero.
+
+    Surfaced at the FAMILY level, not only inside each `per_test` entry,
+    because a family dict's `raw_p` / `holm_adjusted_p` are what a
+    reporting caller reads -- and a raw p of `0.0` Holm-adjusts to `0.0`,
+    so the underflow propagates into the corrected value with nothing at
+    that layer to mark it. Reporting either as "p = 0" is never correct
+    (CLAUDE.md principle 6); the supported statement is that the
+    two-sided tail is below float64's smallest representable positive
+    value.
+
+    This is reachable at Stage 2B's real corpus size, not a contrived
+    edge: a per-image MSE difference an order of magnitude above its own
+    standard error over ~10,000 images already drives |t| past the point
+    where the analytic tail underflows."""
+    underflowed = tuple(k for k in raw_p if per_test[k]["t_test"]["p_underflow"])
+    return {
+        "p_underflowed": underflowed,
+        "n_p_underflowed": len(underflowed),
+        "underflow_note": (
+            "a raw or Holm-adjusted p of 0.0 is a float64 underflow of the "
+            "analytic t-tail, not an exact zero; report it as below the "
+            "smallest representable positive double (CLAUDE.md principle 6)"
+            if underflowed else None),
     }
 
 

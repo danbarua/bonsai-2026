@@ -532,6 +532,60 @@ def test_family2_holm_corrects_only_the_t_test_p_values():
     assert fam2["holm_adjusted_p"] == expected_adj
 
 
+def test_family_level_underflow_is_visible_without_reaching_into_per_test():
+    """A raw p of 0.0 Holm-adjusts to 0.0, so the underflow propagates
+    into the corrected value with nothing at that layer to mark it. A
+    caller reading `raw_p` / `holm_adjusted_p` to write up a result must
+    be able to see the underflow from the family dict itself -- the same
+    "the caveat travels with the number" requirement the sign-flip's
+    assumption string satisfies.
+
+    Effect sizes here are the realistic-scale ones that actually underflow
+    (|t| in the hundreds over 10,000 images), not a contrived edge."""
+    n = 10000
+    rng = np.random.default_rng(15)
+    y = np.tile(np.arange(10), n // 10)
+    base = np.full(n, 0.05)
+    mse = {"pre_evolution": base + 0.02 + rng.normal(0, 0.001, n)}
+    for graph in stats.EVOLVED_GRAPHS:
+        mse[graph] = base + rng.normal(0, 0.001, n)
+
+    fam1 = stats.family1_vs_pre_evolution(mse, y, n_resamples=200)
+    assert all(fam1["raw_p"][g] == 0.0 for g in stats.CONTROL_GRAPHS)
+    assert set(fam1["p_underflowed"]) == set(stats.CONTROL_GRAPHS)
+    assert fam1["n_p_underflowed"] == 3
+    assert "principle 6" in fam1["underflow_note"]
+
+    # and the clean case reports no underflow and no note
+    mse_null = {k: base + rng.normal(0, 0.01, n)
+                for k in ("pre_evolution", *stats.EVOLVED_GRAPHS)}
+    fam1_null = stats.family1_vs_pre_evolution(mse_null, y, n_resamples=200)
+    assert fam1_null["n_p_underflowed"] == 0
+    assert fam1_null["underflow_note"] is None
+
+
+def test_family2_sign_flip_is_intermediate_on_near_null_differences():
+    """The family-level sign-flip path on a case that does NOT saturate.
+
+    Every other family-level check uses effects large enough to floor the
+    sign-flip at `1/(n_flips+1)`, which would also be the result of a
+    broken statistic that never counts an exceedance. Near-null
+    differences are the only place the family wiring, the chunk defaults,
+    and a non-saturated statistic meet."""
+    n = 600
+    rng = np.random.default_rng(16)
+    base = np.full(n, 0.05)
+    mse = {k: base + rng.normal(0, 0.01, n)
+           for k in ("pre_evolution", *stats.EVOLVED_GRAPHS)}
+    fam2 = stats.family2_pairwise(mse, run_sign_flip=True, n_flips=4000,
+                                  chunk_size=512)
+    p_values = [r["sign_flip"]["p_value"] for r in fam2["per_test"].values()]
+    assert all(0.001 < p <= 1.0 for p in p_values), p_values
+    assert any(p > 0.05 for p in p_values), p_values      # genuinely non-floor
+    assert not any(r["sign_flip"]["at_monte_carlo_floor"]
+                   for r in fam2["per_test"].values())
+
+
 def test_family2_pair_direction_is_first_minus_second():
     n = 200
     rng = np.random.default_rng(13)
