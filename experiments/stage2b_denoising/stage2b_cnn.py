@@ -187,7 +187,7 @@ def require_reduction_dtype(reduce_dtype):
     Under `jax_enable_x64=False`, JAX silently truncates a requested
     float64 to float32 -- a `UserWarning`, not an error. A validation
     metric that asked for a float64 accumulation and quietly got a float32
-    one would leave `accumulate_in_float64`'s whole purpose undone while
+    one would undo the whole point of `VALIDATION_REDUCE_DTYPE` while
     every call still returned a plausible number. `stage2b_ridge` faces
     the same hazard and answers it the same way: check that the requested
     precision actually took effect, and halt naming the cause if it did
