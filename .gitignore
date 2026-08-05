@@ -167,6 +167,12 @@ cython_debug/
 #  option (not recommended) you can uncomment the following to ignore the entire idea folder.
 #.idea/
 
+# JetBrains Documentation:
+# https://intellij-support.jetbrains.com/hc/en-us/articles/206544839-How-to-manage-projects-under-Version-Control-Systems
+# > Items you may want to exclude from sharing:
+# > .iml files and .idea/modules.xml file for the Gradle or Maven based projects since these files will be generated on import
+.idea/*.iml
+
 # Ruff stuff:
 .ruff_cache/
 
