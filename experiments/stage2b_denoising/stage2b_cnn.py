@@ -58,6 +58,45 @@ class of silent state dependency CLAUDE.md principle 7 is about. Every
 parameter, input, target, and mask is cast to `CNN_DTYPE` explicitly, and
 the cast is asserted.
 
+## Validation-metric accumulation: float64, and what that does not fix
+
+The model, its parameters and its forward pass are float32. The
+validation metric's REDUCTION -- the difference, the square, and both
+sums -- is upcast to float64 via the primitive's required `reduce_dtype`.
+Early stopping's locked rule is `min_delta=0.0` with strict `<`, a
+comparison with no tolerance band to absorb rounding noise, so a
+float-noise "improvement" resets patience and changes which epoch gets
+checkpointed. The upcast runs once per epoch, not per training step, so
+its cost is negligible.
+
+Two distinct risks live here. The upcast addresses exactly one.
+
+**(a) Accumulation error -- addressed.** The reduction sums squared
+errors over ~6,000 validation images x 505 active coordinates: repeated
+summation of millions of similar-magnitude values, the textbook float32
+precision-loss mode, and fully recoverable by accumulating in float64
+because every float32 input is exact in float64. Two genuinely different
+true validation means separated only in the 6th-7th decimal place are
+precisely the regime in which a naive float32 sum ties or flips a strict
+`<`.
+
+**(b) The float32 quantization of the predictions themselves -- NOT
+addressed, and not addressable here.** A value already rounded to float32
+does not recover lost digits by being upcast afterwards. The upcast makes
+the metric an exact reduction OF float32 predictions; it does not make
+the metric exact. This is judged the smaller risk: two different epochs'
+checkpoints normally produce predictions differing by far more than
+float32's precision floor, the exception being very late in training, by
+which point patience has likely already fired.
+
+`reduce_dtype` is checked rather than trusted. Under
+`jax_enable_x64=False` JAX truncates a requested float64 to float32 with
+a warning, not an error, which would silently undo (a); whether x64 is on
+depends on module import order (`stage2b_ridge` enables it), so
+`require_reduction_dtype` halts instead of quietly reducing in float32.
+This module does not itself set that flag -- the dtype posture above is
+to depend on no global state, not to own it.
+
 ## Device
 
 Written device-agnostically: no explicit placement, no `jax.device_put`,
@@ -99,6 +138,7 @@ SEEDS = (0, 1, 2)           # each jointly governs init, minibatch order, framew
 # ---- Implementation choices, not locked by DESIGN.md (see module docstring) ----
 CNN_DTYPE = jnp.float32
 EVAL_BATCH_SIZE = 512       # validation is evaluated in chunks purely for memory
+VALIDATION_REDUCE_DTYPE = jnp.float64   # accumulation only; see the module docstring
 
 assert N_ACTIVE + N_INACTIVE == N_PIXELS
 
@@ -141,7 +181,34 @@ def build_active_support_mask(active_indices, side=IMAGE_SIDE, expect_n_active=N
 
 # ---- The masking primitive: ONE function, both call sites ----
 
-def masked_per_image_mse(pred, target, mask, *, clip_predictions):
+def require_reduction_dtype(reduce_dtype):
+    """Halt unless `reduce_dtype` survives JAX's dtype canonicalization.
+
+    Under `jax_enable_x64=False`, JAX silently truncates a requested
+    float64 to float32 -- a `UserWarning`, not an error. A validation
+    metric that asked for a float64 accumulation and quietly got a float32
+    one would leave `accumulate_in_float64`'s whole purpose undone while
+    every call still returned a plausible number. `stage2b_ridge` faces
+    the same hazard and answers it the same way: check that the requested
+    precision actually took effect, and halt naming the cause if it did
+    not.
+
+    Checked via `canonicalize_dtype` rather than by allocating an array,
+    because allocating is what emits the truncation warning; this asks the
+    same question silently."""
+    requested = jnp.dtype(reduce_dtype)
+    if jax.dtypes.canonicalize_dtype(requested) != requested:
+        raise ValueError(
+            f"reduce_dtype {requested} is unavailable: jax_enable_x64 is off, so JAX "
+            f"would silently truncate it to "
+            f"{jax.dtypes.canonicalize_dtype(requested)} and the float64 validation "
+            f"accumulation would be a no-op. Enable x64 before jax.numpy is imported "
+            f"(JAX_ENABLE_X64=1, or jax.config.update('jax_enable_x64', True) -- "
+            f"stage2b_ridge does the latter at import).")
+    return requested
+
+
+def masked_per_image_mse(pred, target, mask, *, clip_predictions, reduce_dtype):
     """Per-image MSE over the masked coordinates only -- the single place
     the active-support mask is ever applied.
 
@@ -154,6 +221,20 @@ def masked_per_image_mse(pred, target, mask, *, clip_predictions):
     training losses are raw and selection criteria are clipped, so the
     choice is stated at every call site rather than inherited from a
     default. Only the PREDICTION is clipped; the target is untouched.
+
+    `reduce_dtype` is keyword-only and REQUIRED for the same reason, one
+    level down: it is the precision the difference, the square, and both
+    sums are computed in, and the two call sites want different values
+    (see the module docstring's accumulation section). A default would let
+    one of them inherit the other's precision silently. Clipping happens
+    before the cast, which costs nothing: 0.0 and 1.0 are exactly
+    representable in float32, so `clip` is a pure min/max with no rounding
+    to preserve.
+
+    The cast is applied to prediction, target and mask together, ahead of
+    the subtraction rather than merely ahead of the sum -- every float32
+    value is exact in float64, so the difference and the square become
+    exact too, and only the accumulation is left as a source of error.
 
     The denominator is `sum(mask)`, not the coordinate count, so the 279
     off-support coordinates contribute neither error nor weight. Averaging
@@ -173,15 +254,24 @@ def masked_per_image_mse(pred, target, mask, *, clip_predictions):
                          f"{flat_pred.shape[1]}")
     if clip_predictions:
         flat_pred = jnp.clip(flat_pred, 0.0, 1.0)
+    dtype = require_reduction_dtype(reduce_dtype)
+    flat_pred = flat_pred.astype(dtype)
+    flat_target = flat_target.astype(dtype)
+    flat_mask = flat_mask.astype(dtype)
     sq = (flat_pred - flat_target) ** 2
     return jnp.sum(sq * flat_mask, axis=1) / jnp.sum(flat_mask)
 
 
-def masked_mse(pred, target, mask, *, clip_predictions):
+def masked_mse(pred, target, mask, *, clip_predictions, reduce_dtype):
     """`masked_per_image_mse` averaged across images -- DESIGN.md's "mean
-    over batch images and their 505 active coordinates"."""
+    over batch images and their 505 active coordinates".
+
+    The across-image mean inherits `reduce_dtype` from the per-image array
+    it averages, so both stages of the reduction run at the one stated
+    precision."""
     return jnp.mean(masked_per_image_mse(pred, target, mask,
-                                         clip_predictions=clip_predictions))
+                                         clip_predictions=clip_predictions,
+                                         reduce_dtype=reduce_dtype))
 
 
 # ---- The locked architecture ----
@@ -259,9 +349,15 @@ def make_optimizer():
 def training_loss(model, x, y, mask):
     """RAW (unclipped) masked active-support MSE -- what gradients are
     taken of. `clip_predictions=False`, per DESIGN.md's locked
-    training/selection distinction."""
+    training/selection distinction.
+
+    Reduced in `CNN_DTYPE`, unchanged: this is the training objective, it
+    is read only by the optimizer, and gradient descent has no use for
+    precision below float32. The float64 accumulation belongs to the
+    validation metric alone, because it is the metric that is compared
+    with a zero-tolerance strict `<`."""
     pred = jax.vmap(model)(x)
-    return masked_mse(pred, y, mask, clip_predictions=False)
+    return masked_mse(pred, y, mask, clip_predictions=False, reduce_dtype=CNN_DTYPE)
 
 
 def clipped_validation_per_image_mse(model, x, y, mask, batch_size=EVAL_BATCH_SIZE):
@@ -274,22 +370,34 @@ def clipped_validation_per_image_mse(model, x, y, mask, batch_size=EVAL_BATCH_SI
     module. Per-image values are concatenated and the mean taken once, so
     no batch-boundary weighting enters the average.
 
+    Reduced in `VALIDATION_REDUCE_DTYPE` (float64), not `CNN_DTYPE` --
+    the module docstring's accumulation section states what that does and
+    does not buy. The model, its parameters and its forward pass stay
+    float32; only this metric's arithmetic is upcast.
+
     `batch_size` is not perfectly inert, and the claim is not made:
     `jax.vmap` vectorizes differently at different batch widths, which
     moves float32 results by ~1e-7 relative (measured on this
-    architecture). Runs are reproducible because `EVAL_BATCH_SIZE` is
-    fixed, not because the value is irrelevant."""
+    architecture). That is a property of the float32 FORWARD PASS and the
+    float64 accumulation does not remove it -- it is risk (b), not risk
+    (a). Runs are reproducible because `EVAL_BATCH_SIZE` is fixed, not
+    because the value is irrelevant."""
     n = x.shape[0]
     parts = []
     for start in range(0, n, int(batch_size)):
         xb, yb = x[start:start + int(batch_size)], y[start:start + int(batch_size)]
         pred = jax.vmap(model)(xb)
-        parts.append(masked_per_image_mse(pred, yb, mask, clip_predictions=True))
+        parts.append(masked_per_image_mse(pred, yb, mask, clip_predictions=True,
+                                          reduce_dtype=VALIDATION_REDUCE_DTYPE))
     return jnp.concatenate(parts) if len(parts) > 1 else parts[0]
 
 
 def clipped_validation_mse(model, x, y, mask, batch_size=EVAL_BATCH_SIZE):
-    """The scalar checkpoint-selection criterion."""
+    """The scalar checkpoint-selection criterion.
+
+    The across-image mean is taken over the float64 per-image array, so
+    the outer reduction over ~6,000 images runs at the same precision as
+    the inner reduction over 505 coordinates."""
     return jnp.mean(clipped_validation_per_image_mse(model, x, y, mask, batch_size))
 
 

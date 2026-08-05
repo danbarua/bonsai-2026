@@ -285,13 +285,16 @@ def test_masked_mse_ignores_off_support_coordinates_entirely(clip):
     rng = np.random.default_rng(3)
     pred = jnp.asarray(rng.uniform(0, 1, (4, SIDE, SIDE)), dtype=cnn.CNN_DTYPE)
     target = jnp.asarray(rng.uniform(0, 1, (4, SIDE, SIDE)), dtype=cnn.CNN_DTYPE)
-    base = float(cnn.masked_mse(pred, target, mask, clip_predictions=clip))
+    base = float(cnn.masked_mse(pred, target, mask, clip_predictions=clip,
+                                reduce_dtype=cnn.CNN_DTYPE))
 
     moved_out = target.reshape(4, -1).at[:, outside].set(-99.0).reshape(4, SIDE, SIDE)
-    assert float(cnn.masked_mse(pred, moved_out, mask, clip_predictions=clip)) == base
+    assert float(cnn.masked_mse(pred, moved_out, mask, clip_predictions=clip,
+                                reduce_dtype=cnn.CNN_DTYPE)) == base
 
     moved_in = target.reshape(4, -1).at[:, inside].set(-99.0).reshape(4, SIDE, SIDE)
-    assert float(cnn.masked_mse(pred, moved_in, mask, clip_predictions=clip)) != base
+    assert float(cnn.masked_mse(pred, moved_in, mask, clip_predictions=clip,
+                                reduce_dtype=cnn.CNN_DTYPE)) != base
 
 
 def test_masked_mse_denominator_is_the_support_size_not_the_grid_size():
@@ -302,7 +305,7 @@ def test_masked_mse_denominator_is_the_support_size_not_the_grid_size():
     pred = jnp.zeros((1, SIDE, SIDE), dtype=cnn.CNN_DTYPE)
     target = jnp.zeros((1, N_PIX), dtype=cnn.CNN_DTYPE).at[:, inside].set(1.0)
     got = float(cnn.masked_mse(pred, target.reshape(1, SIDE, SIDE), mask,
-                               clip_predictions=False))
+                               clip_predictions=False, reduce_dtype=cnn.CNN_DTYPE))
     assert got == pytest.approx(1.0 / cnn.N_ACTIVE, rel=1e-6)
     assert got != pytest.approx(1.0 / N_PIX, rel=1e-6)
 
@@ -438,17 +441,22 @@ def test_off_support_fit_targets_produce_no_gradient():
 
 # ---- RAW training loss versus CLIPPED selection criterion ----
 
-def test_clip_predictions_is_required_at_every_call_site():
-    """No default: neither call site can inherit the wrong side of a locked
-    distinction."""
+@pytest.mark.parametrize("param_name", ["clip_predictions", "reduce_dtype"])
+def test_primitive_choices_are_required_at_every_call_site(param_name):
+    """No default: neither call site can inherit the wrong side of a
+    distinction the two call sites genuinely differ on. `clip_predictions`
+    is DESIGN.md-locked; `reduce_dtype` is not, but its failure mode is
+    the same shape -- a silently inherited precision."""
     for fn in (cnn.masked_per_image_mse, cnn.masked_mse):
-        param = inspect.signature(fn).parameters["clip_predictions"]
+        param = inspect.signature(fn).parameters[param_name]
         assert param.kind is inspect.Parameter.KEYWORD_ONLY
         assert param.default is inspect.Parameter.empty
     mask, _, _ = _mask_and_split_coords()
     z = jnp.zeros((1, SIDE, SIDE), dtype=cnn.CNN_DTYPE)
-    with pytest.raises(TypeError):
-        cnn.masked_mse(z, z, mask)
+    kwargs = {"clip_predictions": False, "reduce_dtype": cnn.CNN_DTYPE}
+    kwargs.pop(param_name)
+    with pytest.raises(TypeError, match=param_name):
+        cnn.masked_mse(z, z, mask, **kwargs)
 
 
 def test_training_loss_is_raw_and_validation_metric_is_clipped():
@@ -497,10 +505,12 @@ def test_masked_mse_is_the_mean_of_the_per_image_primitive():
     rng = np.random.default_rng(6)
     pred = jnp.asarray(rng.uniform(0, 1, (5, SIDE, SIDE)), dtype=cnn.CNN_DTYPE)
     target = jnp.asarray(rng.uniform(0, 1, (5, SIDE, SIDE)), dtype=cnn.CNN_DTYPE)
-    per_image = cnn.masked_per_image_mse(pred, target, mask, clip_predictions=False)
+    per_image = cnn.masked_per_image_mse(pred, target, mask, clip_predictions=False,
+                                         reduce_dtype=cnn.CNN_DTYPE)
     assert per_image.shape == (5,)
     np.testing.assert_allclose(
-        float(cnn.masked_mse(pred, target, mask, clip_predictions=False)),
+        float(cnn.masked_mse(pred, target, mask, clip_predictions=False,
+                             reduce_dtype=cnn.CNN_DTYPE)),
         float(jnp.mean(per_image)), rtol=0, atol=0)
 
 
@@ -512,7 +522,7 @@ def test_masked_primitive_rejects_mismatched_shapes(pred_shape, target_shape, ma
     mask, _, _ = _mask_and_split_coords()
     with pytest.raises(ValueError, match=match):
         cnn.masked_mse(jnp.zeros(pred_shape), jnp.zeros(target_shape), mask,
-                       clip_predictions=False)
+                       clip_predictions=False, reduce_dtype=cnn.CNN_DTYPE)
 
 
 # ---- the optimizer ----
