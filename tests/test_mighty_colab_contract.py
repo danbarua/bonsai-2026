@@ -41,38 +41,13 @@ bills.
 import re
 import shutil
 import subprocess
-from pathlib import Path
 
 import pytest
 
-REPO_ROOT = Path(__file__).resolve().parents[1]
-MAKEFILE = REPO_ROOT / "Makefile"
+from _makefile import REPO_ROOT, recipes as _recipes
 
 # Above this, an "explicit timeout" would be no better than the default.
 MAX_TRUSTWORTHY_DEFAULT_TIMEOUT_S = 60.0
-
-
-def _recipes():
-    """Every Makefile recipe, as {target_name: recipe_text}.
-
-    A recipe is the run of tab-indented lines following a `target:` line.
-    Line continuations are left as-is; the assertions below are substring
-    checks, so joining them would only obscure which line matched."""
-    out, current, body = {}, None, []
-    for line in MAKEFILE.read_text().splitlines():
-        if line.startswith("\t"):
-            if current:
-                body.append(line)
-            continue
-        if current:
-            out[current] = "\n".join(body)
-            current, body = None, []
-        m = re.match(r"^([A-Za-z0-9_-]+):(?!=)", line)
-        if m:
-            current, body = m.group(1), []
-    if current:
-        out[current] = "\n".join(body)
-    return out
 
 
 def _exec_recipes():

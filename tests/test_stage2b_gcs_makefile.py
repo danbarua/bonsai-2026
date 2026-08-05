@@ -19,30 +19,14 @@ otherwise live in a Makefile comment nobody re-checks. Tier 1 throughout
 -- parses two files, touches no network and provisions nothing.
 """
 import ast
-import re
 import sys
 from pathlib import Path
 
-REPO_ROOT = Path(__file__).resolve().parent.parent
-MAKEFILE = REPO_ROOT / "Makefile"
+from _makefile import REPO_ROOT, make_var as _make_var, recipes as _recipes
+
 sys.path.insert(0, str(REPO_ROOT / "experiments" / "stage2b_denoising"))
 
 import stage2b_gcs as gcs  # noqa: E402
-
-
-def _make_var(name):
-    """The value of a `NAME ?= value` (or `:=`, or `=`) assignment.
-
-    Backslash continuations are joined first: `GCS_ENV` spans two lines,
-    and a pattern anchored to a single line silently returns half of it --
-    which read as "GCS_ENV does not mention the bucket" when it does.
-
-    Returns None when the variable is not declared at all, so a test can
-    say which of "wrong value" and "missing entirely" happened."""
-    text = re.sub(r"\\\n\s*", " ", MAKEFILE.read_text())
-    pattern = rf"^{re.escape(name)}\s*[?:]?=\s*(.*?)\s*$"
-    matches = re.findall(pattern, text, re.MULTILINE)
-    return matches[-1] if matches else None
 
 
 def test_the_makefile_declares_the_same_default_bucket_as_the_module():
@@ -94,24 +78,6 @@ def test_the_stage2b_test_target_lists_every_stage2b_test_file():
         f"STAGE2B_TEST_FILES names files that do not exist, so the target fails to "
         f"collect: {stale}")
 
-
-def _recipes():
-    """Every Makefile recipe, as {target_name: recipe_text}."""
-    out, current, body = {}, None, []
-    for line in MAKEFILE.read_text().splitlines():
-        if line.startswith("\t"):
-            if current:
-                body.append(line)
-            continue
-        if current:
-            out[current] = "\n".join(body)
-            current, body = None, []
-        m = re.match(r"^([A-Za-z0-9_-]+):(?!=)", line)
-        if m:
-            current, body = m.group(1), []
-    if current:
-        out[current] = "\n".join(body)
-    return out
 
 
 def _builds_a_live_gcs_client(path):
