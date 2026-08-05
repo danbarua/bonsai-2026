@@ -461,8 +461,10 @@ so the decision is made from measurement rather than mid-halt.
    `execute_terminal_command`, file-editing tools, etc.). Used for
    Stage 1B.2 onward -- genuine multi-core parallelism (10 cores) made
    previously slow analyses (hours single-threaded) complete in minutes.
-3. **Ephemeral cloud GPU sessions via `mighty-colab`** (an MCP server
-   wrapping a Colab-runtime CLI), introduced for Stage 1D's GPU/JAX port.
+3. **Ephemeral cloud GPU sessions via `mighty-colab`** (a CLI that drives
+   Colab runtimes; it also ships an MCP server, but that is for Claude
+   Desktop -- Claude Code shells out to the CLI, which is what every
+   `Makefile` target here does), introduced for Stage 1D's GPU/JAX port.
    New failure modes relative to the first two environments, learned the
    hard way in the session that fixed Stage 1D's Delta_map bug:
    - **A session (and the agent driving it) can die mid-task, silently,
@@ -504,7 +506,11 @@ about, and both applying to any future GPU work here:
   default** -- roughly 10 explicit mantissa bits instead of 24. Measured
   on Stage 2B's CNN: the same model and input gave a max relative
   difference of 1.058e-04 against CPU at default precision, and 1.172e-07
-  (float32 epsilon) with precision pinned. That is normally a good trade.
+  (float32 epsilon) with precision pinned. The default-path magnitude
+  varies between A100 instances (6.360e-05 on a later run) but stays
+  orders above epsilon, while the pinned path is stable at epsilon --
+  so the check's verdict is which side of epsilon each path lands on, not
+  a fixed number. That is normally a good trade.
   It is not one wherever a downstream comparison has no tolerance band --
   Stage 2B's early stopping is `min_delta=0.0` with a strict `<`, so a
   1e-4 shift moves which epoch is checkpointed, which seed is selected,
@@ -525,11 +531,11 @@ about, and both applying to any future GPU work here:
   transfers to neither question.
 
 **`mighty-colab exec`'s exit status is version-dependent, and BOTH
-behaviours are traps.** Up to v0.1.22 it exited 0 even when the remote
-script raised -- verified directly, and the same shape as the
+behaviours are traps.** On the 0.1.x line it exited 0 even when the
+remote script raised -- verified directly, and the same shape as the
 `stage2a-verify` no-op-gate bug (`git diff --stat` always exits 0),
 reintroduced in new code before being caught by a check that genuinely
-failed. From v0.1.23 it propagates the status correctly (verified: 1 on
+failed. From v0.2.0 it propagates the status correctly (verified: 1 on
 a raising script, 0 on a succeeding one).
 
 The fix silently reversed a behaviour the Makefile relied on. An
@@ -545,6 +551,36 @@ General lesson worth more than the specific bug: a dependency fixing a
 bug can break code that had adapted to it. The adaptation is invisible
 at the call site, so upgrading needs a check of what the old behaviour
 was load-bearing FOR, not just that the new behaviour is correct.
+
+**`mighty-colab exec --timeout` defaults to 30 SECONDS, and it bounds the
+gap between outputs rather than the run.** A remote script that is
+computing normally but not printing dies with `TimeoutError: Timeout
+waiting for output`. Every long-running driver in this project goes quiet
+for far longer than 30s -- `stage3_gpu_evolve.py` prints once per
+topology, `class0_support_audit_classify_gpu.py` prints once per input
+download and then not at all through several minutes of cuML fitting.
+Found by running `stage2a-class0-classify-gpu` as a target for the first
+time (2026-08-05): it died 30 seconds in, on the third of six downloads.
+The target had been codified from a hand-run `mighty-colab exec` session
+and `--timeout` was never carried across, so it had **never once
+completed as written**; the two Stage 2A evolve targets had the same
+omission. This is the `stage2a-verify` no-op-gate pattern in a third
+form: a command sequence that produced real results when run by hand, then
+frozen into a target nobody ran end to end. All five GPU targets now pass
+`EXEC_TIMEOUT`, and `tests/test_mighty_colab_contract.py` fails if any
+future one omits it (CLAUDE.md principle 20).
+
+**cuML logistic regression on GPU is not bit-reproducible, and that is
+fine at the level the claims are made.** Re-running the class-0-support
+audit's classifier on a fresh A100 reproduced `selected_C` exactly
+(0.01 for both conditions), `encoded_784_unrestricted` accuracy exactly
+(0.7458), and `raw_pixels_505restricted` accuracy to one image in 10,000
+(0.6549 vs the reported 0.6550). Per-C mean validation losses wobbled in
+the 4th-6th decimal, most at large, unselected, ill-conditioned C
+(C=1000: 1.0366 vs 1.0171) and least at the selected minimum, which wins
+by a wide margin (0.4968 vs 0.5269 next-best). Reproduction of this
+artifact should be judged on selected hyperparameter, convergence flag,
+and accuracy -- not on a hash.
 
 **Practical lessons from operating across both**:
 - `execute_terminal_command` with `reuseExistingTerminalWindow=true` can
