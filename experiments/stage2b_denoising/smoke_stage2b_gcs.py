@@ -227,19 +227,29 @@ def _composite_digest(bucket, workdir, name, local):
 
 def main():
     parser = argparse.ArgumentParser(description=__doc__.splitlines()[0])
-    parser.add_argument("--bucket", default=gcs.GCS_BUCKET)
+    parser.add_argument("--bucket", default=None,
+                        help="bucket to probe; defaults to bucket_name(), i.e. "
+                             "$BONSAI_GCS_BUCKET or the module default")
     parser.add_argument("--credentials", default=None,
                         help="service-account key path; defaults to credentials_path()")
     parser.add_argument("--keep", action="store_true",
                         help="leave the probe objects in place instead of deleting them")
     args = parser.parse_args()
 
-    print(f"bucket:  {args.bucket}")
+    # Resolved and reported before anything is written: this script's whole
+    # job is to touch a real bucket, so which one it picked, and whether
+    # that came from the flag, the environment or the default, is the first
+    # thing a reader needs to see (CLAUDE.md principle 20).
+    name = args.bucket or gcs.bucket_name()
+    origin = ("--bucket" if args.bucket
+              else f"${gcs.BUCKET_ENV_VAR}" if os.environ.get(gcs.BUCKET_ENV_VAR)
+              else "module default")
+    print(f"bucket:  {name} (from {origin})")
     print(f"project: {gcs.GCS_PROJECT}")
     key = args.credentials or gcs.credentials_path()
     print(f"key:     {key} (exists: {os.path.exists(key)}; contents never read)")
 
-    bucket = gcs.get_bucket(bucket_name=args.bucket, credentials=args.credentials)
+    bucket = gcs.get_bucket(name=name, credentials=args.credentials)
 
     with tempfile.TemporaryDirectory() as workdir:
         print("\ntraining-side round trip")

@@ -276,9 +276,26 @@ stage2b-test:  ## Run the Stage 2B test suite (fast only; the Colab round trip i
 # evidence is most of what this test is for (CLAUDE.md principle 20).
 BONSAI_GCS_CREDENTIALS ?= $(HOME)/.config/colab-cli/bonsai-colab-storage-key.json
 
+# The bucket every Stage 2B artifact lands in. `stage2b_gcs.bucket_name()`
+# reads this from the environment and falls back to its own default, so
+# the two must agree -- `tests/test_stage2b_gcs_makefile.py` asserts they
+# do rather than trusting this comment. Override it to point a run at a
+# scratch bucket without editing any Python:
+#
+#     make stage2b-smoke-gcs BONSAI_GCS_BUCKET=some-other-bucket
+#
+BONSAI_GCS_BUCKET ?= bonsai-2026-stage2b-cache
+
+# Every target below that reaches GCS passes both of these explicitly.
+# Exporting them from a single place is the point of the rename that
+# created them: the bucket name lived in three files and a test pinned the
+# wrong one of them.
+GCS_ENV := BONSAI_GCS_CREDENTIALS="$(BONSAI_GCS_CREDENTIALS)" \
+           BONSAI_GCS_BUCKET="$(BONSAI_GCS_BUCKET)"
+
 .PHONY: stage2b-test-roundtrip
 stage2b-test-roundtrip:  ## Real Colab+GCS round trip -- provisions a CPU runtime, bills while running
-	cd $(REPO_ROOT) && BONSAI_GCS_CREDENTIALS="$(BONSAI_GCS_CREDENTIALS)" \
+	cd $(REPO_ROOT) && $(GCS_ENV) \
 		uv run --group gpu pytest tests/test_stage2b_gcs_roundtrip.py -m slow -s
 
 .PHONY: test
@@ -363,7 +380,8 @@ stage2b-verify-cnn-gpu:  ## Compare the CNN float32 forward pass CPU vs GPU -- b
 
 .PHONY: stage2b-smoke-gcs
 stage2b-smoke-gcs:  ## Real-bucket GCS smoke check: transport, chunked resumable upload, both delete refusals
-	cd $(REPO_ROOT) && uv run --group gpu python $(STAGE2B_DIR)/smoke_stage2b_gcs.py
+	cd $(REPO_ROOT) && $(GCS_ENV) \
+		uv run --group gpu python $(STAGE2B_DIR)/smoke_stage2b_gcs.py
 
 .PHONY: help
 help:  ## List every target in this file, grouped by section

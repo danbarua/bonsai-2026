@@ -101,7 +101,7 @@ class FakeBucket:
     listing. `list_blobs` matches on a plain string prefix, as the real
     API does."""
 
-    def __init__(self, name=gcs.GCS_BUCKET):
+    def __init__(self, name=gcs.DEFAULT_GCS_BUCKET):
         self.name = name
         self.objects = {}
         self.uploads = []
@@ -244,7 +244,12 @@ TEST_ARGS = dict(stage=4, condition="evolved_T", kind="predictions", ext="npz", 
 
 def test_infrastructure_constants():
     assert gcs.GCS_PROJECT == "bonsai-504422"
-    assert gcs.GCS_BUCKET == "bonsai-2026-stage4a-cache"
+    assert gcs.DEFAULT_GCS_BUCKET == "bonsai-2026-stage2b-cache"
+    assert gcs.BUCKET_ENV_VAR == "BONSAI_GCS_BUCKET"
+    assert not hasattr(gcs, "GCS_BUCKET"), (
+        "a module-level GCS_BUCKET is read at import time, so anything referencing it "
+        "silently ignores BONSAI_GCS_BUCKET and operates on the wrong bucket. Call "
+        "bucket_name() instead.")
     assert gcs.CREDENTIALS_ENV_VAR == "BONSAI_GCS_CREDENTIALS"
     assert gcs.DEFAULT_CREDENTIALS_PATH == "~/.config/colab-cli/bonsai-colab-storage-key.json"
     assert gcs.ROOT_PREFIX == "stage2b"
@@ -323,6 +328,57 @@ except ImportError:
     assert out[2] == "stage2b/train/stage1"
     assert out[3] == "guard-ok"
     assert out[4] == "lazy-ok"
+
+
+# ---- the bucket: resolved per call, never bound at import ----
+
+def test_bucket_name_defaults_to_the_module_default():
+    assert gcs.bucket_name(env={}) == gcs.DEFAULT_GCS_BUCKET
+
+
+def test_bucket_name_is_overridden_by_the_environment_variable():
+    assert gcs.bucket_name(env={gcs.BUCKET_ENV_VAR: "some-scratch-bucket"}) == \
+        "some-scratch-bucket"
+
+
+def test_an_empty_bucket_override_falls_back_to_the_default():
+    assert gcs.bucket_name(env={gcs.BUCKET_ENV_VAR: ""}) == gcs.DEFAULT_GCS_BUCKET
+    assert gcs.bucket_name(env={gcs.BUCKET_ENV_VAR: "   "}) == gcs.DEFAULT_GCS_BUCKET
+
+
+@pytest.mark.parametrize("bad", [
+    "has/a/slash",        # would silently redirect every object path built against it
+    "UPPERCASE",          # GCS rejects it; fail here rather than at the API
+    "-leading-dash",
+    "trailing-dash-",
+    "ab",                 # under the 3-character minimum
+    "x" * 64,             # over the 63-character maximum
+    "sp ace",
+])
+def test_an_invalid_bucket_override_is_rejected_loudly(bad):
+    """A bad name must fail at resolution, not become a confusing 404 or --
+    worse, for a name containing a separator -- a silently different path."""
+    with pytest.raises(ValueError, match=gcs.BUCKET_ENV_VAR):
+        gcs.bucket_name(env={gcs.BUCKET_ENV_VAR: bad})
+
+
+def test_get_bucket_resolves_the_name_per_call_not_at_import(monkeypatch):
+    """The regression a default argument would reintroduce: `get_bucket`
+    must read the environment when it is called, so a variable set after
+    this module was imported is still honoured."""
+    seen = []
+
+    class _Client:
+        def bucket(self, name):
+            seen.append(name)
+            return name
+
+    monkeypatch.setenv(gcs.BUCKET_ENV_VAR, "set-after-import")
+    gcs.get_bucket(client=_Client())
+    monkeypatch.delenv(gcs.BUCKET_ENV_VAR)
+    gcs.get_bucket(client=_Client())
+
+    assert seen == ["set-after-import", gcs.DEFAULT_GCS_BUCKET]
 
 
 # ---- credentials: resolved, never read ----

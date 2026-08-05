@@ -164,7 +164,17 @@ from typing import NamedTuple
 
 # ---- Infrastructure constants (settled; not configuration to rediscover) ----
 GCS_PROJECT = "bonsai-504422"
-GCS_BUCKET = "bonsai-2026-stage4a-cache"      # public read (anonymous objectViewer)
+
+# The bucket resolves like the credentials path below: a default here, an
+# environment variable that overrides it, and a function that does the
+# resolving. There is deliberately no module-level `GCS_BUCKET` constant --
+# a name holding the default would be read at import time by anything that
+# referenced it, silently bypassing the override and leaving a caller
+# operating on a different bucket than the one it was told to use
+# (CLAUDE.md principle 16: the helper is correct, the glue around it is
+# what goes wrong). Call `bucket_name()`.
+BUCKET_ENV_VAR = "BONSAI_GCS_BUCKET"
+DEFAULT_GCS_BUCKET = "bonsai-2026-stage2b-cache"   # public read (anonymous objectViewer)
 
 CREDENTIALS_ENV_VAR = "BONSAI_GCS_CREDENTIALS"
 DEFAULT_CREDENTIALS_PATH = "~/.config/colab-cli/bonsai-colab-storage-key.json"
@@ -187,6 +197,9 @@ TEST_SPLIT_STAGE = 4              # the one locked confirmatory evaluation
 # a leading dot.
 _TOKEN_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9_-]*$")
 _EXT_RE = re.compile(r"^[A-Za-z0-9]+$")
+# GCS bucket naming, restricted to the unambiguous subset: lowercase only,
+# no leading/trailing punctuation. Domain-named buckets are not in play.
+_BUCKET_RE = re.compile(r"^[a-z0-9][a-z0-9._-]{1,61}[a-z0-9]$")
 
 # ---- Chunked upload ----
 CHUNK_SIZE_DEFAULT = 64 * 1024 * 1024   # 64 MiB: one part is one request, held in memory once
@@ -243,6 +256,31 @@ def credentials_path(env=None):
     env = os.environ if env is None else env
     raw = env.get(CREDENTIALS_ENV_VAR) or DEFAULT_CREDENTIALS_PATH
     return os.path.expanduser(raw)
+
+
+def bucket_name(env=None):
+    """The bucket to operate on: `BONSAI_GCS_BUCKET` if set to a non-empty
+    value, otherwise `DEFAULT_GCS_BUCKET`.
+
+    The name is validated the same way an object-path token is, and for
+    the same reason: a name carrying a `/` would turn every object path
+    built against it into a different path than the one requested, and a
+    stray empty or whitespace value should fail loudly here rather than
+    produce a confusing 404 from the API.
+
+    `env` overrides the environment mapping consulted, for tests."""
+    env = os.environ if env is None else env
+    # Stripped *before* the fallback, so a variable set to whitespace --
+    # which is what `BONSAI_GCS_BUCKET=` or a stray quote in a Makefile
+    # produces -- falls back to the default rather than raising. Matches
+    # `credentials_path`'s treatment of an empty override.
+    name = (env.get(BUCKET_ENV_VAR) or "").strip() or DEFAULT_GCS_BUCKET
+    if not _BUCKET_RE.match(name):
+        raise ValueError(
+            f"{BUCKET_ENV_VAR}={name!r} is not a valid GCS bucket name: expected 3-63 "
+            f"characters of lowercase letters, digits, dashes, underscores and dots, "
+            f"starting and ending alphanumeric.")
+    return name
 
 
 def credentials_available(env=None):
@@ -426,17 +464,23 @@ def make_client(*, credentials=None, project=GCS_PROJECT, anonymous=False):
     return storage.Client.from_service_account_json(path, project=project)
 
 
-def get_bucket(*, bucket_name=GCS_BUCKET, client=None, credentials=None,
+def get_bucket(*, name=None, client=None, credentials=None,
                project=GCS_PROJECT, anonymous=False):
     """The bucket handle every transport function below takes.
 
     Build it once per script and pass it down: the transport functions
     require `bucket` as a keyword argument with no default, so a run
     script constructs exactly one client and a test can inject a stand-in
-    without the library being installed at all."""
+    without the library being installed at all.
+
+    `name` defaults to `bucket_name()`, resolved on each call rather than
+    bound at import: a default argument would freeze whatever the
+    environment held when this module was first imported."""
+    if name is None:
+        name = bucket_name()
     if client is None:
         client = make_client(credentials=credentials, project=project, anonymous=anonymous)
-    return client.bucket(bucket_name)
+    return client.bucket(name)
 
 
 # ---- Content integrity: the digest, and the comparison it feeds ----
@@ -1079,7 +1123,7 @@ def delete_prefix(prefix, *, bucket, allow_test_split=False,
     if not (prefix == ROOT_PREFIX or prefix.startswith(ROOT_PREFIX + "/")):
         raise PermissionError(
             f"refusing to delete {prefix!r}: it lies outside {ROOT_PREFIX + '/'!r}, and the "
-            f"bucket {GCS_BUCKET!r} is shared with other stages' cached artifacts. This "
+            f"bucket {bucket.name!r} may hold other stages' cached artifacts. This "
             f"refusal is unconditional -- force_non_test_prefix does not lift it.")
     if is_test_split_path(prefix):
         _check_object_path_allowed(prefix, allow_test_split)

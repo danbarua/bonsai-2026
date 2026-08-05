@@ -92,9 +92,17 @@ yet.
 
 Artifacts move to GCS **from within the cloud environment**, never
 round-tripped through a local upload — Stage 2A already hit Colab's
-upload ceiling doing that. Bucket `bonsai-2026-stage4a-cache` is
+upload ceiling doing that. Bucket `bonsai-2026-stage2b-cache` is
 public-read, so a consumer needs no credentials; writing needs the
 service-account key.
+
+The bucket is not written into any script. `stage2b_gcs.bucket_name()`
+resolves it from `BONSAI_GCS_BUCKET`, falling back to the module
+default, and the `Makefile` declares that same default in one place and
+exports it to every target that reaches GCS — so pointing a run at a
+different bucket is `make stage2b-smoke-gcs BONSAI_GCS_BUCKET=other`
+with no edit. `tests/test_stage2b_gcs_makefile.py` asserts the Makefile
+and the module still agree.
 
 `stage2b_gcs.py` imports `google.cloud.storage` **lazily**, inside the
 functions that need a client. This is load-bearing, not stylistic: it

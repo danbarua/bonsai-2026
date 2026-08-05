@@ -113,7 +113,7 @@ def main(params_path=PARAMS_PATH):
             handle.write(text)
 
     try:
-        bucket = gcs.get_bucket(bucket_name=params["bucket"],
+        bucket = gcs.get_bucket(name=params["bucket"],
                                 credentials=params["credentials_path"],
                                 project=params["project"])
         result = gcs.ensure_artifact(params["object_name"], params["local_path"],

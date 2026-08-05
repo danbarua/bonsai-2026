@@ -314,7 +314,7 @@ def roundtrip(tmp_path):
     params_file.write_text(json.dumps({
         "object_name": object_name,
         "nonce": nonce,
-        "bucket": gcs.GCS_BUCKET,
+        "bucket": gcs.bucket_name(),
         "project": gcs.GCS_PROJECT,
         "module_dir": REMOTE_DIR,
         "credentials_path": REMOTE_KEY_PATH,
