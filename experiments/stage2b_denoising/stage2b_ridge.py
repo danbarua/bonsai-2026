@@ -1,0 +1,322 @@
+"""
+Stage 2B's readout: the intercept-aware SVD ridge production path (JAX),
+its alpha-selection rule, and the sklearn verification oracle --
+implementing DESIGN.md's "Readout: multi-output ridge -- JAX SVD
+production path, sklearn as oracle" section exactly.
+
+    Y_tilde  = Y - mean(Y_train)
+    W_alpha  = V @ diag(s / (s^2 + alpha)) @ U.T @ Y_tilde
+    b_alpha  = mean(Y_train) - mean(X_train) @ W_alpha
+
+One thin SVD per (fold, condition) of the standardized training
+features; all nine alphas evaluated from that single decomposition. The
+general intercept expression is what is implemented -- not the
+`b_alpha = mean(Y_train)` shortcut that it normally reduces to after
+standardization, which would silently stop being correct if the scaler
+ever changed.
+
+`assert_scaler_centered` is the guard that makes that shortcut's absence
+meaningful: a broken scaler cannot quietly invent intercept structure,
+because `||mean(X_train_scaled)||` is checked against 1e-10 before any
+solve.
+
+**sklearn (`Ridge(solver="svd")`) is the verification oracle -- not in
+the production path, never deleted.** `ridge_equivalence_check` runs
+both paths through the same fold splitter, the same scaler, and the same
+`select_alpha`, and reports DESIGN.md's literal gate quantities: max
+absolute difference in clipped validation predictions (<= 1e-8) and
+identical alpha selection.
+
+Scope note: this module is pure functions over arrays. It loads no
+dataset and knows nothing about conditions, corruption, or splits. The
+42-SVD accounting in DESIGN.md (35 fold-level + 7 final refits) is a
+property of the caller that loops 7 conditions over
+`cross_validate_alpha` (5 SVDs each) and then `fit_final` (1 SVD each),
+not of anything here.
+
+dtype: float64 throughout, per DESIGN.md's dtype table (Stage 2A
+measured ~2e6 condition numbers on evolved-feature design matrices;
+float32's ~6e-8 precision at that conditioning gives ~12% worst-case
+relative error).
+"""
+import numpy as np
+import jax
+
+# x64 must be enabled BEFORE jax.numpy is imported, per this project's
+# established ordering (experiments/stage2a_dynamics_classification/
+# evolve_on_graph_jax.py). Reversed, the update silently does not apply.
+jax.config.update("jax_enable_x64", True)
+import jax.numpy as jnp  # noqa: E402
+
+from sklearn.linear_model import Ridge  # noqa: E402
+from sklearn.model_selection import StratifiedKFold  # noqa: E402
+from sklearn.preprocessing import StandardScaler  # noqa: E402
+
+# The config call above is not self-verifying: assert the effect, not the
+# call (CLAUDE.md principle 16 -- the call being right is not evidence
+# the effect took).
+if jnp.zeros(1, dtype=jnp.float64).dtype != jnp.float64:  # pragma: no cover
+    raise RuntimeError(
+        "jax_enable_x64 did not take effect -- ridge SVD would run in "
+        "float32, which DESIGN.md's dtype table explicitly rules out.")
+
+# ---- Locked constants (DESIGN.md, "Readout") ----
+ALPHA_GRID = (1e-2, 1e-1, 1.0, 10.0, 1e2, 1e3, 1e4, 1e5, 1e6)
+ALPHA_TIE_TOL = 1e-10      # "mean validation MSE within 1e-10 absolute"
+MEAN_X_TOL = 1e-10         # ||mean(X_train_scaled)|| guard
+N_SPLITS = 5
+FOLD_SEED = 42
+EQUIVALENCE_TOL = 1e-8     # max abs clipped-validation-prediction difference
+
+
+def assert_scaler_centered(X_scaled, tol=MEAN_X_TOL):
+    """Guard on the standardized training features: `||mean(X)|| < tol`.
+
+    The intercept formula `b = mean(Y) - mean(X) @ W` is only benign
+    because `mean(X)` is numerically zero after standardization. If a
+    scaler is misconfigured (fitted on the wrong fold, `with_mean=False`,
+    applied to already-scaled data), that term stops being noise and
+    starts being real, invented intercept structure -- silently, since
+    the ridge still fits and still produces predictions.
+
+    Returns the measured L2 norm; raises AssertionError on exceedance."""
+    mean_vec = np.asarray(X_scaled, dtype=np.float64).mean(axis=0)
+    norm = float(np.linalg.norm(mean_vec))
+    assert norm < tol, (
+        f"standardized training features are not centered: "
+        f"||mean(X_train_scaled)|| = {norm:.6e} >= {tol:.1e}")
+    return norm
+
+
+def svd_ridge_fit(X_train_scaled, Y_train, alphas=ALPHA_GRID, check_centered=True):
+    """One thin SVD of the standardized training features; every alpha in
+    `alphas` solved from that single decomposition.
+
+    Parameters
+    ----------
+    X_train_scaled : (n, p) standardized training features.
+    Y_train        : (n, k) UNstandardized targets (DESIGN.md: "targets
+                     unstandardized"), e.g. clean intensities on the
+                     505-coordinate active support.
+    alphas         : ridge penalties, evaluated from the one SVD.
+
+    Returns a dict with `W` (n_alpha, p, k), `b` (n_alpha, k), the
+    singular values, the condition number (DESIGN.md's required stage-2
+    diagnostic, free from the decomposition already computed), and the
+    measured `||mean(X_train_scaled)||`."""
+    X = jnp.asarray(np.asarray(X_train_scaled, dtype=np.float64))
+    Y = jnp.asarray(np.asarray(Y_train, dtype=np.float64))
+    if Y.ndim != 2:
+        raise ValueError("Y_train must be 2-D (n, k); multi-output ridge, "
+                         "shared alpha across all output columns")
+    alphas_arr = jnp.asarray(np.asarray(alphas, dtype=np.float64))
+
+    mean_x_norm = assert_scaler_centered(X_train_scaled) if check_centered else float("nan")
+
+    y_mean = Y.mean(axis=0)                       # (k,)
+    x_mean = X.mean(axis=0)                       # (p,)
+    Y_tilde = Y - y_mean                          # center targets, training fold only
+
+    U, s, Vt = jnp.linalg.svd(X, full_matrices=False)
+    Z = U.T @ Y_tilde                             # (r, k)
+    # diag(s / (s^2 + alpha)) applied per alpha, reusing the one decomposition
+    filt = s[None, :] / (s[None, :] ** 2 + alphas_arr[:, None])   # (a, r)
+    W = jnp.einsum("pr,ar,rk->apk", Vt.T, filt, Z)                # (a, p, k)
+    # general expression, not the mean(Y_train) shortcut
+    b = y_mean[None, :] - jnp.einsum("p,apk->ak", x_mean, W)      # (a, k)
+
+    s_np = np.asarray(s)
+    cond = float(s_np.max() / s_np.min()) if s_np.min() > 0 else float("inf")
+    return {
+        "W": np.asarray(W), "b": np.asarray(b),
+        "alphas": np.asarray(alphas, dtype=np.float64),
+        "singular_values": s_np, "cond": cond,
+        "y_mean": np.asarray(y_mean), "x_mean": np.asarray(x_mean),
+        "mean_x_norm": mean_x_norm,
+    }
+
+
+def ridge_predict(fit, X_scaled, alpha_index):
+    """Predictions for one alpha: `X @ W_alpha + b_alpha`, unclipped
+    (DESIGN.md: "ridge fitted without output clipping")."""
+    X = np.asarray(X_scaled, dtype=np.float64)
+    return X @ fit["W"][alpha_index] + fit["b"][alpha_index]
+
+
+def per_image_mse(pred, target):
+    """MSE per image, averaged over that image's output coordinates."""
+    pred = np.asarray(pred, dtype=np.float64)
+    target = np.asarray(target, dtype=np.float64)
+    return np.mean((pred - target) ** 2, axis=1)
+
+
+def clipped_per_image_mse(pred, target):
+    """DESIGN.md's primary error: MSE after deterministic clipping of the
+    PREDICTION to [0, 1]. The target is untouched."""
+    return per_image_mse(np.clip(np.asarray(pred, dtype=np.float64), 0.0, 1.0), target)
+
+
+def mse_per_alpha(fit, X_scaled, Y, clipped=True):
+    """Mean validation MSE for every alpha in the fit, looping over alphas
+    rather than materializing an (n_alpha, n, k) prediction tensor."""
+    out = np.empty(len(fit["alphas"]), dtype=np.float64)
+    for a in range(len(fit["alphas"])):
+        pred = ridge_predict(fit, X_scaled, a)
+        errs = clipped_per_image_mse(pred, Y) if clipped else per_image_mse(pred, Y)
+        out[a] = float(np.mean(errs))
+    return out
+
+
+def select_alpha(mean_val_mse, alphas=ALPHA_GRID, tol=ALPHA_TIE_TOL):
+    """DESIGN.md's locked selection rule: `argmin_alpha MSE(clip(x_hat, 0, 1), x_0)`,
+    ties within `tol` ABSOLUTE broken toward the LARGER alpha.
+
+    The tie direction is locked (it was a corrected error in an earlier
+    draft): among every alpha whose mean validation MSE is within `tol`
+    of the minimum, the largest -- i.e. the most regularized -- wins.
+
+    Returns (alpha, index)."""
+    mse = np.asarray(mean_val_mse, dtype=np.float64)
+    alphas_arr = np.asarray(alphas, dtype=np.float64)
+    if mse.shape != alphas_arr.shape:
+        raise ValueError(f"mse shape {mse.shape} does not match alphas {alphas_arr.shape}")
+    if not np.all(np.isfinite(mse)):
+        raise ValueError("non-finite validation MSE -- alpha selection is undefined")
+    best = float(mse.min())
+    tied = np.where(mse <= best + tol)[0]
+    idx = int(tied[int(np.argmax(alphas_arr[tied]))])
+    return float(alphas_arr[idx]), idx
+
+
+def cross_validate_alpha(X, Y, y_strat, alphas=ALPHA_GRID, n_splits=N_SPLITS,
+                          random_state=FOLD_SEED):
+    """Five-fold stratified CV over the alpha grid, JAX SVD production path.
+
+    `StratifiedKFold(n_splits=5, shuffle=True, random_state=42)`,
+    per-fold `StandardScaler` fitted on the training fold only, one thin
+    SVD per fold with all alphas reused from it, alpha chosen by mean
+    CLIPPED validation MSE (raw kept as a diagnostic only).
+
+    `X` is passed UNSCALED -- the per-fold scaler is fitted inside, which
+    is what makes the fold partition and the scaling identical across
+    every condition a caller compares."""
+    X = np.asarray(X, dtype=np.float64)
+    Y = np.asarray(Y, dtype=np.float64)
+    skf = StratifiedKFold(n_splits=n_splits, shuffle=True, random_state=random_state)
+    n_alpha = len(alphas)
+    fold_clipped = np.empty((n_splits, n_alpha), dtype=np.float64)
+    fold_raw = np.empty((n_splits, n_alpha), dtype=np.float64)
+    fold_cond = np.empty(n_splits, dtype=np.float64)
+    fold_mean_x_norm = np.empty(n_splits, dtype=np.float64)
+
+    for f, (tr, va) in enumerate(skf.split(X, y_strat)):
+        scaler = StandardScaler().fit(X[tr])
+        X_tr, X_va = scaler.transform(X[tr]), scaler.transform(X[va])
+        fit = svd_ridge_fit(X_tr, Y[tr], alphas=alphas)
+        fold_clipped[f] = mse_per_alpha(fit, X_va, Y[va], clipped=True)
+        fold_raw[f] = mse_per_alpha(fit, X_va, Y[va], clipped=False)
+        fold_cond[f] = fit["cond"]
+        fold_mean_x_norm[f] = fit["mean_x_norm"]
+
+    mean_clipped = fold_clipped.mean(axis=0)
+    alpha, idx = select_alpha(mean_clipped, alphas)
+    return {
+        "alpha": alpha, "alpha_index": idx, "alphas": np.asarray(alphas, dtype=np.float64),
+        "mean_clipped_val_mse": mean_clipped,
+        "mean_raw_val_mse": fold_raw.mean(axis=0),
+        "fold_clipped_val_mse": fold_clipped, "fold_raw_val_mse": fold_raw,
+        "fold_cond": fold_cond, "fold_mean_x_norm": fold_mean_x_norm,
+    }
+
+
+def fit_final(X_train, Y_train, alpha):
+    """The final full-training refit at a selected alpha -- one further
+    thin SVD per condition (DESIGN.md's "SVD count: 42, not 35").
+
+    Returns (fit, scaler); the caller applies the same scaler to
+    evaluation features."""
+    scaler = StandardScaler().fit(np.asarray(X_train, dtype=np.float64))
+    X_scaled = scaler.transform(np.asarray(X_train, dtype=np.float64))
+    fit = svd_ridge_fit(X_scaled, Y_train, alphas=(float(alpha),))
+    return fit, scaler
+
+
+# ---- sklearn verification oracle (never in the production path) ----
+
+def sklearn_ridge_predict(X_train_scaled, Y_train, X_eval_scaled, alphas=ALPHA_GRID):
+    """`Ridge(solver="svd", fit_intercept=True)` per alpha -- the oracle
+    DESIGN.md's equivalence gate is measured against. Returns
+    (predictions (a, n_eval, k), coefficients (a, p, k), intercepts (a, k)).
+
+    sklearn's `coef_` is (k, p) for multi-output; it is transposed here so
+    both paths speak the same (p, k) convention."""
+    X_tr = np.asarray(X_train_scaled, dtype=np.float64)
+    Y_tr = np.asarray(Y_train, dtype=np.float64)
+    X_ev = np.asarray(X_eval_scaled, dtype=np.float64)
+    preds, coefs, intercepts = [], [], []
+    for a in alphas:
+        model = Ridge(alpha=float(a), solver="svd", fit_intercept=True).fit(X_tr, Y_tr)
+        preds.append(model.predict(X_ev))
+        coefs.append(np.atleast_2d(model.coef_).T)
+        intercepts.append(np.atleast_1d(model.intercept_))
+    return np.stack(preds), np.stack(coefs), np.stack(intercepts)
+
+
+def ridge_equivalence_check(X, Y, y_strat, alphas=ALPHA_GRID, n_splits=N_SPLITS,
+                             random_state=FOLD_SEED, tol=EQUIVALENCE_TOL):
+    """DESIGN.md's literal equivalence gate, runnable at any corpus size.
+
+    Both paths share one fold splitter, one per-fold scaler, and one
+    `select_alpha` -- the oracle's selection is NOT computed by a
+    separately written argmin, so "identical alpha selection" tests the
+    selection rule against the same rule, and only the fitted values
+    differ.
+
+    Gate (both required):
+      (a) max abs difference in CLIPPED validation predictions <= 1e-8
+      (b) identical alpha selection
+
+    Max abs COEFFICIENT difference is recorded as a visibility
+    diagnostic at whatever value it takes -- explicitly not a second halt
+    rule, per DESIGN.md ("prediction agreement is what matters for the
+    endpoint")."""
+    X = np.asarray(X, dtype=np.float64)
+    Y = np.asarray(Y, dtype=np.float64)
+    skf = StratifiedKFold(n_splits=n_splits, shuffle=True, random_state=random_state)
+    n_alpha = len(alphas)
+    jax_fold = np.empty((n_splits, n_alpha), dtype=np.float64)
+    skl_fold = np.empty((n_splits, n_alpha), dtype=np.float64)
+    max_pred_diff = 0.0
+    max_coef_diff = 0.0
+
+    for f, (tr, va) in enumerate(skf.split(X, y_strat)):
+        scaler = StandardScaler().fit(X[tr])
+        X_tr, X_va = scaler.transform(X[tr]), scaler.transform(X[va])
+
+        fit = svd_ridge_fit(X_tr, Y[tr], alphas=alphas)
+        skl_pred, skl_coef, _skl_int = sklearn_ridge_predict(X_tr, Y[tr], X_va, alphas)
+
+        for a in range(n_alpha):
+            jax_pred_a = ridge_predict(fit, X_va, a)
+            jax_fold[f, a] = float(np.mean(clipped_per_image_mse(jax_pred_a, Y[va])))
+            skl_fold[f, a] = float(np.mean(clipped_per_image_mse(skl_pred[a], Y[va])))
+            # the gate is on CLIPPED validation predictions specifically
+            diff = np.max(np.abs(np.clip(jax_pred_a, 0.0, 1.0)
+                                  - np.clip(skl_pred[a], 0.0, 1.0)))
+            max_pred_diff = max(max_pred_diff, float(diff))
+            max_coef_diff = max(max_coef_diff,
+                                 float(np.max(np.abs(fit["W"][a] - skl_coef[a]))))
+
+    alpha_jax, _ = select_alpha(jax_fold.mean(axis=0), alphas)
+    alpha_skl, _ = select_alpha(skl_fold.mean(axis=0), alphas)
+    return {
+        "max_abs_clipped_pred_diff": max_pred_diff,
+        "max_abs_coef_diff": max_coef_diff,          # diagnostic only
+        "alpha_jax": alpha_jax, "alpha_sklearn": alpha_skl,
+        "alpha_agrees": alpha_jax == alpha_skl,
+        "pred_agrees": max_pred_diff <= tol,
+        "passed": bool(max_pred_diff <= tol and alpha_jax == alpha_skl),
+        "tol": tol,
+        "mean_clipped_val_mse_jax": jax_fold.mean(axis=0),
+        "mean_clipped_val_mse_sklearn": skl_fold.mean(axis=0),
+    }
