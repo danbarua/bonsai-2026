@@ -92,9 +92,13 @@ stage2a-evolve-train-gpu:  ## Upload + run Stage-3 (training set) GPU evolution 
 	for i in 00 01 02 03 04 05 06 07 08 09 10 11; do \
 		$(MIGHTY_COLAB) upload -s $(SESSION_TRAIN) scratch/stage3_train/theta0_chunk_$$i.npy /content/theta0_chunk_$$i.npy || exit 1; \
 	done && \
-	$(MIGHTY_COLAB) exec -s $(SESSION_TRAIN) -f stage3_gpu_evolve.py && \
-	$(MIGHTY_COLAB) download -s $(SESSION_TRAIN) /content/stage3_gpu_results.pkl scratch/stage3_train/stage3_gpu_results.pkl && \
-	$(MIGHTY_COLAB) stop -s $(SESSION_TRAIN)
+	rc=0; \
+	$(MIGHTY_COLAB) exec -s $(SESSION_TRAIN) -f stage3_gpu_evolve.py || rc=$$?; \
+	if [ $$rc -eq 0 ]; then \
+		$(MIGHTY_COLAB) download -s $(SESSION_TRAIN) /content/stage3_gpu_results.pkl scratch/stage3_train/stage3_gpu_results.pkl || rc=$$?; \
+	fi; \
+	$(MIGHTY_COLAB) stop -s $(SESSION_TRAIN); \
+	exit $$rc
 
 .PHONY: stage2a-evolve-test-gpu
 stage2a-evolve-test-gpu:  ## Upload + run Stage-4 (official test set) GPU evolution via mighty-colab -- bills while running
@@ -109,9 +113,13 @@ stage2a-evolve-test-gpu:  ## Upload + run Stage-4 (official test set) GPU evolut
 	$(MIGHTY_COLAB) upload -s $(SESSION_TEST) evolve_on_graph_jax.py /content/evolve_on_graph_jax.py && \
 	$(MIGHTY_COLAB) upload -s $(SESSION_TEST) scratch/stage4_test/stage4_gpu_upload_topologies.pkl /content/stage4_gpu_upload_topologies.pkl && \
 	$(MIGHTY_COLAB) upload -s $(SESSION_TEST) scratch/stage4_test/stage4_theta0_test.npy /content/stage4_theta0_test.npy && \
-	$(MIGHTY_COLAB) exec -s $(SESSION_TEST) -f stage4_gpu_evolve.py && \
-	$(MIGHTY_COLAB) download -s $(SESSION_TEST) /content/stage4_gpu_results.pkl scratch/stage4_test/stage4_gpu_results.pkl && \
-	$(MIGHTY_COLAB) stop -s $(SESSION_TEST)
+	rc=0; \
+	$(MIGHTY_COLAB) exec -s $(SESSION_TEST) -f stage4_gpu_evolve.py || rc=$$?; \
+	if [ $$rc -eq 0 ]; then \
+		$(MIGHTY_COLAB) download -s $(SESSION_TEST) /content/stage4_gpu_results.pkl scratch/stage4_test/stage4_gpu_results.pkl || rc=$$?; \
+	fi; \
+	$(MIGHTY_COLAB) stop -s $(SESSION_TEST); \
+	exit $$rc
 
 ##@ Analysis and confirmatory evaluation (CPU)
 
@@ -172,9 +180,13 @@ stage2a-class0-classify-gpu:  ## Part 2's cuml.accel GPU variant via mighty-cola
 	$(MIGHTY_COLAB) reinstall -s $(SESSION_CLASS0) --requirement cuml_requirements.txt && \
 	$(MIGHTY_COLAB) upload -s $(SESSION_CLASS0) stage2a_classifier.py /content/stage2a_classifier.py && \
 	$(MIGHTY_COLAB) upload -s $(SESSION_CLASS0) stage2a_stats.py /content/stage2a_stats.py && \
-	$(MIGHTY_COLAB) exec -s $(SESSION_CLASS0) -f class0_support_audit_classify_gpu.py && \
-	$(MIGHTY_COLAB) download -s $(SESSION_CLASS0) /content/class0_support_audit_classify_results.pkl results/class0_support_audit_classify_results.pkl && \
-	$(MIGHTY_COLAB) stop -s $(SESSION_CLASS0)
+	rc=0; \
+	$(MIGHTY_COLAB) exec -s $(SESSION_CLASS0) -f class0_support_audit_classify_gpu.py || rc=$$?; \
+	if [ $$rc -eq 0 ]; then \
+		$(MIGHTY_COLAB) download -s $(SESSION_CLASS0) /content/class0_support_audit_classify_results.pkl results/class0_support_audit_classify_results.pkl || rc=$$?; \
+	fi; \
+	$(MIGHTY_COLAB) stop -s $(SESSION_CLASS0); \
+	exit $$rc
 
 ##@ Testing
 
@@ -246,10 +258,12 @@ stage2b-verify-gpu:  ## Run the ridge equivalence gate on a real GPU -- bills wh
 		echo "[make] Reusing existing session $(SESSION_2B_VERIFY)"; \
 	fi && \
 	$(MIGHTY_COLAB) upload -s $(SESSION_2B_VERIFY) stage2b_ridge.py /content/stage2b_ridge.py && \
-	out=$$($(MIGHTY_COLAB) exec -s $(SESSION_2B_VERIFY) -f stage2b_verify_gpu.py --timeout 900 2>&1); \
+	rc=0; out=$$($(MIGHTY_COLAB) exec -s $(SESSION_2B_VERIFY) -f stage2b_verify_gpu.py --timeout 900 2>&1) || rc=$$?; \
 	echo "$$out"; \
 	$(MIGHTY_COLAB) stop -s $(SESSION_2B_VERIFY); \
-	echo "$$out" | grep -q GPU_VERIFY_OK || { echo "[make] FAILED: the GPU ridge gate did not report success. mighty-colab exec exits 0 even when the remote script raises, so the sentinel is the verdict, not the exit code."; exit 1; }
+	if [ $$rc -ne 0 ] || ! echo "$$out" | grep -q GPU_VERIFY_OK; then \
+		echo "[make] FAILED: the GPU ridge gate did not report success (exec rc=$$rc)."; exit 1; \
+	fi
 
 # The ridge GPU check above says nothing about the CNN: ridge is float64
 # end to end and therefore immune to reduced-precision effects, while the
@@ -268,10 +282,12 @@ stage2b-verify-cnn-gpu:  ## Compare the CNN float32 forward pass CPU vs GPU -- b
 	fi && \
 	$(MIGHTY_COLAB) install -s $(SESSION_2B_VERIFY) equinox optax && \
 	$(MIGHTY_COLAB) upload -s $(SESSION_2B_VERIFY) stage2b_cnn.py /content/stage2b_cnn.py && \
-	out=$$($(MIGHTY_COLAB) exec -s $(SESSION_2B_VERIFY) -f stage2b_verify_cnn_gpu.py --timeout 900 2>&1); \
+	rc=0; out=$$($(MIGHTY_COLAB) exec -s $(SESSION_2B_VERIFY) -f stage2b_verify_cnn_gpu.py --timeout 900 2>&1) || rc=$$?; \
 	echo "$$out"; \
 	$(MIGHTY_COLAB) stop -s $(SESSION_2B_VERIFY); \
-	echo "$$out" | grep -q CNN_GPU_VERIFY_OK || { echo "[make] FAILED: the CNN GPU check did not report success."; exit 1; }
+	if [ $$rc -ne 0 ] || ! echo "$$out" | grep -q CNN_GPU_VERIFY_OK; then \
+		echo "[make] FAILED: the CNN GPU check did not report success (exec rc=$$rc)."; exit 1; \
+	fi
 
 .PHONY: stage2b-smoke-gcs
 stage2b-smoke-gcs:  ## Real-bucket GCS smoke check: transport, chunked resumable upload, both delete refusals

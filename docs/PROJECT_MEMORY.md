@@ -524,15 +524,27 @@ about, and both applying to any future GPU work here:
   (Stage 2B's ridge) is immune to this entire class and its GPU result
   transfers to neither question.
 
-**`mighty-colab exec` exits 0 even when the remote script raises**
-(verified directly: a script that raised `SystemExit` with a failure
-message still let a `make` target report success). Any Makefile target
-that runs a remote verification must capture the output and decide the
-verdict by grepping the script's own success sentinel, not by chaining
-`&&` on the exec's exit status. This is the same shape as the
-`stage2a-verify` no-op-gate bug (`git diff --stat` always exits 0), and
-it was reintroduced in new code before being caught -- by a check that
-genuinely failed.
+**`mighty-colab exec`'s exit status is version-dependent, and BOTH
+behaviours are traps.** Up to v0.1.22 it exited 0 even when the remote
+script raised -- verified directly, and the same shape as the
+`stage2a-verify` no-op-gate bug (`git diff --stat` always exits 0),
+reintroduced in new code before being caught by a check that genuinely
+failed. From v0.1.23 it propagates the status correctly (verified: 1 on
+a raising script, 0 on a succeeding one).
+
+The fix silently reversed a behaviour the Makefile relied on. An
+`exec && download && stop` chain used to tear the session down on every
+path *because* exec always returned 0; once exec can fail, that chain
+SKIPS the teardown and leaves a billable A100 running. Three Stage 2A
+targets were written that way. All GPU targets now capture the status,
+tear down unconditionally, then propagate -- verified by pointing a
+target at a deliberately raising script and confirming the session was
+stopped and `make` still failed.
+
+General lesson worth more than the specific bug: a dependency fixing a
+bug can break code that had adapted to it. The adaptation is invisible
+at the call site, so upgrading needs a check of what the old behaviour
+was load-bearing FOR, not just that the new behaviour is correct.
 
 **Practical lessons from operating across both**:
 - `execute_terminal_command` with `reuseExistingTerminalWindow=true` can
