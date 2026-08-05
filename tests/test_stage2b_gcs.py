@@ -45,22 +45,30 @@ class FakeBlob:
         # Unpopulated until the object is fetched or written, as on a real
         # `Blob`: `bucket.blob(name)` is a handle, not a read.
         self.size = None
+        self.crc32c = None
 
     def exists(self):
         return self.name in self.bucket.objects
 
+    def _populate(self):
+        """Size and checksum as the real client fills them in -- from the
+        object the service actually holds, never from what was sent."""
+        data = self.bucket.objects.get(self.name, b"")
+        self.size = len(data)
+        self.crc32c = self.bucket._checksum(data)
+
     def reload(self):
         if self.name not in self.bucket.objects:
             raise FileNotFoundError(f"no such object: {self.name}")
-        self.size = len(self.bucket.objects[self.name])
+        self._populate()
 
     def upload_from_filename(self, path):
         self.bucket._store_upload(self.name, Path(path).read_bytes())
-        self.size = len(self.bucket.objects.get(self.name, b""))
+        self._populate()
 
     def upload_from_string(self, data, content_type=None):
         self.bucket._store_upload(self.name, bytes(data))
-        self.size = len(self.bucket.objects.get(self.name, b""))
+        self._populate()
 
     def compose(self, sources):
         """Server-side concatenation, with the API's own source limit
@@ -71,14 +79,16 @@ class FakeBlob:
         missing = [s.name for s in sources if s.name not in self.bucket.objects]
         if missing:
             raise FileNotFoundError(f"no such object(s): {missing}")
+        ordered = self.bucket._compose_order(sources)
         self.bucket.objects[self.name] = b"".join(
-            self.bucket.objects[s.name] for s in sources)
+            self.bucket.objects[s.name] for s in ordered)
         self.bucket.composes.append((self.name, [s.name for s in sources]))
+        self._populate()
 
     def download_to_filename(self, path):
         if self.name not in self.bucket.objects:
             raise FileNotFoundError(f"no such object: {self.name}")
-        Path(path).write_bytes(self.bucket.objects[self.name])
+        Path(path).write_bytes(self.bucket._deliver(self.bucket.objects[self.name]))
         self.bucket.downloads.append(self.name)
 
     def delete(self):
@@ -104,6 +114,25 @@ class FakeBucket:
         transfer die or silently vanish without touching `FakeBlob`."""
         self.objects[name] = bytes(data)
         self.uploads.append(name)
+
+    def _checksum(self, data):
+        """The service's own checksum of the bytes it holds -- computed
+        here with the module's implementation, because what these tests
+        exercise is whether stored bytes and local bytes agree, not
+        whether the algorithm is CRC32C. That second question is pinned
+        separately, by the standard check value and by the cross-check
+        against `google_crc32c` where it is installed."""
+        return gcs.crc32c_of_bytes(data)
+
+    def _compose_order(self, sources):
+        """The order the service concatenates in. A hook, so a subclass
+        can compose the right parts wrongly."""
+        return list(sources)
+
+    def _deliver(self, data):
+        """The bytes a download actually hands back, which are not
+        necessarily the bytes the object holds."""
+        return data
 
     def blob(self, name):
         return FakeBlob(self, name)
@@ -158,6 +187,41 @@ class TruncatingBucket(FakeBucket):
         if self.truncate_from is not None and len(self.uploads) >= self.truncate_from:
             data = bytes(data)[: max(0, len(data) // 2)]
         super()._store_upload(name, data)
+
+
+class CorruptingDownloadBucket(FakeBucket):
+    """A download that hands back bytes the object does not hold.
+
+    The stored object and its checksum are both fine -- what goes wrong
+    is between the service and the disk, which is precisely the failure
+    a size check and a `.part` rename cannot see: the file is complete,
+    it is the right length, and its contents are wrong."""
+
+    def _deliver(self, data):
+        mangled = bytearray(data)
+        if mangled:
+            mangled[len(mangled) // 2] ^= 0xFF
+        return bytes(mangled)
+
+
+class ChecksumlessBucket(FakeBucket):
+    """An object with no checksum recorded against it -- what a consumer
+    would face if the field were not populated for some object it meets."""
+
+    def _checksum(self, data):
+        return None
+
+
+class MiscomposingBucket(FakeBucket):
+    """Every part arrives intact and at the right length, and the
+    composition assembles them in the wrong order.
+
+    Nothing about existence or size can see this. The parts are all
+    there, the composed object is exactly the right length, and its bytes
+    are not the artifact's."""
+
+    def _compose_order(self, sources):
+        return list(reversed(sources))
 
 
 @pytest.fixture
@@ -1258,6 +1322,289 @@ print(any(n == "google" or n.startswith("google.") for n in sys.modules))
     out = subprocess.run([sys.executable, "-c", code], capture_output=True, text=True,
                          check=True).stdout.split()
     assert out == ["died-ok", "True", "True", "False"]
+
+
+# ---- content integrity: the digest, and what is done with it ----
+#
+# The `.part` sidecar makes a download atomic -- either the whole
+# transfer landed or nothing did. It says nothing about whether the bytes
+# are the artifact's. Stage 2B downloads multi-gigabyte feature arrays
+# and runs science on them, so a silently corrupted download is the worst
+# available failure: it produces numbers rather than an error.
+#
+# The digest is `crc32c`, the checksum GCS computes for every object it
+# stores -- including a composite one, which carries no `md5_hash` at
+# all. One field, both upload routes, and nothing for a downloader to
+# know about which route produced what it is reading.
+
+
+def test_the_digest_field_is_the_one_gcs_populates_for_every_object():
+    assert gcs.CHECKSUM_FIELD == "crc32c"
+
+
+def test_crc32c_matches_the_standard_check_value():
+    """CRC-32C's published check value over `123456789` is 0xE3069283.
+    Pinned as the base64 form GCS reports, so the encoding is pinned with
+    the algorithm rather than assumed alongside it."""
+    assert gcs.crc32c_of_bytes(b"123456789") == "4waSgw=="
+    assert gcs.crc32c_of_bytes(b"") == "AAAAAA=="
+
+
+def test_crc32c_of_a_file_is_the_one_shot_value_of_its_bytes(tmp_path):
+    """The file digest is computed in blocks -- a gigabyte artifact is not
+    read into memory to check it -- so the blocking must not change the
+    number."""
+    payload = _payload_bytes(300_000)
+    local = tmp_path / "big.bin"
+    local.write_bytes(payload)
+    assert gcs.crc32c_of_file(local) == gcs.crc32c_of_bytes(payload)
+
+
+def test_crc32c_agrees_with_google_crc32c_where_it_is_installed():
+    """The module falls back to a pure-Python CRC32C where
+    `google-crc32c` is absent, which is the local development
+    environment. Where the real library IS present -- the cloud runtime,
+    which is where the digests that matter are computed -- the two must
+    agree, or the fallback would be checking against a different
+    algorithm than GCS uses (CLAUDE.md principle 16)."""
+    google_crc32c = pytest.importorskip("google_crc32c")
+    import base64
+    for payload in (b"", b"a", b"123456789", _payload_bytes(1), _payload_bytes(4096),
+                    _payload_bytes(70_001)):
+        expected = base64.b64encode(google_crc32c.Checksum(payload).digest()).decode()
+        assert gcs.crc32c_of_bytes(payload) == expected
+
+
+def test_a_plain_upload_lands_a_verifiable_digest(bucket, tmp_path):
+    local = _local_artifact(tmp_path)
+    name = gcs.object_path(**TRAIN_ARGS)
+    gcs.upload_file(local, name, bucket=bucket)
+    assert gcs.object_checksum(name, bucket=bucket) == gcs.crc32c_of_file(local)
+
+
+def test_a_chunked_upload_lands_a_digest_in_the_same_field(bucket, tmp_path):
+    """The point of choosing this field: a downloader does not need to
+    know which route produced the object. A composed object carries no
+    MD5, so a downloader verifying MD5 would behave differently for the
+    two routes."""
+    local = _local_artifact(tmp_path)
+    name = gcs.object_path(**TRAIN_ARGS)
+    gcs.upload_file_chunked(local, name, bucket=bucket, chunk_size=CHUNK)
+    assert len(bucket.composes) == 1                     # it really was composed
+    assert gcs.object_checksum(name, bucket=bucket) == gcs.crc32c_of_file(local)
+
+
+def test_a_corrupted_download_raises_naming_the_object_and_both_digests(tmp_path):
+    bucket = CorruptingDownloadBucket()
+    local = _local_artifact(tmp_path)
+    name = gcs.object_path(**TRAIN_ARGS)
+    gcs.upload_file(local, name, bucket=bucket)
+
+    with pytest.raises(gcs.ChecksumMismatchError) as excinfo:
+        gcs.download_file(name, tmp_path / "back" / "features.npz", bucket=bucket)
+    message = str(excinfo.value)
+    assert name in message
+    assert gcs.crc32c_of_file(local) in message          # what the object says it is
+    assert gcs.crc32c_of_bytes(bucket._deliver(local.read_bytes())) in message
+
+
+def test_a_corrupted_download_leaves_nothing_at_the_destination(tmp_path):
+    """The `.part` discipline exists so a bad transfer is never mistaken
+    for a good one. Verification happens before the rename, so a file
+    that fails it never reaches the destination path at all -- and the
+    sidecar does not survive either, to be renamed by hand later."""
+    bucket = CorruptingDownloadBucket()
+    local = _local_artifact(tmp_path)
+    name = gcs.object_path(**TRAIN_ARGS)
+    gcs.upload_file(local, name, bucket=bucket)
+
+    target = tmp_path / "back" / "features.npz"
+    with pytest.raises(gcs.ChecksumMismatchError):
+        gcs.download_file(name, target, bucket=bucket)
+    assert not target.exists()
+    assert not (target.parent / (target.name + ".part")).exists()
+
+
+def test_a_corrupted_download_does_not_overwrite_a_good_local_file(tmp_path):
+    bucket = CorruptingDownloadBucket()
+    local = _local_artifact(tmp_path)
+    name = gcs.object_path(**TRAIN_ARGS)
+    gcs.upload_file(local, name, bucket=bucket)
+
+    target = tmp_path / "existing.npz"
+    target.write_bytes(b"the good copy")
+    with pytest.raises(gcs.ChecksumMismatchError):
+        gcs.download_file(name, target, bucket=bucket)
+    assert target.read_bytes() == b"the good copy"
+
+
+def test_an_object_with_no_recorded_digest_is_refused_rather_than_trusted(tmp_path):
+    """GCS populates `crc32c` for every object it stores, so a missing one
+    means the field could not be read -- not that the object is fine.
+    Refusing is what stops "no digest" degrading into "no check"."""
+    bucket = ChecksumlessBucket()
+    local = _local_artifact(tmp_path)
+    name = gcs.object_path(**TRAIN_ARGS)
+
+    with pytest.raises(gcs.ChecksumMissingError, match=gcs.CHECKSUM_FIELD):
+        gcs.upload_file(local, name, bucket=bucket)
+
+    bucket.objects[name] = local.read_bytes()
+    target = tmp_path / "back" / "features.npz"
+    with pytest.raises(gcs.ChecksumMissingError, match=gcs.CHECKSUM_FIELD):
+        gcs.download_file(name, target, bucket=bucket)
+    assert not target.exists()
+
+
+def test_verification_is_on_by_default_and_can_be_switched_off(tmp_path):
+    """Opt-out, not opt-in: a science run should not have to remember to
+    ask for correctness. The escape hatch exists, and taking it is
+    visible at the call site."""
+    bucket = CorruptingDownloadBucket()
+    local = _local_artifact(tmp_path)
+    name = gcs.object_path(**TRAIN_ARGS)
+    gcs.upload_file(local, name, bucket=bucket)
+
+    target = tmp_path / "back" / "features.npz"
+    gcs.download_file(name, target, bucket=bucket, verify_content=False)
+    assert target.is_file()
+    assert target.read_bytes() != local.read_bytes()     # it really was corrupt
+
+
+def test_a_plain_upload_that_lands_wrong_raises_and_removes_the_object(tmp_path):
+    """`ensure_artifact` treats the object's existence as proof the step
+    is done. An object that failed verification must not be left behind
+    making that claim."""
+    bucket = TruncatingBucket(truncate_from=0)
+    local = _local_artifact(tmp_path)
+    name = gcs.object_path(**TRAIN_ARGS)
+
+    with pytest.raises(gcs.ChecksumMismatchError, match=name):
+        gcs.upload_file(local, name, bucket=bucket)
+    assert name not in bucket.objects
+    assert gcs.object_exists(name, bucket=bucket) is False
+
+
+def test_a_miscomposed_chunked_upload_is_caught_by_the_content_digest(tmp_path):
+    """Every part landed, every part is the right length, and the object
+    is the right size -- and its bytes are the artifact's in the wrong
+    order. The digest is the only thing here that can see it."""
+    bucket = MiscomposingBucket()
+    local = _local_artifact(tmp_path)
+    name = gcs.object_path(**TRAIN_ARGS)
+
+    with pytest.raises(gcs.ChecksumMismatchError, match=name):
+        gcs.upload_file_chunked(local, name, bucket=bucket, chunk_size=CHUNK)
+    assert name not in bucket.objects
+    assert Path(gcs.checkpoint_path(local)).exists()     # the transfer state is kept
+    assert any(n.startswith(gcs.part_prefix(name) + "/") for n in bucket.objects)
+
+
+def test_a_chunked_upload_that_composes_correctly_still_passes(bucket, tmp_path):
+    """The mirror of the test above: the check has to pass on the right
+    answer, or catching the wrong one proves nothing."""
+    local = _local_artifact(tmp_path)
+    name = gcs.object_path(**TRAIN_ARGS)
+    gcs.upload_file_chunked(local, name, bucket=bucket, chunk_size=CHUNK)
+    assert bucket.objects[name] == local.read_bytes()
+    assert list(bucket.objects) == [name]
+
+
+def test_ensure_artifact_verifies_the_artifact_it_downloads(tmp_path):
+    """The resumption path -- a fresh runtime pulling down what a dead
+    session left in GCS -- is exactly where an unverified download would
+    feed corrupt features into the science."""
+    bucket = CorruptingDownloadBucket()
+    name = gcs.object_path(**TRAIN_ARGS)
+    first = tmp_path / "session_a" / "features.npz"
+    gcs.ensure_artifact(name, first, produce=_producer("from session a"), bucket=bucket)
+
+    second = tmp_path / "session_b" / "features.npz"
+    with pytest.raises(gcs.ChecksumMismatchError):
+        gcs.ensure_artifact(name, second, produce=_producer(), bucket=bucket)
+    assert not second.exists()
+
+
+def test_ensure_artifact_verifies_what_it_uploads_on_both_routes(tmp_path):
+    """Each route gets the corruption its own earlier checks cannot see:
+    the single-request one a short object, the chunked one a composition
+    in the wrong order (parts truncated on that route are caught by the
+    part-size check long before anything is composed)."""
+    name = gcs.object_path(**TRAIN_ARGS)
+    for chunked, bucket in ((False, TruncatingBucket(truncate_from=0)),
+                            (True, MiscomposingBucket())):
+        local = tmp_path / f"chunked_{chunked}" / "features.npz"
+        with pytest.raises(gcs.ChecksumMismatchError):
+            gcs.ensure_artifact(name, local, produce=_producer("computed" * 100),
+                                bucket=bucket, chunked=chunked, chunk_size=CHUNK)
+        assert name not in bucket.objects
+
+
+def test_ensure_artifact_verification_can_be_switched_off(tmp_path):
+    bucket = CorruptingDownloadBucket()
+    name = gcs.object_path(**TRAIN_ARGS)
+    gcs.ensure_artifact(name, tmp_path / "a" / "features.npz",
+                        produce=_producer("session a"), bucket=bucket)
+    r = gcs.ensure_artifact(name, tmp_path / "b" / "features.npz", produce=_producer(),
+                            bucket=bucket, verify_content=False)
+    assert r.downloaded is True
+
+
+def test_verify_object_reports_the_digest_it_matched(bucket, tmp_path):
+    """The check is callable on its own, so a script can assert a local
+    copy is still the object's without downloading it again."""
+    local = _local_artifact(tmp_path)
+    name = gcs.object_path(**TRAIN_ARGS)
+    gcs.upload_file(local, name, bucket=bucket)
+    assert gcs.verify_object(name, local, bucket=bucket) == gcs.crc32c_of_file(local)
+
+    other = _local_artifact(tmp_path, n_bytes=1000, name="other.npz")
+    other.write_bytes(_payload_bytes(1000)[::-1])
+    with pytest.raises(gcs.ChecksumMismatchError):
+        gcs.verify_object(name, other, bucket=bucket)
+
+
+def test_content_verification_runs_with_the_google_package_blocked():
+    """`google-crc32c` is a hard dependency of `google-cloud-storage`, so
+    the compiled implementation is present wherever a real transfer
+    happens. Where neither is installed -- this project's local
+    environment -- verification must still run rather than silently
+    becoming a no-op."""
+    code = f"""
+import sys
+class _Block:
+    def find_module(self, name, path=None):
+        return self.find_spec(name, path)
+    def find_spec(self, name, path=None, target=None):
+        if name in ("google", "google_crc32c") or name.startswith("google"):
+            raise ImportError("google is blocked for this test")
+        return None
+sys.meta_path.insert(0, _Block())
+sys.path.insert(0, {str(_STAGE2B_DIR)!r})
+sys.path.insert(0, {str(_REPO_ROOT / "tests")!r})
+import tempfile
+from pathlib import Path
+import stage2b_gcs as gcs
+from test_stage2b_gcs import CorruptingDownloadBucket, _payload_bytes
+
+print(gcs.checksum_backend())
+print(gcs.crc32c_of_bytes(b"123456789"))
+with tempfile.TemporaryDirectory() as d:
+    local = Path(d) / "features.npz"
+    local.write_bytes(_payload_bytes(1000))
+    name = gcs.object_path(stage=2, condition="evolved_T", kind="features", ext="npz",
+                           split="train")
+    bucket = CorruptingDownloadBucket()
+    gcs.upload_file_chunked(local, name, bucket=bucket, chunk_size=100)
+    try:
+        gcs.download_file(name, Path(d) / "back.npz", bucket=bucket)
+    except gcs.ChecksumMismatchError:
+        print("caught-ok")
+    print((Path(d) / "back.npz").exists())
+"""
+    out = subprocess.run([sys.executable, "-c", code], capture_output=True, text=True,
+                         check=True).stdout.split()
+    assert out == ["python", "4waSgw==", "caught-ok", "False"]
 
 
 def test_bucket_is_a_required_keyword_argument_everywhere(tmp_path):
