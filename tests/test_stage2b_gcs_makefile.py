@@ -64,6 +64,36 @@ def test_the_declared_bucket_is_a_name_the_resolver_accepts():
     assert gcs.bucket_name(env={gcs.BUCKET_ENV_VAR: declared}) == declared
 
 
+def test_the_stage2b_test_target_lists_every_stage2b_test_file():
+    """`make stage2b-test` runs an explicit file list, so a new test file
+    is picked up by the whole-suite target and silently skipped by the
+    Stage-2B one -- green either way, and only the glob was ever proving
+    anything.
+
+    That is the `stage2a-verify` no-op-gate shape again: a target that
+    looks like it covers a thing and does not. Both
+    `test_stage2b_contracts.py` and this file were missing from the list
+    when the check was written."""
+    declared = _make_var("STAGE2B_TEST_FILES")
+    assert declared is not None, "STAGE2B_TEST_FILES is no longer declared"
+    listed = {Path(tok).name for tok in declared.split() if tok.endswith(".py")}
+    on_disk = {p.name for p in (REPO_ROOT / "tests").glob("test_stage2b_*.py")}
+
+    print(f"\n[bucket] STAGE2B_TEST_FILES lists {len(listed)} files, "
+          f"{len(on_disk)} on disk")
+    missing = sorted(on_disk - listed)
+    for name in sorted(on_disk):
+        print(f"[bucket]   {'ok  ' if name in listed else 'MISS'} {name}")
+
+    assert not missing, (
+        f"these Stage 2B test files exist but `make stage2b-test` does not run them: "
+        f"{missing}")
+    stale = sorted(listed - on_disk)
+    assert not stale, (
+        f"STAGE2B_TEST_FILES names files that do not exist, so the target fails to "
+        f"collect: {stale}")
+
+
 def test_every_gcs_touching_target_exports_the_bucket():
     """`GCS_ENV` carries both the bucket and the credentials path. Any
     target that reaches GCS must use it rather than relying on ambient
@@ -91,6 +121,11 @@ def test_every_gcs_touching_target_exports_the_bucket():
 
     # Scripts and tests that construct a real GCS client. A target naming
     # any of these is reaching the bucket and must say which one.
+    #
+    # EXTEND THIS when a new script builds a client -- the ladder driver
+    # will. It is an allowlist, so an unlisted script is not caught being
+    # unparameterised; it is simply not looked at, and this check passes
+    # vacuously for whatever target runs it.
     gcs_scripts = ("smoke_stage2b_gcs.py", "test_stage2b_gcs_roundtrip.py")
     touching = {name: body for name, body in recipes.items()
                 if any(script in body for script in gcs_scripts)}

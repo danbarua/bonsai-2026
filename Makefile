@@ -258,10 +258,19 @@ TEST_FILES := tests/test_stage2a_core.py tests/test_stage2a_stats.py \
 stage2a-test:  ## Run the Stage 2A test suite (Tier 2 cases skip cleanly without local cached artifacts)
 	cd $(REPO_ROOT) && uv run pytest $(TEST_FILES) -v
 
+# Must list every tests/test_stage2b_*.py on disk. An explicit list is
+# what lets `stage2b-test` stay fast and stable while `tests/` grows, but
+# it also means a new file is covered by the whole-suite target and
+# silently skipped by this one -- which is how `test_stage2b_contracts.py`
+# and `test_stage2b_gcs_makefile.py` both came to be missing here.
+# `test_stage2b_gcs_makefile.py` asserts this list is complete rather than
+# leaving that to whoever adds the next file.
 STAGE2B_TEST_FILES := tests/test_stage2b_corruption.py tests/test_stage2b_encoder_gate.py \
                       tests/test_stage2b_ridge.py tests/test_stage2b_stats.py \
                       tests/test_stage2b_cnn.py tests/test_stage2b_partition.py \
-                      tests/test_stage2b_gcs.py tests/test_stage2b_gcs_roundtrip.py
+                      tests/test_stage2b_contracts.py tests/test_stage2b_gcs.py \
+                      tests/test_stage2b_gcs_makefile.py \
+                      tests/test_stage2b_gcs_roundtrip.py
 
 .PHONY: stage2b-test
 stage2b-test:  ## Run the Stage 2B test suite (fast only; the Colab round trip is excluded)
