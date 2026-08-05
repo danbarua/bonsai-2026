@@ -235,7 +235,7 @@ requires-dist = [
 dev = [{ name = "pytest", specifier = ">=9.1.1" }]
 gpu = [
     { name = "google-cloud-storage", specifier = ">=2.19.0" },
-    { name = "mighty-colab", specifier = ">=0.1.21" },
+    { name = "mighty-colab", specifier = ">=0.1.23" },
 ]
 
 [[package]]
@@ -1381,7 +1381,7 @@ wheels = [
 
 [[package]]
 name = "mighty-colab"
-version = "0.1.22"
+version = "0.1.23"
 source = { registry = "https://pypi.org/simple" }
 dependencies = [
     { name = "click" },
@@ -1403,9 +1403,9 @@ dependencies = [
     { name = "typing-extensions" },
     { name = "websocket-client" },
 ]
-sdist = { url = "https://files.pythonhosted.org/packages/18/46/7473589f6ae39a1a32d26658e63763013330d5e75a4a9b6812d2446ded82/mighty_colab-0.1.22.tar.gz", hash = "sha256:cd4481709b5b6e3b39964c7c3c64229f6ca36c8b68f0f2614e0e470235a5bbe1", size = 1227739, upload-time = "2026-08-04T13:35:49.963Z" }
+sdist = { url = "https://files.pythonhosted.org/packages/46/26/e60896b127866fbfb07e30a0127b18ef1588b0158ada2967fc46e11d6218/mighty_colab-0.1.23.tar.gz", hash = "sha256:eba384e600a172be9fd001569334e0130d5c0c5b39ae6414a68451f01110758c", size = 1234323, upload-time = "2026-08-05T14:20:35.338Z" }
 wheels = [
-    { url = "https://files.pythonhosted.org/packages/04/50/3ca0ca792cf3ef33ae4abc09aaf3b3e0336bb783e21128f73b28fb1bc3ac/mighty_colab-0.1.22-py3-none-any.whl", hash = "sha256:feb7ab009d29fba3427649983a25a3d971a7df3974f2b83a5ad443883dc3f423", size = 95726, upload-time = "2026-08-04T13:35:48.881Z" },
+    { url = "https://files.pythonhosted.org/packages/32/e7/da0271c724ce01485f10a5b55abb3b31a0ff1be2fdab1a01fabc5bd6b8d9/mighty_colab-0.1.23-py3-none-any.whl", hash = "sha256:c3294785e789f68a23f6e4aba91eb31baf988754875b1a52ce9238d11163061b", size = 95880, upload-time = "2026-08-05T14:20:34.267Z" },
 ]
 
 [[package]]
