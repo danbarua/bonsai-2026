@@ -385,14 +385,26 @@ instances (#9); whether a genuinely static `theta_static = pi*x`
 control would show the local encoding step already carries most of the
 value (#10); robustness of the near-total-synchronization decodability
 result to quantization/noise/precision/perturbation (#11); denoising or
-generation, Stage 2B (#13). A JAX/optax reimplementation of the
-classifier-fitting step remains unresolved and unused for any reported
-result (#2-#4).
+generation, Stage 2B (#13 -- design now locked, see below). A JAX/optax
+reimplementation of the classifier-fitting step remains unresolved and
+unused for any reported result (#2-#4).
 
 Full detail: `experiments/stage2a_dynamics_classification/FINDINGS.md`
 (the full pipeline, go/no-go checks, primary/secondary/post hoc results,
 and every disclosed caveat above); `DESIGN.md` (the locked design, read
 before the result).
+
+**Stage 2B (denoising, #13): design locked, not yet implemented.**
+`experiments/stage2b_denoising/DESIGN.md` -- seven drafts, four external
+review rounds plus an adversarial blind-spot review and an outsider peer
+review, all incorporated; asks the Stage-2A-shaped question (does
+runtime graph evolution add value on top of the same already-
+dynamically-encoded local phase state) for single-step active-support
+reconstruction under a fixed, majority-censored clipped-Gaussian
+corruption, instead of classification. Status: locked, not yet
+implemented, feasibility stage 1 (mechanical correctness, the
+encoder-on-noisy-inputs gate, the first ridge equivalence check) not yet
+started -- pending cloud/GCS execution environment decisions.
 
 ## Part 4: Infrastructure and execution environment
 
