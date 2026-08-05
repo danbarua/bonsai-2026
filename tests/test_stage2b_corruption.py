@@ -183,6 +183,30 @@ def test_corpus_uses_the_supplied_split_indices_not_positions():
     assert not np.allclose(corpus[0], at_zero)
 
 
+def test_corpus_pairs_each_image_with_its_own_index():
+    """Multi-image, non-monotonic indices -- an off-by-one or a zip/
+    enumerate mixup survives the single-image test above but not this."""
+    rng = np.random.default_rng(30)
+    images = rng.uniform(0, 1, (3, 28, 28))
+    indices = np.array([500, 7, 12000])
+    x_t, x_t_clip = corr.corrupt_corpus(images, "train", indices)
+    for i, idx in enumerate(indices):
+        single_t, single_c = corr.corrupt_image(images[i], "train", int(idx))
+        np.testing.assert_array_equal(x_t[i], single_t)
+        np.testing.assert_array_equal(x_t_clip[i], single_c)
+    # and the pairing is not accidentally symmetric across rows
+    assert not np.allclose(x_t[0], corr.corrupt_image(images[0], "train", 7)[0])
+
+
+def test_corrupt_image_rejects_a_restricted_array_rather_than_adapting():
+    """Corruption is defined on the full 784-pixel grid. A 505-length
+    array must raise, not quietly get a 505-length draw."""
+    with pytest.raises(ValueError, match="784"):
+        corr.corrupt_image(np.zeros(505), "train", 0)
+    with pytest.raises(ValueError, match="784"):
+        corr.corrupt_corpus(np.zeros((2, 505)), "train", np.arange(2))
+
+
 def test_corpus_requires_one_index_per_image_and_rejects_duplicates():
     images = np.zeros((3, 28, 28))
     with pytest.raises(ValueError):

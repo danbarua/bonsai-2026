@@ -140,14 +140,26 @@ def _check_split_allowed(split, allow_test_split):
 
 
 def corrupt_image(x0, split, index, alpha_bar=ALPHA_BAR, allow_test_split=False):
-    """Corrupts one image. `x0` may be (28, 28) or (784,), in [0, 1];
+    """Corrupts one image. `x0` must be (28, 28) or (784,), in [0, 1];
     the returned arrays match its shape. Row-major flattening, matching
-    the rest of this project's 28x28 <-> 784 convention."""
+    the rest of this project's 28x28 <-> 784 convention.
+
+    The size is asserted rather than adapted to. The spec locks
+    `standard_normal(784)`; silently drawing a shorter vector for, say, a
+    505-restricted array would produce a valid-looking result from a
+    realization that is not the locked one -- the same class of silent
+    adaptation the index-semantics note above is about. Corruption
+    happens on the full grid, before any restriction."""
     _check_split_allowed(split, allow_test_split)
     x0 = np.asarray(x0, dtype=np.float64)
     shape = x0.shape
     flat = x0.reshape(-1)
-    x_t, x_t_clip = forward_corrupt(flat, epsilon_for(split, index, flat.size), alpha_bar)
+    if flat.size != N_PIXELS:
+        raise ValueError(
+            f"corruption is defined on the full {N_PIXELS}-pixel grid (DESIGN.md: "
+            f"full-image noise, then encode, then restrict), got {flat.size} values "
+            f"with shape {shape}")
+    x_t, x_t_clip = forward_corrupt(flat, epsilon_for(split, index), alpha_bar)
     return x_t.reshape(shape), x_t_clip.reshape(shape)
 
 
