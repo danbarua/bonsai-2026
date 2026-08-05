@@ -20,10 +20,10 @@ meaningful: a broken scaler cannot quietly invent intercept structure,
 because `||mean(X_train_scaled)||` is checked against 1e-10 before any
 solve. `scaler_centering_margin` returns that same statistic as a number,
 alongside the smallest raw per-column standard deviation and its column
-index, so a caller can record how far a fit sat from the guard and how
-close its features came to the near-constant regime that drives the
-guard's value. Diagnostic only: it never raises, drops nothing, and no
-fitting decision reads it.
+index, so every fold records how far it sat from the guard and how close
+its features came to the near-constant regime that drives the guard's
+value. Diagnostic only: it never raises, drops nothing, and no fitting
+decision reads it.
 
 **sklearn (`Ridge(solver="svd")`) is the verification oracle -- not in
 the production path, never deleted.** `ridge_equivalence_check` runs
@@ -155,12 +155,13 @@ def scaler_centering_margin(X_scaled, X_raw=None, tol=MEAN_X_TOL):
     Returns a dict. `within_tol` is descriptive, not a gate -- the gate
     is `assert_scaler_centered`.
 
-    Scope limit: this reports on whatever it is called with, but a
-    caller that computes it around `svd_ridge_fit` reaches it only on the
-    path where the guard passes -- an assertion there propagates and
-    leaves no return value, so the diagnosable record in that case is the
-    assertion message (which names `||mean(X_scaled)||` and the
-    worst-mean column) and not `min_col_std`."""
+    Scope limit: this reports on whatever it is called with, but the
+    callers below reach it only on the path where the guard passes. If
+    `svd_ridge_fit`'s assertion fires, the exception leaves
+    `cross_validate_alpha` / `fit_final` with no return value at all, so
+    the diagnosable record in that case is the assertion message (which
+    names `||mean(X_scaled)||` and the worst-mean column) and not
+    `min_col_std`."""
     X_scaled = np.asarray(X_scaled, dtype=np.float64)
     mean_vec = X_scaled.mean(axis=0)
     norm = float(np.linalg.norm(mean_vec))
@@ -300,7 +301,13 @@ def cross_validate_alpha(X, Y, y_strat, alphas=ALPHA_GRID, n_splits=N_SPLITS,
 
     `X` is passed UNSCALED -- the per-fold scaler is fitted inside, which
     is what makes the fold partition and the scaling identical across
-    every condition a caller compares."""
+    every condition a caller compares.
+
+    `fold_mean_x_norm` carries the centering guard's own statistic per
+    fold; `fold_min_col_std` / `fold_min_col_std_col` /
+    `fold_worst_mean_col` come from `scaler_centering_margin` and are
+    recorded for every fold whether or not the guard was anywhere near
+    firing. They change nothing about the fit or the selected alpha."""
     X = np.asarray(X, dtype=np.float64)
     Y = np.asarray(Y, dtype=np.float64)
     skf = StratifiedKFold(n_splits=n_splits, shuffle=True, random_state=random_state)
@@ -309,15 +316,22 @@ def cross_validate_alpha(X, Y, y_strat, alphas=ALPHA_GRID, n_splits=N_SPLITS,
     fold_raw = np.empty((n_splits, n_alpha), dtype=np.float64)
     fold_cond = np.empty(n_splits, dtype=np.float64)
     fold_mean_x_norm = np.empty(n_splits, dtype=np.float64)
+    fold_min_col_std = np.empty(n_splits, dtype=np.float64)
+    fold_min_col_std_col = np.empty(n_splits, dtype=np.int64)
+    fold_worst_mean_col = np.empty(n_splits, dtype=np.int64)
 
     for f, (tr, va) in enumerate(skf.split(X, y_strat)):
         scaler = StandardScaler().fit(X[tr])
         X_tr, X_va = scaler.transform(X[tr]), scaler.transform(X[va])
+        margin = scaler_centering_margin(X_tr, X[tr])
         fit = svd_ridge_fit(X_tr, Y[tr], alphas=alphas)
         fold_clipped[f] = mse_per_alpha(fit, X_va, Y[va], clipped=True)
         fold_raw[f] = mse_per_alpha(fit, X_va, Y[va], clipped=False)
         fold_cond[f] = fit["cond"]
         fold_mean_x_norm[f] = fit["mean_x_norm"]
+        fold_min_col_std[f] = margin["min_col_std"]
+        fold_min_col_std_col[f] = margin["min_col_std_col"]
+        fold_worst_mean_col[f] = margin["worst_mean_col"]
 
     mean_clipped = fold_clipped.mean(axis=0)
     alpha, idx = select_alpha(mean_clipped, alphas)
@@ -327,6 +341,10 @@ def cross_validate_alpha(X, Y, y_strat, alphas=ALPHA_GRID, n_splits=N_SPLITS,
         "mean_raw_val_mse": fold_raw.mean(axis=0),
         "fold_clipped_val_mse": fold_clipped, "fold_raw_val_mse": fold_raw,
         "fold_cond": fold_cond, "fold_mean_x_norm": fold_mean_x_norm,
+        "fold_min_col_std": fold_min_col_std,
+        "fold_min_col_std_col": fold_min_col_std_col,
+        "fold_worst_mean_col": fold_worst_mean_col,
+        "mean_x_tol": float(MEAN_X_TOL),
     }
 
 
@@ -335,10 +353,16 @@ def fit_final(X_train, Y_train, alpha):
     thin SVD per condition (DESIGN.md's "SVD count: 42, not 35").
 
     Returns (fit, scaler); the caller applies the same scaler to
-    evaluation features."""
+    evaluation features. `fit["centering_margin"]` is
+    `scaler_centering_margin`'s dict for this refit -- attached here, not
+    by `svd_ridge_fit`, which has no access to the unscaled features, so
+    the key is absent from a direct `svd_ridge_fit` call."""
     scaler = StandardScaler().fit(np.asarray(X_train, dtype=np.float64))
-    X_scaled = scaler.transform(np.asarray(X_train, dtype=np.float64))
+    X_raw = np.asarray(X_train, dtype=np.float64)
+    X_scaled = scaler.transform(X_raw)
+    margin = scaler_centering_margin(X_scaled, X_raw)
     fit = svd_ridge_fit(X_scaled, Y_train, alphas=(float(alpha),))
+    fit["centering_margin"] = margin
     return fit, scaler
 
 

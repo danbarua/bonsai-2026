@@ -459,6 +459,82 @@ def test_fit_final_single_svd_at_selected_alpha():
 
 # ---- the equivalence gate itself ----
 
+def test_cross_validate_alpha_records_the_margin_every_fold():
+    X, Y, y = _synthetic_regression(n=250, p=25, k=6, seed=6)
+    result = ridge.cross_validate_alpha(X, Y, y)
+    assert result["fold_min_col_std"].shape == (5,)
+    assert result["fold_min_col_std_col"].shape == (5,)
+    assert result["fold_worst_mean_col"].shape == (5,)
+    assert result["mean_x_tol"] == ridge.MEAN_X_TOL
+    # every fold reported a real column, none a placeholder
+    assert np.all(result["fold_min_col_std"] > 0)
+    assert np.all((result["fold_min_col_std_col"] >= 0)
+                  & (result["fold_min_col_std_col"] < X.shape[1]))
+    assert np.all((result["fold_worst_mean_col"] >= 0)
+                  & (result["fold_worst_mean_col"] < X.shape[1]))
+
+
+def test_cross_validate_margin_agrees_with_recomputing_it_on_the_same_folds():
+    """The recorded per-fold numbers must be the training folds' own, not
+    whole-corpus values standing in for them: recompute from an
+    independently constructed splitter using the locked fold seed."""
+    from sklearn.model_selection import StratifiedKFold
+
+    X, Y, y = _synthetic_regression(n=250, p=25, k=6, seed=6)
+    result = ridge.cross_validate_alpha(X, Y, y)
+    skf = StratifiedKFold(n_splits=ridge.N_SPLITS, shuffle=True,
+                          random_state=ridge.FOLD_SEED)
+    for f, (tr, _va) in enumerate(skf.split(X, y)):
+        expected = ridge.scaler_centering_margin(
+            StandardScaler().fit(X[tr]).transform(X[tr]), X[tr])
+        assert result["fold_min_col_std"][f] == expected["min_col_std"]
+        assert result["fold_min_col_std_col"][f] == expected["min_col_std_col"]
+        assert result["fold_worst_mean_col"][f] == expected["worst_mean_col"]
+        assert result["fold_mean_x_norm"][f] == expected["mean_x_norm"]
+
+
+def test_cross_validate_margin_does_not_disturb_selection_or_scores():
+    """The load-bearing constraint: the margin is instrumentation. Every
+    quantity the selection path depends on must be identical to what a
+    margin-free recomputation of the same folds produces."""
+    from sklearn.model_selection import StratifiedKFold
+
+    X, Y, y = _synthetic_regression(n=250, p=25, k=6, seed=6)
+    result = ridge.cross_validate_alpha(X, Y, y)
+    skf = StratifiedKFold(n_splits=ridge.N_SPLITS, shuffle=True,
+                          random_state=ridge.FOLD_SEED)
+    fold_clipped = np.empty((ridge.N_SPLITS, len(ridge.ALPHA_GRID)))
+    for f, (tr, va) in enumerate(skf.split(X, y)):
+        scaler = StandardScaler().fit(X[tr])
+        fit = ridge.svd_ridge_fit(scaler.transform(X[tr]), Y[tr])
+        fold_clipped[f] = ridge.mse_per_alpha(fit, scaler.transform(X[va]), Y[va])
+    np.testing.assert_array_equal(result["fold_clipped_val_mse"], fold_clipped)
+    assert result["alpha"] == ridge.select_alpha(fold_clipped.mean(axis=0))[0]
+
+
+def test_fit_final_attaches_the_margin_and_keeps_its_two_value_return():
+    """A third return value would silently break every existing caller, so
+    the margin rides on the fit dict instead."""
+    X, Y, y = _synthetic_regression(n=200, p=20, k=5, seed=9)
+    cv = ridge.cross_validate_alpha(X, Y, y)
+    fit, scaler = ridge.fit_final(X, Y, cv["alpha"])
+    margin = fit["centering_margin"]
+    assert margin["mean_x_norm"] == fit["mean_x_norm"]
+    assert margin["within_tol"] is True
+    assert 0 <= margin["min_col_std_col"] < X.shape[1]
+    np.testing.assert_allclose(margin["min_col_std"], np.sqrt(scaler.var_).min(),
+                                rtol=1e-12, atol=0)
+
+
+def test_svd_ridge_fit_alone_does_not_claim_a_margin():
+    """`svd_ridge_fit` never sees the unscaled features, so it cannot
+    report `min_col_std`; the key is absent rather than nan-filled, so a
+    caller cannot mistake a direct fit for an instrumented one."""
+    X, Y, _ = _synthetic_regression(n=150, p=15, k=4, seed=13)
+    fit = ridge.svd_ridge_fit(StandardScaler().fit_transform(X), Y)
+    assert "centering_margin" not in fit
+
+
 def test_ridge_equivalence_check_passes_on_synthetic_data():
     X, Y, y = _synthetic_regression(n=300, p=35, k=10, seed=10)
     result = ridge.ridge_equivalence_check(X, Y, y)
