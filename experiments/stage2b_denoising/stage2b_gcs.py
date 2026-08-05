@@ -654,7 +654,7 @@ def upload_file_chunked(local_path, name, *, bucket, allow_test_split=False,
     of Stage 2B's transport that nothing verifies. Composition needs only
     the same four blob operations already in use, plus `compose`.
 
-    The trade-offs that comes with, stated rather than discovered later:
+    Two trade-offs come with that, stated rather than discovered later:
     a composed object carries a CRC32C but no MD5, so a consumer that
     verifies MD5 on download sees something different from what
     `upload_file` produces; and the parts are real objects in the bucket
