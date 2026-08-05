@@ -35,6 +35,7 @@ invocation x64 IS on, so these tests run in the condition that would
 otherwise silently change the CNN's numerics.
 """
 import inspect
+import subprocess
 import sys
 from pathlib import Path
 
@@ -285,13 +286,16 @@ def test_masked_mse_ignores_off_support_coordinates_entirely(clip):
     rng = np.random.default_rng(3)
     pred = jnp.asarray(rng.uniform(0, 1, (4, SIDE, SIDE)), dtype=cnn.CNN_DTYPE)
     target = jnp.asarray(rng.uniform(0, 1, (4, SIDE, SIDE)), dtype=cnn.CNN_DTYPE)
-    base = float(cnn.masked_mse(pred, target, mask, clip_predictions=clip))
+    base = float(cnn.masked_mse(pred, target, mask, clip_predictions=clip,
+                                reduce_dtype=cnn.CNN_DTYPE))
 
     moved_out = target.reshape(4, -1).at[:, outside].set(-99.0).reshape(4, SIDE, SIDE)
-    assert float(cnn.masked_mse(pred, moved_out, mask, clip_predictions=clip)) == base
+    assert float(cnn.masked_mse(pred, moved_out, mask, clip_predictions=clip,
+                                reduce_dtype=cnn.CNN_DTYPE)) == base
 
     moved_in = target.reshape(4, -1).at[:, inside].set(-99.0).reshape(4, SIDE, SIDE)
-    assert float(cnn.masked_mse(pred, moved_in, mask, clip_predictions=clip)) != base
+    assert float(cnn.masked_mse(pred, moved_in, mask, clip_predictions=clip,
+                                reduce_dtype=cnn.CNN_DTYPE)) != base
 
 
 def test_masked_mse_denominator_is_the_support_size_not_the_grid_size():
@@ -302,7 +306,7 @@ def test_masked_mse_denominator_is_the_support_size_not_the_grid_size():
     pred = jnp.zeros((1, SIDE, SIDE), dtype=cnn.CNN_DTYPE)
     target = jnp.zeros((1, N_PIX), dtype=cnn.CNN_DTYPE).at[:, inside].set(1.0)
     got = float(cnn.masked_mse(pred, target.reshape(1, SIDE, SIDE), mask,
-                               clip_predictions=False))
+                               clip_predictions=False, reduce_dtype=cnn.CNN_DTYPE))
     assert got == pytest.approx(1.0 / cnn.N_ACTIVE, rel=1e-6)
     assert got != pytest.approx(1.0 / N_PIX, rel=1e-6)
 
@@ -438,17 +442,22 @@ def test_off_support_fit_targets_produce_no_gradient():
 
 # ---- RAW training loss versus CLIPPED selection criterion ----
 
-def test_clip_predictions_is_required_at_every_call_site():
-    """No default: neither call site can inherit the wrong side of a locked
-    distinction."""
+@pytest.mark.parametrize("param_name", ["clip_predictions", "reduce_dtype"])
+def test_primitive_choices_are_required_at_every_call_site(param_name):
+    """No default: neither call site can inherit the wrong side of a
+    distinction the two call sites genuinely differ on. `clip_predictions`
+    is DESIGN.md-locked; `reduce_dtype` is not, but its failure mode is
+    the same shape -- a silently inherited precision."""
     for fn in (cnn.masked_per_image_mse, cnn.masked_mse):
-        param = inspect.signature(fn).parameters["clip_predictions"]
+        param = inspect.signature(fn).parameters[param_name]
         assert param.kind is inspect.Parameter.KEYWORD_ONLY
         assert param.default is inspect.Parameter.empty
     mask, _, _ = _mask_and_split_coords()
     z = jnp.zeros((1, SIDE, SIDE), dtype=cnn.CNN_DTYPE)
-    with pytest.raises(TypeError):
-        cnn.masked_mse(z, z, mask)
+    kwargs = {"clip_predictions": False, "reduce_dtype": cnn.CNN_DTYPE}
+    kwargs.pop(param_name)
+    with pytest.raises(TypeError, match=param_name):
+        cnn.masked_mse(z, z, mask, **kwargs)
 
 
 def test_training_loss_is_raw_and_validation_metric_is_clipped():
@@ -497,10 +506,12 @@ def test_masked_mse_is_the_mean_of_the_per_image_primitive():
     rng = np.random.default_rng(6)
     pred = jnp.asarray(rng.uniform(0, 1, (5, SIDE, SIDE)), dtype=cnn.CNN_DTYPE)
     target = jnp.asarray(rng.uniform(0, 1, (5, SIDE, SIDE)), dtype=cnn.CNN_DTYPE)
-    per_image = cnn.masked_per_image_mse(pred, target, mask, clip_predictions=False)
+    per_image = cnn.masked_per_image_mse(pred, target, mask, clip_predictions=False,
+                                         reduce_dtype=cnn.CNN_DTYPE)
     assert per_image.shape == (5,)
     np.testing.assert_allclose(
-        float(cnn.masked_mse(pred, target, mask, clip_predictions=False)),
+        float(cnn.masked_mse(pred, target, mask, clip_predictions=False,
+                             reduce_dtype=cnn.CNN_DTYPE)),
         float(jnp.mean(per_image)), rtol=0, atol=0)
 
 
@@ -512,7 +523,188 @@ def test_masked_primitive_rejects_mismatched_shapes(pred_shape, target_shape, ma
     mask, _, _ = _mask_and_split_coords()
     with pytest.raises(ValueError, match=match):
         cnn.masked_mse(jnp.zeros(pred_shape), jnp.zeros(target_shape), mask,
-                       clip_predictions=False)
+                       clip_predictions=False, reduce_dtype=cnn.CNN_DTYPE)
+
+
+# ---- validation-metric accumulation: float64 reduction ----
+
+def _reduction_operand_dtypes(monkeypatch, call):
+    """The dtypes of every array `jnp.sum` actually reduces during `call`.
+
+    Asserting the RETURNED dtype would not discriminate the fix from a
+    cosmetic one: an implementation that summed in float32 and cast the
+    scalar afterwards returns float64 and fixes nothing. What has to be
+    float64 is the operand the summation runs over, so that is what this
+    records -- inside the primitive, at the reduction itself."""
+    seen = []
+    real_sum = jnp.sum
+
+    def spy(a, *args, **kwargs):
+        seen.append(getattr(a, "dtype", None))
+        return real_sum(a, *args, **kwargs)
+
+    monkeypatch.setattr(cnn.jnp, "sum", spy)
+    call()
+    monkeypatch.undo()
+    return seen
+
+
+def test_validation_metric_reduces_in_float64_at_the_reduction(monkeypatch):
+    """Both sums in the validation path -- the masked numerator over
+    coordinates and the mask-weight denominator -- run on float64
+    operands, while the model stays float32."""
+    mask, _, _ = _mask_and_split_coords()
+    model = cnn.make_model(cnn.seed_keys(0)[0])
+    x, y, _, _ = _synthetic_corpus(n=6)
+    x, y = cnn.as_image_batch(x), cnn.as_image_batch(y)
+
+    dtypes = _reduction_operand_dtypes(
+        monkeypatch, lambda: cnn.clipped_validation_mse(model, x, y, mask, batch_size=4))
+
+    assert dtypes, "no reduction was intercepted -- the spy missed the summation"
+    assert all(d == jnp.float64 for d in dtypes), dtypes
+    assert all(p.dtype == cnn.CNN_DTYPE for p in _params(model)), \
+        "the upcast must not have reached the model's parameters"
+    assert cnn.clipped_validation_per_image_mse(
+        model, x, y, mask, batch_size=4).dtype == jnp.float64
+
+
+def test_training_loss_still_reduces_in_float32(monkeypatch):
+    """The other side of the same check: the training objective was NOT
+    upcast. Gradient descent has no use for precision below float32, and
+    DESIGN.md's locked training/selection distinction keeps the two
+    quantities separately specified."""
+    mask, _, _ = _mask_and_split_coords()
+    model = cnn.make_model(cnn.seed_keys(0)[0])
+    x, y, _, _ = _synthetic_corpus(n=6)
+    x, y = cnn.as_image_batch(x), cnn.as_image_batch(y)
+
+    dtypes = _reduction_operand_dtypes(
+        monkeypatch, lambda: cnn.training_loss(model, x, y, mask))
+
+    assert dtypes, "no reduction was intercepted -- the spy missed the summation"
+    assert all(d == cnn.CNN_DTYPE for d in dtypes), dtypes
+    assert cnn.training_loss(model, x, y, mask).dtype == cnn.CNN_DTYPE
+
+
+def test_training_loss_value_did_not_move():
+    """Show it, rather than assert the intent: the training loss equals an
+    explicit float32 masked reduction of the same raw, unclipped
+    predictions, bit for bit."""
+    mask, _, _ = _mask_and_split_coords()
+    model = cnn.make_model(cnn.seed_keys(0)[0])
+    x, y, _, _ = _synthetic_corpus(n=6)
+    x, y = cnn.as_image_batch(x), cnn.as_image_batch(y)
+
+    pred = jax.vmap(model)(x)          # raw: no clipping anywhere in this reference
+    flat_pred = jnp.reshape(pred, (pred.shape[0], -1))
+    flat_target = jnp.reshape(y, (y.shape[0], -1))
+    flat_mask = jnp.reshape(mask, (-1,)).astype(cnn.CNN_DTYPE)
+    reference = jnp.mean(
+        jnp.sum((flat_pred - flat_target) ** 2 * flat_mask, axis=1) / jnp.sum(flat_mask))
+
+    assert reference.dtype == cnn.CNN_DTYPE
+    assert float(cnn.training_loss(model, x, y, mask)) == float(reference)
+
+
+def test_float64_accumulation_changes_the_answer_at_validation_scale():
+    """The fix has teeth: a float32 and a float64 reduction over the same
+    float32 values genuinely disagree at this scale.
+
+    505 active coordinates per image is the real active-support size, the
+    regime the module's accumulation note describes -- many small,
+    similar-magnitude squared errors summed repeatedly. The float64
+    reduction is checked against an independent NUMPY float64 oracle,
+    which is unconditionally float64 and so cannot itself be truncated by
+    a jax config flag.
+
+    The per-image claim is the robust one: ~1.5e-7 relative on every one
+    of the 64 images, for every seed spot-checked, not a marginal handful.
+
+    The scalar claim is deliberately stated more weakly. Averaging across
+    images lets the per-image accumulation errors partially cancel, so
+    whether the two scalars still differ AT float32 resolution depends on
+    n and on the seed (checked: they do at n=64 for each of seeds 0-4, but
+    at n=32 and n=128 only for some). The fixed seed here is not hiding
+    that -- it is asserted at a size where it holds, and the size
+    dependence is the honest finding, not a defect in the fix."""
+    n = 64
+    rng = np.random.default_rng(0)
+    pred32 = rng.uniform(0.0, 1.0, (n, N_PIX)).astype(np.float32)
+    target32 = rng.uniform(0.0, 1.0, (n, N_PIX)).astype(np.float32)
+    active = np.sort(rng.choice(N_PIX, size=cnn.N_ACTIVE, replace=False))
+    mask = cnn.build_active_support_mask(active, expect_n_active=cnn.N_ACTIVE)
+
+    pred = jnp.asarray(pred32).reshape(n, SIDE, SIDE)
+    target = jnp.asarray(target32).reshape(n, SIDE, SIDE)
+
+    def reduce_with(dtype):
+        return cnn.masked_per_image_mse(pred, target, mask, clip_predictions=False,
+                                        reduce_dtype=dtype)
+
+    in_f32 = np.asarray(reduce_with(cnn.CNN_DTYPE), dtype=np.float64)
+    in_f64 = np.asarray(reduce_with(cnn.VALIDATION_REDUCE_DTYPE))
+    assert reduce_with(cnn.VALIDATION_REDUCE_DTYPE).dtype == jnp.float64
+
+    mask64 = np.asarray(mask, dtype=np.float64).reshape(-1)
+    oracle = (((pred32.astype(np.float64) - target32.astype(np.float64)) ** 2)
+              * mask64).sum(axis=1) / mask64.sum()
+
+    # the float64 reduction is the correct one, to full double precision
+    np.testing.assert_allclose(in_f64, oracle, rtol=1e-14, atol=0)
+    # the float32 reduction is not -- on every image, at ~1e-7 relative
+    assert np.all(in_f32 != in_f64), "float32 and float64 reductions did not disagree"
+    rel = np.abs(in_f32 - oracle) / oracle
+    assert rel.max() > 1e-8, f"discrepancy implausibly small: {rel.max():.2e}"
+
+    # end to end through the real scalar criterion: the two reductions land
+    # on different float32 values, so the strict `<` with min_delta=0.0 that
+    # early stopping applies could genuinely resolve them differently
+    scalar_f32 = cnn.masked_mse(pred, target, mask, clip_predictions=False,
+                                reduce_dtype=cnn.CNN_DTYPE)
+    scalar_f64 = cnn.masked_mse(pred, target, mask, clip_predictions=False,
+                                reduce_dtype=cnn.VALIDATION_REDUCE_DTYPE)
+    assert scalar_f32.dtype == cnn.CNN_DTYPE and scalar_f64.dtype == jnp.float64
+    np.testing.assert_allclose(float(scalar_f64), float(oracle.mean()), rtol=1e-14, atol=0)
+    assert np.float32(float(scalar_f32)) != np.float32(float(scalar_f64))
+
+
+def test_importing_the_cnn_alone_does_not_enable_x64_and_the_metric_halts():
+    """The cross-module interaction, covered where it cannot be covered in
+    process: this test module imports `stage2b_ridge`, which turns x64 on
+    for the whole pytest session, so every other dtype assertion here only
+    ever runs in the x64-ON condition. The x64-OFF branch -- the one that
+    decides whether the float64 accumulation silently no-ops -- needs a
+    clean interpreter.
+
+    Two claims, both about not owning global state: importing
+    `stage2b_cnn` must not enable x64 itself, and with x64 off the
+    validation metric must HALT rather than quietly reduce in float32.
+    Training, which asks only for float32, must still work."""
+    child = """
+import sys
+sys.path.insert(0, sys.argv[1])
+import jax
+assert not jax.config.jax_enable_x64, "a clean interpreter already had x64 on"
+import stage2b_cnn as cnn
+assert not jax.config.jax_enable_x64, "importing stage2b_cnn enabled x64 globally"
+import numpy as np
+mask = cnn.build_active_support_mask(np.arange(cnn.N_ACTIVE), expect_n_active=cnn.N_ACTIVE)
+model = cnn.make_model(cnn.seed_keys(0)[0])
+x = cnn.as_image_batch(np.zeros((2, 28, 28)))
+assert np.isfinite(float(cnn.training_loss(model, x, x, mask))), "float32 training broke"
+try:
+    cnn.clipped_validation_mse(model, x, x, mask)
+except ValueError as exc:
+    assert "jax_enable_x64" in str(exc), str(exc)
+    print("HALTED_AS_EXPECTED")
+else:
+    raise AssertionError("validation metric silently reduced in float32 with x64 off")
+"""
+    proc = subprocess.run([sys.executable, "-c", child, str(_STAGE2B_DIR)],
+                          capture_output=True, text=True)
+    assert proc.returncode == 0, f"stdout:\n{proc.stdout}\nstderr:\n{proc.stderr}"
+    assert "HALTED_AS_EXPECTED" in proc.stdout, proc.stdout
 
 
 # ---- the optimizer ----
