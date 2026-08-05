@@ -732,6 +732,168 @@ def test_one_graph_wins_reports_every_graph_and_every_opponent():
         assert set(opponents) == set(stats.EVOLVED_GRAPHS) - {graph}
 
 
+# ---- the descriptive ranking alongside `unique_winner` ----
+
+def _centered(rng, sd, n):
+    """Noise with EXACTLY zero sample mean.
+
+    Fixtures below need a pairwise direction that is fixed by the offsets
+    alone, not by which way a noise draw happened to fall. Centering makes
+    each contrast's mean exactly the difference of the offsets, so a
+    "directionally better by a hair, nowhere near significant" condition
+    can be built by construction rather than by tuning a seed until it
+    happens."""
+    e = rng.normal(0.0, sd, n)
+    return e - e.mean()
+
+
+def _near_miss(n=400, seed=7):
+    """The shape `unique_winner` must refuse and the descriptive field
+    must render: `T` leads all three rivals on the point estimate, two of
+    those leads survive Family-2 Holm comfortably, and the third does not
+    come close.
+
+    `curr_random` sits 0.0005 above `T` -- a deterministic lead, since the
+    noise is centered -- but carries independent noise 40x wider than the
+    other conditions', so the paired T-vs-`curr_random` difference is a
+    small fraction of its own SD and the t-test is nowhere near
+    significant. The near-miss is therefore built into the fixture, not
+    tuned into it."""
+    rng = np.random.default_rng(seed)
+    base = 0.05 + rng.gamma(2.0, 0.005, n)
+    mse = {
+        "pre_evolution": base + 0.0300 + _centered(rng, 0.0005, n),
+        "T":             base + 0.0000 + _centered(rng, 0.0005, n),
+        "lattice":       base + 0.0100 + _centered(rng, 0.0005, n),
+        "rewired":       base + 0.0120 + _centered(rng, 0.0005, n),
+        "curr_random":   base + 0.0005 + _centered(rng, 0.0200, n),
+    }
+    return mse, np.tile(np.arange(10), n // 10)
+
+
+def test_descriptive_ranking_renders_the_near_miss_unique_winner_refuses():
+    """The headline case. `T` is directionally best against all three
+    rivals but fails Holm against exactly one, so:
+
+      - `unique_winner` is None -- unchanged, and for the RIGHT reason:
+        `T` qualifies, and it is only the Family-2 sweep that fails.
+      - the descriptive field says "3 of 3 directional, 2 of 3
+        Holm-surviving", and names `curr_random` as the pair that led
+        directionally without surviving correction."""
+    mse, y = _near_miss()
+    _primary, _fam1, fam2, verdict = _run_all(mse, y)
+
+    assert verdict["unique_winner"] is None
+    assert verdict["qualification"]["T"]["qualifies"] is True
+    assert verdict["beats_others"]["T"]["beats_all"] is False
+
+    rank = verdict["descriptive_ranking"]
+    assert rank["best_point_estimate"] == "T"
+    assert rank["best_point_estimate_summary"] == (
+        "3 of 3 directional, 2 of 3 Holm-surviving")
+
+    t_row = rank["per_graph"]["T"]
+    assert t_row["n_directional_wins"] == 3
+    assert t_row["n_holm_surviving_wins"] == 2
+    # exactly WHICH pair fell short, not just how many
+    assert t_row["directional_only_wins"] == ("curr_random",)
+    assert set(t_row["holm_surviving_wins"]) == {"lattice", "rewired"}
+    assert fam2["holm_adjusted_p"]["T_vs_curr_random"] > 0.05
+
+
+def test_descriptive_ranking_on_a_clean_sweep_agrees_with_the_winner():
+    """When a graph does win outright, the descriptive field and
+    `unique_winner` say the same thing -- the field adds information in
+    the near-miss case without contradicting the rule in the clear one."""
+    mse, y = _graded(order=("T", "lattice", "rewired", "curr_random"))
+    _p, _f1, _f2, verdict = _run_all(mse, y)
+
+    assert verdict["unique_winner"] == "T"
+    rank = verdict["descriptive_ranking"]
+    assert rank["best_point_estimate"] == "T"
+    assert rank["per_graph"]["T"]["n_directional_wins"] == 3
+    assert rank["per_graph"]["T"]["n_holm_surviving_wins"] == 3
+    assert rank["per_graph"]["T"]["directional_only_wins"] == ()
+    assert rank["order"] == ("T", "lattice", "rewired", "curr_random")
+    assert rank["order_is_strict"] is True
+
+
+def test_descriptive_ranking_names_a_leader_when_nothing_separates():
+    """No clear leader: all four are statistically indistinguishable, so
+    `unique_winner` is None -- but some condition still has the lowest
+    mean, and the field names it with 0 of 3 Holm-surviving.
+
+    This is the case that shows the field cannot be read as a claim: it
+    names a graph precisely when the inferential rule refuses to."""
+    n = 400
+    rng = np.random.default_rng(0)
+    base = np.full(n, 0.05)
+    mse = {"pre_evolution": base + 0.03 + rng.normal(0, 0.001, n)}
+    for g in stats.EVOLVED_GRAPHS:
+        mse[g] = base + rng.normal(0, 0.001, n)
+    y = np.tile(np.arange(10), n // 10)
+    _p, _f1, _f2, verdict = _run_all(mse, y)
+
+    assert verdict["unique_winner"] is None
+    rank = verdict["descriptive_ranking"]
+    assert rank["best_point_estimate"] in stats.EVOLVED_GRAPHS
+    best = rank["per_graph"][rank["best_point_estimate"]]
+    assert best["n_directional_wins"] == 3
+    assert best["n_holm_surviving_wins"] == 0
+    assert rank["best_point_estimate_summary"] == (
+        "3 of 3 directional, 0 of 3 Holm-surviving")
+
+
+def test_descriptive_ranking_cannot_be_mistaken_for_an_inferential_claim():
+    """Naming and note, checked as content rather than trusted to prose:
+    the three disclaimers the field must carry are all present in the
+    dict a reporting caller reads, not only in the module docstring."""
+    mse, y = _near_miss()
+    _p, _f1, _f2, verdict = _run_all(mse, y)
+    rank = verdict["descriptive_ranking"]
+
+    assert rank["is_inferential"] is False
+    note = rank["note"]
+    assert note == stats.DESCRIPTIVE_RANKING_NOTE
+    assert "DESCRIPTIVE ONLY" in note
+    assert "no multiplicity correction of its own" in note
+    assert "qualifies NO graph as a winner" in note
+    # the field never carries a winner-shaped key
+    assert "unique_winner" not in rank
+    assert "winner" not in rank["best_point_estimate"]
+
+
+def test_descriptive_counts_and_beats_all_share_one_direction_read():
+    """The counts are derived from the same `per_opponent` records
+    `beats_all` consumed, so the two can never disagree (CLAUDE.md
+    principle 16 -- no second, independently-written path around a
+    verified helper). A sweep is exactly 3 of 3 Holm-surviving."""
+    for mse, y in (_near_miss(), _graded(), _graded(order=(
+            "curr_random", "rewired", "lattice", "T"))):
+        _p, _f1, _f2, verdict = _run_all(mse, y)
+        rank = verdict["descriptive_ranking"]
+        assert set(rank["per_graph"]) == set(stats.EVOLVED_GRAPHS)
+        for graph in stats.EVOLVED_GRAPHS:
+            row = rank["per_graph"][graph]
+            beats_all = verdict["beats_others"][graph]["beats_all"]
+            assert (row["n_holm_surviving_wins"] == row["n_opponents"]) is beats_all
+            assert row["n_holm_surviving_wins"] <= row["n_directional_wins"]
+            assert set(row["holm_surviving_wins"]) <= set(row["directional_wins"])
+
+
+def test_descriptive_ranking_does_not_alter_the_unique_winner_verdict():
+    """The field is a pure readout: deleting it from the result changes
+    nothing about the rule's own outputs, on every fixture in this file
+    that exercises `one_graph_wins`."""
+    for mse, y in (_near_miss(), _graded(), _graded(order=(
+            "curr_random", "rewired", "lattice", "T"))):
+        primary, fam1, fam2, verdict = _run_all(mse, y)
+        expected = [g for g in stats.EVOLVED_GRAPHS
+                    if verdict["qualification"][g]["qualifies"]
+                    and verdict["beats_others"][g]["beats_all"]]
+        assert verdict["unique_winner"] == (expected[0] if expected else None)
+
+
 # ---- the alpha comparison: strict `<` in BOTH families ----
 #
 # DESIGN.md words Family 1's threshold explicitly ("Holm-adjusted

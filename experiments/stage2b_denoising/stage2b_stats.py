@@ -574,6 +574,91 @@ def pairwise_outcome(family2, graph, other):
     }
 
 
+# ---- Descriptive ranking (NOT an inferential claim) ----
+
+DESCRIPTIVE_RANKING_NOTE = (
+    "DESCRIPTIVE ONLY. This is a plain readout of point estimates and "
+    "directional pairwise outcomes, not a test and not a verdict. It "
+    "applies no multiplicity correction of its own -- the "
+    "Holm-surviving counts are read from Family 2's existing correction, "
+    "and nothing further is corrected for producing this ordering. It "
+    "qualifies NO graph as a winner: `unique_winner` in this same dict "
+    "is the only supported inferential statement about which graph wins, "
+    "and it is decided by the branched rule, not by this ranking. A "
+    "graph named `best_point_estimate` here may well be a graph that "
+    "`unique_winner` correctly declines to name."
+)
+
+
+def _descriptive_ranking(beats_others):
+    """A descriptive companion to `unique_winner` -- never a substitute.
+
+    Reports which graph has the best (lowest) mean per-image MSE, and for
+    every graph how many of its three Family-2 pairwise comparisons it
+    leads directionally, split into those that also survive Family-2 Holm
+    and those that do not. That split is the point: it makes a "3 of 3
+    directional, 2 of 3 Holm-surviving" near-miss legible at a glance
+    instead of collapsing to a bare `unique_winner: None`.
+
+    The model is Stage 2A's own reporting, which published the full
+    descriptive ranking (`curr_random > rewired > T > lattice`) side by
+    side with the rigorous test outcomes rather than merging the two into
+    one number -- here applied to the pre-registered design rather than a
+    post hoc one.
+
+    Read entirely from `beats_others`' already-computed `per_opponent`
+    records, so the direction and Holm reads behind these counts are the
+    SAME reads `beats_all` used. Recomputing them from `family2` would
+    reintroduce exactly the risk CLAUDE.md principle 16 names: a second,
+    independently-written path around a verified helper, free to disagree
+    with the first.
+
+    `best_point_estimate` is always a graph, never `None`: some condition
+    always has the lowest mean, even when nothing separates significantly.
+    Because each pairwise mean is an exact difference of condition means
+    (`mean(a - b) == mean(a) - mean(b)`), the directional outcomes induce
+    a consistent total order, and the lowest-mean graph is exactly the one
+    leading all three of its pairs. `order_is_strict` records that this
+    held -- it is False only under an exact tie between two conditions'
+    means, where the ordering degenerates and should not be read as one.
+    """
+    graphs = tuple(beats_others)
+    per_graph = {}
+    for graph in graphs:
+        outcomes = beats_others[graph]["per_opponent"]
+        directional = tuple(o for o in graphs
+                            if o != graph and outcomes[o]["favorable"])
+        surviving = tuple(o for o in directional
+                          if outcomes[o]["holm_significant"])
+        directional_only = tuple(o for o in directional if o not in surviving)
+        n_opp = len(outcomes)
+        per_graph[graph] = {
+            "n_opponents": n_opp,
+            "n_directional_wins": len(directional),
+            "n_holm_surviving_wins": len(surviving),
+            "directional_wins": directional,
+            "holm_surviving_wins": surviving,
+            "directional_only_wins": directional_only,
+            "summary": (f"{len(directional)} of {n_opp} directional, "
+                        f"{len(surviving)} of {n_opp} Holm-surviving"),
+        }
+
+    order = tuple(sorted(graphs,
+                         key=lambda g: (-per_graph[g]["n_directional_wins"], g)))
+    win_counts = [per_graph[g]["n_directional_wins"] for g in graphs]
+    order_is_strict = len(set(win_counts)) == len(win_counts)
+    best = order[0]
+    return {
+        "note": DESCRIPTIVE_RANKING_NOTE,
+        "is_inferential": False,
+        "best_point_estimate": best,
+        "best_point_estimate_summary": per_graph[best]["summary"],
+        "order": order,
+        "order_is_strict": bool(order_is_strict),
+        "per_graph": per_graph,
+    }
+
+
 # ---- "One graph wins", branched per candidate ----
 
 def one_graph_wins(primary, family1, family2, alpha=ALPHA):
@@ -595,6 +680,16 @@ def one_graph_wins(primary, family1, family2, alpha=ALPHA):
     The winner step is separate again, and uses FAMILY-2 Holm --
     qualification and unique-winner status are never decided by the same
     correction.
+
+    `unique_winner` is `None` whenever the leading graph fails Holm
+    against even one rival. That is deliberate and is the whole point of
+    the rule: naming a winner off a leader that cannot separate from one
+    of its three rivals is the overclaim Stage 2A had to walk back once.
+    `descriptive_ranking`, returned alongside, reports what the point
+    estimates and directional outcomes actually looked like -- so a
+    near-miss is legible instead of invisible -- and is descriptive only.
+    It never qualifies a graph as a winner; see
+    `DESCRIPTIVE_RANKING_NOTE`.
 
     `alpha` is compared strictly -- `Holm-adjusted p < alpha` -- in BOTH
     families, under the same field name `holm_significant` on each side.
@@ -650,6 +745,7 @@ def one_graph_wins(primary, family1, family2, alpha=ALPHA):
         "qualification": qualification,
         "beats_others": beats_others,
         "unique_winner": winners[0] if winners else None,
+        "descriptive_ranking": _descriptive_ranking(beats_others),
         "alpha": float(alpha),
         "alpha_comparison": ALPHA_COMPARISON_NOTE,
         "rule": ("T qualifies iff the primary bootstrap interval lies entirely "
