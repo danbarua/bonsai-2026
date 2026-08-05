@@ -84,6 +84,43 @@ def test_scaler_centering_guard_raises_on_uncentered_features():
         ridge.assert_scaler_centered(X + 5.0)
 
 
+@pytest.mark.parametrize("col_std,expect_pass", [
+    (1e-2, True),      # ordinary low-variance column: fine
+    (1e-4, True),      # residual amplified to ~1e-11, still inside tolerance
+    (1e-9, False),     # near-constant: sklearn does not rescue it, guard fires
+    (1e-15, True),     # sklearn declares it constant and sets scale to 1
+])
+def test_centering_guard_behaviour_on_near_constant_columns(col_std, expect_pass):
+    """Characterizes an OPEN REVIEW ITEM, and pins current behaviour so a
+    later decision is measured against a known baseline.
+
+    A column that is nearly-but-not-exactly constant trips the guard: it
+    sits above sklearn's constant-feature bound, so it is divided by its
+    tiny scale, amplifying the float64 centering residual past 1e-10.
+    That is a property of the data, not a broken scaler, which is what
+    the guard was specified to catch -- so this test asserts what
+    happens, and does not assert that what happens is right."""
+    rng = np.random.default_rng(30)
+    n, p = 5000, 200
+    X = rng.normal(size=(n, p))
+    X[:, 3] = 1.0 + rng.normal(size=n) * col_std
+    X_scaled = StandardScaler().fit_transform(X)
+    if expect_pass:
+        ridge.assert_scaler_centered(X_scaled)
+    else:
+        with pytest.raises(AssertionError, match="near-constant"):
+            ridge.assert_scaler_centered(X_scaled)
+
+
+def test_centering_guard_message_names_the_worst_column():
+    rng = np.random.default_rng(31)
+    X = rng.normal(size=(2000, 50))
+    X[:, 17] = 1.0 + rng.normal(size=2000) * 1e-9
+    X_scaled = StandardScaler().fit_transform(X)
+    with pytest.raises(AssertionError, match=r"worst column 17"):
+        ridge.assert_scaler_centered(X_scaled)
+
+
 def test_svd_ridge_fit_raises_on_uncentered_input_by_default():
     X, Y, _ = _synthetic_regression()
     with pytest.raises(AssertionError, match="not centered"):

@@ -79,12 +79,31 @@ def assert_scaler_centered(X_scaled, tol=MEAN_X_TOL):
     starts being real, invented intercept structure -- silently, since
     the ridge still fits and still produces predictions.
 
+    KNOWN TENSION, open for review before the first real run: a NEARLY-
+    but-not-exactly-constant feature column also trips this. sklearn's
+    `StandardScaler` only rescues a column as constant when its variance
+    falls below roughly `(n * mean * eps)^2`; a column just above that
+    bound is divided by its tiny scale, which amplifies the float64
+    centering residual from ~1e-16 to well past 1e-10. Measured at
+    n=5,000 with a unit-mean column: the guard passes at column std 1e-4
+    (norm 1.1e-11) and at 1e-12 and below (sklearn declares those
+    constant), and FIRES across roughly 1e-12 < std < 1e-5 (norm 9.7e-7
+    at std 1e-9). Stage 2A's cos/sin features under a near-synchronized
+    regime can plausibly land there. That is a near-constant feature, not
+    a broken scaler, so quietly loosening `tol` would defeat the guard's
+    stated purpose -- the resolution is a locked-design question, not an
+    implementation choice. The failure message therefore names the worst
+    offending column so a halt is diagnosable immediately.
+
     Returns the measured L2 norm; raises AssertionError on exceedance."""
     mean_vec = np.asarray(X_scaled, dtype=np.float64).mean(axis=0)
     norm = float(np.linalg.norm(mean_vec))
+    worst = int(np.argmax(np.abs(mean_vec)))
     assert norm < tol, (
         f"standardized training features are not centered: "
-        f"||mean(X_train_scaled)|| = {norm:.6e} >= {tol:.1e}")
+        f"||mean(X_train_scaled)|| = {norm:.6e} >= {tol:.1e}; worst column "
+        f"{worst} has mean {mean_vec[worst]:.6e} "
+        f"(a near-constant column is a likely cause -- see this function's docstring)")
     return norm
 
 
