@@ -26,6 +26,24 @@ a run script:
 where `build_it(local_path)` writes the file. Nothing about resumability
 is left to the caller remembering to check first.
 
+## Surviving a death mid-transfer, in both directions
+
+A step is the unit of resumption above; a transfer is the unit below it,
+and a gigabyte artifact is large enough that losing one in flight matters
+on its own.
+
+`download_file` writes to a `.part` sidecar and renames it into place
+only once the transfer completes, so a death mid-download cannot leave a
+truncated file that the next run mistakes for a finished artifact.
+
+`upload_file_chunked` is the other direction: the file goes up as
+numbered part objects under `{name}.parts/`, each recorded in a
+`{local_path}.upload.json` checkpoint only after the remote confirms it
+arrived, and the parts are composed into the object at the end. A re-run
+resumes after the last confirmed part rather than sending the whole
+artifact again. `upload_file` remains the single-request path, and is
+what `ensure_artifact` uses unless asked for `chunked=True`.
+
 ## Lazy import, deliberately
 
 `google.cloud.storage` is imported inside `_storage_module()`, never at
@@ -102,6 +120,8 @@ The bucket is public-read, so a script that only downloads needs no key
 at all -- `anonymous=True` builds a credential-free client. Anonymous
 clients cannot write.
 """
+import hashlib
+import json
 import os
 import re
 from typing import NamedTuple
@@ -131,6 +151,23 @@ TEST_SPLIT_STAGE = 4              # the one locked confirmatory evaluation
 # a leading dot.
 _TOKEN_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9_-]*$")
 _EXT_RE = re.compile(r"^[A-Za-z0-9]+$")
+
+# ---- Chunked upload ----
+CHUNK_SIZE_DEFAULT = 64 * 1024 * 1024   # 64 MiB: one part is one request, held in memory once
+COMPOSE_MAX_SOURCES = 32                # GCS composes at most 32 sources per request
+MAX_PARTS = 1024                        # this module's own cap; see `upload_file_chunked`
+PART_SUFFIX = ".parts"
+CHECKPOINT_SUFFIX = ".upload.json"
+CHECKPOINT_FORMAT = "stage2b-chunked-upload/1"
+_OCTET_STREAM = "application/octet-stream"
+
+
+class ChunkedUploadError(OSError):
+    """A part upload returned without the object arriving intact.
+
+    Deliberately not a `FileNotFoundError`: a missing local file and a
+    part that did not land are different failures, and a caller catching
+    one should not silently swallow the other."""
 
 
 # ---- Credentials: resolved, never read ----
@@ -363,6 +400,348 @@ def upload_file(local_path, name, *, bucket, allow_test_split=False):
     return name
 
 
+# ---- Chunked upload: a transfer that survives the session dying ----
+
+def part_prefix(name):
+    """Where one object's in-flight parts live: `{name}.parts`.
+
+    Adjacent to the object itself, deliberately. A part of a test-side
+    object is itself test-side, so it lands under the test-split root and
+    both the guard and `delete_test_split_artifacts` cover it with no
+    special case."""
+    return f"{str(name)}{PART_SUFFIX}"
+
+
+def part_name(name, index):
+    """One part's object name. Zero-padded so the parts sort in the order
+    they are composed in, which makes a half-finished upload legible in a
+    bucket listing."""
+    return f"{part_prefix(name)}/{int(index):06d}"
+
+
+def checkpoint_path(local_path):
+    """The upload checkpoint's sidecar, `{local_path}.upload.json` -- next
+    to the file being uploaded, in the manner of `download_file`'s
+    `.part`."""
+    return f"{str(local_path)}{CHECKPOINT_SUFFIX}"
+
+
+def _file_identity(local_path):
+    st = os.stat(local_path)
+    return {"size_bytes": int(st.st_size), "mtime_ns": int(st.st_mtime_ns)}
+
+
+def _chunk_count(size_bytes, chunk_size):
+    return (size_bytes + chunk_size - 1) // chunk_size
+
+
+def _chunk_length(index, size_bytes, chunk_size):
+    return min(chunk_size, size_bytes - index * chunk_size)
+
+
+def _remote_size(blob):
+    """The remote object's byte count, or None if this blob type does not
+    report one. A freshly-built handle carries no metadata until it is
+    reloaded, which is why the reload is here rather than assumed."""
+    size = getattr(blob, "size", None)
+    if size is None:
+        reload_ = getattr(blob, "reload", None)
+        if callable(reload_):
+            reload_()
+            size = getattr(blob, "size", None)
+    return size
+
+
+def _part_is_intact(bucket, part, expected_size):
+    blob = bucket.blob(part)
+    if not blob.exists():
+        return False
+    size = _remote_size(blob)
+    return size is None or int(size) == int(expected_size)
+
+
+def _confirm_part(bucket, part, expected_size):
+    """Ask the remote whether the part actually arrived, and at the right
+    length. This is what a chunk is recorded on -- not on the upload call
+    having returned. A checkpoint claiming a chunk that never landed is
+    worse than no checkpoint: the resume would skip it and compose a hole
+    into the object."""
+    blob = bucket.blob(part)
+    if not blob.exists():
+        raise ChunkedUploadError(
+            f"the upload of {part!r} returned but the object is not in the bucket; "
+            f"refusing to record it as done")
+    size = _remote_size(blob)
+    if size is not None and int(size) != int(expected_size):
+        raise ChunkedUploadError(
+            f"the upload of {part!r} landed {int(size)} bytes, not {int(expected_size)}; "
+            f"refusing to record it as done")
+
+
+def _read_chunk(handle, index, chunk_size, size_bytes):
+    handle.seek(index * chunk_size)
+    return handle.read(_chunk_length(index, size_bytes, chunk_size))
+
+
+def _checkpoint_state(name, local_path, identity, chunk_size, n_chunks, confirmed):
+    return {
+        "format": CHECKPOINT_FORMAT,
+        "object_path": name,
+        "part_prefix": part_prefix(name),
+        "local_path": os.path.abspath(str(local_path)),
+        "size_bytes": identity["size_bytes"],
+        "mtime_ns": identity["mtime_ns"],
+        "chunk_size": chunk_size,
+        "n_chunks": n_chunks,
+        "confirmed": [confirmed[i] for i in sorted(confirmed)],
+    }
+
+
+def _write_checkpoint(path, state):
+    """Written whole and swapped into place, so the file on disk is either
+    the previous consistent state or the new one -- never a half-written
+    record of what has been confirmed."""
+    tmp = path + ".tmp"
+    with open(tmp, "w") as handle:
+        json.dump(state, handle, indent=2, sort_keys=True)
+        handle.flush()
+        os.fsync(handle.fileno())
+    os.replace(tmp, path)
+
+
+def _remove_checkpoint(path):
+    for candidate in (path, path + ".tmp"):
+        try:
+            os.remove(candidate)
+        except FileNotFoundError:
+            pass
+
+
+def _load_checkpoint(path, *, name, identity, chunk_size, n_chunks):
+    """The confirmed chunks a previous run recorded, or `{}` if there is
+    no usable checkpoint.
+
+    Every field that describes what the checkpoint belongs to is compared,
+    and any disagreement discards the whole thing rather than salvaging
+    part of it. A stale checkpoint composing one artifact's parts into
+    another object is the silent-corruption case this exists to prevent,
+    and there is no version of it worth being clever about: re-uploading
+    costs bandwidth, the alternative costs a wrong result.
+
+    The identity checked is (object path, size, mtime, chunk size, chunk
+    count). That catches a regenerated, resized, or truncated file and a
+    checkpoint left by a different object or a different chunking. It does
+    not catch an in-place edit that preserves both size and mtime --
+    `verify_digests=True` is what covers that, at the cost of re-reading
+    the local file."""
+    try:
+        with open(path) as handle:
+            state = json.load(handle)
+    except (OSError, ValueError):
+        return {}
+    if not isinstance(state, dict) or state.get("format") != CHECKPOINT_FORMAT:
+        return {}
+    if (state.get("object_path") != name
+            or state.get("chunk_size") != chunk_size
+            or state.get("n_chunks") != n_chunks
+            or state.get("size_bytes") != identity["size_bytes"]
+            or state.get("mtime_ns") != identity["mtime_ns"]):
+        return {}
+
+    confirmed = {}
+    entries = state.get("confirmed")
+    if not isinstance(entries, list):
+        return {}
+    for entry in entries:
+        if not isinstance(entry, dict):
+            return {}
+        index, size, digest = entry.get("index"), entry.get("size"), entry.get("sha256")
+        if not isinstance(index, int) or isinstance(index, bool) or not 0 <= index < n_chunks:
+            return {}
+        if size != _chunk_length(index, identity["size_bytes"], chunk_size):
+            return {}
+        if not isinstance(digest, str):
+            return {}
+        confirmed[index] = {"index": index, "size": size, "sha256": digest}
+    return confirmed
+
+
+def _reconcile_confirmed(confirmed, *, bucket, name, handle, chunk_size, size_bytes,
+                         verify_digests):
+    """Drops any recorded chunk that does not hold up: its part is gone
+    from the bucket, its part is the wrong length, or -- under
+    `verify_digests` -- the local bytes it was made from have changed.
+
+    Per chunk rather than all-or-nothing, so an edit confined to one chunk
+    does not cost the transfer the rest of them."""
+    kept = {}
+    for index in sorted(confirmed):
+        entry = confirmed[index]
+        if not _part_is_intact(bucket, part_name(name, index), entry["size"]):
+            continue
+        if verify_digests:
+            digest = hashlib.sha256(
+                _read_chunk(handle, index, chunk_size, size_bytes)).hexdigest()
+            if digest != entry["sha256"]:
+                continue
+        kept[index] = entry
+    return kept
+
+
+def _compose(bucket, dest, sources):
+    bucket.blob(dest).compose([bucket.blob(source) for source in sources])
+
+
+def _compose_parts(bucket, name, sources):
+    """Concatenates the parts into the object, server-side.
+
+    GCS composes at most `COMPOSE_MAX_SOURCES` sources per request, so
+    anything longer is merged level by level into intermediate objects --
+    which live under the part prefix too, and so are cleaned up with
+    everything else."""
+    prefix = part_prefix(name)
+    current = list(sources)
+    level = 0
+    while len(current) > COMPOSE_MAX_SOURCES:
+        merged = []
+        for start in range(0, len(current), COMPOSE_MAX_SOURCES):
+            target = f"{prefix}/_merge-L{level}-{len(merged):06d}"
+            _compose(bucket, target, current[start:start + COMPOSE_MAX_SOURCES])
+            merged.append(target)
+        current = merged
+        level += 1
+    _compose(bucket, name, current)
+
+
+def _delete_parts(bucket, name, allow_test_split):
+    """Removes everything under this object's part prefix -- the parts
+    just composed, the intermediate merges, and any surplus left by an
+    earlier, longer attempt at the same object.
+
+    Scoped to the prefix's children (`{name}.parts/`), because GCS prefix
+    matching is plain string matching and an object whose name merely
+    starts the same way is not this upload's to delete. The guard is
+    re-applied to the prefix actually used rather than inherited from the
+    caller."""
+    prefix = _check_object_path_allowed(part_prefix(name), allow_test_split)
+    for blob in list(bucket.list_blobs(prefix=prefix + "/")):
+        blob.delete()
+
+
+def upload_file_chunked(local_path, name, *, bucket, allow_test_split=False,
+                        chunk_size=CHUNK_SIZE_DEFAULT, verify_digests=False):
+    """Uploads a local file in chunks, resuming where a previous run died.
+    Returns the object path.
+
+    `upload_file` is one request: a session that dies partway through a
+    multi-gigabyte transfer loses all of it and starts again from zero on
+    the next run. This uploads the file as numbered part objects under
+    `{name}.parts/`, records each one on disk *after* the remote confirms
+    it arrived, and composes the parts into the object at the end. A
+    re-run picks up after the last confirmed part.
+
+    ## Why parts and composition rather than a resumable session URI
+
+    GCS's own resumable upload is the other candidate primitive, and it
+    would put the checkpoint (a session URI plus a committed byte offset)
+    somewhere that survives too. It is rejected here for one reason: it
+    lives at the HTTP layer, below the `bucket.blob(...)` seam this module
+    is written against, so it cannot be exercised without the library
+    installed and a live endpoint to talk to. Everything in this module is
+    testable against an injected stand-in bucket with
+    `google-cloud-storage` absent, and a transfer path whose failure modes
+    could only be checked against the real bucket would be the one piece
+    of Stage 2B's transport that nothing verifies. Composition needs only
+    the same four blob operations already in use, plus `compose`.
+
+    Two trade-offs come with that, stated rather than discovered later:
+    a composed object carries a CRC32C but no MD5, so a consumer that
+    verifies MD5 on download sees something different from what
+    `upload_file` produces; and the parts are real objects in the bucket
+    until the upload finishes.
+
+    ## What is recorded, and when
+
+    The checkpoint is `{local_path}.upload.json`, written whole and
+    swapped into place after each confirmed part. Confirmation is a fresh
+    remote check that the part exists and is the right length -- not the
+    upload call having returned. Recording a chunk before that is the bug
+    the whole mechanism exists to prevent, because the resume would skip
+    it and compose a hole into the object.
+
+    On the next run the checkpoint is discarded outright unless the object
+    path, the local file's size and mtime, the chunk size and the chunk
+    count all still agree, and each surviving entry is then checked
+    against the bucket. `verify_digests=True` additionally re-reads the
+    local file and compares each recorded chunk's SHA-256, which catches
+    an in-place edit that preserved size and mtime; it costs a full read
+    of the file.
+
+    Order at the end is compose, then delete the parts, then remove the
+    checkpoint, so a death at any point leaves state a re-run can
+    reconcile rather than state it must trust.
+
+    A file that fits in one chunk is uploaded directly by `upload_file` --
+    there is nothing to resume inside a single request -- and still clears
+    any parts an earlier, larger attempt left behind.
+
+    `MAX_PARTS` caps how many parts one object is assembled from. It is
+    this module's own conservative limit, not a quoted API figure: the
+    per-request source limit of 32 is documented, the ceiling on a
+    composite object's total component count is not something this module
+    can verify from here. At the default chunk size the cap is reached at
+    64 GiB, well beyond anything Stage 2B moves.
+
+    The test-split guard applies exactly as it does to `upload_file`, to
+    the object and to its part prefix."""
+    name = _check_object_path_allowed(name, allow_test_split)
+    local_path = str(local_path)
+    if not os.path.isfile(local_path):
+        raise FileNotFoundError(f"nothing to upload: {local_path} is not a file")
+    if not isinstance(chunk_size, int) or isinstance(chunk_size, bool) or chunk_size <= 0:
+        raise ValueError(f"chunk_size must be a positive int, got {chunk_size!r}")
+
+    identity = _file_identity(local_path)
+    size_bytes = identity["size_bytes"]
+    n_chunks = _chunk_count(size_bytes, chunk_size)
+    if n_chunks > MAX_PARTS:
+        raise ValueError(
+            f"{local_path} would need {n_chunks} parts at chunk_size={chunk_size}, over this "
+            f"module's cap of {MAX_PARTS}; use a larger chunk_size")
+
+    checkpoint = checkpoint_path(local_path)
+    if n_chunks <= 1:
+        upload_file(local_path, name, bucket=bucket, allow_test_split=allow_test_split)
+        _delete_parts(bucket, name, allow_test_split)
+        _remove_checkpoint(checkpoint)
+        return name
+
+    with open(local_path, "rb") as handle:
+        confirmed = _load_checkpoint(checkpoint, name=name, identity=identity,
+                                     chunk_size=chunk_size, n_chunks=n_chunks)
+        if confirmed:
+            confirmed = _reconcile_confirmed(
+                confirmed, bucket=bucket, name=name, handle=handle, chunk_size=chunk_size,
+                size_bytes=size_bytes, verify_digests=verify_digests)
+
+        for index in range(n_chunks):
+            if index in confirmed:
+                continue
+            data = _read_chunk(handle, index, chunk_size, size_bytes)
+            part = part_name(name, index)
+            bucket.blob(part).upload_from_string(data, content_type=_OCTET_STREAM)
+            _confirm_part(bucket, part, len(data))
+            confirmed[index] = {"index": index, "size": len(data),
+                                "sha256": hashlib.sha256(data).hexdigest()}
+            _write_checkpoint(checkpoint, _checkpoint_state(
+                name, local_path, identity, chunk_size, n_chunks, confirmed))
+
+    _compose_parts(bucket, name, [part_name(name, i) for i in range(n_chunks)])
+    _delete_parts(bucket, name, allow_test_split)
+    _remove_checkpoint(checkpoint)
+    return name
+
+
 def download_file(name, local_path, *, bucket, allow_test_split=False):
     """Downloads an object to a local path, creating the parent directory.
 
@@ -488,7 +867,7 @@ class StepResult(NamedTuple):
 
 
 def ensure_artifact(name, local_path, *, produce, bucket, allow_test_split=False,
-                    force=False):
+                    force=False, chunked=False, chunk_size=CHUNK_SIZE_DEFAULT):
     """Skip if already done, else compute and upload.
 
         r = stage2b_gcs.ensure_artifact(path, local, produce=build_it, bucket=bucket)
@@ -511,7 +890,15 @@ def ensure_artifact(name, local_path, *, produce, bucket, allow_test_split=False
     local path.
 
     `force=True` recomputes and overwrites an existing object -- for the
-    case where the artifact is known stale, not as a routine flag."""
+    case where the artifact is known stale, not as a routine flag.
+
+    `chunked=True` sends the artifact through `upload_file_chunked`, so a
+    session that dies mid-upload resumes after the last confirmed chunk
+    instead of starting the transfer again. It is opt-in rather than the
+    default because the resulting object is a composite one, with the
+    checksum-metadata difference noted there; pass it at the steps that
+    push gigabytes, which is where the whole transfer being lost actually
+    costs something."""
     name = _check_object_path_allowed(name, allow_test_split)
     local_path = str(local_path)
     if not callable(produce):
@@ -534,7 +921,11 @@ def ensure_artifact(name, local_path, *, produce, bucket, allow_test_split=False
             f"produce() returned without writing {local_path!r}; nothing to upload to "
             f"{name!r}. A step whose artifact is missing must fail here rather than record "
             f"itself as complete -- otherwise the next run would skip it.")
-    upload_file(local_path, name, bucket=bucket, allow_test_split=allow_test_split)
+    if chunked:
+        upload_file_chunked(local_path, name, bucket=bucket,
+                            allow_test_split=allow_test_split, chunk_size=chunk_size)
+    else:
+        upload_file(local_path, name, bucket=bucket, allow_test_split=allow_test_split)
     return StepResult(object_path=name, local_path=local_path, skipped=False,
                       produced=True, uploaded=True, downloaded=False,
                       size_bytes=os.path.getsize(local_path))
