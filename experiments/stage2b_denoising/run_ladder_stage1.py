@@ -237,10 +237,23 @@ def bootstrap_repo(commit, clone_dir=CLONE_DIR):
         say(f"editable install failed ({exc.returncode}); falling back to sys.path")
         info["pip_install_stderr"] = (exc.stderr or "")[-2000:]
 
-    for directory in EXPERIMENT_DIRS:
-        sys.path.insert(0, os.path.join(clone_dir, directory))
-    sys.path.insert(0, os.path.join(clone_dir, "src"))
     return info
+
+
+def add_repo_to_path(clone_dir):
+    """Put a checkout's source directories on `sys.path`, idempotently.
+
+    Owned by the import side rather than the fetch side so that
+    `load_modules` is self-contained: a local test can point both at this
+    repo and check the driver's whole dependency closure resolves and its
+    call sites match the real signatures, without a runtime, a clone or a
+    network. That check is worth a great deal here -- caller-side glue
+    around correct kernels is this project's most expensive recurring bug,
+    and signature drift is the cheap half of it to catch."""
+    for directory in (*EXPERIMENT_DIRS, "src"):
+        entry = os.path.join(clone_dir, directory)
+        if entry not in sys.path:
+            sys.path.insert(0, entry)
 
 
 def verify_driver_identity(clone_dir, expected_sha256):
@@ -271,6 +284,7 @@ def load_modules(clone_dir):
     `jax.numpy` binds. `evolve_on_graph_jax` and `stage2b_cnn` do not, so a
     different order runs the graph evolution in float32 -- silently,
     plausibly, with nothing raised anywhere."""
+    add_repo_to_path(clone_dir)
     import stage2b_ridge as ridge                                       # noqa: E402
     from evolve_on_graph_jax import batched_evolve_on_graph_jax         # noqa: E402
     import jax                                                          # noqa: E402

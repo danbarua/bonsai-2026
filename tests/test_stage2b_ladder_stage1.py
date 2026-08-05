@@ -266,6 +266,98 @@ def test_json_default_handles_the_numpy_types_the_record_carries(driver):
     assert loaded == {"arr": [0, 1, 2], "f": 1.5, "i": 7, "b": True, "t": [1, 2]}
 
 
+# ---- the call sites match the modules they call ----
+
+_ANY = object()
+
+
+def test_the_drivers_dependency_closure_resolves(driver):
+    """`load_modules` pointed at this repo instead of a clone.
+
+    It is self-contained by design -- it adds the source directories to
+    `sys.path` itself rather than depending on `bootstrap_repo` having run
+    -- specifically so this check is possible with no runtime, no clone and
+    no network. An ImportError here is one that would otherwise surface on
+    a billing A100."""
+    mods = driver.load_modules(str(REPO_ROOT))
+    for name in ("ridge", "corruption", "encoder_gate", "gcs", "partition",
+                 "stats", "core", "topologies", "conditions", "verify_gpu"):
+        assert getattr(mods, name) is not None
+
+
+def test_every_call_the_driver_makes_binds_to_the_real_signature(driver):
+    """The cheap half of the glue-bug class, caught locally.
+
+    Stage 1D's replica directions, the stage2a-verify no-op gate and this
+    week's single-trial near-miss were all caller-side mistakes around
+    kernels that were themselves correct. Argument binding will not catch a
+    wrong VALUE -- only a call the module cannot accept at all -- but that
+    is the half that is free to check, and it is the half that turns a
+    module signature change into a local test failure instead of a remote
+    one halfway through a paid run.
+
+    `Signature.bind` performs no type checking, so sentinels are fine: what
+    is under test is arity, keyword names and required arguments."""
+    mods = driver.load_modules(str(REPO_ROOT))
+    calls = [
+        (mods.corruption.corrupt_corpus, (_ANY, "train", _ANY), {"alpha_bar": 0.5}),
+        (mods.corruption.epsilon_for, ("train", 7), {}),
+        (mods.corruption.forward_corrupt, (_ANY, _ANY, 0.5), {}),
+        (mods.corruption.corruption_diagnostics, (_ANY, _ANY, _ANY, _ANY),
+         {"labels": _ANY}),
+        (mods.corruption.clip_rate_agreement, (_ANY, _ANY), {"alpha_bar": 0.5}),
+        (mods.encoder_gate.run_encoder_gate, (_ANY, _ANY, _ANY),
+         {"seed": 0, "steps": 150, "n_workers": 1}),
+        (mods.encoder_gate.format_gate_log, (_ANY,), {}),
+        (mods.topologies.build_all_topologies, (), {}),
+        (mods.core.reference_node_features, (_ANY, 363), {}),
+        (mods.core.evolve_on_graph, (_ANY, _ANY), {}),
+        (mods.core.encode_and_restrict, (_ANY, _ANY), {}),
+        (mods.ridge.cross_validate_alpha, (_ANY, _ANY, _ANY), {}),
+        (mods.ridge.ridge_equivalence_check, (_ANY, _ANY, _ANY), {}),
+        (mods.ridge.fit_final, (_ANY, _ANY, 1.0), {}),
+        (mods.ridge.ridge_predict, (_ANY, _ANY, 0), {}),
+        (mods.ridge.clipped_per_image_mse, (_ANY, _ANY), {}),
+        (mods.stats.run_stage2b_inference, (_ANY, _ANY), {"identity_key": "identity"}),
+        (mods.gcs.ensure_artifact, (_ANY, _ANY),
+         {"produce": _ANY, "bucket": _ANY, "force": True}),
+        (mods.gcs.object_path, (),
+         {"stage": 1, "condition": None, "kind": "corpus", "ext": "npz",
+          "split": "train"}),
+        (mods.gcs.download_file, (_ANY, _ANY), {"bucket": _ANY}),
+        (mods.gcs.get_bucket, (), {"name": None, "credentials": _ANY}),
+        (mods.gcs.checksum_backend, (), {}),
+        (mods.conditions.path_segment, ("T",), {}),
+        (mods.partition.Stage2BTrainingPartition, (_ANY,), {}),
+        (mods.partition.Stage2BTrainingPartition.nested_development_subsets, (_ANY,),
+         {"size": 5000, "prefix_size": 1000, "seed": 42, "stratified": True}),
+        (mods.load_mnist, (_ANY,), {"gz": False}),
+    ]
+    import inspect
+    failures = []
+    for fn, args, kwargs in calls:
+        try:
+            inspect.signature(fn).bind(*args, **kwargs)
+        except TypeError as exc:
+            name = getattr(fn, "__qualname__", repr(fn))
+            failures.append(f"{name}: {exc}")
+    assert not failures, "the driver calls these in a way they no longer accept:\n" + \
+        "\n".join(failures)
+
+
+def test_the_batched_evolution_binding_is_the_batched_one(driver):
+    """By name, and by arity. `batched_evolve_on_graph_jax` is
+    `jax.jit(jax.vmap(evolve_on_graph_jax, in_axes=(0, None)))` -- exactly
+    two positional arguments and no `k_coupling`. The single-trial function
+    is not an acceptable substitute, and swapping them is a near-miss this
+    project has already had once."""
+    source = DRIVER_PATH.read_text()
+    assert "batched_evolve_on_graph_jax" in source
+    assert "from evolve_on_graph_jax import batched_evolve_on_graph_jax" in source
+    import evolve_on_graph_jax as ev
+    assert ev.batched_evolve_on_graph_jax is not ev.evolve_on_graph_jax
+
+
 def test_driver_compiles_under_the_projects_interpreter():
     """A syntax error here is only discoverable on the runtime otherwise --
     the file is transmitted as code, so nothing imports it before it runs."""
