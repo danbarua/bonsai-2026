@@ -1011,6 +1011,15 @@ not part of the locked primary/secondary comparisons):
 | encoded, 505-restricted = `encoded_pre_evolution` (known) | 1008 | 0.01 | 0.7208 | 0.9558 |
 | encoded, full 784, unrestricted (new) | 1566 | 0.01 | 0.7458 | 0.8667 |
 
+The two new rows were fitted under `cuml.accel` on a GPU, which is not
+bit-reproducible. Re-running them on a fresh A100 (2026-08-05, via
+`make stage2a-class0-classify-gpu`) reproduced the selected `C` and the
+1566-dim accuracy exactly, and the 505-dim accuracy to one image in
+10,000 (0.6549 against the 0.6550 above); per-`C` validation losses move
+in the 4th-6th decimal, most at large unselected `C`. Reproduce these
+rows against selected `C`, convergence, and accuracy -- not against a
+file hash. See `docs/PROJECT_MEMORY.md` Part 4.
+
 **The restriction has a real, measurable cost, in both representations**:
 raw pixels lose 4.10 points of accuracy (0.6960 -> 0.6550) when
 restricted to the support; the locally-encoded state loses 2.50 points
