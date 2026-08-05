@@ -1091,6 +1091,40 @@ def test_parts_left_by_a_previous_larger_upload_are_not_composed_in(tmp_path):
     assert list(bucket.objects) == [name]
 
 
+def test_an_artifact_too_small_to_chunk_still_clears_an_earlier_attempts_parts(tmp_path):
+    """The step is re-run, and this time its artifact fits in one request.
+    The parts the dead attempt left must still go: nothing else will ever
+    revisit that prefix, and they would sit under the condition prefix
+    forever, in every listing and every dry-run delete."""
+    bucket = DyingBucket(die_after=3)
+    local = _local_artifact(tmp_path)
+    name = gcs.object_path(**TRAIN_ARGS)
+    with pytest.raises(ConnectionError):
+        gcs.upload_file_chunked(local, name, bucket=bucket, chunk_size=CHUNK)
+
+    _rewrite(local, _payload_bytes(40))
+    bucket.die_after = None
+    gcs.upload_file_chunked(local, name, bucket=bucket, chunk_size=CHUNK)
+
+    assert bucket.objects[name] == local.read_bytes()
+    assert list(bucket.objects) == [name]
+    assert not Path(gcs.checkpoint_path(local)).exists()
+
+
+def test_the_part_cleanup_does_not_reach_a_neighbouring_object(bucket, tmp_path):
+    """Prefix matching is plain string matching, so the cleanup has to be
+    scoped to the part prefix's children -- an object whose name merely
+    starts the same way is not this upload's to delete."""
+    local = _local_artifact(tmp_path)
+    name = gcs.object_path(**TRAIN_ARGS)
+    neighbour = gcs.part_prefix(name) + "-from-something-else"
+    bucket.objects[neighbour] = b"not mine"
+
+    gcs.upload_file_chunked(local, name, bucket=bucket, chunk_size=CHUNK)
+    assert bucket.objects[neighbour] == b"not mine"
+    assert bucket.objects[name] == local.read_bytes()
+
+
 def test_more_chunks_than_one_compose_call_takes_are_composed_in_a_tree(bucket, tmp_path):
     """GCS composes at most 32 sources per request, so a gigabyte artifact
     needs more than one level. The fake refuses an over-long source list,
