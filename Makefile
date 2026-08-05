@@ -217,6 +217,10 @@ test:  ## Run the whole default suite (every stage, slow reproduction checks exc
 
 STAGE2B_DIR := $(REPO_ROOT)/experiments/stage2b_denoising
 SESSION_2B_VERIFY ?= stage2b-verify
+# T4 has no TF32 hardware (Ampere and later only), so a T4 pass cannot
+# answer the reduced-precision question for the A100 the pipeline
+# actually targets. Overridable so both can be checked.
+VERIFY_GPU ?= A100
 
 # DESIGN.md specifies the ridge equivalence gate (JAX SVD vs sklearn,
 # max abs clipped-prediction difference <= 1e-8 and identical alpha
@@ -225,18 +229,49 @@ SESSION_2B_VERIFY ?= stage2b-verify
 # Whether JAX's float64 SVD on a GPU meets the same gate is a separate
 # question from whether the code is right, and it is the question that
 # matters before a ladder rung is ever driven on one.
+# NOTE, load-bearing: `mighty-colab exec` exits 0 even when the remote
+# script raises -- verified directly (a script that raised SystemExit
+# with a failure message still let this target report success). So both
+# GPU targets below capture the output, tear the session down
+# unconditionally, and then decide the verdict by grepping for the
+# script's own success sentinel. Chaining `&& stop` on the exec's exit
+# status is exactly the trap that made `stage2a-verify` a no-op gate.
 .PHONY: stage2b-verify-gpu
 stage2b-verify-gpu:  ## Run the ridge equivalence gate on a real GPU -- bills while running
 	cd $(STAGE2B_DIR) && \
 	$(MIGHTY_COLAB) sessions && \
 	if $(MIGHTY_COLAB) status -s $(SESSION_2B_VERIFY) 2>&1 | grep -q "not found"; then \
-		$(MIGHTY_COLAB) new -s $(SESSION_2B_VERIFY) --gpu T4; \
+		$(MIGHTY_COLAB) new -s $(SESSION_2B_VERIFY) --gpu $(VERIFY_GPU); \
 	else \
 		echo "[make] Reusing existing session $(SESSION_2B_VERIFY)"; \
 	fi && \
 	$(MIGHTY_COLAB) upload -s $(SESSION_2B_VERIFY) stage2b_ridge.py /content/stage2b_ridge.py && \
-	$(MIGHTY_COLAB) exec -s $(SESSION_2B_VERIFY) -f stage2b_verify_gpu.py --timeout 900 && \
-	$(MIGHTY_COLAB) stop -s $(SESSION_2B_VERIFY)
+	out=$$($(MIGHTY_COLAB) exec -s $(SESSION_2B_VERIFY) -f stage2b_verify_gpu.py --timeout 900 2>&1); \
+	echo "$$out"; \
+	$(MIGHTY_COLAB) stop -s $(SESSION_2B_VERIFY); \
+	echo "$$out" | grep -q GPU_VERIFY_OK || { echo "[make] FAILED: the GPU ridge gate did not report success. mighty-colab exec exits 0 even when the remote script raises, so the sentinel is the verdict, not the exit code."; exit 1; }
+
+# The ridge GPU check above says nothing about the CNN: ridge is float64
+# end to end and therefore immune to reduced-precision effects, while the
+# CNN is float32 and runs convolutions through XLA, which may select a
+# TF32-class path by default. With min_delta=0.0 and strict `<` early
+# stopping, that would silently move best_epoch, seed selection and the
+# reported MSE -- so the forward pass is compared CPU-vs-GPU directly.
+.PHONY: stage2b-verify-cnn-gpu
+stage2b-verify-cnn-gpu:  ## Compare the CNN float32 forward pass CPU vs GPU -- bills while running
+	cd $(STAGE2B_DIR) && \
+	$(MIGHTY_COLAB) sessions && \
+	if $(MIGHTY_COLAB) status -s $(SESSION_2B_VERIFY) 2>&1 | grep -q "not found"; then \
+		$(MIGHTY_COLAB) new -s $(SESSION_2B_VERIFY) --gpu $(VERIFY_GPU); \
+	else \
+		echo "[make] Reusing existing session $(SESSION_2B_VERIFY)"; \
+	fi && \
+	$(MIGHTY_COLAB) install -s $(SESSION_2B_VERIFY) equinox optax && \
+	$(MIGHTY_COLAB) upload -s $(SESSION_2B_VERIFY) stage2b_cnn.py /content/stage2b_cnn.py && \
+	out=$$($(MIGHTY_COLAB) exec -s $(SESSION_2B_VERIFY) -f stage2b_verify_cnn_gpu.py --timeout 900 2>&1); \
+	echo "$$out"; \
+	$(MIGHTY_COLAB) stop -s $(SESSION_2B_VERIFY); \
+	echo "$$out" | grep -q CNN_GPU_VERIFY_OK || { echo "[make] FAILED: the CNN GPU check did not report success."; exit 1; }
 
 .PHONY: stage2b-smoke-gcs
 stage2b-smoke-gcs:  ## Real-bucket GCS smoke check: transport, chunked resumable upload, both delete refusals

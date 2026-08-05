@@ -100,7 +100,15 @@ to depend on no global state, not to own it.
 ## Device
 
 Written device-agnostically: no explicit placement, no `jax.device_put`,
-nothing GPU-specific. Verified on CPU only.
+nothing GPU-specific.
+
+Verified on CPU and on an A100 (`make stage2b-verify-cnn-gpu`). That
+check found a real difference and it is why `CNN_MATMUL_PRECISION`
+exists: at XLA's default precision the same forward pass disagreed with
+CPU by 1.058e-04 relative, which the pin brings back to float32 epsilon.
+A T4 run does NOT establish this either way -- T4 has no TF32 hardware,
+so it cannot exhibit the effect, and it reported agreement at default
+precision. A100 is this project's default GPU.
 """
 import equinox as eqx
 import jax
@@ -139,6 +147,31 @@ SEEDS = (0, 1, 2)           # each jointly governs init, minibatch order, framew
 CNN_DTYPE = jnp.float32
 EVAL_BATCH_SIZE = 512       # validation is evaluated in chunks purely for memory
 VALIDATION_REDUCE_DTYPE = jnp.float64   # accumulation only; see the module docstring
+
+# Measured on an A100 (`make stage2b-verify-cnn-gpu`): the same model and
+# input give a max relative difference of 1.058e-04 between CPU and GPU
+# at XLA's default precision, and 1.172e-07 -- float32 epsilon -- with
+# precision pinned. XLA selects a TF32 path for float32 convolutions on
+# Ampere and later unless told otherwise, computing them at roughly 10
+# mantissa bits rather than 24.
+#
+# That is normally a good trade and here it is not, for the same reason
+# the validation reduction is float64: early stopping is `min_delta=0.0`
+# with a strict `<`, so it has no tolerance band to absorb a moved
+# metric. A ~1e-4 relative shift in the forward pass is three orders
+# larger than the ~1e-7 batch-width effect this module already declines
+# to call inert, and it would move `best_epoch`, move which of seeds
+# (0,1,2) `select_best_seed` returns, and move the reported CNN MSE --
+# silently, and differently on different hardware.
+#
+# Pinned per-call rather than via `jax.config`: this module depends on no
+# global interpreter state by design (the same reason it does not enable
+# x64 for the whole process), so the precision travels with the forward
+# pass instead of with the session that happened to import it. A T4 pass
+# does NOT clear this -- T4 has no TF32 hardware, so it cannot exhibit
+# the effect; A100 is the project's default GPU and the device this was
+# measured on.
+CNN_MATMUL_PRECISION = "highest"
 
 assert N_ACTIVE + N_INACTIVE == N_PIXELS
 
@@ -346,6 +379,20 @@ def make_optimizer():
 
 # ---- Losses: the two call sites of the one masking primitive ----
 
+def forward(model, x):
+    """The model's forward pass over a batch -- the ONE place `jax.vmap`
+    is applied to the model, so the precision pin cannot be present at
+    one call site and missing at the other.
+
+    Both the training loss and the validation metric go through here.
+    That is the same argument as the shared masking primitive: a
+    precision that the training pass and the checkpoint-selection metric
+    disagreed about would be a difference nothing announces, and the two
+    call sites are far enough apart in the file to drift."""
+    with jax.default_matmul_precision(CNN_MATMUL_PRECISION):
+        return jax.vmap(model)(x)
+
+
 def training_loss(model, x, y, mask):
     """RAW (unclipped) masked active-support MSE -- what gradients are
     taken of. `clip_predictions=False`, per DESIGN.md's locked
@@ -356,7 +403,7 @@ def training_loss(model, x, y, mask):
     precision below float32. The float64 accumulation belongs to the
     validation metric alone, because it is the metric that is compared
     with a zero-tolerance strict `<`."""
-    pred = jax.vmap(model)(x)
+    pred = forward(model, x)
     return masked_mse(pred, y, mask, clip_predictions=False, reduce_dtype=CNN_DTYPE)
 
 
@@ -386,7 +433,7 @@ def clipped_validation_per_image_mse(model, x, y, mask, batch_size=EVAL_BATCH_SI
     parts = []
     for start in range(0, n, int(batch_size)):
         xb, yb = x[start:start + int(batch_size)], y[start:start + int(batch_size)]
-        pred = jax.vmap(model)(xb)
+        pred = forward(model, xb)
         parts.append(masked_per_image_mse(pred, yb, mask, clip_predictions=True,
                                           reduce_dtype=VALIDATION_REDUCE_DTYPE))
     return jnp.concatenate(parts) if len(parts) > 1 else parts[0]
