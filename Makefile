@@ -51,6 +51,35 @@ SESSION_CLASS0 ?= class0-audit-gpu
 # and bounds what a genuinely hung kernel can bill.
 EXEC_TIMEOUT ?= 3600
 
+# `mighty-colab stop` is the only thing between a failed run and an A100
+# that bills until someone notices, so every recipe checks its exit status
+# instead of discarding it. Two outcomes have to stay distinguishable, and
+# they mean opposite things:
+#
+#   already absent -> nothing is billing. This is the GOAL, and it is the
+#     normal case on any path where provisioning failed before a session
+#     was ever created (which recipes below do reach -- the `;` after
+#     `rc=0` ends the `&&` chain, so teardown runs even when `new` or an
+#     upload failed). Verified against 0.2.1: `stop` on an unknown session
+#     prints "not found." to stdout and exits 0.
+#   could not stop -> something may still be billing. This is a LEAK, and
+#     it is the one outcome worth failing an otherwise-successful target
+#     for, because the cost keeps accruing while nobody is looking.
+#
+# STOP_ABSENT_RC is what "already absent" exits with. It is 0 today, which
+# collapses the two cases into one check; if a future release gives absent
+# its own code, set this to that code and the recipes keep their meaning
+# without being rewritten. Pinned by tests/test_mighty_colab_contract.py.
+STOP_ABSENT_RC ?= 0
+
+# Evaluated after teardown, with $$src holding stop's status and $$rc the
+# run's own verdict so far. A leak fails the target, but never overwrites
+# a verdict that already failed -- the science's failure is the more
+# useful headline, and the leak is reported on its own line regardless.
+define check_teardown
+if [ $$src -ne 0 ] && [ $$src -ne $(STOP_ABSENT_RC) ]; then echo "[make] LEAK WARNING: teardown of session '$(1)' exited $$src -- it may still be running and billing."; echo "[make]   check with: $(MIGHTY_COLAB) sessions"; echo "[make]   stop it with: $(MIGHTY_COLAB) stop -s $(1)"; if [ $$rc -eq 0 ]; then rc=$$src; fi; fi
+endef
+
 # GPU-target idempotency: `mighty-colab new -s <name>` provisions a fresh
 # session unconditionally, so re-running a GPU target after a partial
 # failure (a dropped upload, a flaky exec) would try to allocate a second
@@ -94,6 +123,7 @@ stage2a-prepare-test:  ## Encode 10k KMNIST official test images (local, CPU, ~2
 
 .PHONY: stage2a-evolve-train-gpu
 stage2a-evolve-train-gpu:  ## Upload + run Stage-3 (training set) GPU evolution via mighty-colab -- bills while running
+	rc=0; src=0; \
 	cd $(STAGE2A_DIR) && \
 	$(MIGHTY_COLAB) sessions && \
 	if $(MIGHTY_COLAB) status -s $(SESSION_TRAIN) 2>&1 | grep -q "not found"; then \
@@ -112,11 +142,13 @@ stage2a-evolve-train-gpu:  ## Upload + run Stage-3 (training set) GPU evolution 
 	if [ $$rc -eq 0 ]; then \
 		$(MIGHTY_COLAB) download -s $(SESSION_TRAIN) /content/stage3_gpu_results.pkl scratch/stage3_train/stage3_gpu_results.pkl || rc=$$?; \
 	fi; \
-	$(MIGHTY_COLAB) stop -s $(SESSION_TRAIN); \
+	src=0; $(MIGHTY_COLAB) stop -s $(SESSION_TRAIN) || src=$$?; \
+	$(call check_teardown,$(SESSION_TRAIN)); \
 	exit $$rc
 
 .PHONY: stage2a-evolve-test-gpu
 stage2a-evolve-test-gpu:  ## Upload + run Stage-4 (official test set) GPU evolution via mighty-colab -- bills while running
+	rc=0; src=0; \
 	cd $(STAGE2A_DIR) && \
 	$(MIGHTY_COLAB) sessions && \
 	if $(MIGHTY_COLAB) status -s $(SESSION_TEST) 2>&1 | grep -q "not found"; then \
@@ -133,7 +165,8 @@ stage2a-evolve-test-gpu:  ## Upload + run Stage-4 (official test set) GPU evolut
 	if [ $$rc -eq 0 ]; then \
 		$(MIGHTY_COLAB) download -s $(SESSION_TEST) /content/stage4_gpu_results.pkl scratch/stage4_test/stage4_gpu_results.pkl || rc=$$?; \
 	fi; \
-	$(MIGHTY_COLAB) stop -s $(SESSION_TEST); \
+	src=0; $(MIGHTY_COLAB) stop -s $(SESSION_TEST) || src=$$?; \
+	$(call check_teardown,$(SESSION_TEST)); \
 	exit $$rc
 
 ##@ Analysis and confirmatory evaluation (CPU)
@@ -185,6 +218,7 @@ stage2a-class0-classify:  ## Part 2: the two baseline classifier fits (local skl
 # distinction.
 .PHONY: stage2a-class0-classify-gpu
 stage2a-class0-classify-gpu:  ## Part 2's cuml.accel GPU variant via mighty-colab -- bills while running
+	rc=0; src=0; \
 	cd $(STAGE2A_DIR) && \
 	$(MIGHTY_COLAB) sessions && \
 	if $(MIGHTY_COLAB) status -s $(SESSION_CLASS0) 2>&1 | grep -q "not found"; then \
@@ -200,7 +234,8 @@ stage2a-class0-classify-gpu:  ## Part 2's cuml.accel GPU variant via mighty-cola
 	if [ $$rc -eq 0 ]; then \
 		$(MIGHTY_COLAB) download -s $(SESSION_CLASS0) /content/class0_support_audit_classify_results.pkl results/class0_support_audit_classify_results.pkl || rc=$$?; \
 	fi; \
-	$(MIGHTY_COLAB) stop -s $(SESSION_CLASS0); \
+	src=0; $(MIGHTY_COLAB) stop -s $(SESSION_CLASS0) || src=$$?; \
+	$(call check_teardown,$(SESSION_CLASS0)); \
 	exit $$rc
 
 ##@ Testing
@@ -269,6 +304,7 @@ VERIFY_GPU ?= A100
 # fail, would have left a billing A100 running on every failure.
 .PHONY: stage2b-verify-gpu
 stage2b-verify-gpu:  ## Run the ridge equivalence gate on a real GPU -- bills while running
+	rc=0; src=0; \
 	cd $(STAGE2B_DIR) && \
 	$(MIGHTY_COLAB) sessions && \
 	if $(MIGHTY_COLAB) status -s $(SESSION_2B_VERIFY) 2>&1 | grep -q "not found"; then \
@@ -279,10 +315,13 @@ stage2b-verify-gpu:  ## Run the ridge equivalence gate on a real GPU -- bills wh
 	$(MIGHTY_COLAB) upload -s $(SESSION_2B_VERIFY) stage2b_ridge.py /content/stage2b_ridge.py && \
 	rc=0; out=$$($(MIGHTY_COLAB) exec -s $(SESSION_2B_VERIFY) -f stage2b_verify_gpu.py --timeout $(EXEC_TIMEOUT) 2>&1) || rc=$$?; \
 	echo "$$out"; \
-	$(MIGHTY_COLAB) stop -s $(SESSION_2B_VERIFY); \
+	src=0; $(MIGHTY_COLAB) stop -s $(SESSION_2B_VERIFY) || src=$$?; \
 	if [ $$rc -ne 0 ] || ! echo "$$out" | grep -q GPU_VERIFY_OK; then \
-		echo "[make] FAILED: the GPU ridge gate did not report success (exec rc=$$rc)."; exit 1; \
-	fi
+		echo "[make] FAILED: the GPU ridge gate did not report success (exec rc=$$rc)."; \
+		if [ $$rc -eq 0 ]; then rc=1; fi; \
+	fi; \
+	$(call check_teardown,$(SESSION_2B_VERIFY)); \
+	exit $$rc
 
 # The ridge GPU check above says nothing about the CNN: ridge is float64
 # end to end and therefore immune to reduced-precision effects, while the
@@ -292,6 +331,7 @@ stage2b-verify-gpu:  ## Run the ridge equivalence gate on a real GPU -- bills wh
 # reported MSE -- so the forward pass is compared CPU-vs-GPU directly.
 .PHONY: stage2b-verify-cnn-gpu
 stage2b-verify-cnn-gpu:  ## Compare the CNN float32 forward pass CPU vs GPU -- bills while running
+	rc=0; src=0; \
 	cd $(STAGE2B_DIR) && \
 	$(MIGHTY_COLAB) sessions && \
 	if $(MIGHTY_COLAB) status -s $(SESSION_2B_VERIFY) 2>&1 | grep -q "not found"; then \
@@ -303,10 +343,13 @@ stage2b-verify-cnn-gpu:  ## Compare the CNN float32 forward pass CPU vs GPU -- b
 	$(MIGHTY_COLAB) upload -s $(SESSION_2B_VERIFY) stage2b_cnn.py /content/stage2b_cnn.py && \
 	rc=0; out=$$($(MIGHTY_COLAB) exec -s $(SESSION_2B_VERIFY) -f stage2b_verify_cnn_gpu.py --timeout $(EXEC_TIMEOUT) 2>&1) || rc=$$?; \
 	echo "$$out"; \
-	$(MIGHTY_COLAB) stop -s $(SESSION_2B_VERIFY); \
+	src=0; $(MIGHTY_COLAB) stop -s $(SESSION_2B_VERIFY) || src=$$?; \
 	if [ $$rc -ne 0 ] || ! echo "$$out" | grep -q CNN_GPU_VERIFY_OK; then \
-		echo "[make] FAILED: the CNN GPU check did not report success (exec rc=$$rc)."; exit 1; \
-	fi
+		echo "[make] FAILED: the CNN GPU check did not report success (exec rc=$$rc)."; \
+		if [ $$rc -eq 0 ]; then rc=1; fi; \
+	fi; \
+	$(call check_teardown,$(SESSION_2B_VERIFY)); \
+	exit $$rc
 
 .PHONY: stage2b-smoke-gcs
 stage2b-smoke-gcs:  ## Real-bucket GCS smoke check: transport, chunked resumable upload, both delete refusals

@@ -552,6 +552,24 @@ bug can break code that had adapted to it. The adaptation is invisible
 at the call site, so upgrading needs a check of what the old behaviour
 was load-bearing FOR, not just that the new behaviour is correct.
 
+**Teardown's exit status is now checked, and "already absent" must stay
+distinguishable from "could not stop".** Unconditional teardown only
+protects against leaks if someone reads its result; every target used to
+discard it, so a `stop` that genuinely failed was indistinguishable from
+one that worked. All five now capture it: a failed teardown fails the
+target and prints a leak warning naming the session, but never overwrites
+a scientific verdict that had already failed. The two outcomes mean
+opposite things -- absent is the goal (nothing is billing), unable-to-stop
+is the one case where money keeps accruing unwatched -- which is why
+making "session not found" an error would be a regression rather than
+strictness: it fires on exactly the paths where provisioning failed and
+nothing was ever created, turning the safest outcome into a false alarm
+and making the leak check unadoptable. `STOP_ABSENT_RC` names whichever
+code means absent, so a future CLI that separates them needs a variable
+changed, not five recipes rewritten. All four paths (healthy, leak-only,
+leak-plus-failure, distinct-absent-code) are exercised against a stub CLI
+in `tests/test_mighty_colab_contract.py` -- no session, no billing.
+
 **`mighty-colab exec --timeout` defaults to 30 SECONDS, and it bounds the
 gap between outputs rather than the run.** A remote script that is
 computing normally but not printing dies with `TimeoutError: Timeout

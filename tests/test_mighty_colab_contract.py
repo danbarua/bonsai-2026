@@ -14,20 +14,28 @@ recipe would not guess:
    seconds**, so a healthy remote script that simply goes quiet for longer
    than that dies with `TimeoutError: Timeout waiting for output`. Every
    long-running driver in this project goes quiet for far longer.
+3. `stop` on a session that is already absent exits **0**. That is what
+   makes an unconditional teardown safe, because the recipes do reach
+   `stop` on paths where provisioning never created a session. "Already
+   absent" and "could not stop" mean opposite things for billing, so the
+   recipes must be able to tell them apart -- `STOP_ABSENT_RC` names which
+   code means absent, and everything else non-zero is treated as a
+   possible leak and fails the target.
 
-Both were established by hand -- (1) when the guard was written, (2) when
-`stage2a-class0-classify-gpu` was run as a target for the first time and
-died 30 seconds in, having never completed once since it was codified from
-a hand-run session. CLAUDE.md principle 20: a hand-verified property that
-lives only in a comment is not re-checkable and nothing fails when a
-dependency upgrade invalidates it -- which is exactly what a `mighty-colab`
-upgrade did to a neighbouring comment in this same file.
+All three were established by hand -- (1) when the guard was written, (2)
+when `stage2a-class0-classify-gpu` was run as a target for the first time
+and died 30 seconds in, having never completed once since it was codified
+from a hand-run session, (3) when weighing whether `stop` should start
+erroring on a missing session. CLAUDE.md principle 20: a hand-verified
+property that lives only in a comment is not re-checkable and nothing
+fails when a dependency upgrade invalidates it -- which is exactly what a
+`mighty-colab` upgrade did to a neighbouring comment in this same file.
 
 Tier 1 (always runs, no CLI, no network, nothing provisioned) parses the
-`Makefile` and asserts every `exec` passes an explicit `--timeout` and
-every session-creating recipe tears down unconditionally. Tier 2 asks the
-installed CLI what it actually does; it skips cleanly when the `gpu`
-dependency group is not installed. Nothing here creates a session or
+`Makefile`, and separately drives a real recipe end to end against a stub
+CLI so the teardown logic is exercised rather than merely inspected. Tier
+2 asks the installed CLI what it actually does; it skips cleanly when the
+`gpu` dependency group is not installed. Nothing here creates a session or
 bills.
 """
 import re
@@ -110,6 +118,93 @@ def test_every_session_creating_recipe_tears_down_unconditionally():
             assert not line.strip().startswith("&&"), (
                 f"{name} chains its teardown onto a previous command's success: {line.strip()}")
         print(f"[contract] {name}: teardown present and not chained on success")
+
+
+STUB = """#!/bin/sh
+# Stand-in for the mighty-colab CLI. Provisions nothing, bills nothing.
+case "$1" in
+  sessions) echo "[stub] no active sessions"; exit 0 ;;
+  status)   echo "[stub] Session 'x' not found."; exit 0 ;;
+  new)      echo "[stub] created"; exit 0 ;;
+  install|reinstall|upload) echo "[stub] $1 ok"; exit 0 ;;
+  exec)     echo "${STUB_SENTINEL:-GPU_VERIFY_OK}"; exit "${STUB_EXEC_RC:-0}" ;;
+  stop)     echo "[stub] stop attempted"; exit "${STUB_STOP_RC:-0}" ;;
+  *)        echo "[stub] unhandled: $*"; exit 0 ;;
+esac
+"""
+
+
+@pytest.fixture(scope="module")
+def stub_cli(tmp_path_factory):
+    path = tmp_path_factory.mktemp("mcstub") / "mighty-colab-stub"
+    path.write_text(STUB)
+    path.chmod(0o755)
+    return path
+
+
+def _run_target(stub, env_extra=None, make_vars=()):
+    """Run the real recipe against the stub.
+
+    `-s` is required, not cosmetic: without it `make` echoes the recipe
+    itself, so every assertion about output would match the recipe TEXT
+    containing "LEAK WARNING" rather than the recipe having PRINTED it.
+
+    `make` exits 2 for any recipe failure regardless of what the recipe
+    exited with, so the recipe's own code is read from make's
+    "*** [target] Error N" line on stderr -- that is where the leak code
+    is actually distinguishable from the verdict code."""
+    import os
+    env = dict(os.environ)
+    env.update(env_extra or {})
+    cmd = ["make", "-s", "stage2b-verify-gpu", f"MIGHTY_COLAB={stub}", *make_vars]
+    r = subprocess.run(cmd, cwd=REPO_ROOT, capture_output=True, text=True, timeout=180,
+                       env=env)
+    m = re.search(r"\*\*\* \[[^\]]+\] Error (\d+)", r.stderr)
+    recipe_rc = int(m.group(1)) if m else r.returncode
+    print(f"\n[contract] {' '.join(cmd[2:])} env={env_extra or {}}")
+    print(f"[contract]   make exit={r.returncode}, recipe exit={recipe_rc}")
+    for line in (r.stdout + r.stderr).splitlines():
+        if "LEAK" in line or "FAILED" in line or "Error" in line:
+            print(f"[contract]   | {line}")
+    return recipe_rc, r
+
+
+def test_healthy_run_exits_zero(stub_cli):
+    rc, r = _run_target(stub_cli)
+    assert rc == 0, r.stdout + r.stderr
+    assert "LEAK WARNING" not in r.stdout
+
+
+def test_teardown_failure_fails_an_otherwise_successful_target(stub_cli):
+    """The case the check exists for: the science passed, so nothing else
+    would have failed, and an A100 may still be billing."""
+    rc, r = _run_target(stub_cli, {"STUB_STOP_RC": "7"})
+    assert rc == 7, (
+        f"a failed teardown must fail the target, carrying stop's own code -- got {rc}\n"
+        f"{r.stdout}{r.stderr}")
+    assert "LEAK WARNING" in r.stdout
+    assert "FAILED: the GPU ridge gate" not in r.stdout, (
+        "a teardown failure must not be reported as a scientific failure")
+
+
+def test_a_leak_never_masks_the_scientific_verdict(stub_cli):
+    """Both wrong: the run's own failure stays the headline and exit code,
+    and the leak is still reported rather than swallowed."""
+    rc, r = _run_target(stub_cli, {"STUB_STOP_RC": "7", "STUB_SENTINEL": "NOTHING_USEFUL"})
+    assert rc == 1, r.stdout + r.stderr
+    assert "FAILED: the GPU ridge gate" in r.stdout
+    assert "LEAK WARNING" in r.stdout
+
+
+def test_a_distinct_absent_code_can_be_declared_without_rewriting_recipes(stub_cli):
+    """If `stop` ever grows a separate exit code for "already absent",
+    pointing STOP_ABSENT_RC at it must restore the current meaning: absent
+    is the goal, not a leak."""
+    rc, r = _run_target(stub_cli, {"STUB_STOP_RC": "3"}, make_vars=("STOP_ABSENT_RC=3",))
+    assert rc == 0, (
+        f"declaring 3 as the absent code should make it a success -- got {rc}\n"
+        f"{r.stdout}{r.stderr}")
+    assert "LEAK WARNING" not in r.stdout
 
 
 @pytest.fixture(scope="module")
