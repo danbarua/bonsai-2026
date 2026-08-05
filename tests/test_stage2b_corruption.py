@@ -583,6 +583,33 @@ def test_clip_rate_agreement_tolerance_depends_only_on_the_clean_corpus():
         assert out_a[key]["predicted"] == out_b[key]["predicted"]
 
 
+def test_clip_rate_agreement_handles_a_zero_variance_channel():
+    """The `se == 0` branch, exercised rather than left to inspection.
+    At alpha_bar = 0.999999 the noise std is 1e-3, so at x_0 = 1 the
+    below-zero probability underflows to exactly 0.0 and that channel has
+    no variance to divide by. A matching observation must read z = 0, and
+    any departure at all must read infinite rather than raising or
+    silently becoming NaN."""
+    assert float(corr.analytical_clip_rates(1.0, 0.999999)[0]) == 0.0
+
+    images = np.ones((5, 28, 28))
+    indices = np.arange(5) + 330_000
+    x_t, _clip = corr.corrupt_corpus(images, "train", indices, alpha_bar=0.999999)
+    out = corr.clip_rate_agreement(images, x_t, alpha_bar=0.999999)
+    assert out["below_zero"]["se"] == 0.0
+    assert out["below_zero"]["predicted"] == 0.0
+    assert out["below_zero"]["empirical"] == 0.0
+    assert out["below_zero"]["z"] == 0.0
+    assert out["below_zero"]["within_tolerance"] is True
+
+    x_t_bad = np.array(x_t, copy=True).reshape(-1)
+    x_t_bad[0] = -0.5                       # one clip a zero-variance channel forbids
+    bad = corr.clip_rate_agreement(images, x_t_bad, alpha_bar=0.999999)
+    assert bad["below_zero"]["se"] == 0.0
+    assert bad["below_zero"]["z"] == np.inf
+    assert bad["below_zero"]["within_tolerance"] is False
+
+
 def test_clip_rate_agreement_accepts_a_restricted_scope_and_rejects_a_mismatch():
     """The 505 active support is a legitimate scope for this comparison,
     so nothing may assume 784. A size MISMATCH between x_0 and x_t is
