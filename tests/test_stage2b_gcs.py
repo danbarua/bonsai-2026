@@ -21,6 +21,7 @@ package outright and confirms the module still imports and its pure logic
 still runs, so the lazy import cannot regress into a module-scope one
 even on a machine where the library happens to be installed.
 """
+import json
 import os
 import subprocess
 import sys
@@ -41,13 +42,38 @@ class FakeBlob:
     def __init__(self, bucket, name):
         self.bucket = bucket
         self.name = name
+        # Unpopulated until the object is fetched or written, as on a real
+        # `Blob`: `bucket.blob(name)` is a handle, not a read.
+        self.size = None
 
     def exists(self):
         return self.name in self.bucket.objects
 
+    def reload(self):
+        if self.name not in self.bucket.objects:
+            raise FileNotFoundError(f"no such object: {self.name}")
+        self.size = len(self.bucket.objects[self.name])
+
     def upload_from_filename(self, path):
-        self.bucket.objects[self.name] = Path(path).read_bytes()
-        self.bucket.uploads.append(self.name)
+        self.bucket._store_upload(self.name, Path(path).read_bytes())
+        self.size = len(self.bucket.objects.get(self.name, b""))
+
+    def upload_from_string(self, data, content_type=None):
+        self.bucket._store_upload(self.name, bytes(data))
+        self.size = len(self.bucket.objects.get(self.name, b""))
+
+    def compose(self, sources):
+        """Server-side concatenation, with the API's own source limit
+        enforced -- a composition tree that exceeded it would be a real
+        failure against the real bucket, so it must be one here."""
+        if not 1 <= len(sources) <= 32:
+            raise ValueError(f"compose takes 1-32 sources, got {len(sources)}")
+        missing = [s.name for s in sources if s.name not in self.bucket.objects]
+        if missing:
+            raise FileNotFoundError(f"no such object(s): {missing}")
+        self.bucket.objects[self.name] = b"".join(
+            self.bucket.objects[s.name] for s in sources)
+        self.bucket.composes.append((self.name, [s.name for s in sources]))
 
     def download_to_filename(self, path):
         if self.name not in self.bucket.objects:
@@ -61,7 +87,7 @@ class FakeBlob:
 
 
 class FakeBucket:
-    """Only the four blob operations `stage2b_gcs` uses, plus the prefix
+    """Only the blob operations `stage2b_gcs` uses, plus the prefix
     listing. `list_blobs` matches on a plain string prefix, as the real
     API does."""
 
@@ -71,12 +97,67 @@ class FakeBucket:
         self.uploads = []
         self.downloads = []
         self.deletes = []
+        self.composes = []
+
+    def _store_upload(self, name, data):
+        """The one place an upload lands, so a subclass can make a
+        transfer die or silently vanish without touching `FakeBlob`."""
+        self.objects[name] = bytes(data)
+        self.uploads.append(name)
 
     def blob(self, name):
         return FakeBlob(self, name)
 
     def list_blobs(self, prefix=""):
         return [FakeBlob(self, n) for n in sorted(self.objects) if n.startswith(prefix)]
+
+
+class DyingBucket(FakeBucket):
+    """A session that dies partway through a transfer -- PROJECT_MEMORY.md
+    Part 4's failure mode, which is what the checkpoint exists for. The
+    upload raises; nothing after it runs."""
+
+    def __init__(self, die_after=None, **kwargs):
+        super().__init__(**kwargs)
+        self.die_after = die_after
+
+    def _store_upload(self, name, data):
+        if self.die_after is not None and len(self.uploads) >= self.die_after:
+            raise ConnectionError("the session died mid-transfer")
+        super()._store_upload(name, data)
+
+
+class SilentlyDroppingBucket(FakeBucket):
+    """An upload call that returns successfully and lands nothing.
+
+    This is the case that separates 'recorded once the remote confirmed
+    it' from 'recorded once the call returned': a checkpoint written on
+    the second rule would claim a chunk that does not exist, and the
+    resume would compose a hole into the object."""
+
+    def __init__(self, drop_from=None, **kwargs):
+        super().__init__(**kwargs)
+        self.drop_from = drop_from
+
+    def _store_upload(self, name, data):
+        if self.drop_from is not None and len(self.uploads) >= self.drop_from:
+            self.uploads.append(name)          # the call "succeeded"
+            return
+        super()._store_upload(name, data)
+
+
+class TruncatingBucket(FakeBucket):
+    """An upload that lands a short object -- the call returns, the object
+    exists, and its bytes are not the ones that were sent."""
+
+    def __init__(self, truncate_from=None, **kwargs):
+        super().__init__(**kwargs)
+        self.truncate_from = truncate_from
+
+    def _store_upload(self, name, data):
+        if self.truncate_from is not None and len(self.uploads) >= self.truncate_from:
+            data = bytes(data)[: max(0, len(data) // 2)]
+        super()._store_upload(name, data)
 
 
 @pytest.fixture
@@ -650,6 +731,501 @@ def test_a_stage_4_test_side_step_works_once_opted_in(bucket, tmp_path):
     assert gcs.object_exists(name, bucket=bucket, allow_test_split=True) is True
 
 
+# ---- chunked upload with on-disk checkpointing ----
+#
+# `download_file` already survives a death mid-transfer (the `.part`
+# sidecar). `upload_file` did not, and Stage 2B pushes gigabyte artifacts
+# out of a session that this project has already watched die mid-task
+# (PROJECT_MEMORY.md Part 4). These cover the resume: what the checkpoint
+# is allowed to claim, when it must be thrown away, and that a resumed
+# upload lands exactly the bytes an uninterrupted one would.
+
+CHUNK = 100
+
+
+def _payload_bytes(n):
+    """A byte pattern whose period (256) is not a multiple of the chunk
+    size, so a chunk composed out of order or a chunk left out shows up as
+    a byte difference rather than passing unnoticed."""
+    return bytes((i * 37 + 11) % 256 for i in range(n))
+
+
+def _local_artifact(tmp_path, n_bytes=1000, name="features.npz"):
+    path = tmp_path / "work" / name
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_bytes(_payload_bytes(n_bytes))
+    return path
+
+
+def _rewrite(path, data, *, mtime_ns=None):
+    """Replace a local artifact's contents, optionally pinning its mtime
+    so the test does not depend on the filesystem's clock resolution."""
+    path.write_bytes(data)
+    if mtime_ns is not None:
+        os.utime(path, ns=(mtime_ns, mtime_ns))
+    return path
+
+
+def _checkpoint(local):
+    return json.loads(Path(gcs.checkpoint_path(local)).read_text())
+
+
+def _confirmed_indices(local):
+    return sorted(entry["index"] for entry in _checkpoint(local)["confirmed"])
+
+
+def _part(name, index):
+    return f"{gcs.part_prefix(name)}/{index:06d}"
+
+
+def test_the_checkpoint_is_a_sidecar_next_to_the_local_file(tmp_path):
+    """The `.part` convention `download_file` already uses, applied to the
+    other direction of transfer."""
+    local = _local_artifact(tmp_path)
+    assert gcs.checkpoint_path(local) == str(local) + gcs.CHECKPOINT_SUFFIX
+    assert Path(gcs.checkpoint_path(local)).parent == local.parent
+
+
+def test_a_chunked_upload_lands_the_same_bytes_as_a_plain_one(bucket, tmp_path):
+    local = _local_artifact(tmp_path)
+    name = gcs.object_path(**TRAIN_ARGS)
+    assert gcs.upload_file_chunked(local, name, bucket=bucket, chunk_size=CHUNK) == name
+
+    plain = FakeBucket()
+    gcs.upload_file(local, name, bucket=plain)
+    assert bucket.objects[name] == plain.objects[name] == local.read_bytes()
+
+
+def test_a_completed_chunked_upload_leaves_no_checkpoint_and_no_parts(bucket, tmp_path):
+    local = _local_artifact(tmp_path)
+    name = gcs.object_path(**TRAIN_ARGS)
+    gcs.upload_file_chunked(local, name, bucket=bucket, chunk_size=CHUNK)
+    assert list(bucket.objects) == [name]
+    assert not Path(gcs.checkpoint_path(local)).exists()
+    assert not Path(gcs.checkpoint_path(local) + ".tmp").exists()
+
+
+@pytest.mark.parametrize("n_bytes", [0, 1, 50, CHUNK])
+def test_a_file_within_one_chunk_is_uploaded_directly(bucket, tmp_path, n_bytes):
+    """Nothing to resume from inside a single request, so there is no
+    checkpoint, no part object and no composition for a small artifact --
+    the gate artifacts and manifests keep going up exactly as before."""
+    local = _local_artifact(tmp_path, n_bytes=n_bytes)
+    name = gcs.object_path(**TRAIN_ARGS)
+    gcs.upload_file_chunked(local, name, bucket=bucket, chunk_size=CHUNK)
+    assert bucket.objects[name] == local.read_bytes()
+    assert bucket.uploads == [name]
+    assert bucket.composes == []
+    assert not Path(gcs.checkpoint_path(local)).exists()
+
+
+def test_the_checkpoint_records_what_it_belongs_to(tmp_path):
+    """Provenance, CLAUDE.md principle 7: a checkpoint that does not say
+    which object, which file state and which chunking it describes cannot
+    be checked against anything on the next run."""
+    bucket = DyingBucket(die_after=3)
+    local = _local_artifact(tmp_path)
+    name = gcs.object_path(**TRAIN_ARGS)
+    with pytest.raises(ConnectionError):
+        gcs.upload_file_chunked(local, name, bucket=bucket, chunk_size=CHUNK)
+
+    state = _checkpoint(local)
+    assert state["format"] == gcs.CHECKPOINT_FORMAT
+    assert state["object_path"] == name
+    assert state["chunk_size"] == CHUNK
+    assert state["size_bytes"] == local.stat().st_size
+    assert state["mtime_ns"] == local.stat().st_mtime_ns
+    assert state["n_chunks"] == 10
+    assert state["part_prefix"] == gcs.part_prefix(name)
+
+
+def test_a_death_mid_transfer_leaves_only_the_confirmed_chunks_recorded(tmp_path):
+    bucket = DyingBucket(die_after=3)
+    local = _local_artifact(tmp_path)
+    name = gcs.object_path(**TRAIN_ARGS)
+    with pytest.raises(ConnectionError):
+        gcs.upload_file_chunked(local, name, bucket=bucket, chunk_size=CHUNK)
+
+    assert _confirmed_indices(local) == [0, 1, 2]
+    assert sorted(bucket.objects) == [_part(name, i) for i in (0, 1, 2)]
+    assert name not in bucket.objects
+
+
+def test_a_chunk_is_recorded_only_once_the_remote_confirms_it(tmp_path):
+    """The bug this whole mechanism exists to avoid: a checkpoint claiming
+    a chunk that never landed is worse than no checkpoint at all, because
+    the resume would skip it and compose a hole into the object."""
+    bucket = SilentlyDroppingBucket(drop_from=2)
+    local = _local_artifact(tmp_path)
+    name = gcs.object_path(**TRAIN_ARGS)
+    with pytest.raises(gcs.ChunkedUploadError):
+        gcs.upload_file_chunked(local, name, bucket=bucket, chunk_size=CHUNK)
+
+    assert _confirmed_indices(local) == [0, 1]
+    assert name not in bucket.objects
+    assert bucket.composes == []
+
+
+def test_a_chunk_that_lands_short_is_not_recorded_either(tmp_path):
+    """Existence is not enough: the object is there and its bytes are not
+    the ones that were sent."""
+    bucket = TruncatingBucket(truncate_from=2)
+    local = _local_artifact(tmp_path)
+    name = gcs.object_path(**TRAIN_ARGS)
+    with pytest.raises(gcs.ChunkedUploadError):
+        gcs.upload_file_chunked(local, name, bucket=bucket, chunk_size=CHUNK)
+
+    assert _confirmed_indices(local) == [0, 1]
+    assert name not in bucket.objects
+
+
+def test_a_resumed_upload_is_byte_identical_to_an_uninterrupted_one(tmp_path):
+    """The property the whole design is for."""
+    bucket = DyingBucket(die_after=3)
+    local = _local_artifact(tmp_path)
+    name = gcs.object_path(**TRAIN_ARGS)
+    with pytest.raises(ConnectionError):
+        gcs.upload_file_chunked(local, name, bucket=bucket, chunk_size=CHUNK)
+
+    bucket.die_after = None                     # a fresh run against a live bucket
+    bucket.uploads.clear()
+    assert gcs.upload_file_chunked(local, name, bucket=bucket, chunk_size=CHUNK) == name
+
+    uninterrupted = FakeBucket()
+    gcs.upload_file_chunked(local, name, bucket=uninterrupted, chunk_size=CHUNK)
+    assert bucket.objects[name] == uninterrupted.objects[name] == local.read_bytes()
+    assert list(bucket.objects) == [name]
+    assert not Path(gcs.checkpoint_path(local)).exists()
+
+
+def test_a_resume_does_not_re_send_the_chunks_already_confirmed(tmp_path):
+    """Otherwise the checkpoint buys nothing -- restarting from zero is
+    exactly the behaviour being replaced."""
+    bucket = DyingBucket(die_after=3)
+    local = _local_artifact(tmp_path)
+    name = gcs.object_path(**TRAIN_ARGS)
+    with pytest.raises(ConnectionError):
+        gcs.upload_file_chunked(local, name, bucket=bucket, chunk_size=CHUNK)
+
+    bucket.die_after = None
+    bucket.uploads.clear()
+    gcs.upload_file_chunked(local, name, bucket=bucket, chunk_size=CHUNK)
+    assert bucket.uploads == [_part(name, i) for i in range(3, 10)]
+
+
+def test_a_checkpoint_from_a_differently_sized_file_is_discarded(tmp_path):
+    """The stale-checkpoint corruption: parts of the previous artifact and
+    parts of this one composed into one object. Every chunk must be sent
+    again."""
+    bucket = DyingBucket(die_after=3)
+    local = _local_artifact(tmp_path)
+    name = gcs.object_path(**TRAIN_ARGS)
+    with pytest.raises(ConnectionError):
+        gcs.upload_file_chunked(local, name, bucket=bucket, chunk_size=CHUNK)
+
+    _rewrite(local, _payload_bytes(1600)[::-1])
+    bucket.die_after = None
+    bucket.uploads.clear()
+    gcs.upload_file_chunked(local, name, bucket=bucket, chunk_size=CHUNK)
+
+    assert bucket.objects[name] == local.read_bytes()
+    assert bucket.uploads == [_part(name, i) for i in range(16)]
+    assert list(bucket.objects) == [name]
+
+
+def test_a_checkpoint_from_a_same_sized_but_rewritten_file_is_discarded(tmp_path):
+    """Same length, different bytes, different mtime -- the regenerated
+    artifact case. The mtime is pinned rather than left to the clock so
+    the test asserts the check, not the filesystem's resolution."""
+    bucket = DyingBucket(die_after=3)
+    local = _local_artifact(tmp_path)
+    name = gcs.object_path(**TRAIN_ARGS)
+    with pytest.raises(ConnectionError):
+        gcs.upload_file_chunked(local, name, bucket=bucket, chunk_size=CHUNK)
+    before = local.stat().st_mtime_ns
+
+    _rewrite(local, _payload_bytes(1000)[::-1], mtime_ns=before + 10 ** 9)
+    bucket.die_after = None
+    bucket.uploads.clear()
+    gcs.upload_file_chunked(local, name, bucket=bucket, chunk_size=CHUNK)
+
+    assert bucket.objects[name] == local.read_bytes()
+    assert bucket.uploads == [_part(name, i) for i in range(10)]
+
+
+def test_a_checkpoint_naming_a_different_object_is_discarded(tmp_path):
+    bucket = DyingBucket(die_after=3)
+    local = _local_artifact(tmp_path)
+    first = gcs.object_path(**TRAIN_ARGS)
+    with pytest.raises(ConnectionError):
+        gcs.upload_file_chunked(local, first, bucket=bucket, chunk_size=CHUNK)
+
+    second = gcs.object_path(stage=2, condition="lattice", kind="features", ext="npz",
+                             split="train")
+    bucket.die_after = None
+    bucket.uploads.clear()
+    gcs.upload_file_chunked(local, second, bucket=bucket, chunk_size=CHUNK)
+
+    assert bucket.objects[second] == local.read_bytes()
+    assert bucket.uploads == [_part(second, i) for i in range(10)]
+
+
+def test_a_checkpoint_written_under_a_different_chunk_size_is_discarded(tmp_path):
+    bucket = DyingBucket(die_after=3)
+    local = _local_artifact(tmp_path)
+    name = gcs.object_path(**TRAIN_ARGS)
+    with pytest.raises(ConnectionError):
+        gcs.upload_file_chunked(local, name, bucket=bucket, chunk_size=CHUNK)
+
+    bucket.die_after = None
+    bucket.uploads.clear()
+    gcs.upload_file_chunked(local, name, bucket=bucket, chunk_size=250)
+    assert bucket.objects[name] == local.read_bytes()
+    assert bucket.uploads == [_part(name, i) for i in range(4)]
+
+
+def test_a_corrupt_checkpoint_file_is_discarded_rather_than_fatal(tmp_path):
+    bucket = FakeBucket()
+    local = _local_artifact(tmp_path)
+    name = gcs.object_path(**TRAIN_ARGS)
+    Path(gcs.checkpoint_path(local)).write_text("{not json at all")
+    gcs.upload_file_chunked(local, name, bucket=bucket, chunk_size=CHUNK)
+    assert bucket.objects[name] == local.read_bytes()
+
+
+def test_a_confirmed_chunk_that_vanished_from_the_bucket_is_sent_again(tmp_path):
+    """The checkpoint is checked against the remote before it is trusted:
+    a recorded part that is no longer there must not be composed in."""
+    bucket = DyingBucket(die_after=3)
+    local = _local_artifact(tmp_path)
+    name = gcs.object_path(**TRAIN_ARGS)
+    with pytest.raises(ConnectionError):
+        gcs.upload_file_chunked(local, name, bucket=bucket, chunk_size=CHUNK)
+
+    del bucket.objects[_part(name, 1)]
+    bucket.die_after = None
+    bucket.uploads.clear()
+    gcs.upload_file_chunked(local, name, bucket=bucket, chunk_size=CHUNK)
+
+    assert _part(name, 1) in bucket.uploads
+    assert bucket.objects[name] == local.read_bytes()
+
+
+def test_a_confirmed_chunk_whose_remote_size_disagrees_is_sent_again(tmp_path):
+    bucket = DyingBucket(die_after=3)
+    local = _local_artifact(tmp_path)
+    name = gcs.object_path(**TRAIN_ARGS)
+    with pytest.raises(ConnectionError):
+        gcs.upload_file_chunked(local, name, bucket=bucket, chunk_size=CHUNK)
+
+    bucket.objects[_part(name, 2)] = b"short"
+    bucket.die_after = None
+    bucket.uploads.clear()
+    gcs.upload_file_chunked(local, name, bucket=bucket, chunk_size=CHUNK)
+
+    assert _part(name, 2) in bucket.uploads
+    assert bucket.objects[name] == local.read_bytes()
+
+
+def test_digest_verification_catches_an_edit_the_metadata_check_cannot(tmp_path):
+    """Same size, same mtime, different bytes -- what `verify_digests=True`
+    is for, and the boundary of the cheap check it strengthens."""
+    bucket = DyingBucket(die_after=3)
+    local = _local_artifact(tmp_path)
+    name = gcs.object_path(**TRAIN_ARGS)
+    with pytest.raises(ConnectionError):
+        gcs.upload_file_chunked(local, name, bucket=bucket, chunk_size=CHUNK)
+    pinned = local.stat().st_mtime_ns
+
+    _rewrite(local, _payload_bytes(1000)[::-1], mtime_ns=pinned)
+    assert local.stat().st_mtime_ns == pinned          # the check cannot see this edit
+
+    bucket.die_after = None
+    bucket.uploads.clear()
+    gcs.upload_file_chunked(local, name, bucket=bucket, chunk_size=CHUNK,
+                            verify_digests=True)
+    assert bucket.objects[name] == local.read_bytes()
+    assert bucket.uploads == [_part(name, i) for i in range(10)]
+
+
+def test_digest_verification_keeps_the_chunks_that_still_match(tmp_path):
+    """Per-chunk, not all-or-nothing: an edit confined to one chunk does
+    not cost the transfer the rest of them."""
+    bucket = DyingBucket(die_after=4)
+    local = _local_artifact(tmp_path)
+    name = gcs.object_path(**TRAIN_ARGS)
+    with pytest.raises(ConnectionError):
+        gcs.upload_file_chunked(local, name, bucket=bucket, chunk_size=CHUNK)
+    pinned = local.stat().st_mtime_ns
+
+    edited = bytearray(local.read_bytes())
+    edited[250] ^= 0xFF                                # inside chunk 2 only
+    _rewrite(local, bytes(edited), mtime_ns=pinned)
+
+    bucket.die_after = None
+    bucket.uploads.clear()
+    gcs.upload_file_chunked(local, name, bucket=bucket, chunk_size=CHUNK,
+                            verify_digests=True)
+    assert bucket.objects[name] == local.read_bytes()
+    assert _part(name, 2) in bucket.uploads
+    assert _part(name, 0) not in bucket.uploads
+    assert _part(name, 1) not in bucket.uploads
+    assert _part(name, 3) not in bucket.uploads
+
+
+def test_parts_left_by_a_previous_larger_upload_are_not_composed_in(tmp_path):
+    """A shorter artifact reusing the same object path leaves surplus part
+    objects behind. They must not survive the upload, and they certainly
+    must not end up in the composed object."""
+    bucket = DyingBucket(die_after=5)
+    local = _local_artifact(tmp_path)
+    name = gcs.object_path(**TRAIN_ARGS)
+    with pytest.raises(ConnectionError):
+        gcs.upload_file_chunked(local, name, bucket=bucket, chunk_size=CHUNK)
+
+    _rewrite(local, _payload_bytes(300))
+    bucket.die_after = None
+    gcs.upload_file_chunked(local, name, bucket=bucket, chunk_size=CHUNK)
+
+    assert bucket.objects[name] == local.read_bytes()
+    assert list(bucket.objects) == [name]
+
+
+def test_more_chunks_than_one_compose_call_takes_are_composed_in_a_tree(bucket, tmp_path):
+    """GCS composes at most 32 sources per request, so a gigabyte artifact
+    needs more than one level. The fake refuses an over-long source list,
+    so this fails rather than passing on an untested assumption."""
+    local = _local_artifact(tmp_path, n_bytes=10_000)          # 100 chunks
+    name = gcs.object_path(**TRAIN_ARGS)
+    gcs.upload_file_chunked(local, name, bucket=bucket, chunk_size=CHUNK)
+
+    assert bucket.objects[name] == local.read_bytes()
+    assert len(bucket.composes) > 1
+    assert all(len(sources) <= 32 for _, sources in bucket.composes)
+    assert list(bucket.objects) == [name]
+
+
+def test_a_chunked_upload_to_a_test_side_path_still_needs_the_opt_in(tmp_path):
+    """The guard sits in front of the chunking, not around it: no part
+    object, no checkpoint, nothing."""
+    bucket = FakeBucket()
+    local = _local_artifact(tmp_path)
+    raw = "stage2b/testsplit/stage4/evolved_T/predictions.npz"
+    with pytest.raises(PermissionError, match="stages 1-3"):
+        gcs.upload_file_chunked(local, raw, bucket=bucket, chunk_size=CHUNK)
+    assert bucket.objects == {}
+    assert bucket.uploads == []
+    assert not Path(gcs.checkpoint_path(local)).exists()
+
+
+def test_a_stage_4_test_side_chunked_upload_works_once_opted_in(bucket, tmp_path):
+    """Including the part cleanup, which touches test-side objects itself."""
+    local = _local_artifact(tmp_path)
+    name = gcs.object_path(**TEST_ARGS, allow_test_split=True)
+    gcs.upload_file_chunked(local, name, bucket=bucket, chunk_size=CHUNK,
+                            allow_test_split=True)
+    assert bucket.objects[name] == local.read_bytes()
+    assert list(bucket.objects) == [name]
+
+
+def test_chunked_upload_refuses_a_local_path_that_is_not_a_file(bucket, tmp_path):
+    with pytest.raises(FileNotFoundError):
+        gcs.upload_file_chunked(tmp_path / "missing.bin", gcs.object_path(**TRAIN_ARGS),
+                                bucket=bucket, chunk_size=CHUNK)
+    assert bucket.objects == {}
+
+
+@pytest.mark.parametrize("chunk_size", [0, -1, 1.5, True, None, "100"])
+def test_chunked_upload_rejects_a_malformed_chunk_size(bucket, tmp_path, chunk_size):
+    with pytest.raises(ValueError, match="chunk_size"):
+        gcs.upload_file_chunked(_local_artifact(tmp_path), gcs.object_path(**TRAIN_ARGS),
+                                bucket=bucket, chunk_size=chunk_size)
+
+
+def test_chunked_upload_refuses_more_parts_than_composition_allows(bucket, tmp_path):
+    """Better a refusal naming the chunk size than a transfer that uploads
+    every part and then fails at the compose."""
+    local = _local_artifact(tmp_path, n_bytes=2000)
+    with pytest.raises(ValueError, match="chunk_size"):
+        gcs.upload_file_chunked(local, gcs.object_path(**TRAIN_ARGS), bucket=bucket,
+                                chunk_size=1)
+    assert bucket.objects == {}
+
+
+def test_the_default_chunk_size_is_a_sane_transfer_unit():
+    assert gcs.CHUNK_SIZE_DEFAULT >= 8 * 1024 * 1024
+    assert gcs.COMPOSE_MAX_SOURCES == 32
+    assert gcs.MAX_PARTS >= 1024
+
+
+def test_ensure_artifact_can_push_its_artifact_in_chunks(bucket, tmp_path):
+    """The chunking has to be reachable from the primitive the run scripts
+    actually call, or it protects nothing."""
+    name = gcs.object_path(**TRAIN_ARGS)
+    local = tmp_path / "work" / "features.npz"
+    payload = _payload_bytes(1000)
+
+    def produce(path):
+        Path(path).write_bytes(payload)
+
+    r = gcs.ensure_artifact(name, local, produce=produce, bucket=bucket, chunked=True,
+                            chunk_size=CHUNK)
+    assert (r.skipped, r.produced, r.uploaded) == (False, True, True)
+    assert bucket.objects[name] == payload
+    assert list(bucket.objects) == [name]
+    assert len(bucket.composes) == 1
+
+
+def test_a_chunked_ensure_artifact_still_needs_the_test_split_opt_in(bucket, tmp_path):
+    raw = "stage2b/testsplit/stage4/evolved_T/predictions.npz"
+    with pytest.raises(PermissionError):
+        gcs.ensure_artifact(raw, tmp_path / "p.npz", produce=_producer(), bucket=bucket,
+                            chunked=True, chunk_size=CHUNK)
+    assert bucket.objects == {}
+
+
+def test_a_chunked_upload_and_its_resume_run_with_the_google_package_blocked():
+    """The load-bearing constraint, applied to the new code path: a fresh
+    interpreter where `google` cannot be imported still runs a chunked
+    upload, dies partway, and resumes to the right bytes."""
+    code = f"""
+import sys
+class _Block:
+    def find_module(self, name, path=None):
+        return self.find_spec(name, path)
+    def find_spec(self, name, path=None, target=None):
+        if name == "google" or name.startswith("google."):
+            raise ImportError("google is blocked for this test")
+        return None
+sys.meta_path.insert(0, _Block())
+sys.path.insert(0, {str(_STAGE2B_DIR)!r})
+sys.path.insert(0, {str(_REPO_ROOT / "tests")!r})
+import tempfile, os
+from pathlib import Path
+import stage2b_gcs as gcs
+from test_stage2b_gcs import DyingBucket, _payload_bytes
+
+with tempfile.TemporaryDirectory() as d:
+    local = Path(d) / "features.npz"
+    local.write_bytes(_payload_bytes(1000))
+    name = gcs.object_path(stage=2, condition="evolved_T", kind="features", ext="npz",
+                           split="train")
+    bucket = DyingBucket(die_after=3)
+    try:
+        gcs.upload_file_chunked(local, name, bucket=bucket, chunk_size=100)
+    except ConnectionError:
+        print("died-ok")
+    print(os.path.exists(gcs.checkpoint_path(local)))
+    bucket.die_after = None
+    gcs.upload_file_chunked(local, name, bucket=bucket, chunk_size=100)
+    print(bucket.objects[name] == local.read_bytes())
+print(any(n == "google" or n.startswith("google.") for n in sys.modules))
+"""
+    out = subprocess.run([sys.executable, "-c", code], capture_output=True, text=True,
+                         check=True).stdout.split()
+    assert out == ["died-ok", "True", "True", "False"]
+
+
 def test_bucket_is_a_required_keyword_argument_everywhere(tmp_path):
     """Transport takes an injected bucket rather than building a client
     itself -- which is why every function here is testable without the
@@ -659,6 +1235,8 @@ def test_bucket_is_a_required_keyword_argument_everywhere(tmp_path):
         gcs.object_exists(name)
     with pytest.raises(TypeError):
         gcs.upload_file(_write(tmp_path / "x.bin"), name)
+    with pytest.raises(TypeError):
+        gcs.upload_file_chunked(_write(tmp_path / "x.bin"), name)
     with pytest.raises(TypeError):
         gcs.download_file(name, tmp_path / "y.bin")
     with pytest.raises(TypeError):
