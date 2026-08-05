@@ -217,3 +217,10 @@ bonsai-colab-storage-key.json
 *-storage-key.json
 *service-account*.json
 gcp-*-key.json
+
+
+# Claude Code <-> Claude Desktop filesystem mailbox: a local, personal
+# experiment (see .claude/skills/c2c/SKILL.md), not shared project
+# tooling. The mailbox directory holds transient per-session messages.
+.claude/skills/c2c/
+.claude/claude2claude/
