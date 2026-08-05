@@ -55,6 +55,18 @@ mention here, in the same commit that creates it.
   upload that resumes after a process death, and content verification on
   every transfer.
 
+**The feasibility ladder:**
+
+- **`run_ladder_stage1.py`** — the stage-1 driver (n=1,000). Runs on a
+  Colab runtime, fetching one pinned commit of this repo and the staged
+  KMNIST inputs rather than being uploaded with its dependencies. It
+  composes the modules above and implements none of them; every artifact
+  goes to GCS through `ensure_artifact`, so a dead session resumes having
+  lost at most one step.
+- **`stage_kmnist_inputs.py`** — stages the four KMNIST IDX files into the
+  bucket, once, from here. The only Stage 2B upload that goes local → GCS,
+  because `datasets/` is gitignored and so absent from the driver's clone.
+
 **Cloud-side and manual scripts:**
 
 - **`colab_gcs_roundtrip_probe.py`** — the plain Python script the

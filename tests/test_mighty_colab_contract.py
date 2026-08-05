@@ -117,7 +117,7 @@ def stub_cli(tmp_path_factory):
     return path
 
 
-def _run_target(stub, env_extra=None, make_vars=()):
+def _run_target(stub, env_extra=None, make_vars=(), target="stage2b-verify-gpu"):
     """Run the real recipe against the stub.
 
     `-s` is required, not cosmetic: without it `make` echoes the recipe
@@ -127,11 +127,16 @@ def _run_target(stub, env_extra=None, make_vars=()):
     `make` exits 2 for any recipe failure regardless of what the recipe
     exited with, so the recipe's own code is read from make's
     "*** [target] Error N" line on stderr -- that is where the leak code
-    is actually distinguishable from the verdict code."""
+    is actually distinguishable from the verdict code.
+
+    `target` is a parameter because these four behaviours are a property of
+    the RECIPE SHAPE, not of any one target. Hardcoding one meant the next
+    GPU target added got only the three static checks above, which is how a
+    recipe can look conformant and still mishandle a leak."""
     import os
     env = dict(os.environ)
     env.update(env_extra or {})
-    cmd = ["make", "-s", "stage2b-verify-gpu", f"MIGHTY_COLAB={stub}", *make_vars]
+    cmd = ["make", "-s", target, f"MIGHTY_COLAB={stub}", *make_vars]
     r = subprocess.run(cmd, cwd=REPO_ROOT, capture_output=True, text=True, timeout=180,
                        env=env)
     m = re.search(r"\*\*\* \[[^\]]+\] Error (\d+)", r.stderr)
@@ -169,6 +174,123 @@ def test_a_leak_never_masks_the_scientific_verdict(stub_cli):
     assert rc == 1, r.stdout + r.stderr
     assert "FAILED: the GPU ridge gate" in r.stdout
     assert "LEAK WARNING" in r.stdout
+
+
+# ---- The same four behaviours, on the ladder target ----
+#
+# Not a copy for its own sake: these are properties of the recipe shape, and
+# the whole reason they are re-run here is that a new target inherits the
+# STATIC checks automatically but nothing about how it actually behaves when
+# teardown fails. The ladder target also runs real money, so its leak
+# handling is the last thing that should be assumed rather than exercised.
+
+LADDER_TARGET = "stage2b-ladder-stage1"
+
+# Reports a clean tree on a commit that exists on a remote, so the recipe
+# gets past its pre-flight and into the part these tests are about.
+GIT_STUB_READY = """#!/bin/sh
+case "$1 $2" in
+  "status --porcelain") exit 0 ;;
+  "rev-parse HEAD") echo "0000000000000000000000000000000000000000"; exit 0 ;;
+  "branch -r") echo "  origin/stage2b"; exit 0 ;;
+esac
+case "$1" in
+  status) exit 0 ;;
+  rev-parse) echo "0000000000000000000000000000000000000000"; exit 0 ;;
+  branch) echo "  origin/stage2b"; exit 0 ;;
+  *) exit 0 ;;
+esac
+"""
+
+GIT_STUB_DIRTY = """#!/bin/sh
+case "$1" in
+  status) echo " M experiments/stage2b_denoising/run_ladder_stage1.py"; exit 0 ;;
+  rev-parse) echo "0000000000000000000000000000000000000000"; exit 0 ;;
+  branch) echo "  origin/stage2b"; exit 0 ;;
+  *) exit 0 ;;
+esac
+"""
+
+GIT_STUB_UNPUSHED = """#!/bin/sh
+case "$1" in
+  status) exit 0 ;;
+  rev-parse) echo "0000000000000000000000000000000000000000"; exit 0 ;;
+  branch) exit 0 ;;
+  *) exit 0 ;;
+esac
+"""
+
+
+@pytest.fixture(scope="module")
+def git_stubs(tmp_path_factory):
+    base = tmp_path_factory.mktemp("gitstub")
+    made = {}
+    for name, body in (("ready", GIT_STUB_READY), ("dirty", GIT_STUB_DIRTY),
+                       ("unpushed", GIT_STUB_UNPUSHED)):
+        path = base / f"git-{name}"
+        path.write_text(body)
+        path.chmod(0o755)
+        made[name] = path
+    return made
+
+
+def _run_ladder(stub, git_stub, env_extra=None, make_vars=()):
+    return _run_target(stub, env_extra, (f"GIT={git_stub}", *make_vars),
+                       target=LADDER_TARGET)
+
+
+def test_ladder_healthy_run_exits_zero(stub_cli, git_stubs):
+    rc, r = _run_ladder(stub_cli, git_stubs["ready"], {"STUB_SENTINEL": "STAGE1_OK"})
+    assert rc == 0, r.stdout + r.stderr
+    assert "LEAK WARNING" not in r.stdout
+
+
+def test_ladder_teardown_failure_fails_an_otherwise_successful_target(stub_cli, git_stubs):
+    rc, r = _run_ladder(stub_cli, git_stubs["ready"],
+                        {"STUB_SENTINEL": "STAGE1_OK", "STUB_STOP_RC": "7"})
+    assert rc == 7, (
+        f"a failed teardown must fail the target, carrying stop's own code -- got {rc}\n"
+        f"{r.stdout}{r.stderr}")
+    assert "LEAK WARNING" in r.stdout
+    assert "FAILED: ladder stage 1" not in r.stdout, (
+        "a teardown failure must not be reported as a scientific failure")
+
+
+def test_ladder_missing_sentinel_fails_even_on_a_zero_exit(stub_cli, git_stubs):
+    """The case the sentinel exists for: `exec` returns 0 because the script
+    exited cleanly, but it never reached its own verdict."""
+    rc, r = _run_ladder(stub_cli, git_stubs["ready"],
+                        {"STUB_SENTINEL": "nothing useful here"})
+    assert rc == 1, r.stdout + r.stderr
+    assert "FAILED: ladder stage 1" in r.stdout
+
+
+def test_ladder_absent_session_is_not_treated_as_a_leak(stub_cli, git_stubs):
+    """"Already gone" is the goal, not a failure -- it is "could not stop"
+    that costs money, and conflating them makes the check unadoptable."""
+    rc, r = _run_ladder(stub_cli, git_stubs["ready"],
+                        {"STUB_SENTINEL": "STAGE1_OK", "STUB_STOP_RC": "3"},
+                        make_vars=("STOP_ABSENT_RC=3",))
+    assert rc == 0, r.stdout + r.stderr
+    assert "LEAK WARNING" not in r.stdout
+
+
+def test_ladder_refuses_a_dirty_tree_before_provisioning(stub_cli, git_stubs):
+    """The runtime fetches one pinned commit, so uncommitted work is simply
+    absent from the run -- and the resulting failure would read as a
+    scientific result rather than a mistake. Refuse before any billing."""
+    rc, r = _run_ladder(stub_cli, git_stubs["dirty"], {"STUB_SENTINEL": "STAGE1_OK"})
+    assert rc == 1, r.stdout + r.stderr
+    assert "REFUSING" in r.stdout and "dirty" in r.stdout
+    assert "stub] created" not in r.stdout, "refused too late -- a session was provisioned"
+
+
+def test_ladder_refuses_an_unpushed_head_before_provisioning(stub_cli, git_stubs):
+    """The runtime can only fetch what a remote has."""
+    rc, r = _run_ladder(stub_cli, git_stubs["unpushed"], {"STUB_SENTINEL": "STAGE1_OK"})
+    assert rc == 1, r.stdout + r.stderr
+    assert "REFUSING" in r.stdout and "not on any remote" in r.stdout
+    assert "stub] created" not in r.stdout, "refused too late -- a session was provisioned"
 
 
 def test_a_distinct_absent_code_can_be_declared_without_rewriting_recipes(stub_cli):

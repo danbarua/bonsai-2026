@@ -138,10 +138,24 @@ def test_every_target_running_a_live_gcs_file_exports_the_bucket():
     """`GCS_ENV` carries both the bucket and the credentials path. A target
     that reaches GCS must pass them explicitly rather than inheriting
     whatever the ambient environment holds -- otherwise `make` and a bare
-    `uv run` of the same script disagree about which bucket they mean."""
+    `uv run` of the same script disagree about which bucket they mean.
+
+    A recipe that runs its script on a Colab runtime satisfies this with
+    `GCS_EXEC_ENV` instead, because `GCS_ENV` sets variables in the LOCAL
+    make shell and a remote kernel never sees them. The two forms are not
+    interchangeable and the test does not treat them as such: the remote
+    form counts only for a recipe that actually execs. A locally-run script
+    still has to export `GCS_ENV`, so widening this check does not let the
+    original requirement be satisfied by the wrong mechanism."""
     gcs_env = _make_var("GCS_ENV")
     assert gcs_env is not None and "BONSAI_GCS_BUCKET" in gcs_env, (
         f"GCS_ENV should carry the bucket; got {gcs_env!r}")
+    gcs_exec_env = _make_var("GCS_EXEC_ENV")
+    assert gcs_exec_env is not None and "BONSAI_GCS_BUCKET" in gcs_exec_env, (
+        f"GCS_EXEC_ENV should carry the bucket; got {gcs_exec_env!r}")
+    assert "BONSAI_GCS_CREDENTIALS" in gcs_exec_env, (
+        f"GCS_EXEC_ENV should carry the credentials path the key was uploaded to; "
+        f"got {gcs_exec_env!r}")
 
     live = _live_gcs_files()
     print(f"\n[bucket] files building a live GCS client (AST-discovered):")
@@ -162,20 +176,26 @@ def test_every_target_running_a_live_gcs_file_exports_the_bucket():
             orphans.append(path.name)
             continue
         for target, body in sorted(naming.items()):
-            ok = "$(GCS_ENV)" in body
+            # Which form is acceptable is decided by what the recipe DOES,
+            # not by which file it names -- so a target cannot claim the
+            # remote form without actually running anything remotely.
+            remote = ") exec " in body
+            required = "$(GCS_EXEC_ENV)" if remote else "$(GCS_ENV)"
+            ok = required in body
             print(f"[bucket] {target} -> {path.name}: "
-                  f"{'exports' if ok else 'DOES NOT export'} $(GCS_ENV)")
+                  f"{'exports' if ok else 'DOES NOT export'} {required} "
+                  f"({'remote exec' if remote else 'local'})")
             if not ok:
-                offenders.append(f"{target} (runs {path.name})")
+                offenders.append(f"{target} (runs {path.name}, needs {required})")
 
     assert not offenders, (
         f"these targets reach GCS without exporting the bucket and credentials: "
         f"{offenders}. They would use whatever the ambient environment holds.")
     assert not orphans, (
         f"these files build a live GCS client but no target runs them: {orphans}. "
-        f"Either add a target that exports $(GCS_ENV), or -- if it is executed "
-        f"remotely like the round-trip probe -- add it to REMOTE_EXECUTED with a "
-        f"reason.")
+        f"Either add a target that exports $(GCS_ENV) (or $(GCS_EXEC_ENV), if it "
+        f"execs the script on a runtime), or -- if it is executed remotely like the "
+        f"round-trip probe -- add it to REMOTE_EXECUTED with a reason.")
 
 
 def test_the_remote_executed_exemption_does_not_rot():

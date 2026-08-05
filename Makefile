@@ -46,6 +46,17 @@ PYTHON ?= uv run python
 # the lock entry. Both are quiet no-ops when nothing has changed, so the
 # version reported afterwards is the check, not the command's output.
 MIGHTY_COLAB ?= uv run --group gpu mighty-colab
+
+# Overridable for the same reason MIGHTY_COLAB is. The ladder target's
+# pre-flight refusals (dirty tree, unpushed HEAD) are behaviour worth
+# testing, and testing them needs a git that can be made to report either
+# answer -- otherwise those tests would pass or fail depending on the state
+# of whoever's checkout runs them, and the leak-handling cases below could
+# not run at all on a dirty tree. `tests/test_mighty_colab_contract.py`
+# drives both directions through a stub. Note this is deliberately NOT an
+# escape hatch in the recipe: there is no flag that skips the checks, only
+# a different git to ask.
+GIT ?= git
 SESSION_TRAIN ?= stage3-evolve
 SESSION_TEST ?= stage4-evolve
 SESSION_CLASS0 ?= class0-audit-gpu
@@ -270,7 +281,8 @@ STAGE2B_TEST_FILES := tests/test_stage2b_corruption.py tests/test_stage2b_encode
                       tests/test_stage2b_cnn.py tests/test_stage2b_partition.py \
                       tests/test_stage2b_contracts.py tests/test_stage2b_gcs.py \
                       tests/test_stage2b_gcs_makefile.py \
-                      tests/test_stage2b_gcs_roundtrip.py
+                      tests/test_stage2b_gcs_roundtrip.py \
+                      tests/test_stage2b_ladder_stage1.py
 
 .PHONY: stage2b-test
 stage2b-test:  ## Run the Stage 2B test suite (fast only; the Colab round trip is excluded)
@@ -301,6 +313,19 @@ BONSAI_GCS_BUCKET ?= bonsai-2026-stage2b-cache
 # wrong one of them.
 GCS_ENV := BONSAI_GCS_CREDENTIALS="$(BONSAI_GCS_CREDENTIALS)" \
            BONSAI_GCS_BUCKET="$(BONSAI_GCS_BUCKET)"
+
+# The same two settings for a script that runs on a Colab runtime instead of
+# here. `GCS_ENV` sets them in the LOCAL make shell, which a remote kernel
+# never sees, so a target that execs a GCS-touching script needs this form
+# instead -- `mighty-colab exec --env` sets them in the remote kernel. The
+# credentials value differs deliberately: it is the path the key was
+# uploaded TO on the runtime, not the local key's path.
+# `tests/test_stage2b_gcs_makefile.py` accepts this form only for recipes
+# that actually exec, so a locally-run script cannot satisfy the
+# bucket-export requirement with it.
+REMOTE_KEY_PATH ?= /content/bonsai-colab-storage-key.json
+GCS_EXEC_ENV := --env BONSAI_GCS_BUCKET="$(BONSAI_GCS_BUCKET)" \
+                --env BONSAI_GCS_CREDENTIALS="$(REMOTE_KEY_PATH)"
 
 .PHONY: stage2b-test-roundtrip
 stage2b-test-roundtrip:  ## Real Colab+GCS round trip -- provisions a CPU runtime, bills while running
@@ -391,6 +416,75 @@ stage2b-verify-cnn-gpu:  ## Compare the CNN float32 forward pass CPU vs GPU -- b
 stage2b-smoke-gcs:  ## Real-bucket GCS smoke check: transport, chunked resumable upload, both delete refusals
 	cd $(REPO_ROOT) && $(GCS_ENV) \
 		uv run --group gpu python $(STAGE2B_DIR)/smoke_stage2b_gcs.py
+
+##@ Stage 2B feasibility ladder
+
+SESSION_2B_LADDER ?= stage2b-ladder
+# Stated rather than inherited from VERIFY_GPU: stage 1 runs no CNN and its
+# ridge is float64 end to end, so the TF32 question VERIFY_GPU exists to
+# pin down is immaterial here. That makes this a free choice, and a free
+# choice should be visible.
+LADDER_GPU ?= A100
+
+# `datasets/` is gitignored, so the ladder driver's clone of the repo
+# carries the pipeline but none of its inputs -- and 47MB of IDX files is
+# far past the Colab session upload ceiling this project has already hit
+# once. Stage them to the bucket from here instead, once; the driver
+# downloads them on the runtime. All four files, because load_mnist opens
+# the t10k pair unconditionally and topology construction goes through it.
+.PHONY: stage2b-stage-inputs
+stage2b-stage-inputs:  ## Upload the four KMNIST IDX files to the Stage 2B bucket (once; local -> GCS)
+	cd $(REPO_ROOT) && $(GCS_ENV) \
+		uv run --group gpu python $(STAGE2B_DIR)/stage_kmnist_inputs.py
+
+# Feasibility-ladder stage 1 (n=1,000): the first run that joins the Stage
+# 2B modules together. Same verdict discipline as the two verify targets
+# above -- capture the output, tear the session down unconditionally, and
+# require BOTH a zero exit and the driver's own sentinel, because an exit
+# code cannot distinguish "ran and passed" from "exited before reaching its
+# verdict".
+#
+# Two refusals before any money is spent. The runtime fetches ONE pinned
+# commit from the public repo, so a dirty tree or an unpushed HEAD would
+# run code that is not the code being tested -- and the failure would look
+# like a science result rather than a mistake. The driver hashes the
+# clone's copy of itself against BONSAI_DRIVER_SHA256 computed here, which
+# is what closes the gap that `exec --file` transmits code with no __file__
+# to check.
+.PHONY: stage2b-ladder-stage1
+stage2b-ladder-stage1:  ## Run Stage 2B ladder stage 1 (n=1,000) on a Colab GPU -- bills while running
+	rc=0; src=0; \
+	cd $(REPO_ROOT) && \
+	if [ -n "$$($(GIT) status --porcelain)" ]; then \
+		echo "[make] REFUSING: the working tree is dirty. The runtime fetches one pinned commit; uncommitted work would not be in it."; \
+		$(GIT) status --short; \
+		exit 1; \
+	fi; \
+	commit=$$($(GIT) rev-parse HEAD); \
+	if ! $(GIT) branch -r --contains $$commit 2>/dev/null | grep -q .; then \
+		echo "[make] REFUSING: HEAD $$commit is not on any remote. Push before running -- the runtime can only fetch what origin has."; \
+		exit 1; \
+	fi; \
+	driver_sha=$$(shasum -a 256 $(STAGE2B_DIR)/run_ladder_stage1.py | cut -d' ' -f1); \
+	echo "[make] commit $$commit, driver sha256 $$driver_sha"; \
+	cd $(STAGE2B_DIR) && \
+	$(MIGHTY_COLAB) sessions && \
+	if $(MIGHTY_COLAB) status -s $(SESSION_2B_LADDER) 2>&1 | grep -q "not found"; then \
+		$(MIGHTY_COLAB) new -s $(SESSION_2B_LADDER) --gpu $(LADDER_GPU); \
+	else \
+		echo "[make] Reusing existing session $(SESSION_2B_LADDER)"; \
+	fi && \
+	$(MIGHTY_COLAB) reinstall -s $(SESSION_2B_LADDER) jax[cuda12]==0.11.0 diffrax==0.7.2 google-cloud-storage && \
+	$(MIGHTY_COLAB) upload -s $(SESSION_2B_LADDER) $(BONSAI_GCS_CREDENTIALS) $(REMOTE_KEY_PATH) && \
+	rc=0; out=$$($(MIGHTY_COLAB) exec -s $(SESSION_2B_LADDER) -f run_ladder_stage1.py --timeout $(EXEC_TIMEOUT) $(GCS_EXEC_ENV) --env BONSAI_COMMIT="$$commit" --env BONSAI_DRIVER_SHA256="$$driver_sha" --env JAX_ENABLE_X64=1 2>&1) || rc=$$?; \
+	echo "$$out"; \
+	src=0; $(MIGHTY_COLAB) stop -s $(SESSION_2B_LADDER) || src=$$?; \
+	if [ $$rc -ne 0 ] || ! echo "$$out" | grep -q STAGE1_OK; then \
+		echo "[make] FAILED: ladder stage 1 did not report success (exec rc=$$rc)."; \
+		if [ $$rc -eq 0 ]; then rc=1; fi; \
+	fi; \
+	$(call check_teardown,$(SESSION_2B_LADDER)); \
+	exit $$rc
 
 .PHONY: help
 help:  ## List every target in this file, grouped by section
