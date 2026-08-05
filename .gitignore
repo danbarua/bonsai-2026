@@ -195,14 +195,17 @@ datasets/*/
 *.npz
 *.npy
 
+
 # Stage 2A: local scratch directory for large encode/evolve artifacts
 # (stage2a_paths.py's default STAGE2A_SCRATCH_ROOT) -- regenerable by
 # re-running the encode/evolve pipeline, never committed.
+experiments/stage2a_dynamics_classification/scratch/
+
 
 # Claude Code: personal/local tool permissions and settings -- kept on
 # disk, not tracked (this project has no shared .claude/settings.json).
 .claude/settings.local.json
-experiments/stage2a_dynamics_classification/scratch/
+
 
 # GCP service-account keys (Stage 2B's Colab/GCS access). These are live
 # credentials, not config: anyone holding one has the service account's
