@@ -16,6 +16,73 @@ const PORT = Number(process.env.C2C_MCP_PORT ?? 8765);
 const PUBLIC_MCP_URL = process.env.C2C_MCP_PUBLIC_URL;
 
 const app = createMcpExpressApp({ host: HOST });
+
+// A tools/call validation failure (unknown/missing enum value, etc.) isn't
+// an HTTP-level error at all -- the SDK reports it as an ordinary 200
+// response with the failure embedded in the JSON-RPC result body
+// (`result.isError: true`), by design (it's a tool-level outcome, not a
+// transport-level one). Extracted here so it can be checked against the
+// buffered response body alongside the HTTP-status check below.
+function findJsonRpcError(body: string): string | undefined {
+  for (const line of body.split("\n")) {
+    if (!line.startsWith("data:")) continue;
+    let parsed: unknown;
+    try {
+      parsed = JSON.parse(line.slice("data:".length).trim());
+    } catch {
+      continue;
+    }
+    const msg = parsed as { error?: { message?: string }; result?: { isError?: boolean; content?: { text?: string }[] } };
+    if (msg.error) return msg.error.message ?? "JSON-RPC error";
+    if (msg.result?.isError) return msg.result.content?.[0]?.text ?? "tool call reported isError";
+  }
+  return undefined;
+}
+
+// Logs every response that's an error to stderr, regardless of which route
+// produced it -- mounted before any route (including OAuth's, registered
+// later by mountOAuth), so one line here covers all of them instead of
+// adding logging to each handler individually. Covers both HTTP-level
+// errors (4xx/5xx) and MCP's tool-level errors (see findJsonRpcError
+// above), by buffering the response body to inspect after it's sent.
+// Doesn't capture rejections from createMcpExpressApp's own DNS-rebinding
+// guard, which runs before this middleware is reached on the same app
+// instance.
+function logErrorRequests(req: express.Request, res: express.Response, next: express.NextFunction): void {
+  const chunks: Buffer[] = [];
+  const originalWrite = res.write.bind(res);
+  const originalEnd = res.end.bind(res);
+  // The transport writes raw Uint8Array chunks, not Node Buffers or strings
+  // -- Buffer.isBuffer() is false for a plain Uint8Array (despite Buffer
+  // extending it), and String(uint8Array) joins byte *values* with commas
+  // rather than UTF-8-decoding them. Buffer.from() handles all three
+  // correctly; String()/.toString() would silently corrupt the capture.
+  const toBuffer = (chunk: unknown): Buffer =>
+    Buffer.isBuffer(chunk) ? chunk : chunk instanceof Uint8Array ? Buffer.from(chunk) : Buffer.from(String(chunk));
+
+  res.write = ((chunk: unknown, ...rest: unknown[]) => {
+    if (chunk) chunks.push(toBuffer(chunk));
+    return (originalWrite as (...a: unknown[]) => boolean)(chunk, ...rest);
+  }) as typeof res.write;
+
+  res.end = ((chunk?: unknown, ...rest: unknown[]) => {
+    if (chunk && typeof chunk !== "function") chunks.push(toBuffer(chunk));
+    return (originalEnd as (...a: unknown[]) => express.Response)(chunk, ...rest);
+  }) as typeof res.end;
+
+  res.on("finish", () => {
+    const httpError = res.statusCode >= 400;
+    const jsonRpcErrorDetail = chunks.length > 0 ? findJsonRpcError(Buffer.concat(chunks).toString("utf8")) : undefined;
+    if (httpError) {
+      console.error(`[c2c-mcp] ${req.method} ${req.originalUrl} -> HTTP ${res.statusCode}`);
+    } else if (jsonRpcErrorDetail) {
+      console.error(`[c2c-mcp] ${req.method} ${req.originalUrl} -> ${jsonRpcErrorDetail}`);
+    }
+  });
+  next();
+}
+app.use(logErrorRequests);
+
 // createMcpExpressApp already applies express.json() globally; OAuth's
 // /token and /authorize (form-submitted consent) both need urlencoded too.
 app.use(express.urlencoded({ extended: false }));
