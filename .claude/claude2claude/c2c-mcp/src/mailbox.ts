@@ -63,17 +63,18 @@ export interface SendResult {
 }
 
 /**
- * Writes a new message file to `channel`'s outbox. Filename collisions
- * (two sends in the same second) are resolved with a `-2`, `-3`, ... suffix,
- * using an atomic exclusive-create so concurrent callers can't race each
- * other onto the same filename.
+ * Writes a new message file to `dir` (the caller picks which -- a channel's
+ * outbox or inbox -- based on who's sending; see server.ts's role mapping).
+ * Filename collisions (two sends in the same second) are resolved with a
+ * `-2`, `-3`, ... suffix, using an atomic exclusive-create so concurrent
+ * callers can't race each other onto the same filename.
  */
 export async function sendMessage(
-  channel: Channel,
+  dir: string,
   sender: string,
   content: string,
 ): Promise<SendResult> {
-  await ensureDir(channel.outbox);
+  await ensureDir(dir);
   const now = new Date();
   const base = timestampFilename(now);
   const header = `<!-- from: ${sender} · ${timestampIso(now)} -->\n\n`;
@@ -83,7 +84,7 @@ export async function sendMessage(
   let counter = 1;
   for (;;) {
     const filename = counter === 1 ? `${base}.md` : `${base}-${counter}.md`;
-    const filePath = path.join(channel.outbox, filename);
+    const filePath = path.join(dir, filename);
     try {
       await fs.writeFile(filePath, data, { encoding: "utf8", flag: "wx" });
       return { filename, path: filePath };
@@ -103,27 +104,30 @@ export interface InboxMessage {
 }
 
 /**
- * Reads every `.md` file in `channel`'s inbox, oldest first (filenames sort
- * chronologically). When `archive` is true (the default, matching the
- * existing c2c protocol), each file is moved to archive/ after being read,
- * so a later call only returns messages nobody has processed yet.
+ * Reads every `.md` file in `sourceDir` (the caller picks inbox or outbox
+ * based on whose messages the reader wants -- see server.ts's role
+ * mapping), oldest first (filenames sort chronologically). When `archive`
+ * is true (the default, matching the existing c2c protocol), each file is
+ * moved to `archiveDir` after being read, so a later call only returns
+ * messages nobody has processed yet.
  */
-export async function readInbox(
-  channel: Channel,
+export async function readMailbox(
+  sourceDir: string,
+  archiveDir: string,
   archive: boolean,
 ): Promise<InboxMessage[]> {
-  await ensureDir(channel.inbox);
-  const entries = await fs.readdir(channel.inbox);
+  await ensureDir(sourceDir);
+  const entries = await fs.readdir(sourceDir);
   const filenames = entries.filter((f) => f.endsWith(".md")).sort();
 
   const messages: InboxMessage[] = [];
   for (const filename of filenames) {
-    const filePath = path.join(channel.inbox, filename);
+    const filePath = path.join(sourceDir, filename);
     const content = await fs.readFile(filePath, "utf8");
     messages.push({ filename, content });
     if (archive) {
-      await ensureDir(channel.archive);
-      await fs.rename(filePath, path.join(channel.archive, filename));
+      await ensureDir(archiveDir);
+      await fs.rename(filePath, path.join(archiveDir, filename));
     }
   }
   return messages;

@@ -16,21 +16,32 @@ implementation of the same mailbox convention, not a different one.
 
 ## Tools
 
-| Tool | Channel dir | `sender` values | Effect |
+Each channel has two roles, and the directories are named from
+`claude-code`'s side (matching the existing protocol docs): `outbox/`
+is what `claude-code` writes and the peer (`claude-desktop` or
+`chatgpt`) reads; `inbox/` is the reverse. Both `-send` and `-inbox`
+take an identity argument that decides which directory they touch --
+neither tool has a silent default for "which side am I," since that
+ambiguity is exactly what caused a real bug here once (see git log).
+
+| Tool | Channel dir | Roles | Effect |
 |---|---|---|---|
-| `c2c-send` | `.claude/claude2claude/` | `claude-code`, `claude-desktop` | Writes a new timestamped file to `outbox/` |
-| `c2c-inbox` | `.claude/claude2claude/` | -- | Reads `inbox/*.md` oldest-first, moves each to `archive/` unless called with `archive: false` |
-| `c2gpt-send` | `.claude/claude2gpt/` | `claude-code`, `chatgpt` | Same as `c2c-send`, other channel |
-| `c2gpt-inbox` | `.claude/claude2gpt/` | -- | Same as `c2c-inbox`, other channel |
+| `c2c-send` | `.claude/claude2claude/` | `claude-code`, `claude-desktop` | `{ sender, content }` -- `claude-code` writes `outbox/`, `claude-desktop` writes `inbox/` |
+| `c2c-inbox` | `.claude/claude2claude/` | `claude-code`, `claude-desktop` | `{ reader, archive? }` -- `claude-code` reads `inbox/`, `claude-desktop` reads `outbox/` |
+| `c2gpt-send` | `.claude/claude2gpt/` | `claude-code`, `chatgpt` | Same as `c2c-send`, `chatgpt` in place of `claude-desktop` |
+| `c2gpt-inbox` | `.claude/claude2gpt/` | `claude-code`, `chatgpt` | Same as `c2c-inbox`, `chatgpt` in place of `claude-desktop` |
 
-`-send` takes `{ sender, content }` -- `content` is just the message
-body; the header comment is generated from `sender` and the current
-UTC time. A same-second filename collision gets a `-2`, `-3`, ...
-suffix rather than overwriting anything.
+`-send`'s `content` is just the message body; the header comment is
+generated from `sender` and the current UTC time. A same-second
+filename collision gets a `-2`, `-3`, ... suffix rather than
+overwriting anything.
 
-`-inbox` takes `{ archive?: boolean }` (default `true`). With
-`archive: false` it returns pending messages without moving them, for
-peeking without consuming.
+`-inbox`'s `archive` (default `true`) moves each returned message to
+`archive/` after reading, matching the existing c2c protocol (both
+sides archive what they read, since Desktop's filesystem connector can
+move but not delete). Pass `archive: false` to peek without consuming
+-- useful for checking what's sitting unread in either direction
+without disturbing it.
 
 ## Build & run
 
