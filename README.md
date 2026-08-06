@@ -11,6 +11,7 @@ The core of Bonsai involves:
 - **Oscillator Dynamics**: Simulating coupled-oscillator evolution over these topologies.
 - **Causal Ablation**: Using various controls (random, rewired, lattice) to verify that performance depends on specific learned connectivity and dynamics. This finding is specific to the closed benchmark-feature programme (`docs/PROJECT_MEMORY.md` Part 1); the later dynamics-as-computation work (Stage 1D/2A) found the *opposite* for oscillator dynamics itself -- learned topology is not distinguishable from matched generic controls, under either an internal structured-transformation statistic or an external classification task.
 - **Dynamics-as-Computation**: Analyzing structured responses to perturbations as a form of computation. Established at Level 2 (structured internal transformation) across independent trajectories, and at Level 3 (useful computation) under a bounded classification design (Stage 2A) -- see `docs/PROJECT_MEMORY.md` Part 3 for scope and open follow-ons.
+- **Denoising (Stage 2B)**: Asks the Stage 2A-shaped question -- does runtime graph evolution add value on top of the same encoded phase state -- for single-step active-support reconstruction under a fixed corruption process, instead of classification. Feasibility ladder in progress; see `docs/PROJECT_MEMORY.md` Part 3 for current status.
 
 For detailed history and current status, see `docs/PROJECT_MEMORY.md`; for the methodological principles this project holds itself to, see `CLAUDE.md`. For definitions of project-specific terms (trajectory, baseline seed, replica, t_p, tau, finite/tangent/residual response, etc.), see `docs/GLOSSARY.md`.
 
@@ -61,7 +62,7 @@ This project uses `hatchling` as a build backend and is compatible with `uv`.
   - `data/`: Data loaders (MNIST, KMNIST, etc.).
   - `dynamics/`: Oscillator simulation and topology construction (lattice, rewired, matched-sparsity).
   - `stats/`: Statistical measures (permutation tests, tangent departure).
-- `experiments/`: Active research stages and pilots (e.g., `stage1a_re_verification`, `stage1b_pilot`, `stage1b2_structured_transformation`, `stage1c_trajectory_generalization`).
+- `experiments/`: Active research stages and pilots (e.g., `stage1a_re_verification`, `stage1b_pilot`, `stage1b2_structured_transformation`, `stage1c_trajectory_generalization`, `stage2a_dynamics_classification`, `stage2b_denoising`).
 - `benchmark_programme/`: Historical record of the initial phase, including findings and older test suites. **Note: This directory contains frozen snapshots and should not be modified.**
 - `datasets/`: Local storage for MNIST-format datasets (MNIST, KMNIST, Fashion-MNIST, notMNIST).
 - `docs/`: Durable project documentation and memory.
@@ -81,6 +82,13 @@ need to be run from any particular subdirectory -- run `make
 stage2a-help` for the full list, or see
 `experiments/stage2a_dynamics_classification/README.md` for the
 workflow they belong to.
+
+The same `Makefile` also wraps Stage 2B's feasibility-ladder drivers
+behind `make stage2b-*` targets (`stage2b-test` for the fast local
+suite, `stage2b-ladder-stage1` / `stage2b-ladder-stage2` for the
+Colab-GPU ladder rungs, both billing while running) -- run `make help`
+for the full list, or see `experiments/stage2b_denoising/README.md` for
+the workflow.
 
 ## Environment Variables
 

@@ -395,8 +395,8 @@ Full detail: `experiments/stage2a_dynamics_classification/FINDINGS.md`
 and every disclosed caveat above); `DESIGN.md` (the locked design, read
 before the result).
 
-**Stage 2B (denoising, #13): design locked, components built and
-tested, no ladder rung run yet.**
+**Stage 2B (denoising, #13): design locked; feasibility-ladder stages 1
+and 2 both complete (`STAGE2_OK`), stage 3 not yet started.**
 `experiments/stage2b_denoising/DESIGN.md` -- seven drafts, four external
 review rounds plus an adversarial blind-spot review and an outsider peer
 review, all incorporated; asks the Stage-2A-shaped question (does
@@ -409,42 +409,98 @@ corruption, instead of classification.
 corruption/RNG, the encoder rho-gate, the intercept-aware SVD ridge with
 sklearn as oracle, the confirmatory statistics (studentized sign-flip,
 two Holm families, branched winner rule), the equinox+optax CNN
-baseline, the partition/nested-ladder draw, and GCS transport with
-resumable chunked upload and crc32c content verification on every
-transfer. 576 fast tests. Execution-environment decisions are settled,
-not pending: plain Python scripts on Colab runtimes via `mighty-colab`,
-artifacts to a public-read GCS bucket from within the cloud environment.
+baseline, the partition/nested-ladder draw, GCS transport with resumable
+chunked upload and crc32c content verification on every transfer, and
+now the two ladder drivers (`run_ladder_stage1.py`, `run_ladder_stage2.py`)
+that compose all of the above into a runnable pipeline. Fast test count
+is intentionally not restated here -- `make stage2b-test` reports it;
+per-file counts drifted stale four times before that convention was
+adopted (`experiments/stage2b_denoising/README.md`). Execution-environment
+decisions are settled: plain Python scripts on Colab runtimes via
+`mighty-colab`, artifacts to a public-read GCS bucket from within the
+cloud environment, each driver fetching one pinned commit rather than
+being uploaded with its dependencies.
 
 **Verified against real infrastructure, not fakes**: a Colab-to-GCS
 round trip read back both authenticated and anonymously; the GCS smoke
 check including a chunked upload resumed mid-transfer and the crc32c
 the real service records for the resulting composite object; DESIGN.md's
-ridge equivalence gate on an A100 at both ladder scales (8.6e-13 and
-3.0e-13 against a 1e-8 gate, the n=5,000 case at cond(X)=2e16); and the
-CNN's float32 forward pass, which found a real defect -- see Part 4's
-TF32 entry.
+ridge equivalence gate on an A100, on SYNTHETIC ill-conditioned
+matrices, at both ladder scales, before any real ladder rung existed
+(8.6e-13 and 3.0e-13 against a 1e-8 gate, the n=5,000 case at
+cond(X)=2e16); and the CNN's float32 forward pass, which found a real
+defect -- see Part 4's TF32 entry. Since then, two full ladder rungs
+have run against real GCP infrastructure end to end, on real (not
+synthetic) data -- below.
 
-**Not done**: no feasibility-ladder rung has been executed. There are no
-driver scripts wiring the modules into a runnable stage 1, no
-`FINDINGS.md`, and no number of any kind about denoising. A cold-context
-audit ranked that missing glue layer as the top remaining risk,
-precisely because it is where Stage 1D's bug lived: every module is
-individually well tested and nothing has ever joined two of them. Graph
-evolution -- the manipulation this stage is about -- has no Stage 2B
-module at all and will be Stage 2A code called from a script nobody has
-written.
+**Feasibility-ladder stage 1 (n=1,000), complete.** First run FAILED
+honestly, as designed: the encoder-on-noisy-inputs gate measured
+rho=169.851 against threshold 10 at `ENCODER_STEPS=150` (median
+final-Delta clean 2.177e-07, noisy 3.698e-05; zero non-finite values --
+a clean ratio failure). Diagnosed in
+`experiments/stage2b_denoising/diagnose_encoder_gate_failure.py`
+(diagnostic-only, no locked pipeline touched): noisy final-Delta decays
+geometrically to exact float64 zero by 1,200 steps, the same fixed point
+clean reaches -- genuine slow convergence, not a floor. A second,
+independent defect surfaced in the same investigation: the ratio formula
+reads numerical dust as a real failure once either series crosses its
+own float64 floor (at steps=600, FAIL at rho=17.76 while noisy's median
+sat at 1.776e-14). Disclosed post-lock amendment: `ENCODER_STEPS` raised
+150 -> 1200 uniformly, and the gate formula gained an absolute-
+convergence escape (`ABS_CONV_EPS=1e-12`, passes when both medians are
+already below it regardless of rho) -- `CLAUDE.md` principle 23
+generalizes the lesson (a ratio gate between two quantities that each
+decay to a numerical floor measures which floored first, not the
+mechanism). The 150-step FAIL artifact remains in the bucket, untouched,
+beside the 1,200-step PASS, as the historical record of the first real
+run. Re-run: gate PASS (rho=0.0, exact), and the driver continued
+automatically through evolution (0 failed of 1,000, all four graphs),
+ridge (all seven conditions passing the FIRST real-data equivalence
+gate, 4+ orders below the 1e-8 tolerance), and the stats machinery
+end-to-end (in-sample, non-inferential). 596.7s total. Full account:
+`experiments/stage2b_denoising/FINDINGS.md`.
 
-**Known before the ladder runs**: `stage2b_ridge`'s centering guard
-(`||mean(X_scaled)|| <= 1e-10`) is projected to fire on `curr_random` at
-ladder stage 2 and on `rewired` at stage 3, measured on real
-corrupted-encoded-evolved features. The growth fits an exponent near
-0.5 -- ordinary sqrt(n) floating-point accumulation, so a fixed absolute
-tolerance fires eventually for any features. The coupled 1e-8
-JAX-vs-sklearn equivalence gate survives until roughly 1e-4, five orders
-beyond the worst projected value, so the guard as set would halt on a
-number that harms nothing. Changing it is a disclosed DESIGN.md
-amendment, not an edit; the numbers are in that directory's `README.md`
-so the decision is made from measurement rather than mid-halt.
+**Feasibility-ladder stage 2 (n=5,000), complete.** Adds runtime/
+feature-validity measurement at scale, the production SVD's own
+condition-number diagnostic (reported, not gated), ridge-grid behaviour,
+the ladder's SECOND real-data ridge equivalence gate, and the first CNN
+training against real data. `STAGE2_OK`, 1,722.0s total, on the first
+attempt after fixing one immediate false start (a module-scope
+`__file__` reference broke under `mighty-colab exec`'s exec-into-kernel
+execution model -- caught before any real cost, fixed, and turned into
+two permanent guards; see `FINDINGS.md`). Evolution: 0 failed of 5,000,
+all four graphs. Ridge: all seven conditions passed equivalence pass 2
+(1.2e-14 to 1.1e-12 against 1e-8); condition numbers span raw_505's 4.25
+to `lattice`'s 4.82e8 (roughly two orders worse than `T`'s 4.78e6),
+recorded plainly, not interpreted -- all seven passed regardless. CNN:
+first-ever training against real data, best of three seeds (clipped
+validation MSE 0.0637 vs. the identity baseline's 0.1998 on the locked
+6,000-image validation partition), labeled non-inferential per the
+design's own framing. **The number most likely to shape stage-3
+planning**: measured encode cost, 218.28 ms/image at 1,200 steps
+single-worker, projects LINEARLY (unvalidated at scale) to **3.27 hours**
+for encoding alone at stage 3's 54,000-image fit side -- by far the
+dominant projected cost in the pipeline. Full account, all four named
+report items, and the complete per-stage stage-3 projection table:
+`experiments/stage2b_denoising/FINDINGS.md`.
+
+**The scaler-centering tolerance, previously flagged as "known before
+the ladder runs," is resolved.** Disclosed pre-stage-1 amendment:
+`stage2b_ridge`'s centering guard tolerance is now n-dependent
+(`1e-9 * (n/1000)**0.5`, `stage2b_ridge.mean_x_tol_for`), replacing the
+fixed `1e-10` it would have outgrown. Confirmed holding with wide margin
+at both ladder scales actually run: `curr_random` (the condition it was
+specifically set to protect) measured `margin_ratio=0.076` at n=1,000
+and `0.081` at n=5,000, both comfortably under 1.0 and close to the
+amendment's own ~0.075 prediction. No condition has fired it at either
+rung run so far.
+
+**Not yet started**: feasibility-ladder stage 3 (full 60,000-image
+training side: 54,000 fit + 6,000 locked validation) and stage 4 (the
+single locked evaluation against the official 10,000-image test set).
+The stage-2 encode-cost projection above is the open planning question
+stage 3 is blocked on, not a technical gap -- nothing about the pipeline
+itself is unbuilt or unverified at this point.
 
 ## Part 4: Infrastructure and execution environment
 
@@ -587,6 +643,33 @@ form: a command sequence that produced real results when run by hand, then
 frozen into a target nobody ran end to end. All five GPU targets now pass
 `EXEC_TIMEOUT`, and `tests/test_mighty_colab_contract.py` fails if any
 future one omits it (CLAUDE.md principle 20).
+
+**`mighty-colab exec -f script.py` transmits the file's TEXT into an
+existing IPython kernel cell -- the script is never run as a script, and
+`__file__` is never defined.** Found running the Stage 2B ladder stage-2
+driver for the first time (2026-08-06): a refactor that imported a
+constant from a sibling driver module used
+`os.path.dirname(os.path.abspath(__file__))` to locate it, and crashed
+immediately with `NameError: name '__file__' is not defined`, before the
+driver's own `main()` ever started. Ordinary local verification (import
+the driver as a real Python module, run its functions) could not have
+caught this: Python's own import machinery sets `__file__` correctly for
+a genuinely imported module, so the bug was invisible to every local
+check except one that reproduces the actual execution model --
+`compile()` + `exec()` of the driver's source into a fresh namespace
+with no `__file__` key, which now exists as a permanent test
+(`tests/test_stage2b_ladder_stage2.py`). The deeper consequence, not
+just the proximate bug: nothing from this repository -- not even
+another file in it -- exists on the exec'd kernel's filesystem until
+`bootstrap_repo()` clones it, which happens *inside* `main()`, after
+every module-scope statement in the transmitted file has already run.
+Module scope under this execution model can rely on stdlib and numpy
+only, full stop -- the constraint the ladder-stage-1 driver happened to
+satisfy from the start, and the one the stage-2 refactor briefly
+violated trying to avoid duplicating a four-entry dict. Cost of the
+failure: session provisioning and package-install overhead only -- the
+crash preceded any artifact write, confirmed against the live bucket
+before the fix was written, not assumed.
 
 **cuML logistic regression on GPU is not bit-reproducible, and that is
 fine at the level the claims are made.** Re-running the class-0-support
