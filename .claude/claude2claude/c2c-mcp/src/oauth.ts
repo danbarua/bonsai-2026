@@ -29,6 +29,20 @@ import type { Express, NextFunction, Request, Response } from "express";
 // boundary. See requireBearerAuth.
 export const PROXY_MARKER_HEADER = "x-c2c-via-proxy";
 
+// JSON-RPC methods exempt from requireBearerAuth even over the public
+// proxy -- see requireBearerAuth for why. Read-only schema/capability
+// methods only; deliberately excludes tools/call, the only method that
+// actually touches mailbox files.
+const DISCOVERY_METHODS = new Set([
+  "initialize",
+  "notifications/initialized",
+  "ping",
+  "tools/list",
+  "resources/list",
+  "resources/templates/list",
+  "prompts/list",
+]);
+
 const ACCESS_TTL_S = 60 * 60; // 1 hour
 const REFRESH_TTL_S = 60 * 60 * 24 * 30; // 30 days
 const CODE_TTL_MS = 60 * 1000; // 60 seconds, matches Claude's own auth-code lifetime expectations
@@ -378,6 +392,21 @@ ${hidden}
     // public proxy gets challenged.
     const viaProxy = req.headers[PROXY_MARKER_HEADER] === "1";
     if (!viaProxy) {
+      next();
+      return;
+    }
+    // Discovery-only methods stay anonymous even over the public proxy.
+    // Found live: ChatGPT's connector pings initialize/tools/list/etc.
+    // before ever attaching a token, attaching Authorization only once a
+    // tool is actually invoked via tools/call -- gating every method
+    // uniformly meant discovery itself 401'd (confirmed in this session's
+    // own logs: "POST /mcp -> HTTP 401 (method: initialize)" and
+    // "(method: resources/list)"), so no tool was ever visible regardless
+    // of whether OAuth itself succeeded. Safe to exempt: these only expose
+    // tool/resource/prompt *schemas*, never mailbox contents -- the actual
+    // read/write happens in tools/call, which stays gated below.
+    const method = typeof req.body?.method === "string" ? req.body.method : undefined;
+    if (method && DISCOVERY_METHODS.has(method)) {
       next();
       return;
     }

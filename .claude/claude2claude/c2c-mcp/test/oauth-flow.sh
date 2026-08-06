@@ -136,16 +136,29 @@ EXPIRED="$(curl -s -o /dev/null -w '%{http_code}' -X POST "$BASE/token" \
 check "expired code rejected (400)" "$EXPIRED" "400"
 
 MCP_INIT='{"jsonrpc":"2.0","id":1,"method":"initialize","params":{"protocolVersion":"2025-06-18","capabilities":{},"clientInfo":{"name":"oauth-flow-test","version":"0.0.1"}}}'
+# tools/call is the only method that actually touches mailbox files, so
+# it's the one that must stay gated regardless of discovery being opened up.
+MCP_TOOLS_CALL='{"jsonrpc":"2.0","id":1,"method":"tools/call","params":{"name":"c2c-send","arguments":{"sender":"claude-code","content":"should be blocked pre-auth"}}}'
 
-echo "== 11. MCP call via proxy marker, no token -> 401 with WWW-Authenticate =="
+echo "== 11. MCP tools/call via proxy marker, no token -> 401 with WWW-Authenticate =="
 UNAUTH="$(curl -s -o /dev/null -w '%{http_code}' -X POST "$BASE/mcp" \
   -H 'Content-Type: application/json' -H 'Accept: application/json, text/event-stream' \
-  -H 'X-C2C-Via-Proxy: 1' -d "$MCP_INIT")"
-check "unauthenticated proxied call rejected (401)" "$UNAUTH" "401"
+  -H 'X-C2C-Via-Proxy: 1' -d "$MCP_TOOLS_CALL")"
+check "unauthenticated proxied tools/call rejected (401)" "$UNAUTH" "401"
 WWWAUTH="$(curl -s -D - -o /dev/null -X POST "$BASE/mcp" \
   -H 'Content-Type: application/json' -H 'Accept: application/json, text/event-stream' \
-  -H 'X-C2C-Via-Proxy: 1' -d "$MCP_INIT" | grep -i 'www-authenticate' | grep -c 'resource_metadata=')"
+  -H 'X-C2C-Via-Proxy: 1' -d "$MCP_TOOLS_CALL" | grep -i 'www-authenticate' | grep -c 'resource_metadata=')"
 check "WWW-Authenticate carries resource_metadata" "$WWWAUTH" "1"
+
+echo "== 11b. discovery methods stay anonymous even via the proxy marker, no token needed =="
+DISCOVERY_NO_TOKEN="$(curl -s -o /dev/null -w '%{http_code}' -X POST "$BASE/mcp" \
+  -H 'Content-Type: application/json' -H 'Accept: application/json, text/event-stream' \
+  -H 'X-C2C-Via-Proxy: 1' -d "$MCP_INIT")"
+check "unauthenticated proxied initialize succeeds (200)" "$DISCOVERY_NO_TOKEN" "200"
+TOOLS_LIST_NO_TOKEN="$(curl -s -o /dev/null -w '%{http_code}' -X POST "$BASE/mcp" \
+  -H 'Content-Type: application/json' -H 'Accept: application/json, text/event-stream' \
+  -H 'X-C2C-Via-Proxy: 1' -d '{"jsonrpc":"2.0","id":1,"method":"tools/list","params":{}}')"
+check "unauthenticated proxied tools/list succeeds (200)" "$TOOLS_LIST_NO_TOKEN" "200"
 
 echo "== 12. MCP call via proxy marker WITH valid token -> 200 =="
 AUTHED="$(curl -s -o /dev/null -w '%{http_code}' -X POST "$BASE/mcp" \
@@ -179,11 +192,11 @@ for _ in $(seq 1 50); do
 done
 SPOOFED="$(curl -s -o /dev/null -w '%{http_code}' -X POST "http://127.0.0.1:8798/mcp" \
   -H 'Content-Type: application/json' -H 'Accept: application/json, text/event-stream' \
-  -H 'X-C2C-Via-Proxy: 0' -d "$MCP_INIT")"
+  -H 'X-C2C-Via-Proxy: 0' -d "$MCP_TOOLS_CALL")"
 check "forged local-looking header via real proxy still challenged (401)" "$SPOOFED" "401"
 THROUGH_PROXY_AUTHED="$(curl -s -o /dev/null -w '%{http_code}' -X POST "http://127.0.0.1:8798/mcp" \
   -H 'Content-Type: application/json' -H 'Accept: application/json, text/event-stream' \
-  -H "Authorization: Bearer $ACCESS_TOKEN" -d "$MCP_INIT")"
+  -H "Authorization: Bearer $ACCESS_TOKEN" -d "$MCP_TOOLS_CALL")"
 check "valid token through real proxy succeeds (200)" "$THROUGH_PROXY_AUTHED" "200"
 
 echo
