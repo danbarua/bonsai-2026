@@ -220,7 +220,17 @@ gcp-*-key.json
 
 
 # Claude Code <-> Claude Desktop filesystem mailbox: a local, personal
-# experiment (see .claude/skills/c2c/SKILL.md), not shared project
-# tooling. The mailbox directory holds transient per-session messages.
+# experiment (see .claude/skills/c2c/SKILL.md). The c2c-mcp server that
+# reads/writes it (.claude/claude2claude/c2c-mcp/) IS real project
+# tooling and stays tracked -- only the mailbox message directories are
+# ignored here, not the whole claude2claude/ tree.
 .claude/skills/c2c/
-.claude/claude2claude/
+.claude/claude2claude/inbox/
+.claude/claude2claude/outbox/
+.claude/claude2claude/archive/
+.claude/claude2gpt/inbox/
+.claude/claude2gpt/outbox/
+.claude/claude2gpt/archive/
+
+# Node.js dependencies (c2c-mcp server)
+node_modules/
