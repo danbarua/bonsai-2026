@@ -45,7 +45,9 @@ echo "== build =="
 ( cd "$PKG_DIR" && npm run build >/dev/null ) || { echo "build failed"; exit 1; }
 
 echo "== start server (BONSAI_PROJECT_ROOT=$TMP_ROOT) =="
+# See test/oauth-flow.sh for why C2C_OAUTH_DATA_DIR is set here too.
 BONSAI_PROJECT_ROOT="$TMP_ROOT" C2C_MCP_PORT="$PORT" C2C_MCP_PUBLIC_URL="$PUBLIC_MCP_URL" \
+  C2C_OAUTH_DATA_DIR="$TMP_ROOT/.oauth-data" \
   node "$PKG_DIR/dist/index.js" > "$TMP_ROOT/server.log" 2>&1 &
 SERVER_PID=$!
 for _ in $(seq 1 50); do

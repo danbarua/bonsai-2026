@@ -42,7 +42,13 @@ echo "== build =="
 ( cd "$PKG_DIR" && npm run build >/dev/null && npm run build-proxy >/dev/null ) || { echo "build failed"; exit 1; }
 
 echo "== start server (BONSAI_PROJECT_ROOT=$TMP_ROOT) =="
+# C2C_OAUTH_DATA_DIR keeps the signing key + persisted DCR client registry
+# in this throwaway root too -- without it, this test would read and
+# overwrite the real deployment's actual OAuth state (same package
+# directory either way, since the path is derived from the running script's
+# own location, not from BONSAI_PROJECT_ROOT).
 BONSAI_PROJECT_ROOT="$TMP_ROOT" C2C_MCP_PORT="$PORT" C2C_MCP_PUBLIC_URL="$PUBLIC_MCP_URL" \
+  C2C_OAUTH_DATA_DIR="$TMP_ROOT/.oauth-data" \
   node "$PKG_DIR/dist/index.js" > "$TMP_ROOT/server.log" 2>&1 &
 SERVER_PID=$!
 for _ in $(seq 1 50); do

@@ -99,8 +99,15 @@ app.get("/health", (_req, res) => {
 
 let requireBearerAuth: express.RequestHandler = (_req, _res, next) => next();
 if (PUBLIC_MCP_URL) {
+  // Overridable so tests (and any throwaway server) never share the real
+  // signing key / persisted DCR client registry with a live deployment --
+  // both live in this same directory, keyed off the running script's own
+  // location by default, same as BONSAI_PROJECT_ROOT's role for mailbox
+  // data. Without this, a test run against the real dist/index.js would
+  // read and overwrite the live server's actual OAuth state.
   const here = path.dirname(fileURLToPath(import.meta.url));
-  const signingKeyPath = path.join(here, "..", ".data", "oauth-signing-key");
+  const dataDir = process.env.C2C_OAUTH_DATA_DIR ?? path.join(here, "..", ".data");
+  const signingKeyPath = path.join(dataDir, "oauth-signing-key");
   ({ requireBearerAuth } = mountOAuth(app, { publicMcpUrl: PUBLIC_MCP_URL, signingKeyPath }));
   console.log(`OAuth enabled for public traffic, resource=${PUBLIC_MCP_URL}`);
 } else {
