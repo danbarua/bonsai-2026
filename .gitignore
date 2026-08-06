@@ -197,3 +197,18 @@ datasets/*/
 # disk, not tracked (this project has no shared .claude/settings.json).
 .claude/settings.local.json
 experiments/stage2a_dynamics_classification/scratch/
+
+# Claude<->Claude / Claude<->ChatGPT filesystem mailboxes: the message
+# files themselves are transient per-session content, not tracked. The
+# c2c-mcp server that reads/writes them (.claude/claude2claude/c2c-mcp/)
+# IS real project tooling and stays tracked -- only the mailbox message
+# directories are ignored here, not the whole claude2claude/ tree.
+.claude/claude2claude/inbox/
+.claude/claude2claude/outbox/
+.claude/claude2claude/archive/
+.claude/claude2gpt/inbox/
+.claude/claude2gpt/outbox/
+.claude/claude2gpt/archive/
+
+# Node.js dependencies (c2c-mcp server)
+node_modules/
