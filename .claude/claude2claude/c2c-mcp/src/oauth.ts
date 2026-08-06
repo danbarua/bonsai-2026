@@ -53,6 +53,29 @@ function loadOrCreateSigningKey(keyPath: string): Buffer {
   }
 }
 
+// Persisted for the same reason tokens are (see signToken above), but
+// discovered as a real gap rather than anticipated: registered DCR clients
+// were originally in-memory only on the assumption that a client re-runs
+// POST /register on every reconnect, so losing the registry across a
+// restart would be self-healing. ChatGPT's connector doesn't do that -- it
+// caches the client_id from an earlier registration and reuses it directly
+// against /authorize, so a server restart orphaned a real, already-
+// registered client and broke reconnection with "Invalid authorization
+// request." Small JSON file, same directory as the signing key.
+function loadClients(clientsPath: string): Map<string, ClientRecord> {
+  try {
+    const raw = JSON.parse(fs.readFileSync(clientsPath, "utf8")) as ClientRecord[];
+    return new Map(raw.map((c) => [c.client_id, c]));
+  } catch {
+    return new Map();
+  }
+}
+
+function saveClients(clientsPath: string, clients: Map<string, ClientRecord>): void {
+  fs.mkdirSync(path.dirname(clientsPath), { recursive: true });
+  fs.writeFileSync(clientsPath, JSON.stringify([...clients.values()], null, 2));
+}
+
 // Stateless tokens (payload + HMAC signature, both base64url) so access
 // and refresh tokens survive a server restart without any persisted
 // store -- the whole point of this server is keeping a long-running
@@ -123,10 +146,12 @@ export function mountOAuth(app: Express, opts: MountOAuthOptions): { requireBear
   const issuer = `${resourceUrl.protocol}//${resourceUrl.host}`;
   const protectedResourceMetadataUrl = `${issuer}/.well-known/oauth-protected-resource`;
 
-  // In-memory only, deliberately: a restart forces re-registration/re-consent
-  // for NEW authorizations, but existing access/refresh tokens (self-verifying
-  // via HMAC) keep working regardless -- see signToken/verifyToken above.
-  const clients = new Map<string, ClientRecord>();
+  // Persisted (see loadClients/saveClients above) -- a restart must not
+  // orphan an already-registered client. Auth codes stay in-memory: a
+  // restart inside their 60s TTL is an acceptable edge case, and losing one
+  // is self-healing (the client just retries /authorize from scratch).
+  const clientsPath = path.join(path.dirname(opts.signingKeyPath), "oauth-clients.json");
+  const clients = loadClients(clientsPath);
   const authCodes = new Map<string, AuthCodeRecord>();
 
   const servePrm = (_req: Request, res: Response) => {
@@ -167,6 +192,7 @@ export function mountOAuth(app: Express, opts: MountOAuthOptions): { requireBear
     }
     const clientId = randomId();
     clients.set(clientId, { client_id: clientId, redirect_uris: redirectUris });
+    saveClients(clientsPath, clients);
     res.status(201).json({
       client_id: clientId,
       client_id_issued_at: Math.floor(Date.now() / 1000),
