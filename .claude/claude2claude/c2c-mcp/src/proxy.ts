@@ -15,6 +15,12 @@ const LISTEN_PORT = Number(process.env.C2C_PROXY_LISTEN_PORT ?? 80);
 const TARGET_HOST = process.env.C2C_PROXY_TARGET_HOST ?? "127.0.0.1";
 const TARGET_PORT = Number(process.env.C2C_PROXY_TARGET_PORT ?? 8765);
 
+// Must match PROXY_MARKER_HEADER in src/oauth.ts. Duplicated as a literal
+// (not imported) so this file keeps its zero-dependency, standalone build --
+// importing oauth.ts would pull in express's types for a build that's meant
+// to run on the VM with nothing but node:http.
+const PROXY_MARKER_HEADER = "x-c2c-via-proxy";
+
 // Hop-by-hop headers (RFC 7230 6.1) never get forwarded across a proxy leg.
 // content-length/transfer-encoding are dropped too, deliberately: both legs
 // re-derive their own framing from how bytes are actually written, which is
@@ -48,6 +54,12 @@ const server = http.createServer((clientReq, clientRes) => {
   // whatever public host/IP the client actually connected to -- otherwise
   // every request gets rejected 403 by the backend, not proxied at all.
   headers.host = `${TARGET_HOST}:${TARGET_PORT}`;
+  // Tell the backend this request came from the public internet, not a
+  // same-machine caller -- that's what gates the OAuth check on /mcp. Every
+  // request through this proxy gets it set to "1" regardless of what the
+  // client sent, so a public caller can't spoof "I'm local" by omitting or
+  // forging their own copy of this header.
+  headers[PROXY_MARKER_HEADER] = "1";
 
   const proxyReq = http.request(
     {

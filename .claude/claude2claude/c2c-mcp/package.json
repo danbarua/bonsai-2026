@@ -6,7 +6,7 @@
     "build": "tsc -p tsconfig.json",
     "start": "node dist/index.js",
     "dev": "tsx src/index.ts",
-    "build-proxy": "tsc -p tsconfig.proxy.json"
+    "build-proxy": "tsc -p tsconfig.proxy.json && mv dist-proxy/proxy.js dist-proxy/proxy.cjs"
   },
   "keywords": [],
   "type": "module",
