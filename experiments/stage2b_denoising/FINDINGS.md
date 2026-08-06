@@ -277,8 +277,181 @@ not silently superseded.
 
 ## Next step
 
-Feasibility ladder stage 2 (5,000-image development subset), per
-`DESIGN.md`'s locked ladder -- see that document for what stage 2 adds
-(runtime and feature-validity measurement at scale, the condition-number
-diagnostic, the second ridge-equivalence pass, CNN development). Not yet
-started.
+Feasibility ladder stage 2 (5,000-image development subset) -- see
+below.
+
+# Stage 2B: Feasibility Ladder Stage 2
+
+**Status: mechanical validation only, same framing as stage 1.** Its job
+is runtime and feature-validity measurement at 5x scale, the production
+SVD's own condition-number diagnostic, ridge-grid behaviour, the
+ladder's second real-data ridge equivalence gate, and the first CNN
+training against real data. The CNN-vs-identity and in-sample stats
+numbers below are mechanical/development reporting, not a result --
+`DESIGN.md` scopes this stage that way explicitly.
+
+## Scope
+
+5,000 official KMNIST training images, the same nested stratified draw
+stage 1's 1,000 is a prefix of (`SEED=42`) -- checked explicitly (not
+merely trusted from construction) and, further, checked bit-exact
+against stage 1's own cached corruption artifact at the three shared
+prefix rows. Corrupted per the same locked forward process. Topologies
+and staged KMNIST inputs reused directly from stage 1's cached objects,
+not rebuilt or re-staged. Run on a Colab A100 via `run_ladder_stage2.py`,
+same architecture as the stage-1 driver.
+
+## A false start, fixed before any real cost was incurred
+
+The first attempt crashed immediately, at module scope, before `main()`
+ever started: `NameError: name '__file__' is not defined`. A refactor
+that imported `KMNIST_FILES` from `run_ladder_stage1` at module scope
+(to avoid duplicating the dict) relied on `os.path.dirname(os.path.
+abspath(__file__))` to locate it -- which fails under `mighty-colab exec
+-f script.py`: the file's TEXT is transmitted directly into an existing
+IPython kernel cell, not run as a script or imported as a module, so
+`__file__` is never defined there. Past that, `run_ladder_stage1.py`
+does not exist anywhere on the exec'd kernel's filesystem until
+`bootstrap_repo()` clones the repo -- which happens INSIDE `main()`,
+after every module-scope statement has already run. Confirmed against
+the live session list and the bucket before any fix was written: zero
+objects under `stage2b/train/stage2/`, no leaked session -- the crash
+cost provisioning and package-install overhead only.
+
+Fixed by reverting to plain duplication (stage 1's own pattern), with
+two new durable guards added directly from this failure: a static check
+that neither driver references `__file__` anywhere, and a dynamic check
+that execs each driver's actual source into a namespace with no
+`__file__` key, reproducing the real execution model exactly -- which
+the ordinary import-based local verification could not, since Python's
+own import machinery sets `__file__` correctly for a real imported
+module. That gap is exactly how the bug reached a billing A100 uncaught
+by every other local check run beforehand.
+
+## Result: complete, all ten steps, first attempt after the fix
+
+**`STAGE2_OK`.** Commit `a84fac9`. Total wall clock: **1,722.0s (28.7
+minutes)** -- well under the 90-minute budget reserved for it. No
+non-finite features anywhere; the corruption cross-stage spot-check
+matched stage 1's cache bit-exact at all three shared rows.
+
+| step | seconds |
+|---|---:|
+| bootstrap (clone + pip install) | 17.7 |
+| stage_kmnist (download, reused from stage 1) | 8.4 |
+| preflight | 0.0 |
+| corpus | 5.6 |
+| topologies (reused from stage 1) | 1.7 |
+| corruption | 13.1 |
+| corruption diagnostics | 2.5 |
+| **encode (noisy only, diagnostic)** | **1,099.2** |
+| restrict | 0.1 |
+| evolution (4 graphs) | 41.0 |
+| features | 46.8 |
+| ridge (7 conditions, CV + equivalence pass 2) | 305.5 |
+| CNN (3 seeds) | 113.1 |
+| stats smoke | 67.1 |
+
+**Step 6 (evolution)**: all four graphs, **0 failed of 5,000 for every
+graph**, CPU reference cross-check succeeded on all four. **Step 8
+(ridge)**: all seven conditions passed the ladder's SECOND real-data
+equivalence gate, every difference 4+ orders below the 1e-8 tolerance
+(1.2e-14 to 1.1e-12), every alpha selection agreeing between JAX and
+sklearn, no condition at a grid edge. The n-dependent centering
+tolerance held at every condition (see named item 2, below).
+
+## Named items, on their own terms
+
+**(1) Measured encode cost and the stage-3 projection.** **218.28
+ms/image** at 1,200 steps, single-worker, n=5,000 (1,091.4s measured).
+Linearly projected to stage 3's 54,000-image fit side: **11,787s (3.27
+hours)** for encoding alone -- by far the dominant cost in the whole
+pipeline at that scale, and the number that should drive any stage-3
+planning decision about parallelizing or otherwise restructuring this
+step. Not validated at that scale; a linear projection from one
+measurement, stated as such.
+
+**(2) `curr_random` centering margin vs. the amendment's ~0.075
+prediction.** Measured: **`margin_ratio = 0.0807`** (`||mean(X)|| =
+1.804e-10` against tolerance `2.236e-09` at this fold's n=4,000 training
+rows) -- close agreement with the amendment's own derivation, confirmed
+now at real n=5,000 scale rather than only the n=1,000 rung it was
+first measured to hold at. Every other condition's margin sits inside
+0.0009 to 0.081 (`T` and `lattice` tightest, `curr_random` still the
+widest of the seven, consistent with it being the condition the
+amendment's tolerance was specifically set to protect).
+
+**(3) The condition-number table, all seven conditions**, from the
+production SVD's own singular values (`fold_cond`), no second `cond()`
+call:
+
+| condition | mean fold cond(X) | alpha |
+|---|---:|---:|
+| raw_505 | 4.25 | 1000 |
+| raw_784 | 5.34 | 1000 |
+| pre_evolution | 171.0 | 1000 |
+| curr_random | 1.49e6 | 100 |
+| rewired | 1.87e6 | 10 |
+| T | 4.78e6 | 1 |
+| **lattice** | **4.82e8** | 1 |
+
+Recorded plainly, not interpreted: `lattice`'s condition number is
+roughly two orders of magnitude worse than `T`'s, and `T` in turn is
+worse than `curr_random`/`rewired` by a factor of ~3. All seven passed
+the equivalence gate regardless -- the diagnostic is descriptive, not a
+gate, exactly as designed.
+
+**(4) CNN: best seed, best_epoch, val MSE vs. identity.** Best seed
+**0** (`best_epoch=94`, ran the full 100 epochs without early stopping),
+**clipped validation MSE = 0.063678** against the identity baseline's
+**0.199770** on the same locked 6,000-image validation partition -- a
+substantial, consistent margin; all three seeds landed within
+0.0637-0.0642 of each other (seed 1: 0.064229, stopped early at epoch
+63/74; seed 2: 0.064156, stopped early at epoch 81/92). Total CNN
+wall-clock across all three seeds: 99.5s. Labeled explicitly,
+matching the design's own framing: mechanical sanity ("does the CNN
+beat doing nothing on its own validation data"), NON-INFERENTIAL, not a
+locked comparison -- the first CNN training against real data this
+project has ever run.
+
+## Stats smoke (in-sample, non-inferential)
+
+Ran (not skipped): projected at 54.3s from stage 1's own measurement,
+actually took 67.1s -- the linear projection understated real cost by
+about 24%, worth noting as a fact about the projection's own accuracy
+rather than a concern (the decision threshold has 60s of margin below
+stage 1's own measured value, and this rung's real cost still landed
+close to it). Artifact's first line, verbatim, matching stage 1's:
+`SMOKE OF THE MACHINERY ONLY -- IN-SAMPLE, TRAINING-SIDE,
+NON-INFERENTIAL, NOT A RESULT`.
+
+## Stage-3 projections, per pipeline stage (linear, unvalidated)
+
+| stage | measured at n=5,000 | projected at n=54,000 (10.8x) |
+|---|---:|---:|
+| encode | 1,091.4s | 11,787s (3.27h) |
+| evolution | 41.0s | 443.2s (7.4min) |
+| ridge | 305.5s | 3,299.7s (55.0min) |
+| CNN | 99.5s | 1,074.9s (17.9min), basis differs -- see caveat below |
+
+Never one blended rate. The CNN projection is explicitly weaker than the
+others: CNN cost scales with epochs x batches, not simply n, and early
+stopping means the epoch count itself is not fixed by corpus size --
+this row scales wall-clock linearly as a first approximation only, not
+a validated model of CNN training cost at scale.
+
+## Code and artifacts
+
+`run_ladder_stage2.py` (the driver). Tests:
+`tests/test_stage2b_ladder_stage2.py`. Every stage-2 artifact lives in
+the public-read bucket under `stage2b/train/stage2/`; topologies and
+KMNIST inputs are read from `stage2b/train/stage1/` directly (reused,
+not duplicated).
+
+## Next step
+
+Feasibility ladder stage 3 (full 60,000-image training side: 54,000 fit
++ 6,000 locked validation) -- per `DESIGN.md`'s locked ladder. The
+encode-cost projection above (3.27 hours, single-worker, unvalidated at
+scale) is the single number most likely to require a planning decision
+before that stage is attempted. Not yet started.
