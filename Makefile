@@ -497,6 +497,27 @@ stage2b-ladder-stage1:  ## Run Stage 2B ladder stage 1 (n=1,000) on a Colab GPU 
 # does not need them, so its own target is left untouched.
 SESSION_2B_LADDER2 ?= stage2b-ladder2
 
+# Ladder stage 3, PHASE A: encode the 54,000-image fit side HERE, on CPU,
+# and write only the encoded array to GCS. No Colab session is involved
+# and nothing bills.
+#
+# Split out from the GPU phase deliberately. Encoding is the one CPU-bound
+# step in the pipeline; evolution, ridge and the CNN are what actually use
+# the A100. Running the encode inside a provisioned GPU session would leave
+# a metered A100 idle for the majority of the run's wall-clock. Measured,
+# not assumed: this machine encodes ~20x faster in wall-clock than the
+# Colab CPU would single-worker (~3.4x per core, times 9 workers), so
+# stage 3's fit side lands in ~10 minutes here.
+#
+# This does not contradict DESIGN.md's "generate in the cloud" convention
+# -- that constraint's own stated reason is the Colab session UPLOAD
+# limit, which a direct Mac->GCS write never touches. `stage2b-stage-inputs`
+# already writes to the bucket from here on exactly the same transport.
+.PHONY: stage2b-encode-stage3-local
+stage2b-encode-stage3-local:  ## Stage 3 Phase A: encode the fit side locally on CPU, push to GCS (free, no session)
+	cd $(REPO_ROOT) && $(GCS_ENV) \
+		uv run --group gpu python $(STAGE2B_DIR)/encode_stage3_local.py
+
 .PHONY: stage2b-ladder-stage2
 stage2b-ladder-stage2:  ## Run Stage 2B ladder stage 2 (n=5,000, CNN development) on a Colab GPU -- bills while running
 	rc=0; src=0; \

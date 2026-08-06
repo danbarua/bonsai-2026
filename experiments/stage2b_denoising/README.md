@@ -79,8 +79,16 @@ mention here, in the same commit that creates it.
   goes to GCS through `ensure_artifact`, so a dead session resumes having
   lost at most one step.
 - **`stage_kmnist_inputs.py`** — stages the four KMNIST IDX files into the
-  bucket, once, from here. The only Stage 2B upload that goes local → GCS,
-  because `datasets/` is gitignored and so absent from the driver's clone.
+  bucket, once, from here. Local → GCS, because `datasets/` is gitignored
+  and so absent from the driver's clone.
+- **`encode_stage3_local.py`** — stage 3, Phase A: corrupts and encodes the
+  54,000-image fit side on this machine's CPU cores and writes only the
+  encoded 505-dim array to GCS, for the GPU phase to read. Split out from
+  the GPU phase because encoding is the pipeline's one CPU-bound step, and
+  running it inside a provisioned session would leave a metered A100 idle
+  for most of the run. Composes `corrupt_corpus` and
+  `encode_with_final_delta_batch` unchanged — same numerics as both prior
+  rungs, different machine.
 - **`run_ladder_stage2.py`** — the stage-2 driver (n=5,000 development
   subset). Same architecture as stage 1: pinned-commit fetch, every
   artifact via `ensure_artifact`. Reuses stage 1's topologies and staged
