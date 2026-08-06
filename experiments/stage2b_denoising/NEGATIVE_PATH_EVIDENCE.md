@@ -258,7 +258,7 @@ read `exec`'s exit status only.
 | # | demand | status | primary evidence |
 |---|---|---|---|
 | 1 | verification mismatch → nonzero top-level exit | covered | `test_ladder_missing_sentinel_fails_even_on_a_zero_exit`; nonzero-`exec` propagation untested |
-| 2 | missing or corrupted artifact fails, not silently accepted | covered | seven transfer-refusal tests plus `test_an_object_with_no_recorded_digest_is_refused_rather_than_trusted`; `verify_content=False` is a visible opt-out |
+| 2 | missing or corrupted artifact fails, not silently accepted | covered | the transfer-refusal tests plus `test_an_object_with_no_recorded_digest_is_refused_rather_than_trusted`; `verify_content=False` is a visible opt-out |
 | 3 | inner remote failure survives teardown | covered | `test_a_leak_never_masks_the_scientific_verdict` — sole test, one target |
 | 4 | teardown success cannot overwrite a failure verdict | covered | `test_ladder_missing_sentinel_fails_even_on_a_zero_exit` plus both pre-flight refusals |
 | 5 | stale artifacts are refused | **pending** | none — mechanism under construction |
