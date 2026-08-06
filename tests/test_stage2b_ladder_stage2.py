@@ -66,15 +66,16 @@ def driver():
 
 def test_module_scope_imports_without_the_cloud_dependencies():
     """No module-level import may name anything outside the standard
-    library, numpy, and `run_ladder_stage1` -- which is included here
-    specifically because it is ITSELF stdlib+numpy-only at module scope
-    (its own test pins that), so importing its staging constants does not
-    reintroduce a cloud dependency. A hoisted `import jax` would make this
-    file uncollectable."""
+    library and numpy -- not even `run_ladder_stage1`, which was tried and
+    reverted (see `test_kmnist_staging_matches_stage_1s_own_values`):
+    nothing from this repository can be imported at module scope, because
+    the repo does not exist on the exec'd kernel's filesystem until
+    `bootstrap_repo()` clones it inside `main()`. A hoisted `import jax`
+    would make this file uncollectable for the more familiar reason; a
+    hoisted repo-internal import fails for this project-specific one."""
     tree = ast.parse(DRIVER_PATH.read_text(), filename=str(DRIVER_PATH))
     allowed = {"contextlib", "hashlib", "json", "os", "subprocess", "sys",
-               "threading", "time", "traceback", "types", "numpy",
-               "run_ladder_stage1"}
+               "threading", "time", "traceback", "types", "numpy"}
     offenders = []
     for node in tree.body:
         if isinstance(node, ast.Import):
@@ -120,24 +121,59 @@ def test_the_smoke_banner_matches_stage_1s_locked_wording(driver):
 
 # ---- the reuse decisions: KMNIST staging and topologies ----
 
-def test_kmnist_staging_is_imported_from_stage_1_not_redefined(driver):
-    """"KMNIST inputs already staged -- reuse, don't re-stage" enforced as
-    object identity, not merely equal values: a redefined dict could drift
-    from stage 1's without any test catching it until a download 404s on
-    the runtime."""
+def test_kmnist_staging_matches_stage_1s_own_values(driver):
+    """"KMNIST inputs already staged -- reuse, don't re-stage", checked by
+    VALUE, not object identity.
+
+    An earlier version of this file imported these constants from
+    `run_ladder_stage1` at module scope, via a `__file__`-relative
+    `sys.path` insert. That failed on the first real run: `mighty-colab
+    exec -f script` transmits this file's TEXT directly into an existing
+    IPython kernel cell, not as a script or an imported module, so
+    `__file__` is undefined there -- and even past that, `run_ladder_
+    stage1.py` does not exist anywhere on the exec'd kernel's filesystem
+    until `bootstrap_repo()` clones the repo, which happens INSIDE
+    `main()`, after every module-scope statement has already run. Nothing
+    but stdlib+numpy is available at module-import time under this
+    execution model, not even another file from this same repository.
+    Deliberately duplicated now; this test is what keeps the duplicate
+    from silently drifting instead of a shared object."""
     import run_ladder_stage1
-    assert driver.KMNIST_FILES is run_ladder_stage1.KMNIST_FILES
+    assert driver.KMNIST_FILES == run_ladder_stage1.KMNIST_FILES
     assert driver.KMNIST_EXT == run_ladder_stage1.KMNIST_EXT
     assert driver.KMNIST_SUBDIR == run_ladder_stage1.KMNIST_SUBDIR
 
 
-def test_kmnist_staging_stage_is_stage_1s_own_constant(driver):
-    """`KMNIST_STAGING_STAGE` must equal stage 1's `LADDER_STAGE` -- via
-    the import, not a hardcoded literal `1` that could silently stop
-    matching if stage 1's own numbering ever changed."""
+def test_kmnist_staging_stage_matches_stage_1s_own_constant(driver):
     import run_ladder_stage1
     assert driver.KMNIST_STAGING_STAGE == run_ladder_stage1.LADDER_STAGE == 1
-    assert driver.LADDER_STAGE == 2   # stage 2's own, unaffected by the import
+    assert driver.LADDER_STAGE == 2   # stage 2's own, unrelated number
+
+
+def test_no_module_scope_code_references_file_dunder():
+    """The exact bug this file's neighboring tests were rewritten to catch,
+    generalized: ANY module-scope use of `__file__` is unsafe under
+    `mighty-colab exec`, regardless of what it is used for, because the
+    transmitted text is exec'd into an existing kernel cell rather than
+    run as a script or imported as a module. Checked on BOTH drivers --
+    stage 1 never had this bug, and this is what keeps it that way."""
+    import ast as ast_module
+    for driver_path in (DRIVER_PATH, STAGE2B_DIR / "run_ladder_stage1.py"):
+        tree = ast_module.parse(driver_path.read_text(), filename=str(driver_path))
+        offenders = [node for node in ast_module.walk(tree)
+                    if isinstance(node, ast_module.Name) and node.id == "__file__"
+                    # inside a function body is fine -- load_modules()/similar run
+                    # after bootstrap, when __file__ semantics do not matter here
+                    # because nothing in either driver reads ITS OWN __file__ even
+                    # there; this walk is whole-tree, so nested-function uses of
+                    # __file__ would also be flagged, which is intentional -- ANY
+                    # dependency on this driver's own __file__ is a bug, not just
+                    # a module-scope one.
+                    ]
+        assert not offenders, (
+            f"{driver_path.name} references __file__ -- undefined under "
+            f"`mighty-colab exec -f script`, which exec's this file's text into "
+            f"an existing kernel cell rather than running it as a script")
 
 
 def test_topologies_are_reused_from_stage_1s_object_path_not_rebuilt(driver):
@@ -371,3 +407,29 @@ def test_driver_compiles_under_the_projects_interpreter():
     result = subprocess.run([sys.executable, "-m", "py_compile", str(DRIVER_PATH)],
                             capture_output=True, text=True)
     assert result.returncode == 0, result.stderr
+
+
+def test_module_scope_survives_execution_with_no_file_dunder_available():
+    """Reproduces the actual execution model, not an approximation of it:
+    `mighty-colab exec -f script.py` sends this file's TEXT into an
+    existing IPython kernel cell, which is exactly what `compile()` +
+    `exec()` into a fresh namespace with no `__file__` key does. This is
+    the check that would have caught the real failure before it reached a
+    billing A100 -- importing the driver as a normal Python module (every
+    other test in this file does that, via the `driver` fixture) does NOT
+    reproduce it, because Python's own import machinery sets `__file__`
+    correctly for a real imported module. That gap is exactly how the bug
+    passed every other local check here and still crashed on the first
+    real run.
+
+    Confirmed to have teeth: reverting the fix (module-scope
+    `os.path.abspath(__file__)`) reproduces the exact `NameError` this
+    test exists to catch. Run against both drivers -- stage 1 never had
+    this bug, and this is what keeps it that way as both files evolve."""
+    for driver_path in (DRIVER_PATH, STAGE2B_DIR / "run_ladder_stage1.py"):
+        namespace = {"__name__": "not_main"}   # no __file__ key at all
+        try:
+            exec(compile(driver_path.read_text(), "<kernel cell>", "exec"), namespace)
+        except NameError as exc:
+            pytest.fail(f"{driver_path.name}: module scope is not safe to exec "
+                       f"without __file__: {exc}")

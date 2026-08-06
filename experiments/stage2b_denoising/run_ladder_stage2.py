@@ -59,21 +59,15 @@ import contextlib
 
 import numpy as np
 
-_THIS_DIR = os.path.dirname(os.path.abspath(__file__))
-if _THIS_DIR not in sys.path:
-    sys.path.insert(0, _THIS_DIR)
-# `run_ladder_stage1` is itself stdlib+numpy-only at module scope (its own
-# test suite pins that), so importing its staging constants here does not
-# reintroduce a cloud dependency -- the same pattern `stage_kmnist_inputs.py`
-# already uses. One source of truth for what was staged and under which
-# stage number, rather than a second dict that could silently drift from
-# the first.
-from run_ladder_stage1 import (  # noqa: E402
-    KMNIST_EXT, KMNIST_FILES, KMNIST_SUBDIR, LADDER_STAGE as KMNIST_STAGING_STAGE)
-
 # ---- identity and sentinels ----
 DRIVER_FILENAME = "run_ladder_stage2.py"
 LADDER_STAGE = 2
+KMNIST_STAGING_STAGE = 1   # staged once by stage_kmnist_inputs.py under
+                           # stage=1; every later ladder stage downloads
+                           # from THAT object path, never re-stages. Must
+                           # equal run_ladder_stage1.LADDER_STAGE -- checked
+                           # by value in tests/test_stage2b_ladder_stage2.py,
+                           # not imported (see KMNIST_FILES below for why).
 SPLIT = "train"
 OK_SENTINEL = "STAGE2_OK"
 FAIL_SENTINEL = "STAGE2_FAIL"
@@ -82,11 +76,33 @@ FAIL_SENTINEL = "STAGE2_FAIL"
 REPO_URL = "https://github.com/danbarua/bonsai-2026.git"
 CLONE_DIR = "/content/bonsai-2026"
 WORK_DIR = "/content/stage2b_stage2"
+KMNIST_SUBDIR = "datasets/kmnist"
 EXPERIMENT_DIRS = (
     "experiments/stage2b_denoising",
     "experiments/stage2a_dynamics_classification",
     "experiments/stage1d_topology_specificity",
 )
+# Duplicated from run_ladder_stage1.py rather than imported -- deliberately
+# reversed from an earlier version of this file that imported these from
+# run_ladder_stage1 at module scope via a `__file__`-relative sys.path
+# insert. That failed on the FIRST real run: `mighty-colab exec -f script`
+# transmits this file's TEXT directly into an existing IPython kernel cell
+# rather than running it as a script or importing it as a module, so
+# `__file__` is undefined there (confirmed: `NameError: name '__file__' is
+# not defined`, before main() ever started) -- and even with that fixed,
+# run_ladder_stage1.py does not exist anywhere on the exec'd kernel's
+# filesystem until bootstrap_repo() has cloned the repo, which happens
+# INSIDE main(), after every module-scope statement has already run.
+# Nothing but stdlib+numpy is available at module-import time under this
+# execution model, not even another file from this same repository -- the
+# same constraint stage 1's driver was self-contained under from the start.
+KMNIST_FILES = {
+    "train-images-idx3-ubyte": "kmnist_train_images",
+    "train-labels-idx1-ubyte": "kmnist_train_labels",
+    "t10k-images-idx3-ubyte": "kmnist_t10k_images",
+    "t10k-labels-idx1-ubyte": "kmnist_t10k_labels",
+}
+KMNIST_EXT = "idx"
 
 # ---- environment variable names (set by `mighty-colab exec --env K=V`) ----
 ENV_COMMIT = "BONSAI_COMMIT"
