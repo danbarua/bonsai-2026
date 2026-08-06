@@ -5,7 +5,8 @@
   "scripts": {
     "build": "tsc -p tsconfig.json",
     "start": "node dist/index.js",
-    "dev": "tsx src/index.ts"
+    "dev": "tsx src/index.ts",
+    "build-proxy": "tsc -p tsconfig.proxy.json"
   },
   "keywords": [],
   "type": "module",

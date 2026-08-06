@@ -79,5 +79,54 @@ here starts it automatically.
 **Claude Desktop** -- add the same URL as a remote/HTTP MCP server in
 Desktop's connector settings.
 
-**ChatGPT** -- add `http://127.0.0.1:8765/mcp` as a custom MCP
-connector in the app's connector settings.
+**ChatGPT** -- ChatGPT needs a public URL, not `127.0.0.1` -- see
+`src/proxy.ts` below.
+
+## Exposing it publicly: `src/proxy.ts`
+
+`127.0.0.1:8765` is only reachable on the machine the server runs on.
+A client that needs a public URL (ChatGPT's connector settings, for
+one) needs something reachable from the internet in front of it.
+`src/proxy.ts` is a standalone reverse proxy for exactly that: deploy
+it to a cheap cloud VM listening on port 80, and reach back to the
+real c2c-mcp server (still running locally, still bound to
+`127.0.0.1`) over a reverse SSH tunnel:
+
+```
+ChatGPT -> http://<vm>:80 -> [proxy.ts] -> localhost:8765 on the VM
+                                              ^
+                                    reverse SSH tunnel
+                                              v
+                              127.0.0.1:8765 on your machine (real c2c-mcp)
+```
+
+```bash
+# on your machine: keep c2c-mcp's port reachable from the VM
+ssh -R 8765:127.0.0.1:8765 <user>@<vm>
+
+# on the VM: no npm install needed, dist-proxy/proxy.js has zero
+# dependencies outside node:http
+npm run build-proxy                    # -> dist-proxy/proxy.js
+scp dist-proxy/proxy.js <user>@<vm>:
+ssh <user>@<vm> 'sudo node proxy.js'   # sudo (or setcap) for port 80
+```
+
+Env vars (all optional): `C2C_PROXY_LISTEN_HOST` (default `0.0.0.0`),
+`C2C_PROXY_LISTEN_PORT` (default `80`), `C2C_PROXY_TARGET_HOST`
+(default `127.0.0.1`), `C2C_PROXY_TARGET_PORT` (default `8765`).
+
+The proxy rewrites the `Host` header to the target before forwarding
+-- c2c-mcp's DNS-rebinding guard (from `createMcpExpressApp`) checks
+`Host` against `localhost`/`127.0.0.1`/`[::1]`, and would reject every
+request with 403 if the VM's public hostname passed straight through.
+Everything else forwards through unbuffered (no request/response
+buffering, hop-by-hop headers stripped per RFC 7230), which is what
+lets Streamable HTTP's SSE-framed responses come through intact.
+
+**No auth in front of any of this.** The proxy is a dumb pipe and
+c2c-mcp itself doesn't check credentials -- putting the proxy on a
+public VM means anyone who finds the URL can read and write both
+mailboxes. Fine for a low-stakes personal tool; put a reverse-proxy
+auth layer (e.g. an nginx/Caddy basic-auth in front, or an SSH
+allowlist on the VM's firewall) in front of it before relying on this
+for anything sensitive.

@@ -234,3 +234,4 @@ gcp-*-key.json
 
 # Node.js dependencies (c2c-mcp server)
 node_modules/
+.claude/claude2claude/c2c-mcp/dist-proxy/
