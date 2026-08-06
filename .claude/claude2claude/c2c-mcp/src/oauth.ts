@@ -170,19 +170,37 @@ export function mountOAuth(app: Express, opts: MountOAuthOptions): { requireBear
   // document here rather than leave it 404.
   app.get(`/.well-known/oauth-protected-resource${resourceUrl.pathname}`, servePrm);
 
-  app.get("/.well-known/oauth-authorization-server", (_req, res) => {
+  // We're an OAuth 2.1 AS, not a real OpenID Connect provider -- no id_token
+  // is ever issued (response_types_supported below is just "code", no
+  // "openid" scope offered). Served at both the RFC 8414 path and the OIDC
+  // Discovery 1.0 path anyway: found live that a client (ChatGPT's
+  // connector) probes /.well-known/openid-configuration unconditionally as
+  // an early discovery step and aborts hard on 404 without ever falling
+  // back to plain OAuth metadata, even though the MCP spec only requires a
+  // server to serve *one* of the two. subject_types_supported and
+  // id_token_signing_alg_values_supported are included purely because
+  // OpenID Connect Discovery 1.0 lists them as required fields for a
+  // conforming document -- they don't imply we actually support signed ID
+  // tokens; jwks_uri truthfully serves an empty keyset for the same reason.
+  const serveAsMetadata = (_req: Request, res: Response) => {
     res.json({
       issuer,
       authorization_endpoint: `${issuer}/authorize`,
       token_endpoint: `${issuer}/token`,
       registration_endpoint: `${issuer}/register`,
+      jwks_uri: `${issuer}/.well-known/jwks.json`,
       response_types_supported: ["code"],
       grant_types_supported: ["authorization_code", "refresh_token"],
       code_challenge_methods_supported: ["S256"],
+      subject_types_supported: ["public"],
+      id_token_signing_alg_values_supported: ["RS256"],
       // Public clients only (no client_secret) -- DCR never issues one below.
       token_endpoint_auth_methods_supported: ["none"],
     });
-  });
+  };
+  app.get("/.well-known/oauth-authorization-server", serveAsMetadata);
+  app.get("/.well-known/openid-configuration", serveAsMetadata);
+  app.get("/.well-known/jwks.json", (_req, res) => res.json({ keys: [] }));
 
   app.post("/register", (req, res) => {
     const redirectUris: unknown = req.body?.redirect_uris;
