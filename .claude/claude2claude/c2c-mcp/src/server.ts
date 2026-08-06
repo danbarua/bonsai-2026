@@ -1,4 +1,9 @@
 import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
+import {
+  ListPromptsRequestSchema,
+  ListResourceTemplatesRequestSchema,
+  ListResourcesRequestSchema,
+} from "@modelcontextprotocol/sdk/types.js";
 import { z } from "zod";
 import { CHANNELS, readMailbox, sendMessage, type Channel } from "./mailbox.js";
 
@@ -116,12 +121,28 @@ function registerChannelTools(server: McpServer, cfg: ChannelToolConfig): void {
 }
 
 export function createServer(): McpServer {
-  const server = new McpServer({
-    name: "c2c-mcp",
-    version: "0.1.0",
-  });
+  const server = new McpServer(
+    {
+      name: "c2c-mcp",
+      version: "0.1.0",
+    },
+    // Declared even though we have none of either: some MCP clients (found
+    // debugging ChatGPT's Developer Mode connector) call resources/list and
+    // prompts/list unconditionally during discovery, not gated on whether a
+    // server advertised the capability first. Without a handler registered
+    // for a method, the SDK's dispatcher returns a hard JSON-RPC
+    // "Method not found" instead of a valid empty result -- which broke
+    // discovery entirely (no tools were visible, not just resources/prompts).
+    // registerCapabilities merges rather than overwrites, so this coexists
+    // fine with registerTool's own separate "tools" capability registration
+    // below.
+    { capabilities: { resources: {}, prompts: {} } },
+  );
   for (const cfg of CHANNEL_TOOLS) {
     registerChannelTools(server, cfg);
   }
+  server.server.setRequestHandler(ListResourcesRequestSchema, async () => ({ resources: [] }));
+  server.server.setRequestHandler(ListResourceTemplatesRequestSchema, async () => ({ resourceTemplates: [] }));
+  server.server.setRequestHandler(ListPromptsRequestSchema, async () => ({ prompts: [] }));
   return server;
 }

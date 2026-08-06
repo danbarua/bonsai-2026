@@ -29,6 +29,20 @@ import type { Express, NextFunction, Request, Response } from "express";
 // boundary. See requireBearerAuth.
 export const PROXY_MARKER_HEADER = "x-c2c-via-proxy";
 
+// JSON-RPC methods exempt from requireBearerAuth even over the public
+// proxy -- see requireBearerAuth for why. Read-only schema/capability
+// methods only; deliberately excludes tools/call, the only method that
+// actually touches mailbox files.
+const DISCOVERY_METHODS = new Set([
+  "initialize",
+  "notifications/initialized",
+  "ping",
+  "tools/list",
+  "resources/list",
+  "resources/templates/list",
+  "prompts/list",
+]);
+
 const ACCESS_TTL_S = 60 * 60; // 1 hour
 const REFRESH_TTL_S = 60 * 60 * 24 * 30; // 30 days
 const CODE_TTL_MS = 60 * 1000; // 60 seconds, matches Claude's own auth-code lifetime expectations
@@ -51,6 +65,29 @@ function loadOrCreateSigningKey(keyPath: string): Buffer {
     fs.writeFileSync(keyPath, key, { mode: 0o600 });
     return key;
   }
+}
+
+// Persisted for the same reason tokens are (see signToken above), but
+// discovered as a real gap rather than anticipated: registered DCR clients
+// were originally in-memory only on the assumption that a client re-runs
+// POST /register on every reconnect, so losing the registry across a
+// restart would be self-healing. ChatGPT's connector doesn't do that -- it
+// caches the client_id from an earlier registration and reuses it directly
+// against /authorize, so a server restart orphaned a real, already-
+// registered client and broke reconnection with "Invalid authorization
+// request." Small JSON file, same directory as the signing key.
+function loadClients(clientsPath: string): Map<string, ClientRecord> {
+  try {
+    const raw = JSON.parse(fs.readFileSync(clientsPath, "utf8")) as ClientRecord[];
+    return new Map(raw.map((c) => [c.client_id, c]));
+  } catch {
+    return new Map();
+  }
+}
+
+function saveClients(clientsPath: string, clients: Map<string, ClientRecord>): void {
+  fs.mkdirSync(path.dirname(clientsPath), { recursive: true });
+  fs.writeFileSync(clientsPath, JSON.stringify([...clients.values()], null, 2));
 }
 
 // Stateless tokens (payload + HMAC signature, both base64url) so access
@@ -123,32 +160,65 @@ export function mountOAuth(app: Express, opts: MountOAuthOptions): { requireBear
   const issuer = `${resourceUrl.protocol}//${resourceUrl.host}`;
   const protectedResourceMetadataUrl = `${issuer}/.well-known/oauth-protected-resource`;
 
-  // In-memory only, deliberately: a restart forces re-registration/re-consent
-  // for NEW authorizations, but existing access/refresh tokens (self-verifying
-  // via HMAC) keep working regardless -- see signToken/verifyToken above.
-  const clients = new Map<string, ClientRecord>();
+  // Persisted (see loadClients/saveClients above) -- a restart must not
+  // orphan an already-registered client. Auth codes stay in-memory: a
+  // restart inside their 60s TTL is an acceptable edge case, and losing one
+  // is self-healing (the client just retries /authorize from scratch).
+  const clientsPath = path.join(path.dirname(opts.signingKeyPath), "oauth-clients.json");
+  const clients = loadClients(clientsPath);
   const authCodes = new Map<string, AuthCodeRecord>();
 
-  app.get("/.well-known/oauth-protected-resource", (_req, res) => {
+  const servePrm = (_req: Request, res: Response) => {
     res.json({
       resource: opts.publicMcpUrl,
       authorization_servers: [issuer],
     });
-  });
+  };
+  app.get("/.well-known/oauth-protected-resource", servePrm);
+  // Alias for the RFC 9728 resource-specific well-known path convention
+  // (.well-known/oauth-protected-resource/<mcp-path>). Not required for our
+  // own flow -- the WWW-Authenticate header's resource_metadata pointer on
+  // our 401 is what clients are supposed to follow -- but ChatGPT's
+  // connector was observed probing this path too (see logs/err.log from an
+  // earlier session) as a fallback, so it's cheap to serve the same
+  // document here rather than leave it 404.
+  app.get(`/.well-known/oauth-protected-resource${resourceUrl.pathname}`, servePrm);
 
-  app.get("/.well-known/oauth-authorization-server", (_req, res) => {
+  // We're an OAuth 2.1 AS, not a real OpenID Connect provider -- no id_token
+  // is ever issued (response_types_supported below is just "code", no
+  // "openid" scope offered). Served at both the RFC 8414 path and the OIDC
+  // Discovery 1.0 path anyway: found live that a client (ChatGPT's
+  // connector) probes /.well-known/openid-configuration unconditionally as
+  // an early discovery step and aborts hard on 404 without ever falling
+  // back to plain OAuth metadata, even though the MCP spec only requires a
+  // server to serve *one* of the two. subject_types_supported and
+  // id_token_signing_alg_values_supported are included purely because
+  // OpenID Connect Discovery 1.0 lists them as required fields for a
+  // conforming document -- they don't imply we actually support signed ID
+  // tokens; jwks_uri truthfully serves an empty keyset for the same reason.
+  const serveAsMetadata = (_req: Request, res: Response) => {
     res.json({
       issuer,
       authorization_endpoint: `${issuer}/authorize`,
       token_endpoint: `${issuer}/token`,
       registration_endpoint: `${issuer}/register`,
+      jwks_uri: `${issuer}/.well-known/jwks.json`,
       response_types_supported: ["code"],
       grant_types_supported: ["authorization_code", "refresh_token"],
       code_challenge_methods_supported: ["S256"],
+      subject_types_supported: ["public"],
+      id_token_signing_alg_values_supported: ["RS256"],
       // Public clients only (no client_secret) -- DCR never issues one below.
       token_endpoint_auth_methods_supported: ["none"],
+      // RFC 9207: must be true since /authorize now actually emits iss on
+      // its success redirect -- see handleAuthorize. (The validation-failure
+      // path returns a plain 400, not a redirect, so iss doesn't apply there.)
+      authorization_response_iss_parameter_supported: true,
     });
-  });
+  };
+  app.get("/.well-known/oauth-authorization-server", serveAsMetadata);
+  app.get("/.well-known/openid-configuration", serveAsMetadata);
+  app.get("/.well-known/jwks.json", (_req, res) => res.json({ keys: [] }));
 
   app.post("/register", (req, res) => {
     const redirectUris: unknown = req.body?.redirect_uris;
@@ -158,6 +228,7 @@ export function mountOAuth(app: Express, opts: MountOAuthOptions): { requireBear
     }
     const clientId = randomId();
     clients.set(clientId, { client_id: clientId, redirect_uris: redirectUris });
+    saveClients(clientsPath, clients);
     res.status(201).json({
       client_id: clientId,
       client_id_issued_at: Math.floor(Date.now() / 1000),
@@ -233,6 +304,12 @@ ${hidden}
     const redirect = new URL(redirectUri);
     redirect.searchParams.set("code", code);
     if (state !== undefined) redirect.searchParams.set("state", state);
+    // RFC 9207: currently only a spec "SHOULD", but the spec itself expects
+    // this to become a MUST, and clients that already enforce it will
+    // reject a callback missing iss. authorization_response_iss_parameter_supported
+    // is set alongside this in the AS metadata (required by spec once iss
+    // is actually emitted).
+    redirect.searchParams.set("iss", issuer);
     res.redirect(303, redirect.toString());
   }
 
@@ -315,6 +392,21 @@ ${hidden}
     // public proxy gets challenged.
     const viaProxy = req.headers[PROXY_MARKER_HEADER] === "1";
     if (!viaProxy) {
+      next();
+      return;
+    }
+    // Discovery-only methods stay anonymous even over the public proxy.
+    // Found live: ChatGPT's connector pings initialize/tools/list/etc.
+    // before ever attaching a token, attaching Authorization only once a
+    // tool is actually invoked via tools/call -- gating every method
+    // uniformly meant discovery itself 401'd (confirmed in this session's
+    // own logs: "POST /mcp -> HTTP 401 (method: initialize)" and
+    // "(method: resources/list)"), so no tool was ever visible regardless
+    // of whether OAuth itself succeeded. Safe to exempt: these only expose
+    // tool/resource/prompt *schemas*, never mailbox contents -- the actual
+    // read/write happens in tools/call, which stays gated below.
+    const method = typeof req.body?.method === "string" ? req.body.method : undefined;
+    if (method && DISCOVERY_METHODS.has(method)) {
       next();
       return;
     }
