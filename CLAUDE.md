@@ -419,6 +419,30 @@ without reading that document's full findings history first.
     detection power it existed for shown intact at every scale, not
     assumed: the guard must still fire on a genuinely broken input at the
     largest n, or widening it has simply switched it off.
+23. **A ratio gate between two quantities that each decay to a numerical
+    floor measures which one floored first, not the mechanism.** Once
+    either side of a ratio underflows toward zero, a division-by-zero
+    guard (a small absolute floor in the denominator, or an equivalent
+    protection) silently converts what reads as a RATIO test into an
+    ABSOLUTE test against that floor -- and the two sides can cross their
+    own floors at different points, so the ratio swings by orders of
+    magnitude for reasons unrelated to whatever it was meant to measure.
+    Found in Stage 2B's encoder-on-noisy-inputs gate
+    (`stage2b_encoder_gate.py`): at ENCODER_STEPS=600 (a diagnostic step
+    count, not the locked one), clean's median final-Delta had already hit
+    exact float64 zero while noisy's sat at 1.776e-14 -- nine orders below
+    the smallest meaningful measured value (2.177e-07) -- yet
+    `rho = noisy / max(clean, 1e-15)` reported FAIL at rho=17.76. The full
+    trajectory across five step counts (14.98, 169.9, 1.915e4, 17.76, 0.0)
+    was non-monotone for exactly this reason, diagnosed in
+    `diagnose_encoder_gate_failure.py` before being mistaken for evidence
+    the mechanism itself was unstable. The fix is not a bigger floor --
+    that only moves where the same failure recurs -- but a separate
+    absolute-convergence escape: when BOTH quantities are already below a
+    threshold chosen 5+ orders under the smallest meaningful measured
+    value and well above observed numerical dust, the gate passes on that
+    basis, and the ordinary ratio test applies everywhere else. Near a
+    floor, a ratio is the wrong statistic; switch to an absolute one.
 
 # IntelliJ MCP Server Companion
 This project is open in Pycharm IDE (IntelliJ IDEA platform). 

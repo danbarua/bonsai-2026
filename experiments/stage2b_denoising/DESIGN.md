@@ -134,12 +134,95 @@ PASS iff rho <= 10
 
 The `1e-15` floor is numerical protection, not a scientific threshold.
 The 10x multiplier is arbitrary but pre-registered, locked before any
-data exists. **Automatic failures, regardless of rho**: any non-finite
-encoded phase; any non-finite final-Delta. Both medians recorded in the
-stage-1 log regardless of outcome; 95th-percentile final-Delta (noisy
-and clean) logged alongside -- visibility for a passing-median-but-
-exploding-tail pattern, explicitly not a second gate. Exceedance halts
-the stage pending investigation.
+data exists. **Automatic failures, regardless of rho or the absolute-
+convergence escape below**: any non-finite encoded phase; any non-finite
+final-Delta. Both medians recorded in the stage-1 log regardless of
+outcome; 95th-percentile final-Delta (noisy and clean) logged alongside
+-- visibility for a passing-median-but-exploding-tail pattern, explicitly
+not a second gate. Exceedance halts the stage pending investigation.
+
+**Post-lock amendment (2026-08-06, after feasibility stage 1's first real
+run): ENCODER_STEPS raised 150 -> 1200, and the gate formula gains an
+absolute-convergence escape.** The gate's first execution on real,
+majority-censored KMNIST FAILED honestly, as designed: rho=169.851
+against the threshold of 10 (median final-Delta clean 2.177e-07, noisy
+3.698e-05; zero non-finite values anywhere -- a clean ratio failure, not
+a numerical blow-up). Investigated in
+`experiments/stage2b_denoising/diagnose_encoder_gate_failure.py`
+(diagnostic-only, no locked pipeline code touched by it), which
+reconstructs the exact stage-1 corpus and corruption locally and verifies
+that reconstruction bit-for-bit against the failed run's own reported
+identity-baseline MSE before trusting anything computed from it
+(confirmed exact, relative diff 0.000e+00).
+
+Two measurements, pre-committed before either was run. (1) A convergence
+curve across five step counts (75, 150, 300, 600, 1200): noisy final-
+Delta decays geometrically all the way to EXACT float64 zero -- median
+AND p95, every one of 1,000 images -- by 1,200 steps, the same fixed
+point clean reaches. No floor above a meaningful scale exists; the
+encoder converges on censored inputs, it is simply slower to. (2) Per-
+image state drift from 150 to 600 steps (noisy) against the typical
+between-image circular distance at 150 steps: median ratio 4e-4 -- the
+phase field has, for all practical purposes, stopped moving relative to
+the scale that distinguishes one image from another long before the
+Delta metric says so. Both measurements independently support the same
+reading: genuine, if slow, convergence, not a qualitatively different
+regime on noisy inputs.
+
+**A second, independent defect surfaced in the same investigation: the
+ratio formula is unstable near either series' own numerical floor.** At
+steps=600, clean's median had already hit exact 0.0 while noisy's sat at
+1.776e-14 -- nine orders below the smallest meaningful final-Delta
+measured anywhere (2.177e-07) -- yet the gate reported FAIL at rho=17.76,
+because `max(0.0, 1e-15)` silently turned a RATIO gate into an ABSOLUTE
+test against the 1e-15 floor. The full rho trajectory across the five
+step counts (14.98, 169.9, 1.915e4, 17.76, 0.0) is non-monotone for
+exactly this reason: it tracks which series crossed its own float64
+floor first, not whether the mechanism converged. A threshold sitting
+inside that crossover band is fragile by construction, independent of
+where ENCODER_STEPS ends up.
+
+**Fix, both parts disclosed together:**
+
+```
+rho = median(Delta_noisy) / max(median(Delta_clean), 1e-15)
+PASS iff rho <= 10 OR (median(Delta_clean) < 1e-12 AND median(Delta_noisy) < 1e-12)
+```
+
+`ABS_CONV_EPS = 1e-12` follows the same margin logic as `RHO_THRESHOLD`
+and `MEDIAN_FLOOR`: 5+ orders below the smallest meaningful measured
+Delta (2.177e-07) and well above observed float64 dust (1e-14 to 1e-16),
+so it cannot fire on a genuinely still-converging signal, only on values
+already indistinguishable from numerical noise. It requires BOTH medians
+below it, not either -- a lopsided case (one series converged, the other
+still measurably moving) falls through to the ordinary rho test on its
+own merits.
+
+**The decision rule that selected S*=1200 is stated precisely because an
+earlier, looser version of it was caught before being applied.** "Some
+S* brings noisy final-Delta within 10x of clean-AT-150" is satisfied as
+early as S*=300 -- which then fails its own re-run at rho=1.915e4,
+because the real gate compares same-step (noisy(S*) vs. clean(S*)), not
+against a stale reference from a different step count. The corrected
+rule is same-step, both series required to have genuinely converged, and
+it is **verdict-invariant at the chosen operating point**: S*=1200 passes
+under either the original (flawed) reading or the corrected one, so the
+correction is not what selected this outcome -- both readings agree here.
+1200 is also the only step count in the five-point scan that passes
+ROBUSTLY (both medians and both p95s exactly 0.0, maximum possible
+margin) rather than sitting near the fragile crossover band a smaller,
+untested S* might land in; no finer scan between 600 and 1200 was run --
+encoder cost scales with steps, and robustness of the operating point was
+judged worth more than shaving minutes off it. Revisit as its own
+disclosed decision if measured full-scale cost ever makes that trade
+different.
+
+Every other stage-1 artifact (corpus, topologies, corruption, corruption
+diagnostics) is encoder-independent and unaffected; only the encoder-gate
+step recomputes. Its GCS object name carries the step count
+(`encoder_gate_s{steps}.npz`), so the 150-step FAIL artifact remains in
+the bucket, untouched, as the historical record of the first real run --
+not deleted, not silently reused under stale semantics.
 
 ## Foreground mask
 
@@ -372,7 +455,7 @@ during selection.
 | stage                 | shape                          | where         | working-out |
 |-----------------------|--------------------------------|---------------|-------------|
 | Corruption generation | 70k x 784 Gaussians            | CPU           | ~55M draws, vectorized numpy, <2s |
-| Encoding              | 70k x 150-iter local update    | CPU reference | ~4.6ms/image measured (2A) => ~5-6 min parallelized; gated by measured throughput; any port verified against reference first |
+| Encoding              | 70k x 1200-iter local update   | CPU reference | ~4.6ms/image at 150 iters measured (2A); iteration count raised 150->1200 (see "Encoder-on-noisy-inputs gate" amendment) -- full-scale throughput at 1200 iters not yet measured, gated by that measurement before a firm estimate is stated; any port verified against reference first |
 | Evolution             | 70k x 4 topologies             | GPU           | verified JAX (`evolve_on_graph_jax.py`), ~0.67ms/img/topology batched => ~3-4 min |
 | Ridge                 | 42 SVDs (35 fold-level + 7 final refits, ~48-60k x 1008) | GPU | ~0.1 TFLOP each; seconds on A100, ~1 min each demonstrably viable on CPU |
 | CNN                   | 9,857 params                   | GPU           | standard |
@@ -454,3 +537,14 @@ Does not revisit Stage 2A's open items (#9, #10, #11).
 - Post-lock amendment, computational strategy: Colab-notebook
   final-deliverable wording removed as an implied task; delivery format
   deferred, Colab/GCP a compute runtime.
+- Post-lock amendment, after feasibility stage 1's honest FAIL
+  (rho=169.851 at ENCODER_STEPS=150): raised to 1200, diagnosed by
+  `diagnose_encoder_gate_failure.py` as genuine slow convergence to the
+  same float64 fixed point, not a floor; gate formula gains an
+  absolute-convergence escape (`ABS_CONV_EPS=1e-12`) after the same
+  diagnostic exposed the ratio formula reading numerical dust as a real
+  failure at steps=600; the decision rule that selected S*=1200 is
+  stated as verdict-invariant under its own earlier, corrected defect,
+  disclosed rather than silently fixed; encoder-gate artifact naming
+  carries the step count so the 150-step FAIL remains in the bucket as
+  history.

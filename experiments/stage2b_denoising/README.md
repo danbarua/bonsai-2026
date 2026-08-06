@@ -32,11 +32,21 @@ mention here, in the same commit that creates it.
 - **`stage2b_corruption.py`** — the locked forward corruption
   (`SHA256(split:index:42)` → PCG64 → one realization per image),
   clipping, clip-rate diagnostics against the design's analytical
-  censoring table, and the rescaled-identity descriptive baseline.
+  censoring table, the rescaled-identity descriptive baseline, and
+  `clip_rate_agreement` — empirical censoring rates against the
+  analytical profile's prediction for a given corpus, with the exact
+  binomial Monte Carlo tolerance (`SE = sqrt(sum p_i(1-p_i))/N`, default
+  5σ); diagnostic, gates nothing.
 - **`stage2b_encoder_gate.py`** — the encoder-on-noisy-inputs gate:
   final-Δ per image for clean and noisy encodings,
-  `rho = median_noisy / max(median_clean, 1e-15)`, PASS iff `rho <= 10`, with non-finite
-  values as automatic failures regardless of rho.
+  `rho = median_noisy / max(median_clean, 1e-15)`, PASS iff `rho <= 10`
+  OR both medians are already below the absolute-convergence floor
+  (`ABS_CONV_EPS=1e-12` — a ratio between two quantities each at
+  numerical dust measures which one underflowed first, not the
+  mechanism), with non-finite values as automatic failures regardless of
+  either. `ENCODER_STEPS=1200` (raised from 150 after the gate's first
+  real FAIL on noisy KMNIST — see `DESIGN.md`'s "Encoder-on-noisy-inputs
+  gate" amendment and `diagnose_encoder_gate_failure.py`).
 - **`stage2b_ridge.py`** — the multi-output ridge readout. Intercept-aware
   JAX SVD (one thin decomposition per fold, all nine alphas reused from
   it), sklearn `Ridge(solver="svd")` retained as the verification
@@ -71,6 +81,18 @@ mention here, in the same commit that creates it.
 - **`stage_kmnist_inputs.py`** — stages the four KMNIST IDX files into the
   bucket, once, from here. The only Stage 2B upload that goes local → GCS,
   because `datasets/` is gitignored and so absent from the driver's clone.
+
+**Diagnostics** (not part of the locked pipeline; convention of Stage
+2A's `diagnose_*.py` scripts — investigate, change nothing themselves):
+
+- **`diagnose_encoder_gate_failure.py`** — investigated feasibility
+  stage 1's first encoder-gate FAIL (rho=169.851 at ENCODER_STEPS=150).
+  Runs entirely on CPU, locally — `_local_converged_phases` has no
+  JAX/GPU dependency, so this bills nothing. Regenerates the exact
+  stage-1 corpus and verifies it bit-for-bit against the failed cloud
+  run's own reported numbers before trusting anything computed from it.
+  Its findings are now `DESIGN.md`'s "Encoder-on-noisy-inputs gate"
+  amendment.
 
 **Cloud-side and manual scripts:**
 

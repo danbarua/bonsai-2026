@@ -194,6 +194,82 @@ def test_gate_both_medians_zero_gives_rho_zero_and_passes():
     result = gate.evaluate_rho_gate(np.zeros(20), np.zeros(20))
     assert result["rho"] == 0.0
     assert result["passed"] is True
+    assert result["absolute_convergence"] is True   # both under eps too, not just rho<=10
+
+
+# ---- the absolute-convergence escape (post-lock amendment, 2026-08-06) ----
+
+def test_absolute_convergence_escape_passes_a_high_rho_when_both_medians_are_dust():
+    """The exact defect the escape exists for: a ratio between two
+    quantities that have each decayed below the numerical floor measures
+    which one underflowed first, not the mechanism. Both medians here are
+    5+ orders below ABS_CONV_EPS; rho alone would be a clear FAIL."""
+    clean = np.full(50, 1e-14)
+    noisy = np.full(50, 5e-13)     # rho = 50, would fail on its own
+    result = gate.evaluate_rho_gate(clean, noisy)
+    assert result["rho"] > gate.RHO_THRESHOLD
+    assert result["absolute_convergence"] is True
+    assert result["passed"] is True
+
+
+def test_absolute_convergence_escape_requires_both_sides_not_either():
+    """A lopsided case -- one series genuinely converged, the other still
+    measurably moving -- must not qualify. Falls through to the ordinary
+    rho test on its own merits."""
+    clean = np.full(50, 1e-14)           # well under eps
+    noisy = np.full(50, 1e-6)            # NOT under eps, and rho is huge
+    result = gate.evaluate_rho_gate(clean, noisy)
+    assert result["absolute_convergence"] is False
+    assert result["passed"] is False
+    assert any("threshold" in r for r in result["failure_reasons"])
+
+
+def test_absolute_convergence_escape_does_not_override_automatic_failure():
+    """Non-finite auto-fail stays unconditional -- the escape must not
+    create a new way around it.
+
+    Uses a non-finite ENCODED PHASE, not a non-finite delta: a NaN delta
+    would poison `np.median` (NaN comparisons are always False), making
+    `absolute_convergence` False for an unrelated reason and proving
+    nothing about whether the escape specifically respects automatic
+    failure. A non-finite phase trips automatic_failure independently,
+    leaving both medians genuinely finite and below eps."""
+    clean = np.full(50, 1e-14)
+    noisy = np.full(50, 1e-14)
+    thetas_noisy = np.zeros((50, 10))
+    thetas_noisy[3, 2] = np.nan
+    result = gate.evaluate_rho_gate(clean, noisy, thetas_noisy=thetas_noisy)
+    assert result["absolute_convergence"] is True    # the escape condition genuinely fires
+    assert result["automatic_failure"] is True
+    assert result["passed"] is False
+
+
+def test_absolute_convergence_escape_boundary_is_exclusive():
+    """Values exactly AT abs_conv_eps must not qualify -- '<', not '<='.
+
+    Both medians pinned exactly at eps: a test with only one side at the
+    boundary and the other clearly away from it can't distinguish '<'
+    from '<=' at all, since the far side already fails either reading."""
+    eps = gate.ABS_CONV_EPS
+    result = gate.evaluate_rho_gate(np.full(20, eps), np.full(20, eps))
+    assert result["absolute_convergence"] is False
+
+
+def test_absolute_convergence_escape_reproduces_the_s600_diagnostic_anomaly():
+    """Regression test, pinned to the exact numbers that motivated this
+    amendment: `diagnose_encoder_gate_failure.py`'s steps=600 row measured
+    median_clean=0.0 (exact float64 zero) and median_noisy=1.776357e-14,
+    which the OLD gate reported as FAIL at rho=17.76 -- numerical dust
+    read as a real failure. Confirms the fix actually changes the verdict
+    on the real anomaly, not just on synthetic values chosen to exercise
+    the new branch."""
+    clean = np.zeros(1000)
+    noisy = np.full(1000, 1.776357e-14)
+    result = gate.evaluate_rho_gate(clean, noisy)
+    assert result["rho"] == pytest.approx(17.76, abs=0.01)   # the old FAIL verdict's own number
+    assert result["rho"] > gate.RHO_THRESHOLD                # still true: rho alone still fails
+    assert result["absolute_convergence"] is True             # the escape is what saves it
+    assert result["passed"] is True
 
 
 def test_gate_automatic_failure_on_non_finite_final_delta_despite_small_rho():
@@ -244,7 +320,8 @@ def test_gate_records_all_required_quantities_even_when_failing():
 def test_gate_locked_constants():
     assert gate.RHO_THRESHOLD == 10.0
     assert gate.MEDIAN_FLOOR == 1e-15
-    assert gate.ENCODER_STEPS == 150
+    assert gate.ENCODER_STEPS == 1200      # raised 2026-08-06 from 150
+    assert gate.ABS_CONV_EPS == 1e-12
 
 
 def test_gate_rejects_mismatched_shapes():
@@ -273,28 +350,50 @@ def test_run_encoder_gate_end_to_end_on_synthetic_images():
     assert "rho" in gate.format_gate_log(result)
 
 
-def test_run_encoder_gate_uses_the_production_encode_path():
-    """The phases the gate inspects must be exactly what
-    `stage2a_core.encode_and_restrict` produces -- not a parallel
-    encoding written for the diagnostic."""
-    from stage2a_core import encode_and_restrict
+def test_run_encoder_gate_uses_the_production_encoder_at_its_own_step_count():
+    """The phases the gate inspects must be exactly what a fresh,
+    unmodified call to `_local_converged_phases` produces AT THE GATE'S
+    OWN STEP COUNT -- not `stage2a_core.encode_and_restrict`, which has no
+    `steps` parameter of its own and is hardwired to a different, unrelated
+    convention (150, Stage 2A's own, load-bearing for ~14 of its own
+    already-verified pipeline files).
+
+    This used to be checked against `encode_and_restrict` directly, which
+    passed only because `ENCODER_STEPS` also happened to be 150 at the
+    time -- an asymmetry the module's own `_encode_one` had (theta frozen
+    at 150 regardless of the requested `steps`; only final-Delta reflected
+    it), invisible until `ENCODER_STEPS` actually diverged from 150
+    (2026-08-06). Fixed at the source, not just re-anchored here: this
+    test would have kept silently passing against the wrong oracle
+    otherwise, exactly the class of bug CLAUDE.md principle 16 is about."""
     rng = np.random.default_rng(6)
     images = rng.uniform(0, 1, (2, 28, 28))
     active = np.array([0, 5, 100, 783])
     result = gate.run_encoder_gate(images, images, active)
     for i, img in enumerate(images):
-        np.testing.assert_array_equal(result["thetas_clean"][i],
-                                       encode_and_restrict(img, active))
+        expected = _local_converged_phases(
+            img, steps=gate.ENCODER_STEPS, seed=gate.ENCODER_SEED).flatten()[active]
+        np.testing.assert_array_equal(result["thetas_clean"][i], expected)
 
 
 def test_run_encoder_gate_identical_inputs_give_rho_exactly_one():
     """Feeding the same images as both "clean" and "noisy" must give
     rho = 1 exactly -- the degenerate control that would catch the two
-    arms being swapped, mis-seeded, or silently reusing one encode."""
+    arms being swapped, mis-seeded, or silently reusing one encode.
+
+    Pinned at a small, explicit step count rather than the module default:
+    at ENCODER_STEPS=1200 these random images converge final-Delta to
+    EXACT float64 zero on both arms (median AND p95), and
+    0 / max(0, floor) = 0, not 1 -- a genuine property of the absolute-
+    convergence regime this same amendment introduced (see the module
+    docstring), not a bug in this check. A small step count keeps the
+    median comfortably away from that floor so rho stays a meaningfully
+    computed ratio, independent of whatever ENCODER_STEPS happens to be."""
     rng = np.random.default_rng(7)
     images = rng.uniform(0, 1, (4, 28, 28))
-    result = gate.run_encoder_gate(images, images, _ALL_784)
+    result = gate.run_encoder_gate(images, images, _ALL_784, steps=10)
     np.testing.assert_array_equal(result["delta_clean"], result["delta_noisy"])
+    assert result["median_delta_clean"] > 0.0     # otherwise this test proves nothing
     assert result["rho"] == pytest.approx(1.0)
     assert result["passed"] is True
 

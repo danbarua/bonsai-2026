@@ -9,15 +9,46 @@ phase update (final-Delta) is recorded for the clean and the noisy
 version separately, and:
 
     rho = median(Delta_noisy) / max(median(Delta_clean), 1e-15)
-    PASS iff rho <= 10
+    PASS iff rho <= 10 OR (median_clean < ABS_CONV_EPS AND median_noisy < ABS_CONV_EPS)
 
 The 1e-15 floor is numerical protection, not a scientific threshold. The
 10x multiplier is arbitrary but pre-registered. **Automatic failures,
-regardless of rho**: any non-finite encoded phase; any non-finite
-final-Delta. Both medians and both 95th-percentile final-Deltas are
-recorded regardless of outcome -- the 95th percentile gives visibility
-into a passing-median-but-exploding-tail pattern and is explicitly NOT a
-second gate.
+regardless of rho or the absolute-convergence escape**: any non-finite
+encoded phase; any non-finite final-Delta. Both medians and both
+95th-percentile final-Deltas are recorded regardless of outcome -- the
+95th percentile gives visibility into a passing-median-but-exploding-tail
+pattern and is explicitly NOT a second gate.
+
+## The absolute-convergence escape (post-lock amendment)
+
+At ENCODER_STEPS=150, the gate's first real run on noisy KMNIST FAILED at
+rho=169.851 -- diagnosed in `diagnose_encoder_gate_failure.py` as genuine
+slow convergence, not an irreducible floor: both clean and noisy
+final-Delta decay geometrically all the way to exact float64 zero (median
+AND p95, all 1,000 images) by 1,200 steps. ENCODER_STEPS was raised to
+1200 uniformly (clean and noisy identically, every encoding site) as a
+result.
+
+That diagnostic surfaced a second, independent defect the ratio formula
+has near either series' numerical floor: at steps=600, clean's median had
+already hit exact 0.0 while noisy's sat at 1.776e-14 -- nine orders of
+magnitude below the smallest meaningful final-Delta measured anywhere
+(2.177e-07, clean at 150 steps) -- yet the gate reported FAIL at
+rho=17.76, because `max(0.0, 1e-15)` silently turned a RATIO gate into an
+ABSOLUTE test against the 1e-15 floor. The full rho trajectory across the
+diagnostic's five step counts (14.98, 169.9, 1.915e4, 17.76, 0.0) is
+non-monotone for exactly this reason: it tracks which of the two series
+crossed its own float64 floor first, not whether the underlying mechanism
+converged.
+
+`ABS_CONV_EPS = 1e-12` is the fix: when BOTH medians are already below
+it, the gate passes regardless of rho, because a ratio between two
+quantities each indistinguishable from numerical dust measures which one
+underflowed first, not the mechanism. 1e-12 is chosen with the same
+margin logic as `RHO_THRESHOLD` and `MEDIAN_FLOOR` -- 5+ orders below the
+smallest meaningful measured Delta (2.177e-07) and well above observed
+float64 dust (1e-14 to 1e-16) -- so it cannot fire on a genuine, still-
+converging signal, only on values already at the numerical floor.
 
 ## How final-Delta is measured without touching the encoder
 
@@ -59,12 +90,20 @@ import numpy as np
 _THIS_DIR = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, os.path.join(_THIS_DIR, "..", "stage2a_dynamics_classification"))
 
-from stage2a_core import encode_and_restrict, ENCODER_SEED  # noqa: E402
+from stage2a_core import ENCODER_SEED  # noqa: E402
 from bonsai.dynamics.learned_topology_construction import _local_converged_phases  # noqa: E402
 
-ENCODER_STEPS = 150      # _local_converged_phases' locked default
+ENCODER_STEPS = 1200     # raised 2026-08-06 from 150 (this module's own
+                         # encoding sites only -- see module docstring;
+                         # `_local_converged_phases`'s shared default and
+                         # `stage2a_core.encode_and_restrict`, load-bearing
+                         # for Stage 2A's own established pipeline, are
+                         # deliberately untouched)
 RHO_THRESHOLD = 10.0     # pre-registered, locked before any data existed
 MEDIAN_FLOOR = 1e-15     # numerical protection, not a scientific threshold
+ABS_CONV_EPS = 1e-12     # numerical-floor detection, not a scientific
+                         # threshold -- see module docstring's "absolute-
+                         # convergence escape"
 
 
 def final_delta(image_01, seed=ENCODER_SEED, steps=ENCODER_STEPS):
@@ -85,27 +124,54 @@ def final_delta(image_01, seed=ENCODER_SEED, steps=ENCODER_STEPS):
 
 def _encode_one(args):
     """Module-level worker so `encode_with_final_delta_batch` can use a
-    process Pool under either fork or spawn start methods."""
+    process Pool under either fork or spawn start methods.
+
+    Computes `theta_last` (the converged field at the REQUESTED `steps`)
+    and `theta_prev` (`steps - 1`) directly, then derives both the
+    returned encoded theta and the final-Delta from them -- two encoder
+    calls, not three.
+
+    This deliberately does NOT go through `stage2a_core.encode_and_restrict`
+    the way it used to. That function has no `steps` parameter of its own
+    -- it is hardwired to `_local_converged_phases`'s bare default (150,
+    Stage 2A's separate, unrelated convention) -- so the old version of
+    this worker silently returned final-Delta measured at the CALLER's
+    requested `steps` alongside a theta frozen at 150 regardless of it: an
+    asymmetry invisible while `ENCODER_STEPS` also happened to be 150, and
+    a real bug the moment it stopped being (2026-08-06, 150 -> 1200).
+    Measured directly: at steps=1200 the two thetas differ by up to
+    2.664e-07 (max wrapped abs difference, a single test image) -- small
+    in absolute terms, but a downstream pipeline built from the STALE
+    150-step theta while the gate's own verdict correctly reflects 1200
+    would defeat the point of raising ENCODER_STEPS at all."""
     image_01, active_indices, seed, steps = args
-    theta = encode_and_restrict(image_01, active_indices, seed=seed)
-    return theta, final_delta(image_01, seed=seed, steps=steps)
+    theta_prev = _local_converged_phases(image_01, steps=steps - 1, seed=seed)
+    theta_last = _local_converged_phases(image_01, steps=steps, seed=seed)
+    with np.errstate(invalid="ignore"):
+        wrapped = (theta_last - theta_prev + np.pi) % (2.0 * np.pi) - np.pi
+    delta = float(np.max(np.abs(wrapped)))
+    theta = theta_last.flatten()[active_indices]
+    return theta, delta
 
 
 def encode_with_final_delta_batch(images_01, active_indices, seed=ENCODER_SEED,
                                    steps=ENCODER_STEPS, n_workers=1):
     """Encodes every image and records its final-Delta.
 
-    Encoding goes through `stage2a_core.encode_and_restrict` unchanged --
-    the same call Stage 2A's own pipeline makes -- so the phases this gate
-    inspects are the production phases, not a parallel implementation of
-    them. Pass `active_indices = np.arange(784)` for the unrestricted
-    full-grid field.
+    The returned theta is `_local_converged_phases` run to exactly
+    `steps` -- the same call `stage2a_core.encode_and_restrict` makes
+    when `steps` happens to equal ITS hardwired default, and a genuinely
+    different one otherwise (see `_encode_one`'s docstring for why that
+    distinction is now load-bearing). Pass
+    `active_indices = np.arange(784)` for the unrestricted full-grid
+    field.
 
     Returns (thetas (n, len(active_indices)), deltas (n,)).
 
-    Single-process by default: the gate runs on 1,000 images at roughly
-    3 x 4.6 ms each (three encoder passes per image: one production
-    encode, two for the final-Delta measurement), a few tens of seconds.
+    Single-process by default. Two encoder passes per image (`steps - 1`
+    and `steps`), cost scaling with `steps`; the caller measures and
+    reports actual wall-clock rather than this docstring hand-maintaining
+    a number that would go stale the next time `ENCODER_STEPS` moves.
     `n_workers > 1` uses a process Pool for callers that want it; the
     heavy per-image encode pipeline is a separate concern from this
     diagnostic and is not this module's job."""
@@ -123,7 +189,8 @@ def encode_with_final_delta_batch(images_01, active_indices, seed=ENCODER_SEED,
 
 
 def evaluate_rho_gate(delta_clean, delta_noisy, thetas_clean=None, thetas_noisy=None,
-                       threshold=RHO_THRESHOLD, floor=MEDIAN_FLOOR):
+                       threshold=RHO_THRESHOLD, floor=MEDIAN_FLOOR,
+                       abs_conv_eps=ABS_CONV_EPS):
     """The gate itself, as a pure function of measured final-Deltas (and,
     optionally, the encoded phases, for the non-finite-phase check).
 
@@ -132,10 +199,16 @@ def evaluate_rho_gate(delta_clean, delta_noisy, thetas_clean=None, thetas_noisy=
     any image data.
 
     Returns a dict recording every quantity DESIGN.md requires logged
-    regardless of outcome. `passed` is True only if rho <= threshold AND
-    no automatic-failure condition fired.
+    regardless of outcome. `passed` is True if EITHER rho <= threshold OR
+    both medians are already below `abs_conv_eps` (the absolute-
+    convergence escape -- see module docstring), AND no automatic-failure
+    condition fired. The escape exists because a ratio between two
+    quantities that have each decayed to numerical dust measures which one
+    underflowed first, not whether the mechanism converged -- see the
+    module docstring's account of the S=600 in-data demonstration
+    (FAIL at rho=17.76 while noisy's median sat at 1.776e-14).
 
-    Two scoping notes worth knowing when reading the log:
+    Three scoping notes worth knowing when reading the log:
 
     - The non-finite-PHASE check sees only the coordinates the caller
       passed in `thetas_*`, i.e. the active support. A non-finite phase
@@ -147,7 +220,11 @@ def evaluate_rho_gate(delta_clean, delta_noisy, thetas_clean=None, thetas_noisy=
       single non-finite final-Delta makes them nan. That is faithful to
       the data and the gate has already failed automatically at that
       point, but it does mean the logged medians carry no information
-      about the healthy images in that case."""
+      about the healthy images in that case.
+    - The absolute-convergence escape requires BOTH medians below
+      `abs_conv_eps`, not either. A lopsided case -- one series genuinely
+      converged, the other still measurably moving -- does not qualify,
+      and falls through to the ordinary rho test on its own merits."""
     delta_clean = np.asarray(delta_clean, dtype=np.float64)
     delta_noisy = np.asarray(delta_noisy, dtype=np.float64)
     if delta_clean.shape != delta_noisy.shape:
@@ -182,11 +259,20 @@ def evaluate_rho_gate(delta_clean, delta_noisy, thetas_clean=None, thetas_noisy=
     automatic_failure = bool(reasons)
 
     rho_ok = bool(np.isfinite(rho) and rho <= threshold)
-    if not rho_ok:
-        reasons.append(f"rho = {rho:.6g} exceeds the pre-registered threshold {threshold:g}")
+    # Both medians already numerical dust: a ratio between them measures
+    # which one underflowed first, not the mechanism. Computed regardless
+    # of rho_ok, so it is always recorded -- not only when it was needed.
+    absolute_convergence = bool(median_clean < abs_conv_eps and median_noisy < abs_conv_eps)
+    gate_ok = rho_ok or absolute_convergence
+    if not gate_ok:
+        reasons.append(
+            f"rho = {rho:.6g} exceeds the pre-registered threshold {threshold:g} "
+            f"(median_clean={median_clean:.6g}, median_noisy={median_noisy:.6g}, "
+            f"neither below the absolute-convergence floor {abs_conv_eps:.1e})")
 
     return {
-        "rho": rho, "passed": bool(rho_ok and not automatic_failure),
+        "rho": rho, "passed": bool(gate_ok and not automatic_failure),
+        "absolute_convergence": absolute_convergence, "abs_conv_eps": float(abs_conv_eps),
         "automatic_failure": automatic_failure, "failure_reasons": reasons,
         "median_delta_clean": median_clean, "median_delta_noisy": median_noisy,
         "p95_delta_clean": p95_clean, "p95_delta_noisy": p95_noisy,
@@ -206,7 +292,11 @@ def run_encoder_gate(clean_images_01, noisy_images_01, active_indices,
 
     Returns the `evaluate_rho_gate` dict with the encoded phases attached
     under `thetas_clean` / `thetas_noisy`, so a caller can inspect them
-    without re-encoding."""
+    without re-encoding. `steps` is also attached: a gate artifact carries
+    no record of which step count produced it otherwise, and this module's
+    own default has already moved once (150 -> 1200) -- provenance a
+    caller would otherwise have to infer from a module constant that may
+    have moved again by the time the artifact is read."""
     thetas_clean, delta_clean = encode_with_final_delta_batch(
         clean_images_01, active_indices, seed=seed, steps=steps, n_workers=n_workers)
     thetas_noisy, delta_noisy = encode_with_final_delta_batch(
@@ -217,6 +307,8 @@ def run_encoder_gate(clean_images_01, noisy_images_01, active_indices,
     result["delta_noisy"] = delta_noisy
     result["thetas_clean"] = thetas_clean
     result["thetas_noisy"] = thetas_noisy
+    result["steps"] = steps
+    result["seed"] = seed
     return result
 
 
@@ -230,6 +322,8 @@ def format_gate_log(result):
         f"  median final-Delta noisy : {result['median_delta_noisy']:.6e}",
         f"  rho                      : {result['rho']:.6g} "
         f"(threshold {result['threshold']:g})",
+        f"  absolute convergence     : {result['absolute_convergence']} "
+        f"(both medians < {result['abs_conv_eps']:.1e})",
         f"  p95 final-Delta clean    : {result['p95_delta_clean']:.6e}  "
         f"(visibility only, not a gate)",
         f"  p95 final-Delta noisy    : {result['p95_delta_noisy']:.6e}  "
