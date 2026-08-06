@@ -87,11 +87,15 @@ here starts it automatically.
 }
 ```
 
-**Claude Desktop** -- add the same URL as a remote/HTTP MCP server in
-Desktop's connector settings.
+**Claude Desktop/iOS** -- these need a public URL, not `127.0.0.1`
+(Desktop's config-file entry doesn't support remote servers at all;
+only Settings -> Connectors does), *and* in practice require a working
+OAuth handshake even for a server meant to be authless -- see
+`src/proxy.ts` and the OAuth section below, then add the public
+`https://.../mcp` URL via Settings -> Connectors, leaving the OAuth
+Client ID/Secret fields blank (DCR registers one automatically).
 
-**ChatGPT** -- ChatGPT needs a public URL, not `127.0.0.1` -- see
-`src/proxy.ts` below.
+**ChatGPT** -- also needs the public URL from `src/proxy.ts` below.
 
 ## Exposing it publicly: `src/proxy.ts`
 
@@ -115,12 +119,20 @@ ChatGPT -> http://<vm>:80 -> [proxy.ts] -> localhost:8765 on the VM
 # on your machine: keep c2c-mcp's port reachable from the VM
 ssh -R 8765:127.0.0.1:8765 <user>@<vm>
 
-# on the VM: no npm install needed, dist-proxy/proxy.js has zero
+# on the VM: no npm install needed, dist-proxy/proxy.cjs has zero
 # dependencies outside node:http
-npm run build-proxy                    # -> dist-proxy/proxy.js
-scp dist-proxy/proxy.js <user>@<vm>:
-ssh <user>@<vm> 'sudo node proxy.js'   # sudo (or setcap) for port 80
+npm run build-proxy                     # -> dist-proxy/proxy.cjs
+scp dist-proxy/proxy.cjs <user>@<vm>:
+ssh <user>@<vm> 'sudo node proxy.cjs'   # sudo (or setcap) for port 80
 ```
+
+The output is named `.cjs`, not `.js`: Node infers module type from the
+*nearest* `package.json` above a script, and this repo's declares
+`"type": "module"` -- run as plain `.js` from inside this directory
+tree, Node would misread the compiled CommonJS output as ESM and
+crash. `.cjs` is unambiguous regardless of what sits above it, which
+matters doubly on the VM where there's no surrounding `package.json`
+at all.
 
 Env vars (all optional): `C2C_PROXY_LISTEN_HOST` (default `0.0.0.0`),
 `C2C_PROXY_LISTEN_PORT` (default `80`), `C2C_PROXY_TARGET_HOST`
@@ -134,10 +146,75 @@ Everything else forwards through unbuffered (no request/response
 buffering, hop-by-hop headers stripped per RFC 7230), which is what
 lets Streamable HTTP's SSE-framed responses come through intact.
 
-**No auth in front of any of this.** The proxy is a dumb pipe and
-c2c-mcp itself doesn't check credentials -- putting the proxy on a
-public VM means anyone who finds the URL can read and write both
-mailboxes. Fine for a low-stakes personal tool; put a reverse-proxy
-auth layer (e.g. an nginx/Caddy basic-auth in front, or an SSH
-allowlist on the VM's firewall) in front of it before relying on this
-for anything sensitive.
+**The proxy itself is still a dumb, unauthenticated pipe.** Anyone who
+can reach the VM can reach c2c-mcp's HTTP surface. What sits behind
+that surface is real auth now (see below) -- `/mcp` itself rejects
+public traffic with no valid token -- but the `/authorize`,
+`/register`, and `/token` endpoints are necessarily reachable by
+anyone too, since that's how a client bootstraps into the flow. An
+attacker can still burn cycles hitting those, just not read or write
+either mailbox without completing consent. A firewall allowlist or a
+reverse-proxy IP restriction in front of the VM is still worth doing
+if you want to shrink that surface further.
+
+## OAuth for Claude Desktop/iOS: `src/oauth.ts`
+
+Claude Desktop and iOS's "Add custom connector" flow requires a
+working auth handshake even when a server is meant to be authless in
+principle -- authless (`none`) is documented as supported, but in
+practice the connector dialog forced OAuth. `src/oauth.ts` is a
+minimal, spec-compliant OAuth 2.1 authorization server (Dynamic Client
+Registration + PKCE) mounted on the same Express app as `/mcp`,
+built for exactly one consenting user, not a multi-tenant service:
+
+- `GET /.well-known/oauth-protected-resource` (RFC 9728)
+- `GET /.well-known/oauth-authorization-server` (RFC 8414)
+- `POST /register` (RFC 7591, Dynamic Client Registration -- no
+  client secret, PKCE S256 required instead)
+- `GET`/`POST /authorize` -- a one-button consent page, no login
+  (anyone who reaches this URL can click Allow; see the security note
+  above)
+- `POST /token` -- authorization-code exchange and refresh
+
+**Enable it** by setting `C2C_MCP_PUBLIC_URL` to exactly the URL
+you'll paste into Claude's connector dialog (path included, e.g.
+`https://c2c.framesift.ai/mcp`) when starting c2c-mcp. Leave it unset
+for pure local use and `/mcp` stays fully authless, as before.
+
+**Auth only applies to traffic that came through the proxy**, not to
+local callers (Claude Code's own `.mcp.json` entry, `curl` against
+`127.0.0.1` directly): `src/proxy.ts` stamps every request it forwards
+with a marker header (overwriting any client-supplied copy first, so
+a public caller can't fake "I'm local"), and `requireBearerAuth` only
+checks for a token when that header is present. `127.0.0.1` binding is
+already Claude Code's trust boundary; this doesn't add a second gate
+on top of it, and it means Claude Code never needs to go through the
+OAuth dance CIMD would otherwise require for its loopback-redirect
+client. If you ever run c2c-mcp directly on a public interface without
+the proxy in front, this scheme doesn't protect you -- it exists to
+gate the proxy's ingress specifically.
+
+**Tokens are self-verifying, not looked up in a store.** Access and
+refresh tokens are `payload.signature` pairs (HMAC-SHA256 over a
+JSON claims blob) signed with a key generated on first run and
+persisted to the gitignored `.data/oauth-signing-key` -- restarting
+the server (as `run-c2c-mcp.sh`-style dev loops do) doesn't invalidate
+already-issued tokens, which matters because the whole point is
+keeping a long-running claude.ai chat connected across restarts.
+Authorization codes stay in-memory with a 60-second TTL and don't
+survive a restart, and registered DCR clients aren't persisted either
+-- both are self-healing (Claude re-registers/re-consents on demand),
+unlike losing a live session's tokens. One known gap from this
+simplification: refresh "rotation" issues a new refresh token but
+can't revoke the old one without a persisted store. Acceptable for a
+single-user tool; would need real storage to harden further.
+
+Verified end-to-end, not just endpoint-by-endpoint, in
+`test/oauth-flow.sh`: the full DCR -> consent -> code exchange -> `/mcp`
+call -> refresh chain, plus the negatives that matter (wrong PKCE
+verifier, a replayed code, an expired code, and -- through the real
+built `proxy.cjs`, not just the server directly -- a client trying to
+forge the "I'm local" marker header). Run it with `bash
+test/oauth-flow.sh` after `npm install`; it builds, spins up a
+throwaway server and proxy against a disposable mailbox root, and
+tears both down on exit.
