@@ -129,12 +129,21 @@ export function mountOAuth(app: Express, opts: MountOAuthOptions): { requireBear
   const clients = new Map<string, ClientRecord>();
   const authCodes = new Map<string, AuthCodeRecord>();
 
-  app.get("/.well-known/oauth-protected-resource", (_req, res) => {
+  const servePrm = (_req: Request, res: Response) => {
     res.json({
       resource: opts.publicMcpUrl,
       authorization_servers: [issuer],
     });
-  });
+  };
+  app.get("/.well-known/oauth-protected-resource", servePrm);
+  // Alias for the RFC 9728 resource-specific well-known path convention
+  // (.well-known/oauth-protected-resource/<mcp-path>). Not required for our
+  // own flow -- the WWW-Authenticate header's resource_metadata pointer on
+  // our 401 is what clients are supposed to follow -- but ChatGPT's
+  // connector was observed probing this path too (see logs/err.log from an
+  // earlier session) as a fallback, so it's cheap to serve the same
+  // document here rather than leave it 404.
+  app.get(`/.well-known/oauth-protected-resource${resourceUrl.pathname}`, servePrm);
 
   app.get("/.well-known/oauth-authorization-server", (_req, res) => {
     res.json({

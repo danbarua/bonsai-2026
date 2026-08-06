@@ -73,10 +73,16 @@ function logErrorRequests(req: express.Request, res: express.Response, next: exp
   res.on("finish", () => {
     const httpError = res.statusCode >= 400;
     const jsonRpcErrorDetail = chunks.length > 0 ? findJsonRpcError(Buffer.concat(chunks).toString("utf8")) : undefined;
+    // The JSON-RPC `method` field (e.g. "resources/list") is what actually
+    // identifies what a client was trying to do -- without it, a logged
+    // "Method not found" only tells you *that* something failed, not what
+    // to go add a handler for. req.body is already parsed here (express.json()
+    // runs inside createMcpExpressApp, before this middleware).
+    const method = typeof req.body?.method === "string" ? ` (method: ${req.body.method})` : "";
     if (httpError) {
-      console.error(`[c2c-mcp] ${req.method} ${req.originalUrl} -> HTTP ${res.statusCode}`);
+      console.error(`[c2c-mcp] ${req.method} ${req.originalUrl} -> HTTP ${res.statusCode}${method}`);
     } else if (jsonRpcErrorDetail) {
-      console.error(`[c2c-mcp] ${req.method} ${req.originalUrl} -> ${jsonRpcErrorDetail}`);
+      console.error(`[c2c-mcp] ${req.method} ${req.originalUrl} -> ${jsonRpcErrorDetail}${method}`);
     }
   });
   next();
