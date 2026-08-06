@@ -196,6 +196,10 @@ export function mountOAuth(app: Express, opts: MountOAuthOptions): { requireBear
       id_token_signing_alg_values_supported: ["RS256"],
       // Public clients only (no client_secret) -- DCR never issues one below.
       token_endpoint_auth_methods_supported: ["none"],
+      // RFC 9207: must be true since /authorize now actually emits iss on
+      // its success redirect -- see handleAuthorize. (The validation-failure
+      // path returns a plain 400, not a redirect, so iss doesn't apply there.)
+      authorization_response_iss_parameter_supported: true,
     });
   };
   app.get("/.well-known/oauth-authorization-server", serveAsMetadata);
@@ -286,6 +290,12 @@ ${hidden}
     const redirect = new URL(redirectUri);
     redirect.searchParams.set("code", code);
     if (state !== undefined) redirect.searchParams.set("state", state);
+    // RFC 9207: currently only a spec "SHOULD", but the spec itself expects
+    // this to become a MUST, and clients that already enforce it will
+    // reject a callback missing iss. authorization_response_iss_parameter_supported
+    // is set alongside this in the AS metadata (required by spec once iss
+    // is actually emitted).
+    redirect.searchParams.set("iss", issuer);
     res.redirect(303, redirect.toString());
   }
 
