@@ -301,13 +301,15 @@ def load_modules(clone_dir):
     import stage2a_topologies as topologies                             # noqa: E402
     import build_stage1d_constructions as s1d                           # noqa: E402
     from bonsai.data.mnist_loader import load_mnist                     # noqa: E402
+    from bonsai.dynamics.learned_topology_construction import (         # noqa: E402
+        _local_converged_phases)
 
     mods = types.SimpleNamespace(
         ridge=ridge, batched_evolve_on_graph_jax=batched_evolve_on_graph_jax,
         jax=jax, jnp=jnp, conditions=conditions, corruption=corruption,
         encoder_gate=encoder_gate, gcs=gcs, partition=partition, stats=stats,
         verify_gpu=verify_gpu, core=core, topologies=topologies, s1d=s1d,
-        load_mnist=load_mnist)
+        load_mnist=load_mnist, local_converged_phases=_local_converged_phases)
 
     # `stage2b_verify_gpu` puts /content at the front of sys.path at import.
     # Nothing importable is uploaded there by this target, but assert the
@@ -587,7 +589,15 @@ def step4_encoder_gate(mods, bucket, corpus, corr, record):
                 "gate_log": np.array(mods.encoder_gate.format_gate_log(result)),
                 "summary_json": np.array(_dumps(summary))}
 
-    gate, _ = ensure_npz(mods, bucket, _obj(mods, "encoder_gate", "npz"), compute)
+    # Step count in the object name, self-invalidating: a step-count change
+    # (e.g. the 2026-08-06 150->1200 amendment) mints a NEW object rather
+    # than silently reusing a cached artifact computed at the old count --
+    # `ensure_artifact` treats an object's existence as proof its step is
+    # done, so reusing one name across a semantics change would serve a
+    # stale FAIL verdict forever. The old steps=150 FAIL artifact stays in
+    # the bucket, untouched, as the historical record of the first real run.
+    gate_kind = f"encoder_gate_s{mods.encoder_gate.ENCODER_STEPS}"
+    gate, _ = ensure_npz(mods, bucket, _obj(mods, gate_kind, "npz"), compute)
     print(gate["gate_log"].item(), flush=True)
     summary = json.loads(gate["summary_json"].item())
     # Into the report on BOTH branches, and before the halt: the gate's
@@ -614,14 +624,28 @@ def step5_restrict(mods, gate, corr, topo):
     expected = (np.asarray(corr["x_t_clip"]).shape[0], EXPECTED_N_ACTIVE)
     if theta0_505.shape != expected:
         raise Stage1Halt(f"restricted phases are {theta0_505.shape}, expected {expected}")
-    # One-image proof that slicing the gate's full-grid field equals the
-    # production encode path, rather than an argument that it must.
-    reference = mods.core.encode_and_restrict(np.asarray(corr["x_t_clip"])[0],
-                                              active_indices)
-    if not np.array_equal(np.asarray(reference), theta0_505[0]):
+    # One-image proof that slicing the gate's full-grid field equals a
+    # fresh call to the same underlying encoder AT THE GATE'S OWN STEP
+    # COUNT -- not `stage2a_core.encode_and_restrict`, which has no `steps`
+    # parameter of its own and is hardwired to `_local_converged_phases`'s
+    # bare default. That default is Stage 2A's separate, unrelated
+    # convention (still 150, load-bearing for ~14 of its own already-
+    # verified pipeline files) and must not move for Stage 2B's sake.
+    # Comparing against it would have silently re-anchored this check to
+    # the WRONG step count the moment ENCODER_STEPS diverged from
+    # `_local_converged_phases`'s default -- which it now has (the ladder
+    # stage-1 amendment raising ENCODER_STEPS to 1200 after the encoder
+    # gate's first real FAIL). Caught by tracing the amendment's own
+    # "every encoding site" requirement against this driver's actual call
+    # graph, not by assumption.
+    reference = mods.local_converged_phases(
+        np.asarray(corr["x_t_clip"])[0], steps=mods.encoder_gate.ENCODER_STEPS,
+        seed=mods.encoder_gate.ENCODER_SEED).flatten()[active_indices]
+    if not np.array_equal(reference, theta0_505[0]):
         raise Stage1Halt("restricting the gate's full-grid phases does not reproduce "
-                         "stage2a_core.encode_and_restrict on image 0")
-    say(f"restricted to {theta0_505.shape}; matches encode_and_restrict on image 0")
+                         "a fresh encode at the gate's own step count on image 0")
+    say(f"restricted to {theta0_505.shape}; matches a fresh encode at "
+        f"{mods.encoder_gate.ENCODER_STEPS} steps on image 0")
     return theta0_505
 
 

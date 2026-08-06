@@ -176,6 +176,32 @@ def test_staged_object_paths_are_legal_and_distinct(driver):
         assert not gcs.is_test_split_path(name)
 
 
+def test_encoder_gate_artifact_name_self_invalidates_on_step_count(driver):
+    """The naming decision, enforced rather than documented: the encoder-
+    gate object's `kind` must carry the CURRENT `ENCODER_STEPS`, read
+    dynamically from the module constant, not a literal frozen at the
+    moment this line was written. Otherwise a future step-count change
+    (this is the amendment's second occurrence, not its first -- 150 ->
+    1200, 2026-08-06) would silently resume from a cached artifact
+    computed under the OLD semantics, and `ensure_artifact` has no way to
+    know the meaning of "done" changed."""
+    source = DRIVER_PATH.read_text()
+    assert 'gate_kind = f"encoder_gate_s{mods.encoder_gate.ENCODER_STEPS}"' in source, (
+        "the encoder-gate object kind must be built from the LIVE "
+        "ENCODER_STEPS value, not a hardcoded string")
+
+    mods = driver.load_modules(str(REPO_ROOT))
+    import stage2b_gcs as gcs
+    name_now = gcs.object_path(stage=1, condition=None,
+                               kind=f"encoder_gate_s{mods.encoder_gate.ENCODER_STEPS}",
+                               ext="npz", split="train")
+    name_at_old_default = gcs.object_path(stage=1, condition=None,
+                                          kind="encoder_gate_s150", ext="npz", split="train")
+    assert name_now != name_at_old_default, (
+        "the current encoder-gate object name must differ from the pre-amendment "
+        "(steps=150) name -- the old FAIL artifact must be left alone, not overwritten")
+
+
 def test_local_paths_are_distinct_for_distinct_objects(driver):
     """`ensure_artifact` trusts an existing local file when the object is
     already in the bucket, so two objects sharing a local path would hand
@@ -185,7 +211,7 @@ def test_local_paths_are_distinct_for_distinct_objects(driver):
     names = [gcs.object_path(stage=1, condition=cond, kind=kind, ext=ext, split="train")
              for cond, kind, ext in (
                  (None, "corpus", "npz"), (None, "topologies", "npz"),
-                 (None, "corruption", "npz"), (None, "encoder_gate", "npz"),
+                 (None, "corruption", "npz"), (None, "encoder_gate_s1200", "npz"),
                  (None, "ridge_cv", "json"), (None, "ridge_final", "npz"),
                  (None, "stats_smoke", "json"), (None, "stats_smoke", "txt"),
                  (None, "stage1_report", "json"), (None, "stage1_report", "txt"),
