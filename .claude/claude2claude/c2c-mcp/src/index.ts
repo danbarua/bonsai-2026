@@ -83,6 +83,13 @@ function logErrorRequests(req: express.Request, res: express.Response, next: exp
       console.error(`[c2c-mcp] ${req.method} ${req.originalUrl} -> HTTP ${res.statusCode}${method}`);
     } else if (jsonRpcErrorDetail) {
       console.error(`[c2c-mcp] ${req.method} ${req.originalUrl} -> ${jsonRpcErrorDetail}${method}`);
+    } else {
+      // Successful requests, to stdout rather than stderr -- kept separate
+      // from the error stream, but genuinely needed: "the connector says
+      // Connected but shows no actions" is not distinguishable from "ChatGPT
+      // never actually called tools/list" without this. A silent error log
+      // only rules out failures, not silence.
+      console.log(`[c2c-mcp] ${req.method} ${req.originalUrl} -> ${res.statusCode}${method}`);
     }
   });
   next();
