@@ -282,7 +282,8 @@ STAGE2B_TEST_FILES := tests/test_stage2b_corruption.py tests/test_stage2b_encode
                       tests/test_stage2b_contracts.py tests/test_stage2b_gcs.py \
                       tests/test_stage2b_gcs_makefile.py \
                       tests/test_stage2b_gcs_roundtrip.py \
-                      tests/test_stage2b_ladder_stage1.py
+                      tests/test_stage2b_ladder_stage1.py \
+                      tests/test_stage2b_ladder_stage2.py
 
 .PHONY: stage2b-test
 stage2b-test:  ## Run the Stage 2B test suite (fast only; the Colab round trip is excluded)
@@ -484,6 +485,51 @@ stage2b-ladder-stage1:  ## Run Stage 2B ladder stage 1 (n=1,000) on a Colab GPU 
 		if [ $$rc -eq 0 ]; then rc=1; fi; \
 	fi; \
 	$(call check_teardown,$(SESSION_2B_LADDER)); \
+	exit $$rc
+
+# Feasibility-ladder stage 2 (n=5,000): adds runtime/feature-validity
+# measurement at scale, the production SVD's own condition-number
+# diagnostic, ridge-grid behaviour, the ladder's second real-data ridge
+# equivalence gate, and the first CNN training against real data. Own
+# session, distinct from stage 1's -- this target's unconditional teardown
+# must not be able to kill a session stage 1 still expects to be running.
+# equinox/optax join the reinstall line here only: stage 1 has no CNN and
+# does not need them, so its own target is left untouched.
+SESSION_2B_LADDER2 ?= stage2b-ladder2
+
+.PHONY: stage2b-ladder-stage2
+stage2b-ladder-stage2:  ## Run Stage 2B ladder stage 2 (n=5,000, CNN development) on a Colab GPU -- bills while running
+	rc=0; src=0; \
+	cd $(REPO_ROOT) && \
+	if [ -n "$$($(GIT) status --porcelain)" ]; then \
+		echo "[make] REFUSING: the working tree is dirty. The runtime fetches one pinned commit; uncommitted work would not be in it."; \
+		$(GIT) status --short; \
+		exit 1; \
+	fi; \
+	commit=$$($(GIT) rev-parse HEAD); \
+	if ! $(GIT) branch -r --contains $$commit 2>/dev/null | grep -q .; then \
+		echo "[make] REFUSING: HEAD $$commit is not on any remote. Push before running -- the runtime can only fetch what origin has."; \
+		exit 1; \
+	fi; \
+	driver_sha=$$(shasum -a 256 $(STAGE2B_DIR)/run_ladder_stage2.py | cut -d' ' -f1); \
+	echo "[make] commit $$commit, driver sha256 $$driver_sha"; \
+	cd $(STAGE2B_DIR) && \
+	$(MIGHTY_COLAB) sessions && \
+	if $(MIGHTY_COLAB) status -s $(SESSION_2B_LADDER2) 2>&1 | grep -q "not found"; then \
+		$(MIGHTY_COLAB) new -s $(SESSION_2B_LADDER2) --gpu $(LADDER_GPU); \
+	else \
+		echo "[make] Reusing existing session $(SESSION_2B_LADDER2)"; \
+	fi && \
+	$(MIGHTY_COLAB) reinstall -s $(SESSION_2B_LADDER2) jax[cuda12]==0.11.0 diffrax==0.7.2 google-cloud-storage equinox optax && \
+	$(MIGHTY_COLAB) upload -s $(SESSION_2B_LADDER2) $(BONSAI_GCS_CREDENTIALS) $(REMOTE_KEY_PATH) && \
+	rc=0; out=$$($(MIGHTY_COLAB) exec -s $(SESSION_2B_LADDER2) -f run_ladder_stage2.py --timeout $(EXEC_TIMEOUT) $(GCS_EXEC_ENV) --env BONSAI_COMMIT="$$commit" --env BONSAI_DRIVER_SHA256="$$driver_sha" --env JAX_ENABLE_X64=1 2>&1) || rc=$$?; \
+	echo "$$out"; \
+	src=0; $(MIGHTY_COLAB) stop -s $(SESSION_2B_LADDER2) || src=$$?; \
+	if [ $$rc -ne 0 ] || ! echo "$$out" | grep -q STAGE2_OK; then \
+		echo "[make] FAILED: ladder stage 2 did not report success (exec rc=$$rc)."; \
+		if [ $$rc -eq 0 ]; then rc=1; fi; \
+	fi; \
+	$(call check_teardown,$(SESSION_2B_LADDER2)); \
 	exit $$rc
 
 .PHONY: help

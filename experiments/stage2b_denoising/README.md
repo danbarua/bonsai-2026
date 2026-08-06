@@ -81,6 +81,15 @@ mention here, in the same commit that creates it.
 - **`stage_kmnist_inputs.py`** — stages the four KMNIST IDX files into the
   bucket, once, from here. The only Stage 2B upload that goes local → GCS,
   because `datasets/` is gitignored and so absent from the driver's clone.
+- **`run_ladder_stage2.py`** — the stage-2 driver (n=5,000 development
+  subset). Same architecture as stage 1: pinned-commit fetch, every
+  artifact via `ensure_artifact`. Reuses stage 1's topologies and staged
+  KMNIST inputs directly rather than rebuilding or re-staging them, and
+  cross-checks its own corruption bit-exact against stage 1's cached
+  artifact. Adds the production SVD's own condition-number diagnostic,
+  ridge-grid behaviour, the ladder's second real-data ridge equivalence
+  gate, and the first CNN training against real data (early-stopped on
+  the locked 6,000-image validation partition, best of three seeds).
 
 **Diagnostics** (not part of the locked pipeline; convention of Stage
 2A's `diagnose_*.py` scripts — investigate, change nothing themselves):
@@ -318,7 +327,8 @@ make test                      # the whole repository suite
 | `test_stage2b_gcs_roundtrip.py` | credential-gate checks, plus the one slow round trip |
 | `test_stage2b_contracts.py` | cross-module contracts no single module's tests can see |
 | `test_stage2b_gcs_makefile.py` | Makefile and module agree on the bucket; every GCS-touching script has a target |
-| `test_stage2b_ladder_stage1.py` | the ladder driver's constants, call sites and Makefile agreement |
+| `test_stage2b_ladder_stage1.py` | the stage-1 driver's constants, call sites and Makefile agreement |
+| `test_stage2b_ladder_stage2.py` | the stage-2 driver's constants, call sites (including the CNN closure) and Makefile agreement |
 
 This table is the whole of what `make stage2b-test` runs, and the one
 exclusion is the slow round trip. It carries no test counts, deliberately:
