@@ -99,6 +99,15 @@ mention here, in the same commit that creates it.
   gate, and the first CNN training against real data (early-stopped on
   the locked 6,000-image validation partition, best of three seeds).
 
+**Evidence documents:**
+
+- **`NEGATIVE_PATH_EVIDENCE.md`** — the citation table for the pre-Stage-4
+  package's five demanded negative paths: which test evidences each, what
+  that test asserts, where the deliberate breakage that confirmed a guard
+  is recorded, and where coverage is narrower than the demand.
+  Stale-artifact refusal is marked pending; its mechanism does not exist
+  yet.
+
 **Diagnostics** (not part of the locked pipeline; convention of Stage
 2A's `diagnose_*.py` scripts — investigate, change nothing themselves):
 
