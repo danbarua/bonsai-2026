@@ -450,8 +450,142 @@ not duplicated).
 
 ## Next step
 
-Feasibility ladder stage 3 (full 60,000-image training side: 54,000 fit
-+ 6,000 locked validation) -- per `DESIGN.md`'s locked ladder. The
-encode-cost projection above (3.27 hours, single-worker, unvalidated at
-scale) is the single number most likely to require a planning decision
-before that stage is attempted. Not yet started.
+Feasibility ladder stage 3 -- Phase A complete, see below.
+
+# Stage 2B: Feasibility Ladder Stage 3, Phase A (encoding)
+
+**Status: Phase A only. Phase B (evolution, ridge, CNN) has NOT run, and
+stage 3 has produced no denoising number of any kind.** This section
+records the encoding phase because it is a complete, measured unit with
+a durable artifact -- and because this project's own Part 4 lesson is
+that an unwritten result does not survive the session that produced it.
+
+## The two-phase split, and why encoding moved off the GPU
+
+Stage 2 measured encoding at 1,099s of a 1,722s total -- 64% of the run,
+and the only genuinely CPU-bound step in the pipeline. Evolution, ridge
+and the CNN are what actually use the A100. Running the encode inside a
+provisioned GPU session would leave a metered A100 idle for most of
+stage 3's wall-clock, at ten times stage 2's corpus size.
+
+Stage 3 therefore splits: **Phase A** (corpus, corruption, encode,
+restrict) runs on local CPU cores and writes only the encoded array to
+GCS; **Phase B** reads it and regenerates corruption and clean targets
+in-session, both being deterministic and cheap. That puts 218 MB across
+the boundary instead of 775 MB, for about 2.5 minutes of cloud CPU.
+
+This is a disclosed post-lock amendment, not a quiet deviation --
+`DESIGN.md`'s "Computational strategy" and "Review history" both carry
+it. The convention it amends says generation happens "entirely in the
+cloud environment... never round-tripped through local upload", and
+names its own reason in the same sentence: Stage 2A's Colab **session
+upload** limit. A direct local→GCS write never touches that mechanism;
+it uses the same client and the same chunked, crc32c-verified transport
+in `stage2b_gcs.py` that a cloud-side write uses, and
+`stage_kmnist_inputs.py` has moved KMNIST that way for both prior rungs.
+
+## Measured, before the decision was acted on: cross-architecture reproducibility
+
+Encoding on this Mac put the encoder on Apple Silicon for the first
+time; stages 1 and 2 both encoded on Colab's x86. Rather than assume
+equivalence, three comparisons were run on the same images first:
+
+| comparison | result |
+|---|---|
+| same machine, encode run twice | **bit-exact** |
+| two different Colab sessions, same 1,000 images | **bit-exact**, 784,000/784,000 coordinates |
+| Mac (ARM) vs Colab (x86), same images | 93.4% coordinates identical; **max 3 ULP** (4.441e-16), mean 0.07 ULP, max relative 3.98e-16 |
+
+The middle row matters and nearly went unchecked: an initial assumption
+that "Colab hardware varies too, so local loses nothing" is simply
+false -- two separate Colab sessions produced byte-identical encodings.
+The difference is cross-architecture, not cross-session.
+
+It cannot amplify. The encoder is a contraction toward a fixed point:
+measured residual against the 1,200-step result falls 8.370e-07 (300
+steps) → 8.062e-13 (600) → exactly 0.0 (1,200). Both platforms resolve
+the SAME fixed point; a minority of coordinates land on an adjacent
+representable float64. Downstream, these phases feed an ODE solver at
+`rtol=1e-6`, eight or more orders above the difference.
+
+Accepted deliberately, with disclosure, on the same standard this
+project already applies to cuML's non-bit-reproducible GPU logistic
+regression: what is guaranteed is within-architecture determinism, and
+the encoded array in GCS is the artifact of record.
+
+## Result
+
+**54,000 fit-side images, 1,200 steps, 9 workers (Darwin arm64, 10
+cores).** The 6,000-image locked validation partition is deliberately
+not encoded -- the CNN consumes validation images as raw corrupted
+grids, and ridge selects alpha by internal cross-validation on the fit
+side, so an encoded validation array would be an artifact nothing reads.
+
+| quantity | measured |
+|---|---:|
+| encode wall-clock | **475.3s (7.9 min)** |
+| per image | **8.80 ms** |
+| upload (206 MB compressed, chunked) | 102.9s |
+| non-finite theta / delta | 0 / 0 |
+
+Faster than the 9.5-minute projection made from a 180-image sample --
+larger chunks amortise process-pool startup better. Against stage 2's
+Colab-CPU measurement of 218.28 ms/image single-worker, this is roughly
+a 25x wall-clock reduction, of which ~3.4x is per-core speed and the
+rest parallelism.
+
+## A scale-dependent finding: the convergence tail is not exactly zero
+
+Stage 1 concluded final-Delta reaches "exact float64 zero -- median AND
+p95, every one of 1,000 images", and stage 2 measured a max of 2.22e-14
+across 5,000. At 54,000 the maximum is **2.468e-10** -- four orders
+larger, and only visible at this scale:
+
+| final-Delta | count of 54,000 |
+|---|---:|
+| exactly 0.0 | 53,921 (99.854%) |
+| > 0 | 79 (0.146%) |
+| > 1e-13 | 9 |
+| > 1e-12 | 4 |
+| > 1e-10 | 2 |
+
+median 0.0, p95 0.0, max 2.468e-10.
+
+Recorded rather than smoothed over, with its consequences stated
+precisely. It does not affect the encoder gate, which keys on the
+MEDIAN (0.0 here, so the absolute-convergence escape fires regardless of
+the tail). It does not affect the pipeline: the worst image sits 4,053x
+below the ODE solver's `rtol=1e-6`. What it does do is narrow stage 1's
+claim -- "every one of 1,000 images" was true of 1,000 images, and at 54
+times that corpus size a 0.146% tail of not-quite-settled images
+appears. Two images in 54,000 remain above 1e-10 after 1,200 steps.
+
+## Code and artifacts
+
+`encode_stage3_local.py`, run by `make stage2b-encode-stage3-local`
+(local, CPU-only, provisions nothing, bills nothing). Composes
+`corrupt_corpus` and `encode_with_final_delta_batch` unchanged -- same
+numerics as both prior rungs, different machine. Output:
+`stage2b/train/stage3/common/encoded_fit_s1200.npz` (206.1 MB,
+crc32c-verified), carrying the encoded array, per-image final-Deltas,
+the fit indices and active support for self-description, and the run
+summary. The object name carries the step count, so a future
+`ENCODER_STEPS` change mints a new object rather than silently resuming
+a stale one -- the same self-invalidation discipline the stage-1
+encoder-gate artifact uses.
+
+218 MB crossed `ensure_artifact`'s 64 MB auto-chunk threshold, so the
+resumable chunked upload path engaged without the call site asking for
+it. That safeguard was added speculatively earlier in the same week;
+this is its first use on an artifact large enough to need it.
+
+## Next step
+
+Phase B: a GPU-session driver that reads
+`stage2b/train/stage3/common/encoded_fit_s1200.npz`, regenerates
+corruption and clean targets in-session, and runs evolution, ridge (with
+the ladder's third real-data equivalence gate) and CNN training at full
+scale. Not yet written. It should carry a spot-check that one image's
+encoding re-derived in-session matches the stored array, with the
+tolerance stated as ULP-level rather than exact, for the
+cross-architecture reason recorded above.

@@ -247,6 +247,38 @@ per-image first, then across images.
 matrix)` per condition, one line each -- converts the float64-ridge
 motivation from inherited story to checked table.
 
+**Post-lock disclosure (2026-08-06, before ladder stage 3): encoded
+features are bit-reproducible WITHIN a CPU architecture, not across
+one.** Stage 3 splits execution into a local CPU encode phase and a
+remote GPU phase (see "Computational strategy"), which put the encoder
+on Apple Silicon for the first time; stages 1 and 2 both encoded on
+Colab's x86. Measured directly on the same images rather than assumed,
+before any stage-3 artifact was written:
+
+| comparison | result |
+|---|---|
+| same machine (this Mac), encode run twice | bit-exact |
+| two different Colab sessions, same 1,000 images | bit-exact, 784,000/784,000 coordinates |
+| Mac (ARM) vs Colab (x86), same images | 93.4% coordinates identical; max 3 ULP (4.441e-16), mean 0.07 ULP, max relative 3.98e-16 |
+
+The cross-architecture difference is at the float64 representation
+limit, and it cannot amplify: the encoder is a contraction toward a
+fixed point, measured residual against the 1,200-step result falling
+8.370e-07 (300 steps) -> 8.062e-13 (600) -> exactly 0.0 (1,200). Both
+platforms resolve the SAME fixed point; a minority of coordinates land
+on an adjacent representable float64. Downstream the encoded phases feed
+an ODE solver at `rtol=1e-6`, eight or more orders above this
+difference, so no reported quantity in this design can turn on it.
+
+Recorded rather than waved through, and scoped precisely: what is
+guaranteed is within-architecture determinism, and stage 3's encoded
+array in GCS is the artifact of record. Re-deriving it from scratch on a
+different CPU architecture reproduces it to ~1 ULP, not bit-exactly.
+Same standard, and the same reasoning, as this project's existing
+acceptance that "cuML logistic regression on GPU is not bit-reproducible,
+and that is fine at the level the claims are made"
+(`docs/PROJECT_MEMORY.md` Part 4).
+
 ## Readout: multi-output ridge -- JAX SVD production path, sklearn as oracle
 
 One multi-output ridge, shared `alpha` across all 505 outputs, grid
@@ -464,7 +496,36 @@ during selection.
 Generation, features, and statistics run entirely in the cloud
 environment; artifacts pushed to Google Cloud Storage from within it --
 never round-tripped through local upload (Stage 2A's 242MB-vs-~6-15MB
-Colab upload limit, already hit once). Colab/GCP is a compute
+Colab upload limit, already hit once).
+
+**Post-lock amendment (2026-08-06, before ladder stage 3): stage 3 runs
+in two phases, and the encode phase runs locally.** The constraint above
+is preserved in substance, and its own parenthetical states why it
+exists: the failure it guards against is getting a large file INTO a
+Colab session through that session's upload mechanism. A direct
+local->GCS write never touches that mechanism -- it uses the same
+`google-cloud-storage` client and the same chunked, resumable,
+crc32c-verified transport in `stage2b_gcs.py` that a cloud-side write
+uses, and `stage_kmnist_inputs.py` has moved KMNIST that way for both
+prior rungs. The rule that is actually load-bearing is "feature
+artifacts live in GCS, written through the verified transport", not
+"every computation happens inside a Colab session".
+
+What the split avoids is a real cost, not a hypothetical one: encoding
+is the pipeline's one genuinely CPU-bound step -- 1,099s of stage 2's
+1,722s total -- while evolution, ridge and the CNN are what use the
+GPU. Running the encode inside a provisioned session leaves a metered
+A100 idle for the majority of the run's wall-clock. Phase A (corpus,
+corruption, encode, restrict) therefore runs on local CPU cores and
+writes only the encoded array; Phase B (evolution, ridge, CNN) reads it
+and regenerates corruption and clean targets in-session, both being
+deterministic and cheap, so 218MB crosses the boundary instead of
+775MB. `ensure_artifact`'s 64MB auto-chunk threshold engages on that
+upload without the call site asking. See the dtype section's disclosure
+for the cross-architecture reproducibility consequence, measured before
+the decision was acted on.
+
+Colab/GCP is a compute
 RUNTIME for this implementation only -- not a commitment about
 final deliverable format. The visuals/plots delivery format is an
 explicitly DEFERRED decision, made once results exist, and is not
@@ -548,3 +609,15 @@ Does not revisit Stage 2A's open items (#9, #10, #11).
   disclosed rather than silently fixed; encoder-gate artifact naming
   carries the step count so the 150-step FAIL remains in the bucket as
   history.
+- Post-lock amendment, before feasibility stage 3: two-phase execution,
+  local CPU encode writing only the encoded array to GCS and a remote
+  GPU phase regenerating corruption and targets in-session -- the
+  "generate in the cloud" convention's own stated rationale is the Colab
+  session upload limit, which a direct local->GCS write on the already-
+  verified transport never touches, and an in-session CPU encode would
+  leave a metered A100 idle for most of the run; with it, the disclosed
+  cross-architecture consequence, measured before the decision was acted
+  on: encoded features are bit-reproducible within a CPU architecture
+  (Colab-to-Colab bit-exact across sessions; this Mac bit-exact across
+  runs) and agree to a maximum of 3 ULP across architectures, damped
+  rather than amplified by the encoder's contraction to a fixed point.
