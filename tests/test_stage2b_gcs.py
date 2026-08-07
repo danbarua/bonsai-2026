@@ -39,15 +39,33 @@ import stage2b_gcs as gcs  # noqa: E402
 # ---- an in-memory stand-in for a GCS bucket ----
 
 class FakeBlob:
-    def __init__(self, bucket, name):
+    def __init__(self, bucket, name, generation=None):
         self.bucket = bucket
         self.name = name
+        self.pinned_generation = generation
         # Unpopulated until the object is fetched or written, as on a real
         # `Blob`: `bucket.blob(name)` is a handle, not a read.
         self.size = None
         self.crc32c = None
+        self.generation = None
+
+    def _check_pin(self):
+        """A pinned handle reads that version or nothing. With versioning
+        off, "that version" is only ever the current one."""
+        if self.pinned_generation is None:
+            return
+        current = self.bucket.generations.get(self.name)
+        if self.name not in self.bucket.objects or current != self.pinned_generation:
+            raise FileNotFoundError(
+                f"no such object generation: {self.name}#{self.pinned_generation} "
+                f"(current generation {current}). Superseded generations are not "
+                f"retained on this bucket.")
 
     def exists(self):
+        if self.pinned_generation is not None:
+            current = self.bucket.generations.get(self.name)
+            return (self.name in self.bucket.objects
+                    and current == self.pinned_generation)
         return self.name in self.bucket.objects
 
     def _populate(self):
@@ -56,21 +74,60 @@ class FakeBlob:
         data = self.bucket.objects.get(self.name, b"")
         self.size = len(data)
         self.crc32c = self.bucket._checksum(data)
+        self.generation = self.bucket.generations.get(self.name)
 
     def reload(self):
         if self.name not in self.bucket.objects:
             raise FileNotFoundError(f"no such object: {self.name}")
         self._populate()
 
-    def upload_from_filename(self, path):
+    def _check_precondition(self, if_generation_match):
+        """Compare-and-set, as the service does it.
+
+        `0` means the object must not exist; a positive integer means it
+        must still be exactly that generation. Enforced HERE rather than in
+        the code under test, because a precondition the client checks
+        itself is not a precondition -- it is a check with a race after it,
+        which is the whole thing the guard exists to close.
+
+        Raises the module's own error rather than `google.api_core`'s
+        `PreconditionFailed`. Against the real service that exception is
+        translated to this one by `_write_guarded`, so callers see the same
+        type either way; what these tests cannot exercise is the
+        translation itself, and `test_stage2b_gcs_roundtrip.py` is where
+        that would have to live."""
+        if if_generation_match is None:
+            return
+        # An ABSENT object is generation 0 for precondition purposes, even
+        # if it existed earlier in this test -- that is the real semantic,
+        # and getting it wrong would make the ordinary retry-after-a-failed-
+        # verify path fail here while succeeding against GCS. The
+        # `generations` counter still never rewinds, so a recreated object
+        # gets a new number rather than its old one back.
+        current = (self.bucket.generations.get(self.name, 0)
+                   if self.name in self.bucket.objects else 0)
+        if int(if_generation_match) != current:
+            raise gcs.GenerationPreconditionError(
+                f"precondition failed on {self.name!r}: required generation "
+                f"{if_generation_match}, object is at generation {current}")
+
+    def _bump(self):
+        self.bucket.generations[self.name] = (
+            self.bucket.generations.get(self.name, 0) + 1)
+
+    def upload_from_filename(self, path, if_generation_match=None):
+        self._check_precondition(if_generation_match)
         self.bucket._store_upload(self.name, Path(path).read_bytes())
+        self._bump()
         self._populate()
 
-    def upload_from_string(self, data, content_type=None):
+    def upload_from_string(self, data, content_type=None, if_generation_match=None):
+        self._check_precondition(if_generation_match)
         self.bucket._store_upload(self.name, bytes(data))
+        self._bump()
         self._populate()
 
-    def compose(self, sources):
+    def compose(self, sources, if_generation_match=None):
         """Server-side concatenation, with the API's own source limit
         enforced -- a composition tree that exceeded it would be a real
         failure against the real bucket, so it must be one here."""
@@ -79,13 +136,16 @@ class FakeBlob:
         missing = [s.name for s in sources if s.name not in self.bucket.objects]
         if missing:
             raise FileNotFoundError(f"no such object(s): {missing}")
+        self._check_precondition(if_generation_match)
         ordered = self.bucket._compose_order(sources)
         self.bucket.objects[self.name] = b"".join(
             self.bucket.objects[s.name] for s in ordered)
         self.bucket.composes.append((self.name, [s.name for s in sources]))
+        self._bump()
         self._populate()
 
     def download_to_filename(self, path):
+        self._check_pin()
         if self.name not in self.bucket.objects:
             raise FileNotFoundError(f"no such object: {self.name}")
         Path(path).write_bytes(self.bucket._deliver(self.bucket.objects[self.name]))
@@ -104,6 +164,10 @@ class FakeBucket:
     def __init__(self, name=gcs.DEFAULT_GCS_BUCKET):
         self.name = name
         self.objects = {}
+        # Monotonic per object, as GCS generations are. A deleted-and-
+        # rewritten object gets a NEW generation, never its old one back,
+        # which is what makes a stale precondition detectable.
+        self.generations = {}
         self.uploads = []
         self.downloads = []
         self.deletes = []
@@ -134,8 +198,12 @@ class FakeBucket:
         necessarily the bytes the object holds."""
         return data
 
-    def blob(self, name):
-        return FakeBlob(self, name)
+    def blob(self, name, generation=None):
+        """`generation` pins the handle to one exact version, as the real
+        API does. Versioning is OFF on the production bucket (measured),
+        so only the CURRENT generation is retrievable -- a pinned read of
+        a superseded one is a 404 there and a FileNotFoundError here."""
+        return FakeBlob(self, name, generation=generation)
 
     def list_blobs(self, prefix=""):
         return [FakeBlob(self, n) for n in sorted(self.objects) if n.startswith(prefix)]
@@ -238,6 +306,10 @@ def _write(path, text="payload"):
 
 TRAIN_ARGS = dict(stage=2, condition="evolved_T", kind="features", ext="npz", split="train")
 TEST_ARGS = dict(stage=4, condition="evolved_T", kind="predictions", ext="npz", split="test")
+# A RUN_SCOPED name: the only class `force` is legal on, since nothing
+# pins it and nothing may adopt it as a parent.
+REPORT_ARGS = dict(stage=2, condition=None, kind="stage2_report", ext="json",
+                   split="train")
 
 
 # ---- infrastructure constants ----
@@ -761,10 +833,12 @@ def test_ensure_artifact_skips_a_step_that_already_landed(bucket, tmp_path):
     name = gcs.object_path(**TRAIN_ARGS)
     local = tmp_path / "work" / "features.npz"
     calls = []
-    gcs.ensure_artifact(name, local, produce=_producer(counter=calls), bucket=bucket)
+    gcs.ensure_artifact(name, local, produce=_producer(counter=calls), bucket=bucket,
+                        fingerprint=_fingerprint())
     r = gcs.ensure_artifact(name, local, produce=_producer(counter=calls), bucket=bucket)
     assert len(calls) == 1
     assert (r.skipped, r.produced, r.uploaded, r.downloaded) == (True, False, False, False)
+    assert r.validated is True, "the skip branch is a consume, and consumes validate"
 
 
 def test_ensure_artifact_on_a_fresh_runtime_downloads_instead_of_recomputing(bucket, tmp_path):
@@ -772,13 +846,15 @@ def test_ensure_artifact_on_a_fresh_runtime_downloads_instead_of_recomputing(buc
     and the local disk is empty because the runtime is new."""
     name = gcs.object_path(**TRAIN_ARGS)
     first = tmp_path / "session_a" / "features.npz"
-    gcs.ensure_artifact(name, first, produce=_producer("from session a"), bucket=bucket)
+    gcs.ensure_artifact(name, first, produce=_producer("from session a"), bucket=bucket,
+                        fingerprint=_fingerprint())
 
     calls = []
     second = tmp_path / "session_b" / "features.npz"
     r = gcs.ensure_artifact(name, second, produce=_producer(counter=calls), bucket=bucket)
     assert calls == []
     assert (r.skipped, r.produced, r.uploaded, r.downloaded) == (True, False, False, True)
+    assert r.validated is True
     assert second.read_text() == "from session a"
 
 
@@ -786,13 +862,15 @@ def test_ensure_artifact_leaves_the_artifact_present_both_places_in_every_branch
         bucket, tmp_path):
     name = gcs.object_path(**TRAIN_ARGS)
     for i, local in enumerate([tmp_path / "a.npz", tmp_path / "b.npz", tmp_path / "b.npz"]):
-        r = gcs.ensure_artifact(name, local, produce=_producer(f"run{i}"), bucket=bucket)
+        r = gcs.ensure_artifact(name, local, produce=_producer(f"run{i}"), bucket=bucket,
+                                fingerprint=_fingerprint())
         assert Path(r.local_path).is_file()
         assert gcs.object_exists(name, bucket=bucket)
 
 
 def test_force_recomputes_and_overwrites(bucket, tmp_path):
-    name = gcs.object_path(**TRAIN_ARGS)
+    """On a RUN_SCOPED name -- the only class force is legal on."""
+    name = gcs.object_path(**REPORT_ARGS)
     local = tmp_path / "features.npz"
     gcs.ensure_artifact(name, local, produce=_producer("first"), bucket=bucket)
     r = gcs.ensure_artifact(name, local, produce=_producer("second"), bucket=bucket,
@@ -833,11 +911,12 @@ def test_ensure_artifact_requires_a_callable_producer(bucket, tmp_path):
 def test_step_result_summary_records_what_happened(bucket, tmp_path):
     name = gcs.object_path(**TRAIN_ARGS)
     r = gcs.ensure_artifact(name, tmp_path / "features.npz", produce=_producer(),
-                            bucket=bucket)
+                            bucket=bucket, fingerprint=_fingerprint())
     assert r.summary() == {
         "object_path": name, "local_path": str(tmp_path / "features.npz"),
         "skipped": False, "produced": True, "uploaded": True, "downloaded": False,
         "size_bytes": len("computed"),
+        "validated": False, "manifest_published": True,
     }
 
 
@@ -1719,9 +1798,13 @@ def test_ensure_artifact_verifies_the_artifact_it_downloads(tmp_path):
     first = tmp_path / "session_a" / "features.npz"
     gcs.ensure_artifact(name, first, produce=_producer("from session a"), bucket=bucket)
 
+    # No manifest, deliberately: this is about TRANSPORT verification, and
+    # the checksum must fire on its own rather than being reached only
+    # because a provenance check happened to run first.
     second = tmp_path / "session_b" / "features.npz"
     with pytest.raises(gcs.ChecksumMismatchError):
-        gcs.ensure_artifact(name, second, produce=_producer(), bucket=bucket)
+        gcs.ensure_artifact(name, second, produce=_producer(), bucket=bucket,
+                            require_manifest=False)
     assert not second.exists()
 
 
@@ -1746,7 +1829,7 @@ def test_ensure_artifact_verification_can_be_switched_off(tmp_path):
     gcs.ensure_artifact(name, tmp_path / "a" / "features.npz",
                         produce=_producer("session a"), bucket=bucket)
     r = gcs.ensure_artifact(name, tmp_path / "b" / "features.npz", produce=_producer(),
-                            bucket=bucket, verify_content=False)
+                            bucket=bucket, verify_content=False, require_manifest=False)
     assert r.downloaded is True
 
 
@@ -1826,3 +1909,733 @@ def test_bucket_is_a_required_keyword_argument_everywhere(tmp_path):
         gcs.delete_prefix(gcs.TRAIN_ROOT)
     with pytest.raises(TypeError):
         gcs.ensure_artifact(name, tmp_path / "x.bin", produce=_producer())
+
+
+# ---- artifact manifests: the single validated consume path ----
+#
+# The contract these exercise: an object merely existing is never
+# sufficient evidence that it is resumable. Every test below either
+# demonstrates a refusal that must happen, or a legitimate reuse that must
+# NOT be refused -- both directions matter, because a check that refuses
+# everything is as useless as one that refuses nothing.
+
+import numpy as np                                        # noqa: E402
+import stage2b_fingerprint as fp                          # noqa: E402
+
+
+def _fingerprint(**over):
+    base = {
+        "format": fp.FINGERPRINT_FORMAT,
+        "entrypoint": "experiments/stage2b_denoising/encode_stage3_local.py",
+        "git": {"commit": "a" * 40, "clean": True},
+        "source_manifest": {"experiments/stage2b_denoising/x.py": "d" * 64},
+        "source_manifest_digest": "s" * 64,
+        "config": {"encoder_steps": 1200},
+        "config_digest": "c" * 64,
+        "parents": {},
+        "environment": {"python": "3.14.6", "packages": {}},
+    }
+    base.update(over)
+    return base
+
+
+def _npz_artifact(tmp_path, name="payload.npz", **arrays):
+    path = tmp_path / name
+    np.savez_compressed(path, **(arrays or {"x": np.arange(8, dtype=np.float64)}))
+    return str(path)
+
+
+def _published(bucket, tmp_path, fingerprint=None, **arrays):
+    """A payload uploaded with its manifest beside it, as a real run does."""
+    obj = gcs.object_path(stage=3, condition=None, kind="fixture", ext="npz",
+                          split="train")
+    local = _npz_artifact(tmp_path, **arrays)
+    gcs.upload_file(local, obj, bucket=bucket)
+    manifest = gcs.publish_manifest(local, obj, bucket=bucket,
+                                    fingerprint=fingerprint or _fingerprint())
+    return obj, local, manifest
+
+
+def test_manifest_object_name_is_a_sidecar_of_the_payload():
+    assert gcs.manifest_object_name("a/b/c.npz") == "a/b/c.npz.manifest.json"
+    assert gcs.is_manifest_name(gcs.manifest_object_name("a/b/c.npz"))
+    assert not gcs.is_manifest_name("a/b/c.npz")
+
+
+def test_a_published_artifact_validates_against_its_own_manifest(bucket, tmp_path):
+    obj, local, _ = _published(bucket, tmp_path)
+    manifest, downloaded = gcs.consume_validated(
+        obj, local, bucket=bucket, expected_fingerprint=_fingerprint())
+    assert manifest["payload_sha256"] == fp.sha256_of_file(local)
+    assert downloaded is False               # local file already present
+
+
+def test_a_payload_with_no_manifest_is_refused(bucket, tmp_path):
+    """The core of the contract: existence alone buys nothing."""
+    obj = gcs.object_path(stage=3, condition=None, kind="bare", ext="npz",
+                          split="train")
+    local = _npz_artifact(tmp_path, name="bare.npz")
+    gcs.upload_file(local, obj, bucket=bucket)
+    with pytest.raises(gcs.ManifestMissingError, match="carries no manifest"):
+        gcs.consume_validated(obj, local, bucket=bucket)
+
+
+def test_the_no_manifest_optout_is_explicit_and_permits_pre_contract_artifacts(
+        bucket, tmp_path):
+    """Ladder stages 1 and 2 predate the contract. Their artifacts must stay
+    readable, but only via a named opt-out that greps."""
+    obj = gcs.object_path(stage=1, condition=None, kind="legacy", ext="npz",
+                          split="train")
+    local = _npz_artifact(tmp_path, name="legacy.npz")
+    gcs.upload_file(local, obj, bucket=bucket)
+    manifest, _ = gcs.consume_validated(obj, local, bucket=bucket,
+                                        require_manifest=False)
+    assert manifest is None
+
+
+def test_a_payload_edited_after_publication_is_refused(bucket, tmp_path):
+    """The manifest records the payload's digest; changed bytes must not be
+    accepted just because the object still exists."""
+    obj, local, _ = _published(bucket, tmp_path)
+    np.savez_compressed(local, x=np.arange(8, dtype=np.float64) + 1.0)
+    with pytest.raises(gcs.ManifestMismatchError, match="payload sha256"):
+        gcs.consume_validated(obj, local, bucket=bucket)
+
+
+def test_the_per_array_manifest_is_what_survives_a_container_rewrite(tmp_path):
+    """What the per-array manifest is actually FOR, stated honestly.
+
+    Inside `validate_against_manifest` it is defence-in-depth only: a
+    changed array also changes the whole-payload SHA-256, so the payload
+    check catches that first and the per-array branch never decides
+    anything. (An earlier version of this test asserted the per-array check
+    caught a perturbed value; deleting the per-array comparison entirely
+    left it passing, because the payload digest was doing the work.)
+
+    Its real job is CROSS-FILE comparison -- the Phase A regeneration
+    acceptance test, where two independently written `.npz` files must be
+    judged equal on their scientific content. There the whole-file digest
+    is useless, because `np.savez` embeds timestamps in the zip headers, so
+    identical arrays produce different files."""
+    a = np.linspace(0, 1, 200).reshape(20, 10)
+    first, second = tmp_path / "first.npz", tmp_path / "second.npz"
+    np.savez_compressed(first, x=a, y=np.arange(5))
+    np.savez_compressed(second, x=a, y=np.arange(5))
+
+    # Container bytes are deliberately NOT asserted either way. `npz`
+    # serialization is not SPECIFIED deterministic -- zip headers carry an
+    # mtime at two-second granularity -- so two writes in the same second
+    # usually match while a pair straddling a boundary need not. Measured:
+    # these two are byte-identical, which is exactly why the property must
+    # be recorded rather than tested. Relying on whole-file equality would
+    # pass here and fail intermittently in production.
+    assert fp.compare_array_manifests(fp.array_manifest(first),
+                                      fp.array_manifest(second)) == [], (
+        "identical arrays must compare equal regardless of container bytes")
+
+    # and a real difference is still caught
+    np.savez_compressed(second, x=a + np.nextafter(0.0, 1.0), y=np.arange(5))
+    assert fp.compare_array_manifests(fp.array_manifest(first),
+                                      fp.array_manifest(second)) != []
+
+
+def test_a_fingerprint_from_a_different_config_is_refused(bucket, tmp_path):
+    obj, local, _ = _published(bucket, tmp_path)
+    with pytest.raises(fp.FingerprintMismatch, match="config_digest"):
+        gcs.consume_validated(obj, local, bucket=bucket,
+                              expected_fingerprint=_fingerprint(config_digest="x" * 64))
+
+
+def test_cross_stage_reuse_under_content_only_is_permitted(bucket, tmp_path):
+    """Stage 2 and 3 consume stage 1's topologies deliberately. A policy that
+    refused a different producing commit would break correct behaviour."""
+    obj, local, _ = _published(bucket, tmp_path)
+    other = _fingerprint(config_digest="x" * 64, source_manifest_digest="y" * 64,
+                         git={"commit": "b" * 40, "clean": True})
+    manifest, _ = gcs.consume_validated(obj, local, bucket=bucket,
+                                        expected_fingerprint=other,
+                                        policy=fp.CONTENT_ONLY)
+    assert manifest is not None
+
+
+def test_content_only_still_verifies_the_payload(bucket, tmp_path):
+    """The relaxation is about the PRODUCER, never about the bytes."""
+    obj, local, _ = _published(bucket, tmp_path)
+    np.savez_compressed(local, x=np.arange(8, dtype=np.float64) + 1.0)
+    with pytest.raises(gcs.ManifestMismatchError, match="payload sha256"):
+        gcs.consume_validated(obj, local, bucket=bucket,
+                              expected_fingerprint=_fingerprint(),
+                              policy=fp.CONTENT_ONLY)
+
+
+def test_a_manifest_records_the_payload_generation(bucket, tmp_path):
+    obj, local, manifest = _published(bucket, tmp_path)
+    assert "payload_generation" in manifest
+
+
+def test_a_missing_payload_raises_rather_than_reporting_absence_quietly(bucket, tmp_path):
+    obj = gcs.object_path(stage=3, condition=None, kind="absent", ext="npz",
+                          split="train")
+    with pytest.raises(FileNotFoundError):
+        gcs.consume_validated(obj, str(tmp_path / "nope.npz"), bucket=bucket)
+
+
+def test_the_manifest_sidecar_is_itself_subject_to_the_test_split_guard():
+    """A sidecar name must not become a hole in the split guard."""
+    with pytest.raises(PermissionError):
+        gcs._check_object_path_allowed(
+            gcs.manifest_object_name("stage2b/testsplit/stage4/common/x.npz"), False)
+
+
+# ---- ensure_artifact under the manifest contract ----
+#
+# The trust point. `ensure_artifact` treats an object's existence as proof
+# its step is done, which is what makes a dead session cost one step rather
+# than an afternoon -- and is exactly why a provenance check has to sit
+# here rather than only in a function drivers may forget to call.
+
+def test_ensure_artifact_refuses_to_resume_from_an_object_with_no_manifest(
+        bucket, tmp_path):
+    """The default, and the whole contract in one assertion: an object
+    merely existing is never sufficient evidence that it is resumable."""
+    name = gcs.object_path(**TRAIN_ARGS)
+    gcs.ensure_artifact(name, tmp_path / "a.npz", produce=_producer("first"),
+                        bucket=bucket)                    # no fingerprint
+    calls = []
+    with pytest.raises(gcs.ManifestMissingError, match="carries no manifest"):
+        gcs.ensure_artifact(name, tmp_path / "b.npz",
+                            produce=_producer(counter=calls), bucket=bucket)
+    assert calls == [], "it must refuse, not silently recompute"
+
+
+def test_ensure_artifact_refuses_when_the_manifest_disagrees_with_the_payload(
+        bucket, tmp_path):
+    """Existence plus a manifest is still not enough -- they have to agree.
+    The object is overwritten behind the manifest's back, which is what a
+    partially-completed regeneration looks like from the next run."""
+    name = gcs.object_path(**TRAIN_ARGS)
+    gcs.ensure_artifact(name, tmp_path / "a.npz", produce=_producer("first"),
+                        bucket=bucket, fingerprint=_fingerprint())
+    bucket.objects[name] = b"something else entirely"
+    with pytest.raises(gcs.ManifestMismatchError, match="payload sha256"):
+        gcs.ensure_artifact(name, tmp_path / "b.npz", produce=_producer(),
+                            bucket=bucket)
+
+
+def test_ensure_artifact_refuses_a_fingerprint_the_consumer_did_not_expect(
+        bucket, tmp_path):
+    """A consumer that knows what produced its input can say so, and the
+    resumption is refused when the recorded producer disagrees."""
+    name = gcs.object_path(**TRAIN_ARGS)
+    gcs.ensure_artifact(name, tmp_path / "a.npz", produce=_producer("first"),
+                        bucket=bucket, fingerprint=_fingerprint())
+    with pytest.raises(fp.FingerprintMismatch, match="config_digest"):
+        gcs.ensure_artifact(name, tmp_path / "b.npz", produce=_producer(),
+                            bucket=bucket,
+                            expected_fingerprint=_fingerprint(config_digest="x" * 64))
+
+
+def test_ensure_artifact_permits_cross_stage_reuse_under_content_only(bucket, tmp_path):
+    """Stage 3 consumes stage 1's topologies deliberately. A policy that
+    refused a different producing commit would break correct behaviour --
+    the relaxation is about the producer, never about the bytes."""
+    name = gcs.object_path(**TRAIN_ARGS)
+    gcs.ensure_artifact(name, tmp_path / "a.npz", produce=_producer("first"),
+                        bucket=bucket, fingerprint=_fingerprint())
+    other = _fingerprint(config_digest="x" * 64, source_manifest_digest="y" * 64,
+                         git={"commit": "b" * 40, "clean": True})
+    r = gcs.ensure_artifact(name, tmp_path / "b.npz", produce=_producer(),
+                            bucket=bucket, expected_fingerprint=other,
+                            policy=fp.CONTENT_ONLY)
+    assert r.skipped and r.validated
+
+
+def test_the_pre_contract_optout_is_what_keeps_a_completed_rung_rerunnable(
+        bucket, tmp_path):
+    """Ladder stages 1 and 2 wrote every artifact before this contract
+    existed. Retrofitting manifests onto them would fabricate provenance,
+    so their call sites opt out by name -- and the opt-out has to work, or
+    the policy is "those rungs can never run again"."""
+    name = gcs.object_path(**TRAIN_ARGS)
+    gcs.ensure_artifact(name, tmp_path / "a.npz", produce=_producer("legacy"),
+                        bucket=bucket)
+    r = gcs.ensure_artifact(name, tmp_path / "b.npz", produce=_producer(),
+                            bucket=bucket, require_manifest=False)
+    assert r.skipped is True
+    assert r.validated is False, "an unvalidated resume must not claim it validated"
+
+
+def test_a_forced_overwrite_never_leaves_a_manifest_describing_the_old_bytes(
+        bucket, tmp_path):
+    """The stale sidecar is WORSE than no sidecar: the next consume raises a
+    mismatch, which reads as corruption rather than as a deliberate
+    regeneration. Force must republish or remove -- never leave."""
+    name = gcs.object_path(**REPORT_ARGS)
+    local = tmp_path / "features.npz"
+    gcs.ensure_artifact(name, local, produce=_producer("first"), bucket=bucket,
+                        fingerprint=_fingerprint())
+    sidecar = gcs.manifest_object_name(name)
+    assert sidecar in bucket.objects
+
+    # Forced overwrite WITHOUT a fingerprint: the sidecar must go.
+    gcs.ensure_artifact(name, local, produce=_producer("second"), bucket=bucket,
+                        force=True)
+    assert bucket.objects[name] == b"second"
+    assert sidecar not in bucket.objects, (
+        "a manifest describing the replaced bytes survived the overwrite")
+
+
+def test_a_forced_overwrite_with_a_fingerprint_republishes_rather_than_removing(
+        bucket, tmp_path):
+    """The path a regeneration actually takes: new bytes, new manifest, and
+    the pair agree immediately afterwards."""
+    name = gcs.object_path(**REPORT_ARGS)
+    local = tmp_path / "features.npz"
+    gcs.ensure_artifact(name, local, produce=_producer("first"), bucket=bucket,
+                        fingerprint=_fingerprint())
+    r = gcs.ensure_artifact(name, local, produce=_producer("second"), bucket=bucket,
+                            force=True, fingerprint=_fingerprint())
+    assert r.manifest_published is True
+    manifest = gcs.read_manifest(name, bucket=bucket)
+    assert manifest["payload_sha256"] == fp.sha256_of_file(local)
+    # ...and the next ordinary run resumes from it without complaint.
+    again = gcs.ensure_artifact(name, local, produce=_producer(), bucket=bucket)
+    assert again.skipped and again.validated
+
+
+def test_the_manifest_is_published_only_after_the_payload_verifies(tmp_path):
+    """Ordering, not decoration: a sidecar that exists must describe a
+    complete object. A failed upload leaves neither."""
+    name = gcs.object_path(**TRAIN_ARGS)
+    bucket = TruncatingBucket(truncate_from=0)
+    with pytest.raises(gcs.ChecksumMismatchError):
+        gcs.ensure_artifact(name, tmp_path / "features.npz",
+                            produce=_producer("computed" * 100), bucket=bucket,
+                            fingerprint=_fingerprint())
+    assert gcs.manifest_object_name(name) not in bucket.objects
+    assert name not in bucket.objects
+
+
+# ---- Freeze 4's no-overwrite-race guard ----
+#
+# Two writers reaching the same artifact is not hypothetical here: the
+# resumability story explicitly contemplates a second session resuming
+# after the first is PRESUMED dead, and "presumed dead but still
+# uploading" is precisely the failure `stop`'s checked exit status exists
+# for. The guard is a compare-and-set at the service, not a check here
+# followed by a write -- the gap between those two is the race.
+
+def test_a_second_writer_cannot_silently_replace_a_finished_artifact(bucket, tmp_path):
+    """The case the guard exists for. The first session's artifact is
+    complete; a second session that believes the step is unfinished must be
+    refused rather than overwriting it."""
+    name = gcs.object_path(**TRAIN_ARGS)
+    gcs.ensure_artifact(name, tmp_path / "a.npz", produce=_producer("session one"),
+                        bucket=bucket, fingerprint=_fingerprint())
+    local = tmp_path / "b.npz"
+    local.write_text("session two")
+    with pytest.raises(gcs.GenerationPreconditionError, match="generation"):
+        gcs.upload_file(local, name, bucket=bucket, generation_match=0)
+    assert bucket.objects[name] == b"session one", "the finished artifact was replaced"
+
+
+def test_a_forced_overwrite_requires_the_generation_it_read(bucket, tmp_path):
+    """Force is a deliberate replacement, so it carries the generation it
+    saw -- and is refused if anything moved in between."""
+    name = gcs.object_path(**TRAIN_ARGS)
+    local = tmp_path / "features.npz"
+    gcs.ensure_artifact(name, local, produce=_producer("first"), bucket=bucket)
+    stale = gcs.current_generation(name, bucket=bucket)
+
+    # Someone else writes. The generation moves on.
+    other = tmp_path / "other.npz"
+    other.write_text("interloper")
+    gcs.upload_file(other, name, bucket=bucket, generation_match=stale)
+
+    with pytest.raises(gcs.GenerationPreconditionError):
+        gcs.upload_file(local, name, bucket=bucket, generation_match=stale)
+    assert bucket.objects[name] == b"interloper"
+
+
+def test_ensure_artifact_creates_under_a_must_not_exist_precondition(bucket, tmp_path):
+    """A fresh step must CREATE. Nothing about the happy path changes, but
+    the write now says so to the service rather than assuming it."""
+    name = gcs.object_path(**TRAIN_ARGS)
+    assert gcs.current_generation(name, bucket=bucket) == 0
+    r = gcs.ensure_artifact(name, tmp_path / "a.npz", produce=_producer(),
+                            bucket=bucket, fingerprint=_fingerprint())
+    assert r.uploaded
+    assert gcs.current_generation(name, bucket=bucket) > 0
+
+
+def test_a_forced_overwrite_through_ensure_artifact_still_succeeds(bucket, tmp_path):
+    """The positive control the guard must not break: `force=True` reads the
+    current generation and requires exactly it, so the ordinary
+    single-writer regeneration goes through untouched."""
+    name = gcs.object_path(**REPORT_ARGS)
+    local = tmp_path / "features.npz"
+    gcs.ensure_artifact(name, local, produce=_producer("first"), bucket=bucket,
+                        fingerprint=_fingerprint())
+    r = gcs.ensure_artifact(name, local, produce=_producer("second"), bucket=bucket,
+                            force=True, fingerprint=_fingerprint())
+    assert r.uploaded and bucket.objects[name] == b"second"
+
+
+def test_a_retry_after_a_failed_upload_can_still_create(tmp_path):
+    """A verify failure deletes the object, so the next run's CREATE
+    precondition must match again. Real GCS treats an absent object as
+    generation 0 regardless of history; a fake that remembered the old
+    generation would make this pass here and fail in production."""
+    name = gcs.object_path(**TRAIN_ARGS)
+    bucket = TruncatingBucket(truncate_from=0)
+    with pytest.raises(gcs.ChecksumMismatchError):
+        gcs.ensure_artifact(name, tmp_path / "a" / "features.npz",
+                            produce=_producer("computed" * 100), bucket=bucket)
+    assert name not in bucket.objects
+    bucket.truncate_from = None          # the transient fault clears
+    r = gcs.ensure_artifact(name, tmp_path / "b" / "features.npz",
+                            produce=_producer("computed" * 100), bucket=bucket)
+    assert r.uploaded
+
+
+def test_the_chunked_route_guards_the_destination_but_not_its_parts(bucket, tmp_path):
+    """Scoping, stated as a test. The artifact is the composed destination;
+    the parts are transient scratch the upload owns end to end, and a
+    resumed upload rewriting a damaged part is an overwrite BY DESIGN --
+    guarding those would break the resume the route exists for."""
+    name = gcs.object_path(**TRAIN_ARGS)
+    local = tmp_path / "big.npz"
+    local.write_text("x" * (CHUNK * 3))
+    gcs.ensure_artifact(name, local, produce=lambda p: None, bucket=bucket,
+                        chunked=True, chunk_size=CHUNK, fingerprint=_fingerprint())
+    assert gcs.current_generation(name, bucket=bucket) > 0
+    # A second writer cannot replace the composed artifact.
+    with pytest.raises(gcs.GenerationPreconditionError):
+        gcs.upload_file(local, name, bucket=bucket, generation_match=0)
+
+
+def test_the_manifest_sidecar_is_written_under_a_precondition_too(bucket, tmp_path):
+    """A sidecar replaced behind a payload's back is the mismatch that reads
+    as corruption. It gets the same guard."""
+    obj, local, _ = _published(bucket, tmp_path)
+    sidecar = gcs.manifest_object_name(obj)
+    assert sidecar in bucket.objects
+    with pytest.raises(gcs.GenerationPreconditionError):
+        gcs.publish_manifest(local, obj, bucket=bucket, fingerprint=_fingerprint(),
+                             generation_match=0)
+
+
+# ---- The manifest is the COMMIT POINT (Freeze 1, as tightened) ----
+#
+# Not "a description of an object" but "the record that one exact version
+# is committed". Three consequences, each tested: the manifest records the
+# generation the payload write produced; a consumer reads that exact
+# generation rather than latest-by-name; and a payload with no manifest is
+# UNCOMMITTED, which is the crash-window semantic rather than merely a
+# validity rule.
+#
+# Measured on the production bucket 2026-08-07: generation-pinned reads
+# work, object versioning is OFF (a superseded generation returns 404),
+# and a stale precondition really is refused (`PreconditionFailed`). So
+# artifacts are immutable-by-policy and a superseded generation is a
+# halt-worthy anomaly, not a supported read.
+
+def test_the_manifest_records_the_generation_the_payload_write_produced(bucket, tmp_path):
+    name = gcs.object_path(**TRAIN_ARGS)
+    gcs.ensure_artifact(name, tmp_path / "a.npz", produce=_producer("committed"),
+                        bucket=bucket, fingerprint=_fingerprint())
+    manifest = gcs.read_manifest(name, bucket=bucket)
+    assert manifest["payload_generation"] == gcs.current_generation(name, bucket=bucket)
+    assert manifest["payload_generation"] is not None
+
+
+def test_a_consumer_reads_the_committed_generation_not_latest_by_name(bucket, tmp_path):
+    """The point of pinning. The manifest commits generation N; if the
+    object is later replaced, a consumer holding that manifest must fail
+    loudly rather than quietly reading the replacement.
+
+    A digest check alone would also catch this -- but only after moving the
+    bytes, and only because the replacement happened to differ. Pinning
+    makes it structural."""
+    name = gcs.object_path(**TRAIN_ARGS)
+    gcs.ensure_artifact(name, tmp_path / "a.npz", produce=_producer("committed"),
+                        bucket=bucket, fingerprint=_fingerprint())
+    stale_manifest = gcs.read_manifest(name, bucket=bucket)
+
+    # Something replaces the payload, carrying the correct precondition.
+    replacement = tmp_path / "replacement.npz"
+    replacement.write_text("committed")          # SAME BYTES, new generation
+    gcs.upload_file(replacement, name, bucket=bucket,
+                    generation_match=gcs.current_generation(name, bucket=bucket))
+
+    # THROUGH consume_validated, not download_file directly. Asserting on
+    # download_file would have tested the parameter rather than the policy:
+    # dropping the pin inside consume_validated left such a test passing,
+    # which is how this one was found vacuous on its first breakage.
+    assert stale_manifest["payload_generation"] == gcs.read_manifest(
+        name, bucket=bucket)["payload_generation"], "the sidecar was not touched"
+    with pytest.raises(FileNotFoundError, match="generation"):
+        gcs.consume_validated(name, tmp_path / "fetched.npz", bucket=bucket)
+
+
+def test_identical_bytes_at_a_new_generation_still_fail_the_pin(bucket, tmp_path):
+    """Why pinning is not redundant with the digest: the replacement above
+    has the SAME payload sha256, so `validate_against_manifest` would pass
+    it. Only the generation distinguishes the committed object from an
+    identical-looking successor."""
+    name = gcs.object_path(**TRAIN_ARGS)
+    local = tmp_path / "a.npz"
+    gcs.ensure_artifact(name, local, produce=_producer("committed"), bucket=bucket,
+                        fingerprint=_fingerprint())
+    manifest = gcs.read_manifest(name, bucket=bucket)
+    gcs.upload_file(local, name, bucket=bucket,
+                    generation_match=gcs.current_generation(name, bucket=bucket))
+    # The digest check is satisfied...
+    assert manifest["payload_sha256"] == fp.sha256_of_file(local)
+    # ...and the pin is not.
+    assert gcs.current_generation(name, bucket=bucket) != manifest["payload_generation"]
+
+
+def test_a_payload_whose_manifest_never_landed_is_uncommitted(bucket, tmp_path):
+    """The crash window, stated as a semantic rather than a validity rule.
+    A session that died between the payload write and the sidecar write
+    leaves bytes in the bucket that no consumer may accept -- and the next
+    run must not read them as a completed step."""
+    name = gcs.object_path(**TRAIN_ARGS)
+    local = tmp_path / "a.npz"
+    local.write_text("uncommitted")
+    gcs.upload_file(local, name, bucket=bucket, generation_match=0)   # payload only
+    assert gcs.object_exists(name, bucket=bucket)
+    with pytest.raises(gcs.ManifestMissingError):
+        gcs.consume_validated(name, tmp_path / "b.npz", bucket=bucket)
+
+
+def test_the_producer_is_verified_before_any_payload_bytes_move(bucket, tmp_path):
+    """Order matters for cost as well as correctness: a run consuming the
+    wrong artifact should pay nothing to discover it."""
+    obj, local, _ = _published(bucket, tmp_path)
+    fresh = tmp_path / "not_yet_here.npz"
+    before = len(bucket.downloads)
+    with pytest.raises(fp.FingerprintMismatch):
+        gcs.consume_validated(obj, fresh, bucket=bucket,
+                              expected_fingerprint=_fingerprint(config_digest="x" * 64))
+    assert not fresh.exists()
+    payload_fetches = [n for n in bucket.downloads[before:] if not gcs.is_manifest_name(n)]
+    assert payload_fetches == [], (
+        f"payload bytes moved before the producer was checked: {payload_fetches}")
+
+
+def test_the_sidecar_write_is_guarded_against_a_competing_writer(bucket, tmp_path):
+    """The second half of the commit. If two sessions both reach the
+    sidecar, one loses on a precondition rather than silently replacing the
+    other's commit record."""
+    name = gcs.object_path(**TRAIN_ARGS)
+    local = tmp_path / "a.npz"
+    gcs.ensure_artifact(name, local, produce=_producer("first"), bucket=bucket,
+                        fingerprint=_fingerprint())
+    with pytest.raises(gcs.GenerationPreconditionError):
+        gcs.publish_manifest(local, name, bucket=bucket, fingerprint=_fingerprint(),
+                             payload_generation=gcs.current_generation(name, bucket=bucket),
+                             generation_match=0)
+
+
+# ---- The write-once invariant ----
+#
+# Generation pinning guarantees "the consumer reads what was committed"
+# only while the pinned generation survives. Versioning is OFF on this
+# bucket, so supersession destroys it -- which means semantic naming plus
+# manifest pinning is acceptable ONLY under a genuinely write-once policy
+# for anything a consumer pins. Enforced here rather than asserted in a
+# document.
+
+def test_a_lineage_artifact_cannot_be_overwritten_even_with_force(bucket, tmp_path):
+    """The invariant. `force` on a lineage name is a REFUSAL, not a
+    republish -- and the producer must not run either, since a refusal
+    that still recomputed would burn the GPU time it exists to protect."""
+    name = gcs.object_path(**TRAIN_ARGS)
+    gcs.ensure_artifact(name, tmp_path / "a.npz", produce=_producer("first"),
+                        bucket=bucket, fingerprint=_fingerprint())
+    calls = []
+    with pytest.raises(gcs.WriteOnceViolation, match="create-once"):
+        gcs.ensure_artifact(name, tmp_path / "b.npz",
+                            produce=_producer("second", counter=calls),
+                            bucket=bucket, force=True)
+    assert calls == [], "the refusal must happen BEFORE produce runs"
+    assert bucket.objects[name] == b"first"
+
+
+def test_the_refusal_fires_before_anything_is_computed_or_uploaded(bucket, tmp_path):
+    """Even on a name that does not exist yet: force on a lineage class is
+    refused on the class, not on whether a collision would occur. A check
+    that only fired when the object existed would be a race."""
+    name = gcs.object_path(**TRAIN_ARGS)
+    assert not gcs.object_exists(name, bucket=bucket)
+    with pytest.raises(gcs.WriteOnceViolation):
+        gcs.ensure_artifact(name, tmp_path / "a.npz", produce=_producer(),
+                            bucket=bucket, force=True)
+    assert not gcs.object_exists(name, bucket=bucket)
+
+
+def test_regeneration_is_a_new_name_not_an_overwrite(bucket, tmp_path):
+    """What the policy leaves available, and what Phase A actually did:
+    `encoded_train_s1200` rather than overwriting `encoded_fit_s1200`."""
+    old = gcs.object_path(stage=3, condition=None, kind="encoded_fit_s1200",
+                          ext="npz", split="train")
+    new = gcs.object_path(stage=3, condition=None, kind="encoded_train_s1200",
+                          ext="npz", split="train")
+    gcs.ensure_artifact(old, tmp_path / "old.npz", produce=_producer("54k"),
+                        bucket=bucket, fingerprint=_fingerprint())
+    gcs.ensure_artifact(new, tmp_path / "new.npz", produce=_producer("60k"),
+                        bucket=bucket, fingerprint=_fingerprint())
+    assert bucket.objects[old] == b"54k", "the baseline must survive the regeneration"
+    assert bucket.objects[new] == b"60k"
+
+
+def test_a_run_scoped_artifact_may_still_be_forced(bucket, tmp_path):
+    """The positive control. A policy that refused every overwrite would
+    also refuse the report steps, which are meant to be regenerated."""
+    name = gcs.object_path(**REPORT_ARGS)
+    gcs.ensure_artifact(name, tmp_path / "r.json", produce=_producer("first"),
+                        bucket=bucket)
+    r = gcs.ensure_artifact(name, tmp_path / "r.json", produce=_producer("second"),
+                            bucket=bucket, force=True)
+    assert r.uploaded and bucket.objects[name] == b"second"
+
+
+@pytest.mark.parametrize("kind,expected", [
+    ("features", gcs.LINEAGE),
+    ("theta_T", gcs.LINEAGE),
+    ("encoded_train_s1200", gcs.LINEAGE),
+    ("kmnist_train_images", gcs.LINEAGE),
+    ("ridge_final", gcs.LINEAGE),
+    ("stage2_report", gcs.RUN_SCOPED),
+    ("stage2_report_20260807T160000Z", gcs.RUN_SCOPED),   # run-scoped suffix
+    ("probe", gcs.RUN_SCOPED),
+    ("something_nobody_declared", gcs.LINEAGE),           # the safe default
+])
+def test_the_class_of_each_kind(kind, expected):
+    name = gcs.object_path(stage=2, condition=None, kind=kind, ext="npz",
+                           split="train")
+    assert gcs.artifact_class(name) == expected
+
+
+def test_an_undeclared_kind_defaults_to_the_protected_class():
+    """Stated as its own test because the direction of the default is the
+    whole safety property: the dangerous mistake is treating a pinned
+    artifact as disposable, so an unknown kind must be create-once."""
+    unknown = gcs.object_path(stage=3, condition=None, kind="future_artifact",
+                              ext="npz", split="train")
+    assert gcs.artifact_class(unknown) == gcs.LINEAGE
+
+
+def test_a_run_scoped_object_cannot_be_adopted_as_a_parent(bucket, tmp_path):
+    """The other half of the split. A run-scoped object is overwritable by
+    policy, so recording one as a parent would put a mutable thing inside
+    an immutable lineage and pin a digest for bytes allowed to change."""
+    report = gcs.object_path(**REPORT_ARGS)
+    child = gcs.object_path(**TRAIN_ARGS)
+    local = _npz_artifact(tmp_path)
+    gcs.upload_file(local, child, bucket=bucket)
+    with pytest.raises(gcs.WriteOnceViolation, match="RUN_SCOPED"):
+        gcs.publish_manifest(local, child, bucket=bucket, fingerprint=_fingerprint(),
+                             parents={report: "d" * 64})
+
+
+def test_a_lineage_object_is_a_legitimate_parent(bucket, tmp_path):
+    """Positive control for the guard above."""
+    parent = gcs.object_path(stage=1, condition=None, kind="topologies", ext="npz",
+                             split="train")
+    child = gcs.object_path(**TRAIN_ARGS)
+    local = _npz_artifact(tmp_path)
+    gcs.upload_file(local, child, bucket=bucket)
+    manifest = gcs.publish_manifest(local, child, bucket=bucket,
+                                    fingerprint=_fingerprint(),
+                                    parents={parent: "d" * 64})
+    assert manifest["parents"] == {parent: "d" * 64}
+
+
+def test_the_lineage_walk_is_transitive_not_one_hop(bucket, tmp_path):
+    """Checking only immediate parents leaves the property one link deep.
+    Here the run-scoped object is a GRANDparent -- the child's own parents
+    are all lineage, so a one-hop check passes it."""
+    report = gcs.object_path(**REPORT_ARGS)
+    mid = gcs.object_path(stage=1, condition=None, kind="topologies", ext="npz",
+                          split="train")
+    child = gcs.object_path(**TRAIN_ARGS)
+    local = _npz_artifact(tmp_path)
+
+    # `mid` records the report as a parent. Written by hand, because
+    # publish_manifest would refuse it -- which is the point: this is the
+    # manifest an older commit or a different tool could have left.
+    gcs.upload_file(local, mid, bucket=bucket)
+    bucket.objects[gcs.manifest_object_name(mid)] = json.dumps({
+        "format": gcs.MANIFEST_FORMAT, "object_path": mid,
+        "payload_sha256": fp.sha256_of_file(local),
+        "parents": {report: "d" * 64}, "fingerprint": _fingerprint(),
+    }).encode()
+
+    gcs.upload_file(local, child, bucket=bucket)
+    child_manifest = gcs.publish_manifest(local, child, bucket=bucket,
+                                          fingerprint=_fingerprint(),
+                                          parents={mid: "e" * 64})
+    # One hop is clean...
+    assert all(gcs.artifact_class(p) == gcs.LINEAGE for p in child_manifest["parents"])
+    # ...and the walk still catches it.
+    with pytest.raises(gcs.WriteOnceViolation, match="lineage"):
+        gcs.verify_lineage(child, child_manifest, bucket=bucket)
+
+
+def test_the_lineage_walk_accepts_a_clean_chain_and_reports_what_it_saw(bucket, tmp_path):
+    """Positive control, and the evidence half: a walk that returns the
+    ancestors it visited can be logged, where a bare pass cannot."""
+    grand = gcs.object_path(stage=1, condition=None, kind="kmnist_train_images",
+                            ext="idx", split="train")
+    mid = gcs.object_path(stage=1, condition=None, kind="topologies", ext="npz",
+                          split="train")
+    child = gcs.object_path(**TRAIN_ARGS)
+    local = _npz_artifact(tmp_path)
+    for name, parents in ((grand, None), (mid, {grand: "a" * 64}),
+                          (child, {mid: "b" * 64})):
+        gcs.upload_file(local, name, bucket=bucket)
+        gcs.publish_manifest(local, name, bucket=bucket, fingerprint=_fingerprint(),
+                             parents=parents)
+    manifest = gcs.read_manifest(child, bucket=bucket)
+    assert gcs.verify_lineage(child, manifest, bucket=bucket) == {mid, grand}
+
+
+def test_a_cyclic_lineage_is_reported_rather_than_hung_on(bucket, tmp_path):
+    a = gcs.object_path(stage=1, condition=None, kind="topologies", ext="npz",
+                        split="train")
+    b = gcs.object_path(**TRAIN_ARGS)
+    local = _npz_artifact(tmp_path)
+    for name, other in ((a, b), (b, a)):
+        gcs.upload_file(local, name, bucket=bucket)
+        bucket.objects[gcs.manifest_object_name(name)] = json.dumps({
+            "format": gcs.MANIFEST_FORMAT, "object_path": name,
+            "payload_sha256": fp.sha256_of_file(local),
+            "parents": {other: "d" * 64}, "fingerprint": _fingerprint(),
+        }).encode()
+    manifest = gcs.read_manifest(b, bucket=bucket)
+    # Visiting each object once means a 2-cycle terminates on its own; the
+    # depth bound is the backstop for a pathological graph, and the walk
+    # must return rather than spin either way.
+    assert gcs.verify_lineage(b, manifest, bucket=bucket, max_depth=8) == {a, b}
+
+
+def test_consume_refuses_an_artifact_whose_lineage_contains_a_run_scoped_object(
+        bucket, tmp_path):
+    """The consume-side check, which is not redundant with the publish-side
+    one: that binds what this code WRITES, this binds what it is willing to
+    READ -- including a manifest left by an older commit or by hand."""
+    report = gcs.object_path(**REPORT_ARGS)
+    child = gcs.object_path(**TRAIN_ARGS)
+    local = _npz_artifact(tmp_path)
+    gcs.upload_file(local, child, bucket=bucket)
+    bucket.objects[gcs.manifest_object_name(child)] = json.dumps({
+        "format": gcs.MANIFEST_FORMAT, "object_path": child,
+        "payload_sha256": fp.sha256_of_file(local),
+        "payload_generation": gcs.current_generation(child, bucket=bucket),
+        "parents": {report: "d" * 64}, "fingerprint": _fingerprint(),
+    }).encode()
+    with pytest.raises(gcs.WriteOnceViolation, match="RUN_SCOPED"):
+        gcs.consume_validated(child, str(local), bucket=bucket)

@@ -404,6 +404,74 @@ def object_path(*, stage, condition, kind, ext, split, allow_test_split=False):
     return f"{prefix}/{kind}.{ext}"
 
 
+# =====================================================================
+# Artifact class: which names are write-once
+# =====================================================================
+#
+# Generation pinning guarantees "the consumer reads the object that was
+# committed" only while that generation is the surviving one. Object
+# versioning is OFF on this bucket (measured, `PHASE_B_PLAN.md`), so a
+# supersession destroys the pinned generation -- the soft-delete window
+# keeps the bytes for seven days but a pinned READ still 404s, which is a
+# forensic affordance and not availability.
+#
+# So semantic naming plus manifest pinning is only acceptable under a
+# genuinely write-once policy for anything a consumer pins. If an ordinary
+# overwrite path remained open for those artifacts, content-addressed
+# naming would become mandatory. It does not remain open: the policy is
+# enforced here rather than described in a document.
+#
+# Two classes:
+#
+#   LINEAGE     everything scientific -- anything that is or can be a
+#               PARENT in a manifest, anything whose generation a consumer
+#               pins. Strictly create-once. `force=True` on one of these
+#               is a REFUSAL, not a republish, so an accidental or
+#               external replacement surfaces as a loud availability
+#               failure rather than as silent corruption.
+#
+#   RUN_SCOPED  reports and timing summaries: deliberately regenerated,
+#               never a parent, never pinned. The drivers give these
+#               run-scoped names so they are create-once in practice too;
+#               the class exists so that if one ever is overwritten, it
+#               still cannot enter a lineage as a parent.
+#
+# The default for an undeclared kind is LINEAGE, deliberately. The
+# dangerous mistake is treating a pinned artifact as disposable, so the
+# default errs toward refusing a write rather than allowing one.
+
+LINEAGE = "lineage"
+RUN_SCOPED = "run_scoped"
+
+# Kind tokens that are run-scoped. Matched as prefixes, because the
+# drivers append a run id (`stage2_report_20260807T160000Z`).
+RUN_SCOPED_KIND_PREFIXES = (
+    "stage1_report", "stage2_report", "stage3_report",
+    "probe", "chunked_probe",          # smoke-check scratch, never consumed
+)
+
+
+class WriteOnceViolation(OSError):
+    """A write would have replaced a committed lineage artifact."""
+
+
+def artifact_kind(name):
+    """The kind token of an object path: the basename without its
+    extension. `object_path` builds `{prefix}/{kind}.{ext}`, so this is
+    the inverse of that last segment and nothing more."""
+    base = str(name).rsplit("/", 1)[-1]
+    return base.rsplit(".", 1)[0] if "." in base else base
+
+
+def artifact_class(name):
+    """`LINEAGE` or `RUN_SCOPED` for an object path."""
+    kind = artifact_kind(name)
+    for prefix in RUN_SCOPED_KIND_PREFIXES:
+        if kind == prefix or kind.startswith(prefix + "_"):
+            return RUN_SCOPED
+    return LINEAGE
+
+
 def _check_object_path_allowed(name, allow_test_split):
     """The same lock applied to an object name the caller assembled itself
     -- `object_path` is not the only way to produce a string, so the
@@ -670,19 +738,92 @@ def object_exists(name, *, bucket, allow_test_split=False):
     return bool(bucket.blob(name).exists())
 
 
-def upload_file(local_path, name, *, bucket, allow_test_split=False, verify_content=True):
+class GenerationPreconditionError(OSError):
+    """A write was refused because the object was not in the generation the
+    writer expected -- someone else wrote it in between."""
+
+
+def _precondition(generation_match):
+    """Keyword arguments carrying a generation precondition, or none.
+
+    `0` means "only if this object does not exist"; a positive integer
+    means "only if it is still exactly this generation". Both are
+    server-side compare-and-set: the service refuses the write rather than
+    the client checking first and racing between the check and the write.
+    """
+    if generation_match is None:
+        return {}
+    return {"if_generation_match": int(generation_match)}
+
+
+def _precondition_failed_types():
+    """The exception a precondition violation raises, looked up lazily.
+
+    `google.api_core` is a cloud-only import, like `google.cloud.storage`
+    itself -- this module must stay importable on a machine that has
+    neither. Returns an empty tuple when it is absent, in which case
+    nothing is translated and the underlying error propagates unchanged."""
+    try:
+        from google.api_core import exceptions as api_exceptions
+    except ImportError:
+        return ()
+    return (api_exceptions.PreconditionFailed,)
+
+
+def current_generation(name, *, bucket, allow_test_split=False):
+    """The object's current generation, or 0 if it does not exist.
+
+    0 is the value a precondition uses to mean "must not exist", so an
+    absent object and the precondition that requires absence share a
+    representation deliberately."""
+    _check_object_path_allowed(name, allow_test_split)
+    blob = bucket.blob(name)
+    if not blob.exists():
+        return 0
+    blob.reload()
+    return int(getattr(blob, "generation", 0) or 0)
+
+
+def _write_guarded(name, generation_match, action):
+    """Runs `action()`, translating a service-side precondition failure
+    into this module's own named error.
+
+    The message says what the guard is FOR, because a bare 412 from the
+    client library reads as a transient fault and this is not one: it means
+    a second writer reached the same object, which for an artifact bucket
+    is a correctness problem rather than something to retry."""
+    try:
+        return action()
+    except _precondition_failed_types() as exc:
+        raise GenerationPreconditionError(
+            f"refusing to write {name!r}: the object is not in the generation this "
+            f"writer expected (required generation {generation_match}). Another "
+            f"writer changed it in between -- most likely a second session that "
+            f"was presumed dead. The write did NOT happen, which is the intended "
+            f"outcome: an artifact silently replaced mid-run is worse than one "
+            f"that failed loudly.") from exc
+
+
+def upload_file(local_path, name, *, bucket, allow_test_split=False, verify_content=True,
+                generation_match=None):
     """Uploads a local file to an object path. Returns the object path.
 
     `verify_content` (on by default) compares the object's own `crc32c`
     against the local file's once the upload returns, and deletes the
     object if they disagree rather than leaving a known-wrong artifact in
     the bucket for the next run to skip past. It costs one more read of
-    the local file, which is disk against a transfer that is network."""
+    the local file, which is disk against a transfer that is network.
+
+    `generation_match` is the no-overwrite-race guard Freeze 4 requires --
+    `0` to create only, an integer to replace exactly that generation. It
+    is a compare-and-set at the service, not a check here followed by a
+    write: the gap between checking and writing is the race."""
     name = _check_object_path_allowed(name, allow_test_split)
     local_path = str(local_path)
     if not os.path.isfile(local_path):
         raise FileNotFoundError(f"nothing to upload: {local_path} is not a file")
-    bucket.blob(name).upload_from_filename(local_path)
+    _write_guarded(name, generation_match, lambda: bucket.blob(name).upload_from_filename(
+        local_path, **_precondition(generation_match)))
     if verify_content:
         _verify_uploaded(bucket, name, crc32c_of_file(local_path))
     return name
@@ -921,11 +1062,22 @@ def _reconcile_confirmed(confirmed, *, bucket, name, handle, chunk_size, size_by
     return kept
 
 
-def _compose(bucket, dest, sources):
-    bucket.blob(dest).compose([bucket.blob(source) for source in sources])
+def _compose(bucket, dest, sources, generation_match=None):
+    """Server-side concatenation.
+
+    `generation_match` applies to the DESTINATION only, and only the final
+    one -- the intermediate merge targets under the part prefix are
+    transient scratch this function owns end to end. The parts themselves
+    deliberately carry no precondition either: a resumed upload rewrites a
+    part it found damaged, which is an overwrite by design, and guarding it
+    would break exactly the resume the chunked route exists for. The race
+    Freeze 4 names is two writers replacing each other's ARTIFACT, and the
+    artifact is the destination."""
+    bucket.blob(dest).compose([bucket.blob(source) for source in sources],
+                              **_precondition(generation_match))
 
 
-def _compose_parts(bucket, name, sources):
+def _compose_parts(bucket, name, sources, generation_match=None):
     """Concatenates the parts into the object, server-side.
 
     GCS composes at most `COMPOSE_MAX_SOURCES` sources per request, so
@@ -943,7 +1095,8 @@ def _compose_parts(bucket, name, sources):
             merged.append(target)
         current = merged
         level += 1
-    _compose(bucket, name, current)
+    _write_guarded(name, generation_match,
+                   lambda: _compose(bucket, name, current, generation_match))
 
 
 def _delete_parts(bucket, name, allow_test_split):
@@ -963,7 +1116,7 @@ def _delete_parts(bucket, name, allow_test_split):
 
 def upload_file_chunked(local_path, name, *, bucket, allow_test_split=False,
                         chunk_size=CHUNK_SIZE_DEFAULT, verify_digests=False,
-                        verify_content=True):
+                        verify_content=True, generation_match=None):
     """Uploads a local file in chunks, resuming where a previous run died.
     Returns the object path.
 
@@ -1080,7 +1233,8 @@ def upload_file_chunked(local_path, name, *, bucket, allow_test_split=False,
             _write_checkpoint(checkpoint, _checkpoint_state(
                 name, local_path, identity, chunk_size, n_chunks, confirmed))
 
-    _compose_parts(bucket, name, [part_name(name, i) for i in range(n_chunks)])
+    _compose_parts(bucket, name, [part_name(name, i) for i in range(n_chunks)],
+                   generation_match=generation_match)
     if verify_content:
         _verify_uploaded(bucket, name, crc32c_of_file(local_path))
     _delete_parts(bucket, name, allow_test_split)
@@ -1088,7 +1242,8 @@ def upload_file_chunked(local_path, name, *, bucket, allow_test_split=False,
     return name
 
 
-def download_file(name, local_path, *, bucket, allow_test_split=False, verify_content=True):
+def download_file(name, local_path, *, bucket, allow_test_split=False,
+                  verify_content=True, generation=None):
     """Downloads an object to a local path, creating the parent directory.
 
     The download goes to a `.part` sidecar and is renamed into place only
@@ -1103,13 +1258,22 @@ def download_file(name, local_path, *, bucket, allow_test_split=False, verify_co
     finished with the wrong contents. The sidecar is removed on failure
     too: nothing that failed verification is left lying next to the
     destination to be renamed by hand. An existing good file at
-    `local_path` is untouched by a failed download."""
+    `local_path` is untouched by a failed download.
+
+    `generation` pins the read to one exact object version rather than
+    "whatever this name points at now". A semantic name is a mutable
+    pointer; a generation is not. Reading latest-by-name and then checking
+    a digest catches a mismatch after the fact; reading the version the
+    manifest COMMITTED means there is nothing to mismatch -- and if that
+    version is gone, the read fails loudly instead of quietly succeeding
+    against a replacement."""
     name = _check_object_path_allowed(name, allow_test_split)
     local_path = str(local_path)
     parent = os.path.dirname(os.path.abspath(local_path))
     os.makedirs(parent, exist_ok=True)
     partial = local_path + ".part"
-    blob = bucket.blob(name)
+    blob = (bucket.blob(name) if generation is None
+            else bucket.blob(name, generation=generation))
     blob.download_to_filename(partial)
     if verify_content:
         try:
@@ -1219,6 +1383,12 @@ class StepResult(NamedTuple):
     uploaded: bool
     downloaded: bool
     size_bytes: int
+    # Provenance, recorded for the same reason the rest is: a run log that
+    # says a step was resumed is only useful if it also says whether the
+    # thing resumed from was checked. `validated` False on a skip means the
+    # object was accepted under the named pre-contract opt-out.
+    validated: bool = False            # the skip path checked a manifest
+    manifest_published: bool = False   # the produce path wrote one
 
     def summary(self):
         return {
@@ -1229,12 +1399,15 @@ class StepResult(NamedTuple):
             "uploaded": self.uploaded,
             "downloaded": self.downloaded,
             "size_bytes": self.size_bytes,
+            "validated": self.validated,
+            "manifest_published": self.manifest_published,
         }
 
 
 def ensure_artifact(name, local_path, *, produce, bucket, allow_test_split=False,
                     force=False, chunked=None, chunk_size=CHUNK_SIZE_DEFAULT,
-                    verify_content=True):
+                    verify_content=True, fingerprint=None, require_manifest=True,
+                    expected_fingerprint=None, policy=None, parents=None):
     """Skip if already done, else compute and upload.
 
         r = stage2b_gcs.ensure_artifact(path, local, produce=build_it, bucket=bucket)
@@ -1263,7 +1436,46 @@ def ensure_artifact(name, local_path, *, produce, bucket, allow_test_split=False
     trusted-existing-local-file branch above, which transfers nothing.
 
     `force=True` recomputes and overwrites an existing object -- for the
-    case where the artifact is known stale, not as a routine flag.
+    case where the artifact is known stale, not as a routine flag. It does
+    NOT skip validation; there is nothing to validate on that path, because
+    the bytes are freshly produced here rather than trusted from the
+    bucket. What it must not do is leave a manifest describing the object
+    it just replaced, and it does not: see "force and the stale sidecar".
+
+    ## The skip branch is a CONSUME, and consumes are validated
+
+    An object merely existing is never sufficient evidence that it is
+    resumable. The skip branch goes through `consume_validated`, so an
+    object without a manifest, or one whose manifest disagrees with the
+    bytes, halts here instead of being read as a completed step.
+
+    `require_manifest=False` is the named opt-out, and it is not a
+    convenience: it is how a completed rung stays re-runnable. Ladder
+    stages 1 and 2 wrote every one of their artifacts before this contract
+    existed, and retrofitting manifests onto them would fabricate
+    provenance rather than record it. Those call sites pass it explicitly,
+    so each one greps. Everything written from stage 3 onward carries a
+    manifest and takes the default.
+
+    `expected_fingerprint` and `policy` are forwarded to
+    `consume_validated`: a consumer that knows what produced its input can
+    say so, and `CONTENT_ONLY` is how deliberate cross-stage reuse (stage
+    3 reading stage 1's topologies) stays legal without weakening payload
+    verification.
+
+    ## force and the stale sidecar
+
+    A forced overwrite replaces the payload. Any manifest already beside it
+    then describes bytes that no longer exist -- and that is WORSE than no
+    manifest, because the next `consume_validated` raises a mismatch, which
+    reads as corruption rather than as "this was deliberately regenerated".
+
+    So the produce path never leaves one: with `fingerprint`, it publishes
+    a manifest for what it just wrote; without, it removes any manifest it
+    finds. Passing `fingerprint` is what makes publication ATOMIC with the
+    upload rather than a second call every driver has to remember -- the
+    forgot-the-flag failure this function's `chunked` argument already
+    exists to prevent.
 
     `chunked` selects the upload route and defaults to deciding on size
     (`should_chunk`): an artifact needing more than one chunk goes
@@ -1296,15 +1508,35 @@ def ensure_artifact(name, local_path, *, produce, bucket, allow_test_split=False
     if chunked is None:
         _check_chunk_size(chunk_size)
 
+    # The write-once invariant, enforced rather than described. A lineage
+    # artifact's generation is pinned by its manifest and by any manifest
+    # that names it as a parent; with versioning off, replacing it destroys
+    # a reference that something else is holding. There is no supported
+    # overwrite for these, `force` included.
+    if force and artifact_class(name) == LINEAGE:
+        raise WriteOnceViolation(
+            f"refusing to overwrite {name!r}: it is a LINEAGE artifact and lineage "
+            f"artifacts are create-once. Its generation is pinned by its own "
+            f"manifest, and possibly by another manifest naming it as a parent; "
+            f"object versioning is off on this bucket, so replacing it destroys a "
+            f"reference something else is holding. To regenerate, write a NEW "
+            f"name -- as the Phase A regeneration did, producing "
+            f"`encoded_train_s1200` rather than overwriting `encoded_fit_s1200`. "
+            f"`force` remains available only for run-scoped artifacts, which "
+            f"nothing pins and nothing may adopt as a parent.")
+
     if not force and object_exists(name, bucket=bucket, allow_test_split=allow_test_split):
-        downloaded = False
-        if not os.path.isfile(local_path):
-            download_file(name, local_path, bucket=bucket, allow_test_split=allow_test_split,
-                          verify_content=verify_content)
-            downloaded = True
+        # THE trust point. Everything this function does for a resumed run
+        # hangs off this branch, so it is the one place a provenance check
+        # has to sit -- and it is a consume like any other.
+        manifest, downloaded = consume_validated(
+            name, local_path, bucket=bucket, allow_test_split=allow_test_split,
+            verify_content=verify_content, require_manifest=require_manifest,
+            expected_fingerprint=expected_fingerprint, policy=policy)
         return StepResult(object_path=name, local_path=local_path, skipped=True,
                           produced=False, uploaded=False, downloaded=downloaded,
-                          size_bytes=os.path.getsize(local_path))
+                          size_bytes=os.path.getsize(local_path),
+                          validated=manifest is not None)
 
     parent = os.path.dirname(os.path.abspath(local_path))
     os.makedirs(parent, exist_ok=True)
@@ -1314,13 +1546,383 @@ def ensure_artifact(name, local_path, *, produce, bucket, allow_test_split=False
             f"produce() returned without writing {local_path!r}; nothing to upload to "
             f"{name!r}. A step whose artifact is missing must fail here rather than record "
             f"itself as complete -- otherwise the next run would skip it.")
+    # Freeze 4's no-overwrite-race guard, computed here rather than asked
+    # of the caller. A fresh step must CREATE (generation 0); a forced
+    # overwrite must replace exactly the generation it read. Reading the
+    # generation and then requiring it is not a check-then-write race: the
+    # requirement travels to the service, which refuses if anything moved
+    # in between.
+    gen = current_generation(name, bucket=bucket,
+                             allow_test_split=allow_test_split) if force else 0
     if should_chunk(os.path.getsize(local_path), chunked=chunked, chunk_size=chunk_size):
         upload_file_chunked(local_path, name, bucket=bucket,
                             allow_test_split=allow_test_split, chunk_size=chunk_size,
-                            verify_content=verify_content)
+                            verify_content=verify_content, generation_match=gen)
     else:
         upload_file(local_path, name, bucket=bucket, allow_test_split=allow_test_split,
-                    verify_content=verify_content)
+                    verify_content=verify_content, generation_match=gen)
+
+    # The generation THIS write produced, captured before the sidecar is
+    # written, so the manifest commits that exact version. Reading it back
+    # is safe only because every writer here is precondition-guarded: no
+    # one else can move the object between our successful write and this
+    # read without violating a precondition of their own. And if the
+    # capture were wrong anyway, it is detected rather than silent -- the
+    # consumer pins to this number and a pinned fetch of a version that is
+    # not there fails loudly.
+    written_generation = current_generation(name, bucket=bucket,
+                                            allow_test_split=allow_test_split)
+
+    # After the payload verifies, never before: a sidecar that exists is a
+    # sidecar describing a complete object.
+    published = False
+    if fingerprint is not None:
+        # The sidecar is written under its own precondition: create when
+        # there is none, replace exactly the one we found when forcing.
+        # Until it lands the payload is UNCOMMITTED and no consumer may
+        # accept it -- that is the crash-window semantic, and it is what
+        # makes the gap between these two writes safe rather than
+        # ambiguous.
+        sidecar = manifest_object_name(name)
+        publish_manifest(local_path, name, bucket=bucket, fingerprint=fingerprint,
+                         parents=parents, allow_test_split=allow_test_split,
+                         payload_generation=written_generation,
+                         generation_match=current_generation(
+                             sidecar, bucket=bucket,
+                             allow_test_split=allow_test_split))
+        published = True
+    else:
+        stale = manifest_object_name(name)
+        if bucket.blob(stale).exists():
+            _discard_object(bucket, stale)
     return StepResult(object_path=name, local_path=local_path, skipped=False,
                       produced=True, uploaded=True, downloaded=False,
-                      size_bytes=os.path.getsize(local_path))
+                      size_bytes=os.path.getsize(local_path),
+                      manifest_published=published)
+
+
+# =====================================================================
+# Artifact manifests: the single validated consume path
+# =====================================================================
+#
+# **An object merely existing is never sufficient evidence that it is
+# resumable.**
+#
+# `ensure_artifact` above treats existence as proof a step is done, which
+# is what makes a dead session cost one step rather than an afternoon. That
+# same property silently accepts an artifact produced under a different
+# configuration once configuration can change. The manifest is the missing
+# evidence.
+#
+# ## Why a sidecar object rather than blob metadata
+#
+# Both were viable -- verified against the real bucket rather than assumed:
+# custom metadata set on a destination handle BEFORE `compose()` survives
+# composition, and `patch()` works afterwards, so the chunked route could
+# have carried it. A sidecar was chosen anyway, for two reasons. GCS custom
+# metadata is size-limited and a source manifest grows with the dependency
+# set; and "valid only when payload and manifest both exist and agree" is
+# expressed directly by two objects, where a half-published artifact is
+# detectably incomplete rather than merely odd.
+#
+# ## Publication order is the atomicity mechanism
+#
+# Payload first, then the manifest recording that payload's digest AND the
+# GCS generation it had at publication. A reader requires both, so a run
+# that died between the two writes leaves an artifact that is refused, not
+# one that is silently trusted. If the payload is later overwritten its
+# generation changes and the recorded generation no longer matches, which
+# is detected on the next consume.
+
+FINGERPRINT_AVAILABLE = True
+try:                                            # pragma: no cover - import shape
+    import stage2b_fingerprint as _fp
+except ImportError:                             # pragma: no cover
+    FINGERPRINT_AVAILABLE = False
+    _fp = None
+
+MANIFEST_SUFFIX = ".manifest.json"
+MANIFEST_FORMAT = "stage2b-artifact-manifest/1"
+
+
+class ManifestMissingError(OSError):
+    """A payload exists with no manifest beside it.
+
+    Distinct from a mismatch: this means the artifact carries no evidence
+    of what produced it, which under the fingerprint contract is a refusal
+    rather than a reason to fall back on trusting it."""
+
+
+class ManifestMismatchError(OSError):
+    """A manifest and its payload disagree, or the recorded fingerprint is
+    not what this run expects."""
+
+
+def manifest_object_name(payload_name):
+    """The sidecar manifest's object name for a payload."""
+    return f"{payload_name}{MANIFEST_SUFFIX}"
+
+
+def is_manifest_name(name):
+    return str(name).endswith(MANIFEST_SUFFIX)
+
+
+def build_manifest(local_path, *, object_name, fingerprint, parents=None,
+                   generation=None):
+    """The manifest recorded beside a payload.
+
+    `arrays` is per-array dtype/shape/SHA-256 for `.npz` payloads. It is
+    recorded in addition to the whole-payload digest because the whole-file
+    digest is the WRONG test for that container: `np.savez` writes a zip
+    whose headers embed timestamps, so two runs producing bit-identical
+    arrays produce different files. The per-array digests are what a
+    regeneration is actually compared on."""
+    # The other half of the class split. A run-scoped object is
+    # overwritable by policy, so adopting one as a parent would put a
+    # mutable thing inside an immutable lineage -- and the resulting
+    # manifest would record a digest for bytes that are allowed to change
+    # underneath it.
+    for parent_name in (parents or {}):
+        if artifact_class(parent_name) == RUN_SCOPED:
+            raise WriteOnceViolation(
+                f"refusing to record {parent_name!r} as a parent of "
+                f"{object_name!r}: it is RUN_SCOPED, which means it may be "
+                f"regenerated in place. A lineage may only be built from "
+                f"create-once artifacts, or the parent digest describes bytes "
+                f"that are permitted to change.")
+    manifest = {
+        "format": MANIFEST_FORMAT,
+        "object_path": object_name,
+        "payload_sha256": _fp.sha256_of_file(local_path),
+        "payload_crc32c": crc32c_of_file(local_path),
+        "payload_size": os.path.getsize(local_path),
+        "payload_generation": generation,
+        "fingerprint": fingerprint,
+        "parents": dict(parents or {}),
+    }
+    if str(local_path).endswith(".npz"):
+        try:
+            manifest["arrays"] = _fp.array_manifest(local_path)
+        except Exception as exc:               # noqa: BLE001 - recorded, not fatal
+            manifest["arrays_error"] = f"{type(exc).__name__}: {exc}"
+    return manifest
+
+
+def publish_manifest(local_path, object_name, *, bucket, fingerprint,
+                     parents=None, allow_test_split=False, generation_match=None,
+                     payload_generation=None):
+    """Write the manifest sidecar, COMMITTING one exact payload version.
+
+    The manifest is the commit point, not a description. Write order is
+    load-bearing: payload first under its own precondition, then the
+    generation that write produced is captured, then this sidecar records
+    that generation and is itself written under a precondition. Until the
+    sidecar lands the payload is UNCOMMITTED, and no consumer may accept
+    it -- which is what makes the crash window between the two writes safe
+    rather than ambiguous.
+
+    `payload_generation` is that captured generation. When omitted it is
+    read back from the bucket, which is correct only for the backfill path
+    (describing an object staged before this contract existed); the write
+    path always passes it, so the manifest commits the version its own
+    upload produced rather than whatever the name points at now."""
+    generation = payload_generation
+    if generation is None:
+        blob = bucket.blob(object_name)
+        reload_ = getattr(blob, "reload", None)
+        if callable(reload_):
+            try:
+                reload_()
+                generation = getattr(blob, "generation", None)
+            except Exception:                  # noqa: BLE001 - generation is optional
+                generation = None
+    manifest = build_manifest(local_path, object_name=object_name,
+                              fingerprint=fingerprint, parents=parents,
+                              generation=generation)
+    payload = json.dumps(manifest, indent=2, sort_keys=True, default=str)
+    name = manifest_object_name(object_name)
+    _check_object_path_allowed(name, allow_test_split)
+    _write_guarded(name, generation_match,
+                   lambda: bucket.blob(name).upload_from_string(
+                       payload.encode("utf-8"), content_type="application/json",
+                       **_precondition(generation_match)))
+    return manifest
+
+
+def read_manifest(object_name, *, bucket, allow_test_split=False):
+    """The recorded manifest for a payload, or None if there is none."""
+    name = manifest_object_name(object_name)
+    _check_object_path_allowed(name, allow_test_split)
+    blob = bucket.blob(name)
+    if not blob.exists():
+        return None
+    import tempfile
+    with tempfile.TemporaryDirectory() as tmp:
+        path = os.path.join(tmp, "manifest.json")
+        blob.download_to_filename(path)
+        with open(path, "r", encoding="utf-8") as handle:
+            return json.load(handle)
+
+
+def validate_against_manifest(local_path, object_name, *, manifest,
+                              expected_fingerprint=None, policy=None):
+    """The one place a manifest is checked against a payload.
+
+    Recomputes the payload digest from the local bytes rather than trusting
+    anything recorded, compares the per-array manifest where present, and
+    only then compares the producer fingerprint under `policy`. Raises
+    `ManifestMismatchError` naming every disagreement; returns the manifest
+    on success."""
+    problems = []
+    if manifest.get("format") != MANIFEST_FORMAT:
+        problems.append(f"manifest format {manifest.get('format')!r} "
+                        f"!= {MANIFEST_FORMAT!r}")
+    recorded = manifest.get("payload_sha256")
+    computed = _fp.sha256_of_file(local_path)
+    if recorded != computed:
+        problems.append(f"payload sha256: manifest {recorded!r} != local {computed!r}")
+    if "arrays" in manifest and str(local_path).endswith(".npz"):
+        problems += _fp.compare_array_manifests(manifest["arrays"],
+                                                _fp.array_manifest(local_path))
+    if problems:
+        raise ManifestMismatchError(
+            f"{object_name!r} does not match its recorded manifest. An object "
+            f"merely existing is never sufficient evidence that it is resumable.\n  "
+            + "\n  ".join(problems))
+    if expected_fingerprint is not None:
+        _fp.require_match(manifest.get("fingerprint") or {}, expected_fingerprint,
+                          name=object_name, policy=policy or _fp.STRICT)
+    return manifest
+
+
+def verify_lineage(object_name, manifest, *, bucket, allow_test_split=False,
+                   max_depth=32):
+    """Walk an artifact's parents transitively; every one must be LINEAGE.
+
+    Checking only the immediate parents would leave the property one link
+    deep. A lineage is immutable only if every link in it is: a RUN_SCOPED
+    object three hops up is still an overwritable thing inside a chain of
+    digests that claim to be fixed.
+
+    The walk is breadth-first over recorded manifests, visiting each object
+    once, and stops at any artifact with no manifest -- a pre-contract
+    input, which has no recorded parents to follow. `max_depth` bounds it
+    against a cycle; a cycle is itself a corrupt lineage and is reported as
+    one rather than hung on.
+
+    Returns the set of ancestors visited, so a caller can log the lineage
+    it actually verified rather than that it verified something."""
+    seen, frontier, depth = set(), [(object_name, manifest)], 0
+    while frontier:
+        depth += 1
+        if depth > max_depth:
+            raise WriteOnceViolation(
+                f"lineage walk from {object_name!r} exceeded depth {max_depth}; "
+                f"the parent graph is cyclic or implausibly deep, and either way "
+                f"it is not a lineage that can be verified.")
+        nxt = []
+        for name, current in frontier:
+            for parent_name in sorted((current or {}).get("parents") or {}):
+                if artifact_class(parent_name) == RUN_SCOPED:
+                    raise WriteOnceViolation(
+                        f"{parent_name!r} appears in {object_name!r}'s lineage (via "
+                        f"{name!r}) but is RUN_SCOPED, which means it may be "
+                        f"regenerated in place. A recorded parent digest must "
+                        f"describe bytes that cannot change.")
+                if parent_name in seen:
+                    continue
+                seen.add(parent_name)
+                parent_manifest = read_manifest(parent_name, bucket=bucket,
+                                                allow_test_split=allow_test_split)
+                if parent_manifest is not None:
+                    nxt.append((parent_name, parent_manifest))
+        frontier = nxt
+    return seen
+
+
+def consume_validated(object_name, local_path, *, bucket, expected_fingerprint=None,
+                      policy=None, allow_test_split=False, verify_content=True,
+                      require_manifest=True):
+    """THE central validated consume path. Every read of an existing
+    artifact goes through here -- `ensure_artifact`'s skip branch, report
+    steps, and the drivers' direct downloads alike.
+
+    A raw `download_file` reaches bytes without ever consulting a manifest,
+    which is exactly the bypass the contract exists to close; call sites
+    that need an existing artifact call this instead.
+
+    `require_manifest=False` is the named, greppable opt-out for artifacts
+    written BEFORE the fingerprint contract existed (ladder stages 1 and 2).
+    Their configurations are fixed history, recorded in their own run
+    reports, and retrofitting manifests onto them would fabricate
+    provenance rather than record it.
+
+    ## The legacy policy, stated so a refusal reads as designed
+
+    There is no grandfather allowlist and there will not be one. Every
+    artifact under the stage-1 and stage-2 prefixes is completed-rung
+    history; nothing from stage 3 onward consumes any of it except at three
+    call sites that say so out loud -- the two `stage_kmnist` staging reads
+    and stage 2's cross-rung corruption spot-check. Those pass
+    `require_manifest=False` inline, next to a comment naming the rung.
+
+    Everything else consumes under the contract. So if a future code path
+    meets a `ManifestMissingError` on an un-manifested object, **the
+    refusal is the correct behaviour, not an obstacle**: it means new code
+    reached for pre-contract history, and the fix is to decide deliberately
+    whether that reuse is legitimate -- adding the opt-out at that call
+    site with a reason -- rather than to widen a policy centrally where
+    nobody will see it."""
+    _check_object_path_allowed(object_name, allow_test_split)
+    if not object_exists(object_name, bucket=bucket, allow_test_split=allow_test_split):
+        raise FileNotFoundError(f"{object_name!r} does not exist in {bucket.name!r}")
+
+    manifest = read_manifest(object_name, bucket=bucket, allow_test_split=allow_test_split)
+    if manifest is None:
+        if require_manifest:
+            raise ManifestMissingError(
+                f"{object_name!r} exists but carries no manifest at "
+                f"{manifest_object_name(object_name)!r}. Under the fingerprint "
+                f"contract an artifact without recorded provenance is refused: an "
+                f"object merely existing is never sufficient evidence that it is "
+                f"resumable. Pass require_manifest=False, deliberately, only for "
+                f"artifacts written before the contract existed.")
+        downloaded = False
+        if not os.path.isfile(local_path):
+            download_file(object_name, local_path, bucket=bucket,
+                          allow_test_split=allow_test_split,
+                          verify_content=verify_content)
+            downloaded = True
+        return None, downloaded
+
+    # Order is the contract, not a style choice.
+    #
+    #   1. the manifest has already been read, above;
+    #   2. the PRODUCER is verified against what this consumer expects --
+    #      before any payload bytes move, so a run consuming the wrong
+    #      artifact pays nothing to find out;
+    #   3. the payload is fetched AT THE COMMITTED GENERATION, not
+    #      latest-by-name. A semantic name is a mutable pointer; the
+    #      manifest committed one exact version, and that is the one read;
+    #   4. the digest is recomputed on the fetched bytes.
+    if expected_fingerprint is not None:
+        _fp.require_match(manifest.get("fingerprint") or {}, expected_fingerprint,
+                          name=object_name, policy=policy or _fp.STRICT)
+
+    # Consume-side class check, and it is not redundant with the one in
+    # `publish_manifest`. That one binds what THIS code writes; this one
+    # binds what this code is willing to READ, including a manifest written
+    # by an older commit, by a different driver, or by hand. The walk is
+    # transitive: a lineage is only immutable if every link in it is.
+    verify_lineage(object_name, manifest, bucket=bucket,
+                   allow_test_split=allow_test_split)
+
+    downloaded = False
+    if not os.path.isfile(local_path):
+        download_file(object_name, local_path, bucket=bucket,
+                      allow_test_split=allow_test_split, verify_content=verify_content,
+                      generation=manifest.get("payload_generation"))
+        downloaded = True
+    validate_against_manifest(local_path, object_name, manifest=manifest,
+                              expected_fingerprint=expected_fingerprint, policy=policy)
+    return manifest, downloaded

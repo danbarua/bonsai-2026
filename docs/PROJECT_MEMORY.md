@@ -396,7 +396,9 @@ and every disclosed caveat above); `DESIGN.md` (the locked design, read
 before the result).
 
 **Stage 2B (denoising, #13): design locked; feasibility-ladder stages 1
-and 2 both complete (`STAGE2_OK`), stage 3 not yet started.**
+and 2 complete (`STAGE2_OK`); stage 3 Phase A complete and regenerated at
+the full 60,000; Phase B planned, implemented-around, and awaiting
+release.**
 `experiments/stage2b_denoising/DESIGN.md` -- seven drafts, four external
 review rounds plus an adversarial blind-spot review and an outsider peer
 review, all incorporated; asks the Stage-2A-shaped question (does
@@ -480,8 +482,10 @@ design's own framing. **The number most likely to shape stage-3
 planning**: measured encode cost, 218.28 ms/image at 1,200 steps
 single-worker, projects LINEARLY (unvalidated at scale) to **3.27 hours**
 for encoding alone at stage 3's 54,000-image fit side -- by far the
-dominant projected cost in the pipeline. Full account, all four named
-report items, and the complete per-stage stage-3 projection table:
+dominant projected cost in the pipeline. **That projection was never
+paid**: the encode moved to local CPU and took 11.3 minutes, see the
+Phase A entry below. Full account, all four named report items, and the
+complete per-stage stage-3 projection table:
 `experiments/stage2b_denoising/FINDINGS.md`.
 
 **The scaler-centering tolerance, previously flagged as "known before
@@ -495,14 +499,113 @@ and `0.081` at n=5,000, both comfortably under 1.0 and close to the
 amendment's own ~0.075 prediction. No condition has fired it at either
 rung run so far.
 
-**Not yet started**: feasibility-ladder stage 3 (full 60,000-image
-training side: 54,000 fit + 6,000 locked validation) and stage 4 (the
-single locked evaluation against the official 10,000-image test set).
-The stage-2 encode-cost projection above is the open planning question
-stage 3 is blocked on, not a technical gap -- nothing about the pipeline
-itself is unbuilt or unverified at this point.
+**The 3.27-hour encode projection was not paid.** Stage 3 splits into
+Phase A (corrupt + encode, the pipeline's one genuinely CPU-bound step)
+and Phase B (evolution, ridge, CNN -- what actually uses an A100).
+Phase A moved to local CPU, where 9 workers on the M1 Max encode at
+11.32 ms/image against the Colab CPU's 218.28 ms single-worker: a ~25x
+wall-clock reduction, of which ~3.4x is per-core speed and the rest
+parallelism. Running it inside a provisioned session would have left a
+metered A100 idle for most of the run. A disclosed post-lock amendment,
+recorded in `DESIGN.md`; the constraint it appears to violate ("generate
+in the cloud") names its own reason -- Colab's *session upload* limit --
+which a direct local->GCS write never touches.
+
+**Phase A, complete at 60,000.** First run encoded 54,000 on the reading
+that the 6,000 locked-validation images "would produce an artifact
+nothing reads." That reading was wrong: `DESIGN.md:479` defines "full
+training" at stage 3 as the 54,000 fit plus 6,000 validation composite,
+`:492`'s compute table corroborates it arithmetically, and the ridge
+cross-validates and refits on all 60,000. Disclosed as an error in the
+script's own docstring rather than edited away, and regenerated. The
+regeneration's acceptance keeps two populations apart deliberately: the
+**54,000** reproduce **bit-exactly** (`thetas_505` and `deltas`, identical
+sha256 each side, joined by official KMNIST index across an artifact
+where 53,985 of them sit at a different row), with an independent
+cross-check that the aligned subset's nonzero final-Delta count is
+exactly the 79 already on record; the **6,000** are new measurement, 10
+nonzero (0.167%, 95% CI [0.0800%, 0.3063%]) against the fit side's 0.146%
+[0.1158%, 0.1823%] -- indistinguishable at these sample sizes, which is
+why `AUDIT_PROTOCOL.md` sets no expected-agreement criterion. 679.0s,
+11.3 min.
+
+**Provenance became a contract, because Phase A's first artifact had
+none.** It recorded scientific parameters and timings and nothing about
+the code that produced them, and it ran from a dirty tree. That gap is
+now closed by construction rather than by discipline:
+
+- `stage2b_fingerprint.py` -- the union of the **static and runtime**
+  import closures over the scientific sources, established before
+  generation and revalidated after. Both, not either: runtime alone
+  misses conditional and branch-specific imports; static alone misses
+  what a driver reaches for dynamically. Measured on
+  `run_ladder_stage2.py` the two disagree in both directions.
+- **The manifest is the commit point**, not a description. Payload
+  written under a generation precondition, the generation that write
+  produced captured, sidecar written second under its own precondition
+  recording that generation. Consumers read the manifest first, verify
+  the producer *before any payload bytes move*, then fetch **that exact
+  generation** -- never latest-by-name. A payload with no manifest is
+  UNCOMMITTED.
+- **Write-once by construction.** Lineage artifacts (anything that is or
+  can be a parent) are create-once; `force=True` on one is a named
+  refusal raised before `produce` runs. Classification is fail-closed --
+  an undeclared kind is lineage. The lineage walk is transitive and runs
+  on the consume side as well as publish. Reports are run-scoped, so no
+  overwrite path survives anywhere and the storage model is uniformly
+  append-only.
+- **Pre-flight is closure-keyed**, not whole-tree: a GPU target refuses
+  when a file in the *driver's own import closure* differs from HEAD, and
+  proceeds when the tree is dirty elsewhere, because the runtime executes
+  one pinned commit and cannot see the rest.
+
+**Frozen before any of their numbers existed**: `AUDIT_PROTOCOL.md` (the
+150-vs-1200 encoder-budget amendment audit -- sign convention, 60,000
+population, out-of-fold prediction basis, both alpha regimes, an
+*analytic* resolution limit propagated through the metric rather than an
+empirical one, and all three review triggers under either regime) and
+`COMPANION_PROTOCOLS.md` (the ARM/x86 propagation stress set and the
+`ABS_CONV_EPS` sensitivity table, each with its own pre-committed halt
+condition). `PHASE_B_PLAN.md` is the plan of record for Phase B and is
+revisable, unlike those two.
+
+**Cross-architecture numerics, measured before being relied on.** Phase A
+put the encoder on Apple Silicon for the first time; stages 1 and 2
+encoded on x86. Same machine twice: bit-exact. Two different Colab
+sessions, same 1,000 images: bit-exact, 784,000/784,000 coordinates -- so
+the difference is cross-architecture, not cross-session, and the
+assumption that "Colab hardware varies too, so local loses nothing" is
+simply false. ARM vs x86: 93.4% of coordinates identical, **max 3 ULP**
+(4.441e-16), eight or more orders below the ODE solver's `rtol=1e-6`. The
+encoder is a contraction toward a fixed point and both platforms resolve
+the same one, so this cannot amplify. Accepted with disclosure, on the
+same standard already applied to cuML's non-bit-reproducible GPU logistic
+regression.
+
+**A scale-dependent finding worth carrying forward.** Stage 1 reported
+final-Delta at exact float64 zero at both the median and the p95 across
+1,000 images. At 60,000 the maximum is 2.468e-10 and 89 images (0.148%)
+are nonzero. Nothing downstream is affected -- the worst image sits ~4,000x
+below the solver's tolerance, and the encoder gate keys on the median,
+which is zero. What it does do is narrow stage 1's claim: two order
+statistics sitting at zero never established "every image is zero", and at
+60x the corpus a small tail appears. The standing wording is **numerical
+convergence below any practically relevant tolerance**, never exact
+convergence as a universal claim.
+
+**Not yet started**: Phase B (evolution, ridge and CNN at full scale) and
+stage 4 (the single locked evaluation against the official 10,000-image
+test set). Phase B is planned in full and its supporting contracts are
+implemented and tested; what it waits on is Dan's explicit release, not
+missing work. Stage 4 stays blocked behind the pre-test package review.
 
 ## Part 4: Infrastructure and execution environment
+
+*The operational patterns generalized out of everything below --
+multi-agent coordination, ephemeral-session discipline, provenance, and
+the cost asymmetries specific to metered cloud -- are collected in
+`docs/MULTI_AGENT_PRACTICE.md`. This section stays as the incident
+record those patterns were derived from.*
 
 **This project now runs in three places, and the distinction matters:**
 
@@ -671,6 +774,29 @@ failure: session provisioning and package-install overhead only -- the
 crash preceded any artifact write, confirmed against the live bucket
 before the fix was written, not assumed.
 
+**Bucket retention is a config fact, and behaviour alone will mislead you
+about it** (added 2026-08-07, Stage 2B). Generation-pinned reads make an
+artifact's identity structural rather than digest-dependent -- but pinning
+only holds while the pinned generation survives. Probing that by
+behaviour: a pinned read of a superseded generation returns `NotFound`, so
+the obvious conclusion is "the bytes are gone." They are not.
+`gcloud storage buckets describe` reports
+`soft_delete_policy.retentionDurationSeconds: 604800` -- **seven days** --
+and the superseded generation *is* returned by
+`list_blobs(soft_deleted=True)`. The pinned read 404s because a normal
+read does not see soft-deleted objects, not because nothing is there.
+The behavioural probe was right about what a *consumer* can do and wrong
+about what *exists*, and only the second question matters when asking
+whether a superseded artifact can be examined after a halt. Object
+versioning is genuinely off (no `versioning` key), so the standing
+declaration is: artifacts immutable **by policy**, a superseded
+generation a **halt-worthy anomaly**, and a bounded **7-day forensic
+window** that no code path may depend on. Note the pipeline's service
+account cannot read bucket config at all (`storage.buckets.get` denied) --
+deliberately, since the driver never needs it and widening a credential
+that runs unattended on a rented VM to make a one-off audit convenient is
+a bad trade. Config questions get answered under a human identity.
+
 **cuML logistic regression on GPU is not bit-reproducible, and that is
 fine at the level the claims are made.** Re-running the class-0-support
 audit's classifier on a fresh A100 reproduced `selected_C` exactly
@@ -748,8 +874,13 @@ and accuracy -- not on a hash.
   (`uv pip install -e .`) so `from bonsai.x.y import z` resolves
   properly from anywhere -- verified from an unrelated directory, not
   just assumed to work from proximity.
-- `docs/` -- living/reference documents, currently just this file.
-  Update in place; do not version-number this folder's contents.
+- `docs/` -- living/reference documents. Update in place; do not
+  version-number this folder's contents. Currently: this file;
+  `GLOSSARY.md`; `VACUOUS_TESTS.md` (the catalogue of tests that passed
+  for reasons unrelated to what they named -- fourteen dated, SHA-backed
+  incidents, a six-way taxonomy, and what actually caught each);
+  `MULTI_AGENT_PRACTICE.md` (patterns for running scientific computing
+  across several AI agents, localhost and ephemeral cloud).
 - `datasets/` -- MNIST, Fashion-MNIST, KMNIST, notMNIST raw data.
 - `tarballs/` -- original packaged deliverables that `benchmark_programme`
   and parts of `experiments` were decanted from. Kept for provenance.

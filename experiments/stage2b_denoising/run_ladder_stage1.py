@@ -339,8 +339,16 @@ def stage_kmnist(mods, bucket, clone_dir):
         if os.path.isfile(dest):
             say(f"{filename} already present ({os.path.getsize(dest)} bytes)")
         else:
-            mods.gcs.download_file(name, dest, bucket=bucket)
-            say(f"downloaded {name} -> {filename} ({os.path.getsize(dest)} bytes)")
+            # Through the central validated consume path, not a raw
+            # download -- there is exactly one way bytes get from GCS into
+            # a consumer here, and it validates. `require_manifest=False`
+            # by name: the IDX objects were staged under the stage-1 prefix
+            # before the fingerprint contract existed. See stage2b_gcs's
+            # legacy policy.
+            manifest, _ = mods.gcs.consume_validated(name, dest, bucket=bucket,
+                                                     require_manifest=False)
+            say(f"downloaded {name} -> {filename} ({os.path.getsize(dest)} bytes)"
+                f"{'' if manifest is None else ', manifest validated'}")
         staged[filename] = dest
     return dest_dir, staged
 
@@ -905,16 +913,26 @@ def step10_report(mods, bucket, record):
                   str(record.get("verdict", FAIL_SENTINEL))]
         return "\n".join(lines) + "\n"
 
-    ensure_json(mods, bucket, _obj(mods, "stage1_report", "json"), compute_json,
-                force=True)
-    ensure_text(mods, bucket, _obj(mods, "stage1_report", "txt"), compute_text,
-                force=True)
+    # Run-scoped, and therefore create-once like every other artifact.
+    # `force=True` used to overwrite one fixed report name, which meant a
+    # resumed run DESTROYED the record of what the attempt that died had
+    # seen -- the same "an unwritten result does not survive" failure this
+    # project already has a lesson about. Both reports now survive,
+    # distinguishable by run id, and the write-once policy needs no
+    # exception carved out for reports.
+    kind = f"stage1_report_{record['run']['run_id']}"
+    ensure_json(mods, bucket, _obj(mods, kind, "json"), compute_json)
+    ensure_text(mods, bucket, _obj(mods, kind, "txt"), compute_text)
 
 
 # ------------------------------------------------------------------- main
 
 def new_record():
-    return {"run": {}, "timings": {}, "gates": {}, "evolution": {}, "artifacts": {},
+    # A run id, minted once per process. It scopes the report object name,
+    # so a resumed run writes a new report rather than replacing the one
+    # its predecessor left.
+    return {"run": {"run_id": time.strftime("%Y%m%dT%H%M%SZ", time.gmtime())},
+            "timings": {}, "gates": {}, "evolution": {}, "artifacts": {},
             "verdict": None, "halt_reason": None}
 
 

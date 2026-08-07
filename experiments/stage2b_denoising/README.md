@@ -5,13 +5,22 @@ evolution, on top of the same already-dynamically-encoded local phase
 state, improve single-step denoising prediction error relative to the
 unevolved encoded state alone? The design is locked (`DESIGN.md`).
 
-**Status: built, not yet run.** Every component below exists and is
-tested; no feasibility-ladder stage has been executed, and there is no
-`FINDINGS.md` yet because there are no findings. Nothing here has
-produced a number about denoising. Read `DESIGN.md` first — it is the
-authoritative spec for every constant, gate and statistical rule this
-code implements, and it was locked through seven drafts and six review
-rounds before any of this was written.
+**Status: feasibility ladder stages 1 and 2 complete; stage 3 Phase A
+complete, Phase B not written.** Stage 1 (n=1,000) and stage 2 (n=5,000)
+have both run end to end on Colab A100s. Stage 3's Phase A encoded all
+60,000 official training images on local CPU and is the first Stage 2B
+artifact published with provenance attached; the 54,000 images its
+54,000-image predecessor covered reproduced bit-exactly.
+`FINDINGS.md` carries every result,
+including stage 1's first honest FAIL and the disclosed post-lock
+amendment it produced. No confirmatory statistic has been computed on the
+test split, and none may be before the Stage 4 gate.
+
+Read `DESIGN.md` first — it is the authoritative spec for every constant,
+gate and statistical rule this code implements, and it was locked through
+seven drafts and six review rounds before any of this was written.
+Amendments to it after the lock are disclosed as amendments, never edited
+in silently.
 
 ## Reading order
 
@@ -68,7 +77,27 @@ mention here, in the same commit that creates it.
 - **`stage2b_gcs.py`** — artifact transport: object paths, the
   test-split guards, idempotent `ensure_artifact`, chunked checkpointed
   upload that resumes after a process death, and content verification on
-  every transfer.
+  every transfer. It also carries the sidecar-manifest layer —
+  `publish_manifest` alongside each artifact, and `consume_validated` as
+  the one validated read path — so an artifact's provenance travels next
+  to it rather than inside it. `ensure_artifact`'s skip branch **is** a
+  `consume_validated` call, so a resumed step is validated by
+  construction: an object merely existing is never sufficient evidence
+  that it is resumable. Pass `fingerprint=` and publication becomes
+  atomic with the upload; pre-contract artifacts are read through a
+  `require_manifest=False` that names the rung at its call site.
+- **`stage2b_fingerprint.py`** — what "the same code produced this" means
+  here: the union of the static and runtime import closures over the
+  scientific source files, hashed, established before a run and
+  revalidated after it. `ConsumePolicy` selects which fields must match
+  for a given artifact kind, because stage 2 legitimately reuses stage
+  1's topologies under a different commit; `array_manifest` pins the
+  payload itself, per array, by dtype/shape/SHA-256. It is also the
+  GPU targets' pre-flight — `--check-closure <driver.py>` exits non-zero
+  naming any file in that driver's own closure which differs from HEAD.
+  Uncommitted work elsewhere in the tree is recorded in the manifest and
+  does not block, because the runtime executes one pinned commit and
+  cannot see it.
 
 **The feasibility ladder:**
 
@@ -81,14 +110,21 @@ mention here, in the same commit that creates it.
 - **`stage_kmnist_inputs.py`** — stages the four KMNIST IDX files into the
   bucket, once, from here. Local → GCS, because `datasets/` is gitignored
   and so absent from the driver's clone.
-- **`encode_stage3_local.py`** — stage 3, Phase A: corrupts and encodes the
-  54,000-image fit side on this machine's CPU cores and writes only the
-  encoded 505-dim array to GCS, for the GPU phase to read. Split out from
-  the GPU phase because encoding is the pipeline's one CPU-bound step, and
-  running it inside a provisioned session would leave a metered A100 idle
-  for most of the run. Composes `corrupt_corpus` and
+- **`encode_stage3_local.py`** — stage 3, Phase A: corrupts and encodes all
+  60,000 official training images on this machine's CPU cores and writes
+  only the encoded 505-dim array to GCS, for the GPU phase to read. Split
+  out from the GPU phase because encoding is the pipeline's one CPU-bound
+  step, and running it inside a provisioned session would leave a metered
+  A100 idle for most of the run. Composes `corrupt_corpus` and
   `encode_with_final_delta_batch` unchanged — same numerics as both prior
-  rungs, different machine.
+  rungs, different machine. Rows are in ascending official index order,
+  and the artifact is published with a fingerprint manifest.
+- **`compare_stage3_regeneration.py`** — the regeneration's acceptance
+  test: the 54,000 images the previous Phase A run encoded must come back
+  bit-exact, matched **by official index** rather than by positional
+  prefix, while the 6,000 validation images are reported as new evidence
+  with their own final-Delta tail and no expected-agreement criterion.
+  Reads only; writes nothing to the bucket.
 - **`run_ladder_stage2.py`** — the stage-2 driver (n=5,000 development
   subset). Same architecture as stage 1: pinned-commit fetch, every
   artifact via `ensure_artifact`. Reuses stage 1's topologies and staged
@@ -98,6 +134,45 @@ mention here, in the same commit that creates it.
   ridge-grid behaviour, the ladder's second real-data ridge equivalence
   gate, and the first CNN training against real data (early-stopped on
   the locked 6,000-image validation partition, best of three seeds).
+
+**Frozen protocols** (each committed before any of its own numbers
+existed; nothing in them may change once a result has been seen):
+
+- **`AUDIT_PROTOCOL.md`** — the 150-vs-1200 amendment-impact audit: sign
+  convention, population roles, the out-of-fold prediction basis, both
+  alpha regimes, the analytic numerical-resolution limit, and all three
+  review triggers.
+- **`COMPANION_PROTOCOLS.md`** — the two protocols `AUDIT_PROTOCOL.md`
+  names as companions: the ARM/x86 propagation stress set (deterministic
+  construction, frozen ridge coefficients across both architectures) and
+  the `ABS_CONV_EPS` sensitivity table, each with its own pre-committed
+  halt condition.
+- **`STAGE3_PLAN.md`** — the stage-3 plan of record and its five freezes.
+
+**Plans** (revisable, unlike the frozen protocols above):
+
+- **`PHASE_B_PLAN.md`** — Phase B's step structure and the decisions that
+  shaped it: **the manifest as commit point** (payload written under a
+  precondition, its generation captured, sidecar written second recording
+  that generation; consumers verify the producer before fetching and then
+  read that exact generation, never latest-by-name); the 60,000-image
+  equivalence check as a new prudential extension whose failure is
+  nonetheless a hard stop; the encoder gate discharged as a stage-1 device;
+  and the amendment audit sequenced after Phase B against Phase B's own
+  persisted artifacts. Carries the measured retention finding — versioning
+  is off on the bucket, so artifacts are immutable by policy and a
+  superseded generation is a halt-worthy anomaly.
+
+**Evidence documents:**
+
+- **`NEGATIVE_PATH_EVIDENCE.md`** — the citation table for the pre-Stage-4
+  package's five demanded negative paths: which test evidences each, what
+  that test asserts, where the deliberate breakage that confirmed a guard
+  is recorded, and where coverage is narrower than the demand.
+  Stale-artifact refusal is the one demand not yet green: its mechanism is
+  built and tested, but no driver consumes through `consume_validated`
+  yet, and the table says so rather than counting the mechanism as
+  adoption.
 
 **Diagnostics** (not part of the locked pipeline; convention of Stage
 2A's `diagnose_*.py` scripts — investigate, change nothing themselves):
@@ -325,7 +400,11 @@ make test                      # the whole repository suite
 
 | file | covers |
 |---|---|
-| `test_stage2b_gcs.py` | transport, guards, chunked resumable upload, content verification |
+| `test_stage2b_gcs.py` | transport, guards, chunked resumable upload, content verification, the sidecar manifest and validated consume path |
+| `test_stage2b_fingerprint.py` | static ∪ runtime import closure, dirty-tree and revalidation refusals, per-kind consume policies, per-array payload manifests |
+| `test_stage2b_negative_path_evidence.py` | that every test `NEGATIVE_PATH_EVIDENCE.md` cites still exists under that name |
+| `test_stage2b_encode_stage3_local.py` | chunk-invariance of the encode, index-keyed corruption, the exact-binomial tail report, population roles |
+| `test_stage2b_compare_stage3.py` | the regeneration join: by official index, never a positional prefix |
 | `test_stage2b_cnn.py` | architecture, shared masking, training loop |
 | `test_stage2b_stats.py` | sign-flip, Holm families, winner rule |
 | `test_stage2b_ridge.py` | SVD ridge vs sklearn oracle, alpha selection, the n-dependent centering tolerance |

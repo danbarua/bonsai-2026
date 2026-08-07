@@ -204,3 +204,94 @@ def test_the_remote_executed_exemption_does_not_rot():
     names = {p.name for p in (REPO_ROOT / "experiments" / "stage2b_denoising").glob("*.py")}
     missing = sorted(REMOTE_EXECUTED - names)
     assert not missing, f"REMOTE_EXECUTED names files that no longer exist: {missing}"
+
+
+# =====================================================================
+# One way in: nothing consumes GCS bytes except through consume_validated
+# =====================================================================
+#
+# `consume_validated` is only "THE central validated consume path" if
+# nothing routes around it. A raw `download_file` reaches bytes without
+# ever consulting a manifest, which is precisely the bypass the contract
+# exists to close -- and a bypass is invisible from a green suite, because
+# the code still works. It just works unvalidated.
+#
+# Discovered by AST rather than listed. An allowlist of "scripts we know
+# download things" would not catch the next driver; it would simply not
+# look at it. That is the failure this project has now produced five
+# times.
+
+# Files permitted to call `download_file` directly, each with a reason.
+# A test below asserts every entry still exists AND still contains such a
+# call -- an exemption for a file that stopped needing it is an exemption
+# hiding the next real bypass.
+RAW_TRANSPORT_EXEMPT = {
+    "stage2b_gcs.py":
+        "defines both functions; consume_validated calls download_file by "
+        "construction",
+    "smoke_stage2b_gcs.py":
+        "deliberately exercises RAW transport against a real bucket -- "
+        "round-trip, corruption and chunk-resume checks whose subject is "
+        "download_file itself. Routing it through the validated path would "
+        "test the wrong function",
+}
+
+
+def _calls_download_file(path):
+    tree = ast.parse(path.read_text(), filename=str(path))
+    for node in ast.walk(tree):
+        if isinstance(node, ast.Call):
+            func = node.func
+            name = func.attr if isinstance(func, ast.Attribute) else getattr(func, "id", None)
+            if name == "download_file":
+                return True
+    return False
+
+
+def _stage2b_scripts():
+    return sorted((REPO_ROOT / "experiments" / "stage2b_denoising").glob("*.py"))
+
+
+def test_no_stage2b_script_downloads_around_the_validated_consume_path():
+    offenders = []
+    for path in _stage2b_scripts():
+        if not _calls_download_file(path):
+            continue
+        if path.name in RAW_TRANSPORT_EXEMPT:
+            print(f"[consume] {path.name}: raw download, exempt "
+                  f"({RAW_TRANSPORT_EXEMPT[path.name][:40]}...)")
+            continue
+        offenders.append(path.name)
+    print(f"[consume] {len(_stage2b_scripts())} scripts scanned, "
+          f"{len(offenders)} bypassing consume_validated")
+    assert not offenders, (
+        f"these scripts call download_file directly, reaching bytes without "
+        f"consulting a manifest: {offenders}. Use consume_validated -- it "
+        f"downloads when the local file is absent, so there is nothing a raw "
+        f"download adds except the bypass. If the raw call is genuinely the "
+        f"subject of the code, add it to RAW_TRANSPORT_EXEMPT with a reason.")
+
+
+def test_the_scanner_would_actually_find_a_bypass():
+    """The vacuity guard. Every assertion above is over a discovered set,
+    and a scanner that finds nothing passes it trivially -- so check that
+    the detector fires on a file known to contain the call."""
+    smoke = REPO_ROOT / "experiments" / "stage2b_denoising" / "smoke_stage2b_gcs.py"
+    assert smoke.exists()
+    assert _calls_download_file(smoke), "the AST scanner no longer detects the call"
+    scanned = _stage2b_scripts()
+    assert len(scanned) >= 10, f"only {len(scanned)} scripts discovered"
+
+
+def test_every_raw_transport_exemption_still_names_a_file_that_needs_it():
+    """Both directions. An exemption naming a deleted file, or one that no
+    longer calls download_file, is dead -- and a dead exemption is where
+    the next real bypass hides."""
+    for name, reason in RAW_TRANSPORT_EXEMPT.items():
+        assert reason, f"{name} is exempt with no reason"
+        path = REPO_ROOT / "experiments" / "stage2b_denoising" / name
+        assert path.exists(), f"exemption {name} names a file that no longer exists"
+        assert _calls_download_file(path), (
+            f"{name} is exempted from the consume-path rule but no longer calls "
+            f"download_file -- remove the exemption rather than leaving it to "
+            f"cover something else later")

@@ -1,0 +1,364 @@
+# Negative-path evidence: what fails, and the test that proves it
+
+The pre-Stage-4 package (`STAGE3_PLAN.md`, item 7) owes a reviewer
+evidence for five negative paths. All five are covered end to end. The
+fifth — stale-artifact refusal — was the last to land: its mechanism was
+built first and adopted second, and it is recorded as covered only now
+that `ensure_artifact`'s trust point actually routes through it.
+
+Every row names a test file, a test function, and what the assertion
+actually checks. The **function name is the citation**; a
+`tests/test_stage2b_negative_path_evidence.py` asserts that every function
+this document names still exists, so a rename or deletion fails the suite
+instead of quietly leaving a citation pointing at nothing. Line numbers,
+where they appear, are as of the commit that wrote the line and are
+navigational only. Where a guard was confirmed by deliberately breaking
+what it watches, what was broken and what failed is recorded here or cited
+by commit SHA, not paraphrased.
+
+Two conventions this table follows, both from CLAUDE.md principle 21. A
+test is cited only where it would fail if the named behaviour regressed —
+not where its name merely describes the behaviour. And where coverage is
+narrower than the demand, the narrowing is stated in the row rather than
+left for the reader to discover.
+
+---
+
+## Demand 1 — a verification mismatch produces a nonzero top-level exit
+
+The mechanism is a sentinel string. The remote script prints a token on
+its own success path; the recipe captures `exec`'s combined output and
+greps for it. `exec` exiting 0 is not sufficient, because a script can
+exit cleanly having never reached its verdict.
+
+| test | asserts |
+|---|---|
+| `tests/test_mighty_colab_contract.py:259` `test_ladder_missing_sentinel_fails_even_on_a_zero_exit` | Drives the real `stage2b-ladder-stage1` recipe with a stub CLI whose `exec` exits **0** and prints `nothing useful here`. Recipe exit code is 1, and `FAILED: ladder stage 1` is on stdout. |
+| `tests/test_mighty_colab_contract.py:170` `test_a_leak_never_masks_the_scientific_verdict` | Same mismatch on `stage2b-verify-gpu` (sentinel `NOTHING_USEFUL`): exit 1, `FAILED: the GPU ridge gate` on stdout. |
+
+The exit code these read is the **recipe's**, not `make`'s. `make` exits 2
+for any recipe failure regardless, so `_run_target`
+(`tests/test_mighty_colab_contract.py:120`) parses the code out of make's
+`*** [target] Error N` line on stderr. Without that, "nonzero" would be
+untestable — every failure would look like 2.
+
+Recipe source: `Makefile:378-386` (verify) and `Makefile:480-488`
+(ladder). Both compute `if [ $rc -ne 0 ] || ! echo "$out" | grep -q
+<SENTINEL>`, print `FAILED:`, and promote `rc` to 1 when `exec` itself
+returned 0.
+
+Positive controls, without which a refusal test proves nothing:
+`test_healthy_run_exits_zero` (:152) and
+`test_ladder_healthy_run_exits_zero` (:242) — correct sentinel, exit 0, no
+`LEAK WARNING`.
+
+The converse case — `exec` exiting nonzero while the sentinel is
+**present**, i.e. a driver that printed its verdict and then died — is the
+`[ $rc -ne 0 ]` half of the disjunct, and is covered separately:
+
+| test | asserts |
+|---|---|
+| `tests/test_mighty_colab_contract.py` `test_a_nonzero_exec_fails_the_target_even_when_the_sentinel_is_present` | `STUB_EXEC_RC=5` with a correct sentinel on `stage2b-verify-gpu`: recipe exit is **5**, not 0 and not a generic 1, and `exec rc=5` is on stdout so the failure is diagnosable. |
+| `tests/test_mighty_colab_contract.py` `test_ladder_nonzero_exec_fails_the_target_even_when_the_sentinel_is_present` | The same on `stage2b-ladder-stage1`, the target that spends real money. |
+
+**Deliberate breakage.** Both halves of the mechanism were broken
+separately and the specific expected failure observed. Removing `[ $$rc
+-ne 0 ] ||` from the verify recipe's disjunct leaves the exit code intact
+at 5 but drops the `FAILED:` diagnostic — the test fails on the message
+assertion. Replacing `|| rc=$$?` with `|| true` leaves the diagnostic
+untouched but the target exits **0** — the test fails on the exit-code
+assertion. Neither break is caught by the other's assertion, which is why
+both are asserted.
+
+**Where this is narrower than it looks.**
+
+- On `stage2b-verify-gpu` the missing-sentinel case is only ever exercised
+  *together with* a failing teardown (`STUB_STOP_RC=7`). The test still
+  has teeth for this demand — delete the sentinel grep and `rc` reaches
+  `check_teardown` as 0, gets promoted to 7, and the `rc == 1` assertion
+  fails — but the isolated mismatch case exists only on the ladder target.
+
+## Demand 2 — a missing or corrupted artifact fails rather than being silently accepted
+
+Content verification is on by default on every GCS transfer, in both
+directions, on `crc32c` — the digest GCS records for every object it
+stores, composed objects included. All tests below inject an adversarial
+fake bucket (`tests/test_stage2b_gcs.py:144-225`) that corrupts a specific
+way nothing else in the transport can see.
+
+**Corrupt bytes that arrive whole**
+
+| test | asserts |
+|---|---|
+| `tests/test_stage2b_gcs.py:1597` `test_a_corrupted_download_raises_naming_the_object_and_both_digests` | `ChecksumMismatchError`, and the message carries the object name, the digest the object records, and the digest of the bytes actually delivered. |
+| `tests/test_stage2b_gcs.py:1611` `test_a_corrupted_download_leaves_nothing_at_the_destination` | Verification runs on the `.part` sidecar, before the rename: the destination path does not exist afterwards, and neither does the sidecar. |
+| `tests/test_stage2b_gcs.py:1628` `test_a_corrupted_download_does_not_overwrite_a_good_local_file` | A good file already at the destination still reads `b"the good copy"` after the failed download. |
+| `tests/test_stage2b_gcs.py:1674` `test_a_plain_upload_that_lands_wrong_raises_and_removes_the_object` | A truncating bucket: raises, and the object is **gone** from the bucket — `object_exists` is `False`. |
+| `tests/test_stage2b_gcs.py:1688` `test_a_miscomposed_chunked_upload_is_caught_by_the_content_digest` | Every part intact, every part the right length, composed in reverse order: raises, object absent. Size and existence checks cannot see this; the digest is the only thing that can. |
+| `tests/test_stage2b_gcs.py:1713` `test_ensure_artifact_verifies_the_artifact_it_downloads` | The resumption path — a fresh runtime pulling what a dead session left — raises, and no local file is left behind. |
+| `tests/test_stage2b_gcs.py:1728` `test_ensure_artifact_verifies_what_it_uploads_on_both_routes` | Both upload routes, each given the corruption its own earlier checks cannot detect; neither leaves an object. |
+
+The upload-side deletion is the load-bearing part: `ensure_artifact` reads
+an object's existence as proof its step is done
+(`stage2b_gcs.py:1299`), so an object known to be wrong must not remain
+making that claim.
+
+**A digest that is missing rather than wrong**
+
+`tests/test_stage2b_gcs.py:1641`
+`test_an_object_with_no_recorded_digest_is_refused_rather_than_trusted` —
+against a bucket that reports no checksum, both `upload_file` and
+`download_file` raise `ChecksumMissingError` (matched on the digest field
+name), and the download leaves no file. This is what stops "could not be
+checked" degrading into "no check".
+
+**A step that produced nothing**
+
+| test | asserts |
+|---|---|
+| `tests/test_stage2b_gcs.py:804` `test_a_step_whose_producer_writes_nothing_fails_instead_of_recording_completion` | A producer that writes no file raises `FileNotFoundError`, uploads nothing, and leaves `object_exists` `False` — the next run does not read the step as done. |
+| `tests/test_stage2b_gcs.py:816` `test_a_producer_that_raises_leaves_no_object_behind` | A producer that raises propagates, and the bucket is empty. |
+
+**Positive control**: `tests/test_stage2b_gcs.py:1703`
+`test_a_chunked_upload_that_composes_correctly_still_passes` — the check
+passes on a correct composition. Catching the wrong answer proves nothing
+if the right one is also rejected.
+
+**Deliberate breakage.** Commit `5f5ff3c2` ("Stage 2B: verify object
+content on every GCS transfer") records: *"Mutating the comparison to a
+no-op fails the 10 that assert a transfer is refused, and no pre-existing
+test; the remaining 9 pin the digest itself, which that mutation does not
+touch."* That is the guard being watched fail, and the split between
+refusal tests and digest tests is what shows the mutation targeted the
+right thing.
+
+**Where this is narrower than it looks.** `verify_content=False` is a
+genuine bypass, exercised deliberately by
+`tests/test_stage2b_gcs.py:1659`
+`test_verification_is_on_by_default_and_can_be_switched_off` (the
+corrupted file lands, and the test asserts it really is corrupt). It is
+opt-out rather than opt-in and visible at the call site, and no Stage 2B
+driver passes it — but the guarantee is "on unless a call site asks
+otherwise", not "unconditional".
+
+## Demand 3 — an inner remote failure survives teardown
+
+This is the **failing**-teardown case. The run's own verdict is 1, `stop`
+exits 7, and the only thing stopping 7 from replacing 1 is the `if [ $rc
+-eq 0 ]` guard inside `check_teardown` (`Makefile:101`).
+
+| test | asserts |
+|---|---|
+| `tests/test_mighty_colab_contract.py:170` `test_a_leak_never_masks_the_scientific_verdict` | Bad sentinel **and** `stop` exiting 7. Exit code is **1**, not 7 — the science's failure stays the headline. `FAILED: the GPU ridge gate` and `LEAK WARNING` are **both** on stdout: the leak is reported rather than swallowed, and reporting it does not cost the verdict. |
+
+The complementary direction — teardown failing while the science
+succeeded — is `test_teardown_failure_fails_an_otherwise_successful_target`
+(:158) and its ladder twin (:248): exit code 7 (`stop`'s own code, not a
+generic 1), `LEAK WARNING` present, and the `FAILED:` line explicitly
+**absent**, so a billing leak is never misreported as a scientific
+failure.
+
+**Where this is narrower than it looks.** `test_a_leak_never_masks_the_scientific_verdict`
+is the **only** test of this demand, and it runs on `stage2b-verify-gpu`
+only. There is no ladder-target test combining an inner failure with a
+failing teardown; the ladder's teardown-failure test (:248) pairs a failed
+teardown with a *successful* run, which is the other case.
+
+## Demand 4 — teardown success cannot overwrite a substantive failure verdict
+
+This is the **succeeding**-teardown case, and the mechanism is stronger
+than the outcome: `check_teardown`'s entire body is guarded by `[ $src -ne
+0 ]` (`Makefile:100-102`), so on a successful teardown `rc` is not merely
+preserved — the code path that could touch it is never entered.
+
+| test | asserts |
+|---|---|
+| `tests/test_mighty_colab_contract.py:259` `test_ladder_missing_sentinel_fails_even_on_a_zero_exit` | `STUB_STOP_RC` unset, so teardown exits 0. The verdict-derived exit code 1 survives to the top level. |
+| `tests/test_mighty_colab_contract.py` `test_ladder_refuses_a_dirty_source_closure_before_provisioning` | Exit 1 with `REFUSING` and `closure` on stdout, and `stub] created` **absent** — refused before any session was provisioned, so there is no teardown to overwrite anything. The pre-flight is closure-keyed: it asks whether the driver's own imports are committed, not whether the repository is tidy. |
+| `tests/test_mighty_colab_contract.py` `test_ladder_proceeds_when_only_unrelated_files_are_uncommitted` | The positive control for the row above, and the case that motivated narrowing the guard: a clean closure inside a dirty tree must reach provisioning. A refusal test without this proves only that the target can refuse. |
+| `tests/test_mighty_colab_contract.py:288` `test_ladder_refuses_an_unpushed_head_before_provisioning` | Exit 1 with `REFUSING` and `not on any remote`, `stub] created` absent. The runtime fetches one pinned commit, so an unpushed HEAD would run code that is not the code under test. |
+
+The pre-flight refusals are the same demand one step earlier: the two
+failure modes they catch would both surface as *scientific* results rather
+than mistakes, and neither reaches the teardown path at all.
+
+**The first refusal was narrowed, and the narrowing has its own guards.**
+It used to be whole-tree `git status --porcelain`. Uncommitted work
+outside a driver's import closure cannot reach the computation — the
+runtime executes one pinned commit — so the coarse check refused correct
+runs while reporting a genuinely dirty closure file as one line among
+many. Two static checks keep the replacement honest, both derived rather
+than listed: `test_no_gpu_target_still_gates_on_whole_tree_porcelain`
+(the coarse gate must not return, because it would fire first and make
+the closure check dead code) and
+`test_every_repo_fetching_gpu_target_runs_the_closure_check` (any recipe
+pinning a commit for the runtime must ask whether that commit contains
+the driver's sources — so a new ladder target is covered the day it is
+written). Both were confirmed by breaking what they watch: restoring a
+porcelain gate in stage 2's recipe fails both and names stage 2.
+
+**Supporting — a teardown signal must not fabricate a verdict either.**
+`test_ladder_absent_session_is_not_treated_as_a_leak` (:268) and
+`test_a_distinct_absent_code_can_be_declared_without_rewriting_recipes`
+(:296) both give `stop` a nonzero code that `STOP_ABSENT_RC` declares to
+mean "already absent", and assert exit 0 with no `LEAK WARNING`. "Already
+gone" is the goal; only "could not stop" costs money.
+
+**Deliberate breakage (demands 1, 3 and 4).** Commit `e6398e09` ("Add the
+Stage 2B ladder stage-1 driver and the targets that run it", 2026-08-05)
+records an eleven-item sweep: *"the sentinel grep, the leak check, both
+pre-flight refusals, an &&-chained teardown, a recipe that omits
+--timeout, a local recipe using the remote env form, an ENV_ the recipe
+never sets, a "test"-named staged object, a ragged evolution chunk, and a
+hoisted cloud import."* Four of the eleven bear on these demands — the
+sentinel grep (demand 1), the leak check (demands 3 and 4), and both
+pre-flight refusals (demand 4). The other seven concern unrelated guards
+and are not evidence here.
+
+Commit `a63dbd87` ("Add the Stage 2B ladder stage-2 driver", 2026-08-06)
+records the same discipline for that rung's guards, and that *"two of the
+new tests were themselves found vacuous on first breakage (a whole-file
+substring search that matched an unrelated, correct call site elsewhere in
+the same file) and rewritten to target the specific call site"* — the
+reason breaking the guard is the check, and reading it is not.
+
+## Demand 5 — stale artifacts are refused — **COVERED**
+
+The mechanism (`stage2b_fingerprint.py` plus the sidecar manifest layer in
+`stage2b_gcs.py`) is now **adopted**: `ensure_artifact`'s trust point is a
+`consume_validated` call, so a resumed step validates by construction
+rather than by a driver remembering to. There is one way bytes get from
+GCS into a consumer, and it checks.
+
+**The wiring, and the tests that hold it**
+
+| test | asserts |
+|---|---|
+| `tests/test_stage2b_gcs.py` `test_ensure_artifact_refuses_to_resume_from_an_object_with_no_manifest` | The default. An object that exists but carries no manifest halts the step — and the producer is **not** silently re-run instead. |
+| `tests/test_stage2b_gcs.py` `test_ensure_artifact_refuses_when_the_manifest_disagrees_with_the_payload` | Existence plus a manifest is still not enough: the object is overwritten behind the manifest's back, as a half-finished regeneration would leave it, and the resume raises. |
+| `tests/test_stage2b_gcs.py` `test_ensure_artifact_refuses_a_fingerprint_the_consumer_did_not_expect` | A consumer that declares what produced its input is refused when the recorded producer disagrees, naming the field. |
+| `tests/test_stage2b_gcs.py` `test_a_forced_overwrite_never_leaves_a_manifest_describing_the_old_bytes` | The `force=True` hole, closed. A stale sidecar is worse than none — the next consume raises a mismatch that reads as corruption rather than as deliberate regeneration — so force republishes or removes, never leaves. |
+| `tests/test_stage2b_gcs.py` `test_the_manifest_is_published_only_after_the_payload_verifies` | Ordering: a failed upload leaves neither payload nor sidecar, so a manifest that exists always describes a complete object. |
+| `tests/test_stage2b_gcs_makefile.py` `test_no_stage2b_script_downloads_around_the_validated_consume_path` | **Derived by AST, not listed**: no Stage 2B script calls `download_file` directly. Exemptions are named with reasons and separately asserted to still need them. Confirmed by breaking it — reintroducing the raw call in `run_ladder_stage2.py` fails the check and names the file. |
+
+**Positive controls** — a contract that refuses everything is not a
+contract: `test_a_forced_overwrite_with_a_fingerprint_republishes_rather_than_removing`
+(regenerate, then resume from the new manifest without complaint),
+`test_ensure_artifact_permits_cross_stage_reuse_under_content_only`, and
+`test_the_pre_contract_optout_is_what_keeps_a_completed_rung_rerunnable`.
+
+**The opt-out, and why it is not a hole.** Ladder stages 1 and 2 wrote
+every artifact before this contract existed, and retrofitting manifests
+onto them would fabricate provenance rather than record it. Three call
+sites pass `require_manifest=False` inline with a comment naming the rung:
+the two `stage_kmnist` staging reads and stage 2's cross-rung corruption
+spot-check. Note what it does **not** mean — when a manifest is present it
+is validated regardless, so the opt-out relaxes the requirement that one
+exist, never the check itself. The four staged KMNIST objects now carry
+manifests (`make stage2b-publish-input-manifests`, sidecars only, each
+verified against its local copy first), so those two reads validate in
+practice while staying re-runnable against history.
+
+There is no grandfather allowlist and there will not be one. A future
+`ManifestMissingError` on pre-contract history is the **correct**
+behaviour: it means new code reached backwards, and the fix is to decide
+deliberately at that call site rather than to widen a policy centrally
+where nobody would see it.
+
+**A completed artifact whose provenance no longer matches its consumer**
+
+| test | asserts |
+|---|---|
+| `tests/test_stage2b_gcs.py` `test_a_payload_with_no_manifest_is_refused` | The core of the contract: an object that exists but carries no manifest raises `ManifestMissingError`. Existence alone buys nothing. |
+| `tests/test_stage2b_gcs.py` `test_a_payload_edited_after_publication_is_refused` | Bytes changed after publication raise `ManifestMismatchError` on the recorded payload digest — the object still exists, and that is not enough. |
+| `tests/test_stage2b_gcs.py` `test_a_fingerprint_from_a_different_config_is_refused` | A consumer whose expected fingerprint differs in `config_digest` raises `FingerprintMismatch`, naming the field that disagreed. |
+| `tests/test_stage2b_fingerprint.py` `test_strict_policy_catches_a_changed_digest` | Parametrised over each participating field: any single changed digest is caught under `STRICT`. |
+| `tests/test_stage2b_fingerprint.py` `test_strict_policy_catches_a_changed_commit` | A different producing commit is refused under `STRICT`. |
+| `tests/test_stage2b_fingerprint.py` `test_content_only_still_refuses_a_different_fingerprint_format` | The relaxed policy is a relaxation about the producer, not an escape from the contract's own version. |
+| `tests/test_stage2b_fingerprint.py` `test_a_non_mapping_recorded_fingerprint_is_reported_not_crashed` | A malformed recorded fingerprint is a refusal, not a traceback — otherwise "unreadable provenance" degrades into "no check". |
+
+**Staleness that is invisible to the whole-file digest**
+
+| test | asserts |
+|---|---|
+| `tests/test_stage2b_fingerprint.py` `test_revalidation_refuses_a_repo_module_absent_from_the_manifest` | A repo module imported *during* execution but absent from the pre-run closure is caught by the post-run revalidation. This is the case a pre-run-only check cannot see. |
+| `tests/test_stage2b_fingerprint.py` `test_revalidation_refuses_a_source_file_that_changed_during_execution` | A participating source edited mid-run is refused at revalidation. |
+| `tests/test_stage2b_fingerprint.py` `test_array_manifest_detects_a_single_changed_value` | One changed element in one array is caught by the per-array digest. |
+| `tests/test_stage2b_fingerprint.py` `test_array_manifest_distinguishes_nan_bit_patterns` | Two NaNs that compare unequal under `==` still differ by bit pattern, and the manifest sees it. |
+
+**Positive controls** — a refusal test proves nothing without them:
+`test_a_published_artifact_validates_against_its_own_manifest`,
+`test_cross_stage_reuse_under_content_only_is_permitted` (stage 2 and 3
+consume stage 1's topologies deliberately; a uniformly commit-keyed check
+would break correct behaviour), and
+`test_the_no_manifest_optout_is_explicit_and_permits_pre_contract_artifacts`
+(ladder stages 1 and 2 predate the contract).
+
+**Deliberate breakage.** Seven fingerprint guards and four manifest guards
+were each broken and the specific expected failure observed. The fourth
+manifest break is the one worth recording: it fired **nothing**, because
+the whole-file payload digest caught the corruption first — which exposed
+`test_the_per_array_manifest_is_what_survives_a_container_rewrite` as
+vacuous in its original form. It now tests the cross-file regeneration
+case the per-array manifest actually serves, where the whole-file digest
+is useless because `np.savez` embeds zip timestamps.
+
+**Where this is still narrower than it looks.** The contract binds Stage
+2B's own transport. Nothing here stops a future script importing
+`google.cloud.storage` directly and never touching this module — the AST
+check above scans `experiments/stage2b_denoising/*.py` for
+`download_file`, so a genuinely separate client would be invisible to it.
+`tests/test_stage2b_gcs_makefile.py`'s live-GCS discovery does look for
+direct `google.cloud` imports, which narrows the gap without closing it.
+
+**Adjacent, and explicitly not coverage.** `stage2b_gcs.py` already
+discards stale **transfer state** — a checkpoint from a differently sized
+file (`tests/test_stage2b_gcs.py:1036`), from a same-sized but rewritten
+file (:1056), naming a different object (:1076), written under a different
+chunk size (:1093), corrupt on disk (:1107); a recorded part that vanished
+from the bucket (:1116) or whose remote size disagrees (:1134); and parts
+left by a previous larger upload that must not be composed in (:1196).
+Every one of those refuses *in-flight state left by a previous attempt
+against the same local file and object*. None of them refuses a
+**completed artifact whose provenance no longer matches its consumer**,
+which is what this demand asks for, and which the manifest tests above
+now cover. Counting them here would have made the table read as five
+covered demands while the mechanism did not exist.
+
+---
+
+## Coverage of the recipe surface
+
+The behavioural tests above drive **two** of the seven `Makefile` recipes
+that invoke `mighty-colab exec`: `stage2b-verify-gpu` and
+`stage2b-ladder-stage1`. The other five — `stage2b-verify-cnn-gpu`,
+`stage2b-ladder-stage2`, and the three Stage 2A GPU recipes
+(`Makefile:162`, `:185`, `:254`) — are covered only by the three static
+checks that parse the Makefile:
+
+- `test_makefile_has_gpu_recipes_to_check` (:58) — fails if the parser
+  finds fewer than three `exec` recipes, so the two checks below cannot
+  pass vacuously on an empty set.
+- `test_every_exec_passes_an_explicit_timeout` (:68) — every `exec` line
+  carries `--timeout`; the 30-second default kills any driver that
+  computes quietly.
+- `test_every_session_creating_recipe_tears_down_unconditionally` (:85) —
+  every such recipe contains a `stop`, and no `stop` line is chained onto
+  a previous command's success with `&&`.
+
+Two consequences worth stating plainly. First, `_run_target` takes the
+target as a parameter precisely so recipe-shape behaviour can be checked
+on more than one target, and today two are checked. Second, the sentinel
+mechanism is a property of the four Stage 2B targets, not of GPU targets
+generally: the three Stage 2A recipes have no sentinel grep at all and
+read `exec`'s exit status only.
+
+## Summary
+
+| # | demand | status | primary evidence |
+|---|---|---|---|
+| 1 | verification mismatch → nonzero top-level exit | covered | `test_ladder_missing_sentinel_fails_even_on_a_zero_exit` for a clean exit with no verdict; `test_a_nonzero_exec_fails_the_target_even_when_the_sentinel_is_present` and its ladder twin for the converse |
+| 2 | missing or corrupted artifact fails, not silently accepted | covered | the transfer-refusal tests plus `test_an_object_with_no_recorded_digest_is_refused_rather_than_trusted`; `verify_content=False` is a visible opt-out |
+| 3 | inner remote failure survives teardown | covered | `test_a_leak_never_masks_the_scientific_verdict` — sole test, one target |
+| 4 | teardown success cannot overwrite a failure verdict | covered | `test_ladder_missing_sentinel_fails_even_on_a_zero_exit` plus both pre-flight refusals |
+| 5 | stale artifacts are refused | covered | `test_ensure_artifact_refuses_to_resume_from_an_object_with_no_manifest` and the rest of the wiring set, plus `test_no_stage2b_script_downloads_around_the_validated_consume_path` (derived by AST) |

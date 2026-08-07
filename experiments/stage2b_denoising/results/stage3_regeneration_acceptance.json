@@ -1,0 +1,205 @@
+{
+  "alignment": {
+    "alignment_is_a_prefix": false,
+    "first_five_baseline_indices": [
+      0,
+      1,
+      2,
+      3,
+      4
+    ],
+    "n_new_total": 60000,
+    "n_overlap": 54000,
+    "n_rows_moved": 53985,
+    "their_rows_in_the_new_artifact": [
+      0,
+      1,
+      2,
+      3,
+      4
+    ]
+  },
+  "arrays": [
+    {
+      "array": "thetas_505",
+      "bit_exact": true,
+      "dtype_new": "float64",
+      "dtype_old": "float64",
+      "sha256_new": "1113cec321a15093d460e1838b6a7da6b75f11b0e4b7cdcab5ec1fb2bc7e85fc",
+      "sha256_old": "1113cec321a15093d460e1838b6a7da6b75f11b0e4b7cdcab5ec1fb2bc7e85fc",
+      "shape_new": [
+        54000,
+        505
+      ],
+      "shape_old": [
+        54000,
+        505
+      ]
+    },
+    {
+      "array": "deltas",
+      "bit_exact": true,
+      "dtype_new": "float64",
+      "dtype_old": "float64",
+      "sha256_new": "6a7753ff11133cfdbeca89bee457294804642cc329373b901ce7caeb3740954f",
+      "sha256_old": "6a7753ff11133cfdbeca89bee457294804642cc329373b901ce7caeb3740954f",
+      "shape_new": [
+        54000
+      ],
+      "shape_old": [
+        54000
+      ]
+    }
+  ],
+  "fit_tail": {
+    "ci95_lower": 0.0011584073791525722,
+    "ci95_upper": 0.0018229597897237242,
+    "max": 2.467519522042494e-10,
+    "n": 54000,
+    "n_gt_1e_10": 2,
+    "n_gt_1e_12": 4,
+    "n_gt_1e_13": 9,
+    "n_nonzero": 79,
+    "rate": 0.001462962962962963
+  },
+  "fit_tail_crosscheck": {
+    "declared_constant": 79,
+    "match": true,
+    "observed_in_baseline_artifact": 79,
+    "observed_in_regenerated_subset": 79
+  },
+  "manifest": {
+    "arrays": {
+      "active_indices": {
+        "dtype": "int64",
+        "sha256": "577cf28d5b01aa38e93210b239c30433bb0e7e0c6d00cfa851fc6288c6ef7a55",
+        "shape": [
+          505
+        ]
+      },
+      "deltas": {
+        "dtype": "float64",
+        "sha256": "dbc042202ec89c83db23884edcb9c9b6b79bbfd711982e32c1169b2c11743ac8",
+        "shape": [
+          60000
+        ]
+      },
+      "fit_indices": {
+        "dtype": "int64",
+        "sha256": "b52a034e01656d7d377f2223297d7ae06705ce2726a9d947ee12f4402efaf3d8",
+        "shape": [
+          54000
+        ]
+      },
+      "summary_json": {
+        "dtype": "<U1580",
+        "sha256": "0dc90b6f3d1807f7b842fa9936ec4c267de99b4326135933caf2922a0f509acd",
+        "shape": [
+          1
+        ]
+      },
+      "thetas_505": {
+        "dtype": "float64",
+        "sha256": "d2ae8eb85e5c3604da1dd862862fc1922420f15ef1f62b39bd781ba331c9bcee",
+        "shape": [
+          60000,
+          505
+        ]
+      },
+      "train_indices": {
+        "dtype": "int64",
+        "sha256": "fe4e39bbf5e7508e2743343e541d967d3a36c5d8560d34e7e1d41073ece735ba",
+        "shape": [
+          60000
+        ]
+      },
+      "validation_indices": {
+        "dtype": "int64",
+        "sha256": "11e667934c3901865ef7cb8a55f60743ff989fc06d84dd486cf517ad6a677a0f",
+        "shape": [
+          6000
+        ]
+      }
+    },
+    "fingerprint": {
+      "config": {
+        "alpha_bar": 0.5,
+        "corruption_scheme": "SHA256(split:index:42) -> PCG64, per image",
+        "dtype": "float64",
+        "encoder_seed": 0,
+        "encoder_steps": 1200,
+        "n_active": 505,
+        "n_images": 60000,
+        "population": "official KMNIST training split, all 60,000",
+        "row_order": "ascending official training index",
+        "split": "train"
+      },
+      "config_digest": "768bf2017a0aa12d9d6aa424627bbceff9f883325ed5d91bec9cb7b293750017",
+      "entrypoint": "experiments/stage2b_denoising/encode_stage3_local.py",
+      "environment": {
+        "packages": {
+          "diffrax": "0.7.2",
+          "equinox": "0.13.8",
+          "google-cloud-storage": "3.13.0",
+          "google-crc32c": "1.8.0",
+          "jax": "0.11.0",
+          "jaxlib": "0.11.0",
+          "numpy": "2.5.1",
+          "optax": "0.2.8",
+          "scikit-learn": "1.9.0",
+          "scipy": "1.18.0"
+        },
+        "python": "3.14.6"
+      },
+      "format": "stage2b-artifact-fingerprint/1",
+      "git": {
+        "clean": false,
+        "closure_clean": true,
+        "closure_dirty_paths": [],
+        "commit": "12a8c46ad5aad152874b4a618f5b60784779f098",
+        "tree_dirty_porcelain": "M .gitignore\n?? .claude/claude2claude/DESKTOP_PROTOCOL.md\n?? .claude/claude2claude/c2c-mcp/deploy-proxy.sh\n?? .claude/claude2claude/c2c-mcp/run-c2c-mcp.sh"
+      },
+      "parents": {},
+      "source_manifest": {
+        "experiments/stage1b2_structured_transformation/stage1b2_core.py": "c1087d116b11125ea3a89803b4b20866423304c66a41a52fc372806027683f96",
+        "experiments/stage1d_topology_specificity/build_stage1d_constructions.py": "8984d271e7ecd6ed5b553c1d51fd4fb6b3d4ca3da9a3a654635c7dd8010bf02f",
+        "experiments/stage2a_dynamics_classification/stage2a_core.py": "13eae6820bbee8fb3926fb3e1b8403fa888b13009f5f70124a5bca6b6db865e8",
+        "experiments/stage2a_dynamics_classification/stage2a_topologies.py": "597f1a3af50bff9d95a2580d9777a7a41f882f45212a8f70324b45f0c0227963",
+        "experiments/stage2b_denoising/encode_stage3_local.py": "61b835c4628d1b59a70bd8081d76d29611dc23f5e2c4848d41c22dcbe224b310",
+        "experiments/stage2b_denoising/stage2b_corruption.py": "9500653dce549c08d3076c866f781b5aa8a8ba4461b7a18f717c7a540db20f3d",
+        "experiments/stage2b_denoising/stage2b_encoder_gate.py": "31c287194927095ede068eaea696c5425705060521a303faf695a8981dec22e4",
+        "experiments/stage2b_denoising/stage2b_gcs.py": "ba7a37507ffdf76796121d662f59d3a4fe28c8a01dcab5f70ad9ef26fb37243b",
+        "experiments/stage2b_denoising/stage2b_partition.py": "f58c4d6c667260b99c9d63d2c2b1a10679fc1d8bec782020b604113ddf8445fe",
+        "src/bonsai/__init__.py": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+        "src/bonsai/data/__init__.py": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+        "src/bonsai/data/mnist_loader.py": "5843a1d0398ccc012d24955a409449a40d2b10fa828080a8a42f8ae295246e47",
+        "src/bonsai/dynamics/__init__.py": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+        "src/bonsai/dynamics/degree_preserving_rewiring.py": "e40bc42fac9f99323cf315a0f416fb919c0ee207b6851e24ea857ed3880f8704",
+        "src/bonsai/dynamics/historical_matched_sparsity_random.py": "d166c1c3b48ec4b606e3622476e514bae8bde1cfea0ef7485e26785cdcb4953e",
+        "src/bonsai/dynamics/lattice_construction.py": "25b4e85fce51f05245c4a90c9dbbf3276e7eac5a4ae656dcf1ba6ebf58a90c29",
+        "src/bonsai/dynamics/learned_topology_construction.py": "33b7e97b3fc0ead966f2066bb70a51e4ea942f0d3e6e3bb2cfe5cd5c5e3cca6e",
+        "src/bonsai/dynamics/matched_sparsity_ablation.py": "10480f63f1e4e9930be097863f730d308b8e82b70c949a51e44dbf76a8ac0d74"
+      },
+      "source_manifest_digest": "6cb4dd1378603792fd629ddd4e84f9ca8c3b613a247e412b28f0db5e6d62652c"
+    },
+    "format": "stage2b-artifact-manifest/1",
+    "object_path": "stage2b/train/stage3/common/encoded_train_s1200.npz",
+    "parents": {},
+    "payload_crc32c": "wA16qw==",
+    "payload_generation": 1786105203101186,
+    "payload_sha256": "8a26353d425dc2cf450fc17f44de1d5c6914dab208ac42a53f261603e78b82ed",
+    "payload_size": 229109711
+  },
+  "passed": true,
+  "validation_tail": {
+    "ci95_lower": 0.0007995116747301324,
+    "ci95_upper": 0.0030629164387282765,
+    "max": 2.886579864025407e-13,
+    "n": 6000,
+    "n_gt_1e_10": 0,
+    "n_gt_1e_12": 0,
+    "n_gt_1e_13": 2,
+    "n_nonzero": 10,
+    "rate": 0.0016666666666666668
+  }
+}

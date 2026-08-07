@@ -167,6 +167,24 @@ def test_teardown_failure_fails_an_otherwise_successful_target(stub_cli):
         "a teardown failure must not be reported as a scientific failure")
 
 
+def test_a_nonzero_exec_fails_the_target_even_when_the_sentinel_is_present(stub_cli):
+    """The other half of `[ $rc -ne 0 ] || ! grep sentinel`, and the half a
+    sentinel check alone cannot cover: a driver that printed its verdict and
+    THEN died -- a crash in teardown, an upload that failed after the
+    science ran, a non-zero exit from the exec transport itself.
+
+    The sentinel is deliberately correct here. If the recipe consulted only
+    the sentinel, this run would pass; the target's own exit code must
+    instead carry `exec`'s, not be reset to 0 by a successful grep."""
+    rc, r = _run_target(stub_cli, {"STUB_EXEC_RC": "5"})
+    assert rc == 5, (
+        f"a nonzero exec must propagate its own code -- got {rc}. A correct "
+        f"sentinel must not rescue a run that exited nonzero.\n{r.stdout}{r.stderr}")
+    assert "FAILED: the GPU ridge gate" in r.stdout
+    assert "exec rc=5" in r.stdout, (
+        "the reported code must be exec's own, so the failure is diagnosable")
+
+
 def test_a_leak_never_masks_the_scientific_verdict(stub_cli):
     """Both wrong: the run's own failure stays the headline and exit code,
     and the leak is still reported rather than swallowed."""
@@ -202,15 +220,6 @@ case "$1" in
 esac
 """
 
-GIT_STUB_DIRTY = """#!/bin/sh
-case "$1" in
-  status) echo " M experiments/stage2b_denoising/run_ladder_stage1.py"; exit 0 ;;
-  rev-parse) echo "0000000000000000000000000000000000000000"; exit 0 ;;
-  branch) echo "  origin/stage2b"; exit 0 ;;
-  *) exit 0 ;;
-esac
-"""
-
 GIT_STUB_UNPUSHED = """#!/bin/sh
 case "$1" in
   status) exit 0 ;;
@@ -221,12 +230,42 @@ esac
 """
 
 
+# The closure pre-flight is a python CLI into stage2b_fingerprint, so the
+# git stubs above cannot reach it -- `git status` is no longer what the
+# recipe asks. These stand in for that CLI at the two answers it can give.
+# The real checker's own behaviour (which files count as the closure, what
+# "dirty" means blob-by-blob against HEAD) is tested directly in
+# tests/test_stage2b_fingerprint.py; what is tested HERE is that the recipe
+# consults it and obeys it.
+CLOSURE_STUB_CLEAN = """#!/bin/sh
+echo "[closure] entrypoint $1: closure is clean"
+exit 0
+"""
+
+CLOSURE_STUB_DIRTY = """#!/bin/sh
+echo "[closure] REFUSING: these files in this driver's own source closure differ from HEAD:"
+echo "[closure]   experiments/stage2b_denoising/run_ladder_stage1.py"
+exit 1
+"""
+
+
+@pytest.fixture(scope="module")
+def closure_stubs(tmp_path_factory):
+    base = tmp_path_factory.mktemp("closurestub")
+    made = {}
+    for name, body in (("clean", CLOSURE_STUB_CLEAN), ("dirty", CLOSURE_STUB_DIRTY)):
+        path = base / f"closure-{name}"
+        path.write_text(body)
+        path.chmod(0o755)
+        made[name] = path
+    return made
+
+
 @pytest.fixture(scope="module")
 def git_stubs(tmp_path_factory):
     base = tmp_path_factory.mktemp("gitstub")
     made = {}
-    for name, body in (("ready", GIT_STUB_READY), ("dirty", GIT_STUB_DIRTY),
-                       ("unpushed", GIT_STUB_UNPUSHED)):
+    for name, body in (("ready", GIT_STUB_READY), ("unpushed", GIT_STUB_UNPUSHED)):
         path = base / f"git-{name}"
         path.write_text(body)
         path.chmod(0o755)
@@ -234,20 +273,27 @@ def git_stubs(tmp_path_factory):
     return made
 
 
-def _run_ladder(stub, git_stub, env_extra=None, make_vars=()):
-    return _run_target(stub, env_extra, (f"GIT={git_stub}", *make_vars),
+def _run_ladder(stub, git_stub, env_extra=None, make_vars=(), closure_stub=None):
+    """`closure_stub` defaults to the clean one, so every test that is about
+    something else gets past the pre-flight without saying so."""
+    extra = list(make_vars)
+    if closure_stub is not None:
+        extra.append(f"CLOSURE_CHECK={closure_stub}")
+    return _run_target(stub, env_extra, (f"GIT={git_stub}", *extra),
                        target=LADDER_TARGET)
 
 
-def test_ladder_healthy_run_exits_zero(stub_cli, git_stubs):
-    rc, r = _run_ladder(stub_cli, git_stubs["ready"], {"STUB_SENTINEL": "STAGE1_OK"})
+def test_ladder_healthy_run_exits_zero(stub_cli, git_stubs, closure_stubs):
+    rc, r = _run_ladder(stub_cli, git_stubs["ready"], {"STUB_SENTINEL": "STAGE1_OK"},
+                        closure_stub=closure_stubs["clean"])
     assert rc == 0, r.stdout + r.stderr
     assert "LEAK WARNING" not in r.stdout
 
 
-def test_ladder_teardown_failure_fails_an_otherwise_successful_target(stub_cli, git_stubs):
+def test_ladder_teardown_failure_fails_an_otherwise_successful_target(stub_cli, git_stubs, closure_stubs):
     rc, r = _run_ladder(stub_cli, git_stubs["ready"],
-                        {"STUB_SENTINEL": "STAGE1_OK", "STUB_STOP_RC": "7"})
+                        {"STUB_SENTINEL": "STAGE1_OK", "STUB_STOP_RC": "7"},
+                        closure_stub=closure_stubs["clean"])
     assert rc == 7, (
         f"a failed teardown must fail the target, carrying stop's own code -- got {rc}\n"
         f"{r.stdout}{r.stderr}")
@@ -256,38 +302,111 @@ def test_ladder_teardown_failure_fails_an_otherwise_successful_target(stub_cli, 
         "a teardown failure must not be reported as a scientific failure")
 
 
-def test_ladder_missing_sentinel_fails_even_on_a_zero_exit(stub_cli, git_stubs):
+def test_ladder_missing_sentinel_fails_even_on_a_zero_exit(stub_cli, git_stubs, closure_stubs):
     """The case the sentinel exists for: `exec` returns 0 because the script
     exited cleanly, but it never reached its own verdict."""
     rc, r = _run_ladder(stub_cli, git_stubs["ready"],
-                        {"STUB_SENTINEL": "nothing useful here"})
+                        {"STUB_SENTINEL": "nothing useful here"},
+                        closure_stub=closure_stubs["clean"])
     assert rc == 1, r.stdout + r.stderr
     assert "FAILED: ladder stage 1" in r.stdout
 
 
-def test_ladder_absent_session_is_not_treated_as_a_leak(stub_cli, git_stubs):
+def test_ladder_nonzero_exec_fails_the_target_even_when_the_sentinel_is_present(
+        stub_cli, git_stubs, closure_stubs):
+    """The converse case, on the target that spends real money: the driver
+    printed its verdict and then died. The sentinel is deliberately correct,
+    so only the `[ $rc -ne 0 ]` half of the disjunct can catch this."""
+    rc, r = _run_ladder(stub_cli, git_stubs["ready"],
+                        {"STUB_SENTINEL": "STAGE1_OK", "STUB_EXEC_RC": "5"},
+                        closure_stub=closure_stubs["clean"])
+    assert rc == 5, (
+        f"a nonzero exec must propagate its own code -- got {rc}\n{r.stdout}{r.stderr}")
+    assert "FAILED: ladder stage 1" in r.stdout
+    assert "exec rc=5" in r.stdout
+
+
+def test_ladder_absent_session_is_not_treated_as_a_leak(stub_cli, git_stubs, closure_stubs):
     """"Already gone" is the goal, not a failure -- it is "could not stop"
     that costs money, and conflating them makes the check unadoptable."""
     rc, r = _run_ladder(stub_cli, git_stubs["ready"],
                         {"STUB_SENTINEL": "STAGE1_OK", "STUB_STOP_RC": "3"},
-                        make_vars=("STOP_ABSENT_RC=3",))
+                        make_vars=("STOP_ABSENT_RC=3",),
+                        closure_stub=closure_stubs["clean"])
     assert rc == 0, r.stdout + r.stderr
     assert "LEAK WARNING" not in r.stdout
 
 
-def test_ladder_refuses_a_dirty_tree_before_provisioning(stub_cli, git_stubs):
-    """The runtime fetches one pinned commit, so uncommitted work is simply
-    absent from the run -- and the resulting failure would read as a
-    scientific result rather than a mistake. Refuse before any billing."""
-    rc, r = _run_ladder(stub_cli, git_stubs["dirty"], {"STUB_SENTINEL": "STAGE1_OK"})
+def test_ladder_refuses_a_dirty_source_closure_before_provisioning(
+        stub_cli, git_stubs, closure_stubs):
+    """The runtime fetches one pinned commit, so an uncommitted file THIS
+    DRIVER IMPORTS is simply absent from the run -- and the resulting
+    failure would read as a scientific result rather than a mistake. Refuse
+    before any billing.
+
+    The check is closure-keyed, not whole-tree: uncommitted work elsewhere
+    cannot reach the computation, and refusing on it meant every GPU launch
+    waited on a spotless checkout. `test_stage2b_fingerprint.py` tests what
+    "dirty closure" means; this tests that the recipe asks and obeys."""
+    rc, r = _run_ladder(stub_cli, git_stubs["ready"], {"STUB_SENTINEL": "STAGE1_OK"},
+                        closure_stub=closure_stubs["dirty"])
     assert rc == 1, r.stdout + r.stderr
-    assert "REFUSING" in r.stdout and "dirty" in r.stdout
+    assert "REFUSING" in r.stdout and "closure" in r.stdout
     assert "stub] created" not in r.stdout, "refused too late -- a session was provisioned"
 
 
-def test_ladder_refuses_an_unpushed_head_before_provisioning(stub_cli, git_stubs):
+def test_ladder_proceeds_when_only_unrelated_files_are_uncommitted(
+        stub_cli, git_stubs, closure_stubs):
+    """The other direction, and the reason the guard was narrowed: a clean
+    closure inside a dirty tree must RUN. Without this the change is
+    untested in the direction that motivated it -- a guard that refuses
+    everything also refuses everything wrong."""
+    rc, r = _run_ladder(stub_cli, git_stubs["ready"], {"STUB_SENTINEL": "STAGE1_OK"},
+                        closure_stub=closure_stubs["clean"])
+    assert rc == 0, r.stdout + r.stderr
+    assert "REFUSING" not in r.stdout
+    assert "stub] created" in r.stdout, "the run should have reached provisioning"
+
+
+def test_no_gpu_target_still_gates_on_whole_tree_porcelain():
+    """The coarse check must not come back. If it did it would fire first,
+    turning the closure check into dead code and restoring the behaviour
+    this replaced -- and nothing about a green suite would reveal it,
+    because the closure check would still be present and still correct."""
+    offenders = []
+    for name, body in _exec_recipes().items():
+        if "status --porcelain" in body:
+            offenders.append(name)
+        print(f"[contract] {name}: "
+              f"{'STILL GATES ON PORCELAIN' if 'status --porcelain' in body else 'no porcelain gate'}")
+    assert not offenders, (
+        f"these recipes gate on whole-tree `git status --porcelain`: {offenders}. "
+        f"Uncommitted work outside a driver's import closure cannot reach the "
+        f"computation -- the runtime executes one pinned commit. Use "
+        f"$(CLOSURE_CHECK) instead.")
+
+
+def test_every_repo_fetching_gpu_target_runs_the_closure_check():
+    """Derived, not a hand-maintained list: any recipe that pins a commit
+    for the runtime to fetch must ask whether that commit contains the
+    driver's own sources. A new ladder target gets this on the day it is
+    written rather than whenever someone remembers."""
+    fetching = {name: body for name, body in _exec_recipes().items()
+                if "BONSAI_COMMIT" in body}
+    assert fetching, "no commit-pinning GPU recipes parsed -- this check is vacuous"
+    missing = [name for name, body in fetching.items() if "CLOSURE_CHECK" not in body]
+    for name in sorted(fetching):
+        print(f"[contract] {name}: "
+              f"{'runs the closure check' if 'CLOSURE_CHECK' in fetching[name] else 'NO CLOSURE CHECK'}")
+    assert not missing, (
+        f"these targets pin a commit for the runtime to fetch but never check that "
+        f"the driver's own closure is in it: {missing}")
+
+
+def test_ladder_refuses_an_unpushed_head_before_provisioning(stub_cli, git_stubs, closure_stubs):
     """The runtime can only fetch what a remote has."""
-    rc, r = _run_ladder(stub_cli, git_stubs["unpushed"], {"STUB_SENTINEL": "STAGE1_OK"})
+    rc, r = _run_ladder(stub_cli, git_stubs["unpushed"], {"STUB_SENTINEL": "STAGE1_OK"},
+                        closure_stub=closure_stubs["clean"])
     assert rc == 1, r.stdout + r.stderr
     assert "REFUSING" in r.stdout and "not on any remote" in r.stdout
     assert "stub] created" not in r.stdout, "refused too late -- a session was provisioned"

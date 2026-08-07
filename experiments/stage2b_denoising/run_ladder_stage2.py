@@ -323,8 +323,16 @@ def stage_kmnist(mods, bucket, clone_dir):
         if os.path.isfile(dest):
             say(f"{filename} already present ({os.path.getsize(dest)} bytes)")
         else:
-            mods.gcs.download_file(name, dest, bucket=bucket)
-            say(f"downloaded {name} -> {filename} ({os.path.getsize(dest)} bytes)")
+            # Through the central validated consume path, not a raw
+            # download -- there is exactly one way bytes get from GCS into
+            # a consumer here, and it validates. `require_manifest=False`
+            # by name: the IDX objects were staged under the stage-1 prefix
+            # before the fingerprint contract existed. See stage2b_gcs's
+            # legacy policy.
+            manifest, _ = mods.gcs.consume_validated(name, dest, bucket=bucket,
+                                                     require_manifest=False)
+            say(f"downloaded {name} -> {filename} ({os.path.getsize(dest)} bytes)"
+                f"{'' if manifest is None else ', manifest validated'}")
         staged[filename] = dest
     return dest_dir, staged
 
@@ -505,7 +513,13 @@ def step2_corruption(mods, bucket, corpus):
     # above already checks).
     stage1_corr_name = _obj(mods, "corruption", "npz", stage=1)
     stage1_local = local_path_for(stage1_corr_name)
-    mods.gcs.download_file(stage1_corr_name, stage1_local, bucket=bucket)
+    # Central validated consume, with the pre-contract opt-out named:
+    # stage 1's corruption artifact is completed-rung history, written
+    # before the fingerprint contract. See stage2b_gcs's legacy policy --
+    # a refusal here would mean new code reached for old history, and this
+    # reach is deliberate and documented.
+    mods.gcs.consume_validated(stage1_corr_name, stage1_local, bucket=bucket,
+                               require_manifest=False)
     with np.load(stage1_local) as handle:
         stage1_x_t_clip = handle["x_t_clip"]
     n_prefix = corpus["stage1_indices"].size
@@ -930,8 +944,16 @@ def step11_report(mods, bucket, record):
                   str(record.get("verdict", FAIL_SENTINEL))]
         return "\n".join(lines) + "\n"
 
-    ensure_json(mods, bucket, _obj(mods, "stage2_report", "json"), compute_json, force=True)
-    ensure_text(mods, bucket, _obj(mods, "stage2_report", "txt"), compute_text, force=True)
+    # Run-scoped, and therefore create-once like every other artifact.
+    # `force=True` used to overwrite one fixed report name, which meant a
+    # resumed run DESTROYED the record of what the attempt that died had
+    # seen -- the same "an unwritten result does not survive" failure this
+    # project already has a lesson about. Both reports now survive,
+    # distinguishable by run id, and the write-once policy needs no
+    # exception carved out for reports.
+    kind = f"stage2_report_{record['run']['run_id']}"
+    ensure_json(mods, bucket, _obj(mods, kind, "json"), compute_json)
+    ensure_text(mods, bucket, _obj(mods, kind, "txt"), compute_text)
 
 
 def build_stage3_projections(record, n_measured=5000):
@@ -973,7 +995,11 @@ def build_stage3_projections(record, n_measured=5000):
 
 
 def new_record():
-    return {"run": {}, "timings": {}, "gates": {}, "evolution": {}, "cnn": {},
+    # A run id, minted once per process. It scopes the report object name,
+    # so a resumed run writes a new report rather than replacing the one
+    # its predecessor left.
+    return {"run": {"run_id": time.strftime("%Y%m%dT%H%M%SZ", time.gmtime())},
+            "timings": {}, "gates": {}, "evolution": {}, "cnn": {},
             "encode_diagnostic": {}, "stats_smoke": {},
             "verdict": None, "halt_reason": None}
 

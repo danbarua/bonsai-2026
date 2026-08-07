@@ -24,10 +24,16 @@ pattern and is explicitly NOT a second gate.
 At ENCODER_STEPS=150, the gate's first real run on noisy KMNIST FAILED at
 rho=169.851 -- diagnosed in `diagnose_encoder_gate_failure.py` as genuine
 slow convergence, not an irreducible floor: both clean and noisy
-final-Delta decay geometrically all the way to exact float64 zero (median
-AND p95, all 1,000 images) by 1,200 steps. ENCODER_STEPS was raised to
-1200 uniformly (clean and noisy identically, every encoding site) as a
-result.
+final-Delta decay geometrically until, by 1,200 steps, the median and the
+p95 of each are exact float64 zero across those 1,000 images.
+ENCODER_STEPS was raised to 1200 uniformly (clean and noisy identically,
+every encoding site) as a result.
+
+Note what that does and does not say. Two quantiles hitting zero is not
+"every image is exactly zero" -- no per-image exact-zero count and no max
+was reported at that rung, and the later 54,000-image measurement shows
+the stronger reading is false at larger corpus sizes. The gate turns on
+medians, so it is unaffected; the narrower statement is the true one.
 
 That diagnostic surfaced a second, independent defect the ratio formula
 has near either series' numerical floor: at steps=600, clean's median had

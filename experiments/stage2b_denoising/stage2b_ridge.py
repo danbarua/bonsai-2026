@@ -382,11 +382,53 @@ def cross_validate_alpha(X, Y, y_strat, alphas=ALPHA_GRID, n_splits=N_SPLITS,
     `fold_min_col_std` / `fold_min_col_std_col` / `fold_worst_mean_col`
     come from `scaler_centering_margin` and are recorded for every fold
     whether or not the guard was anywhere near firing. They change
-    nothing about the fit or the selected alpha."""
+    nothing about the fit or the selected alpha.
+
+    ## Conditioning and coefficient-size diagnostics
+
+    `fold_cond` is the UNregularized ratio `s_max / s_min`. It describes
+    the design matrix, not the system that is actually solved, and a
+    ratio cannot be un-divided -- so `s_max` and `s_min` are recorded as
+    fields in their own right (`fold_s_max`, `fold_s_min`), and the
+    regularized conditioning is reported alongside:
+
+        kappa_alpha = (s_max^2 + alpha) / (s_min^2 + alpha)
+
+    with `s` the singular values of the standardized training features.
+    That expression is convention-consistent as written because both
+    halves use the same alpha in the same objective: sklearn `Ridge`
+    minimizes `||Y - XW - b||^2 + alpha*||W||^2` -- an UNNORMALIZED sum
+    of squares, not divided by `n` -- and the production SVD filter
+    `s / (s^2 + alpha)` above carries that same alpha in its
+    denominator. No `1/n` rescaling of alpha is applied or implied
+    anywhere in this module.
+
+    `fold_kappa_alpha` and `fold_coef_norm` (Frobenius `||W||`) are
+    reported at the SELECTED alpha, which is not known inside the fold
+    loop -- `select_alpha` runs on the fold-averaged MSEs afterwards.
+    Both are therefore computed for every alpha into `(n_splits,
+    n_alpha)` arrays (`fold_kappa_by_alpha`, `fold_coef_norm_by_alpha`,
+    both returned) and column-indexed at `alpha_index` after selection.
+    The per-fold `fit` objects are not retained: `W` is (n_alpha, p, k)
+    float64, ~36 MB per fold at Stage 2B's production shape.
+
+    `fold_numerical_rank` counts `s_i > eps * s_max * max(n_train, p)`,
+    a scale-aware threshold whose per-fold value is `fold_rank_threshold`
+    and whose rule is spelled out in `rank_threshold_rule`. The rank is a
+    property of the spectrum alone, so unlike kappa and `||W||` it needs
+    no post-selection indexing. The threshold is per fold because both
+    `s_max` and `n_train` are; there is deliberately no corpus-level
+    scalar, for the same reason `fold_mean_x_tol` has none.
+
+    Raw spectra are not returned: their length is `min(n_train, p)`, and
+    `StratifiedKFold` gives fold sizes differing by one, so they do not
+    form a rectangular array. Every diagnostic here is a per-fold scalar
+    and serializes as-is."""
     X = np.asarray(X, dtype=np.float64)
     Y = np.asarray(Y, dtype=np.float64)
     skf = StratifiedKFold(n_splits=n_splits, shuffle=True, random_state=random_state)
     n_alpha = len(alphas)
+    alphas_arr = np.asarray(alphas, dtype=np.float64)
     fold_clipped = np.empty((n_splits, n_alpha), dtype=np.float64)
     fold_raw = np.empty((n_splits, n_alpha), dtype=np.float64)
     fold_cond = np.empty(n_splits, dtype=np.float64)
@@ -395,6 +437,13 @@ def cross_validate_alpha(X, Y, y_strat, alphas=ALPHA_GRID, n_splits=N_SPLITS,
     fold_min_col_std = np.empty(n_splits, dtype=np.float64)
     fold_min_col_std_col = np.empty(n_splits, dtype=np.int64)
     fold_worst_mean_col = np.empty(n_splits, dtype=np.int64)
+    fold_s_max = np.empty(n_splits, dtype=np.float64)
+    fold_s_min = np.empty(n_splits, dtype=np.float64)
+    fold_kappa_by_alpha = np.empty((n_splits, n_alpha), dtype=np.float64)
+    fold_coef_norm_by_alpha = np.empty((n_splits, n_alpha), dtype=np.float64)
+    fold_numerical_rank = np.empty(n_splits, dtype=np.int64)
+    fold_rank_threshold = np.empty(n_splits, dtype=np.float64)
+    eps = float(np.finfo(np.float64).eps)
 
     for f, (tr, va) in enumerate(skf.split(X, y_strat)):
         scaler = StandardScaler().fit(X[tr])
@@ -410,6 +459,17 @@ def cross_validate_alpha(X, Y, y_strat, alphas=ALPHA_GRID, n_splits=N_SPLITS,
         fold_min_col_std_col[f] = margin["min_col_std_col"]
         fold_worst_mean_col[f] = margin["worst_mean_col"]
 
+        s = fit["singular_values"]
+        s_max, s_min = float(s.max()), float(s.min())
+        fold_s_max[f] = s_max
+        fold_s_min[f] = s_min
+        fold_kappa_by_alpha[f] = (s_max ** 2 + alphas_arr) / (s_min ** 2 + alphas_arr)
+        fold_coef_norm_by_alpha[f] = [float(np.linalg.norm(fit["W"][a]))
+                                      for a in range(n_alpha)]
+        threshold = eps * s_max * max(X_tr.shape[0], X_tr.shape[1])
+        fold_rank_threshold[f] = threshold
+        fold_numerical_rank[f] = int(np.count_nonzero(s > threshold))
+
     mean_clipped = fold_clipped.mean(axis=0)
     alpha, idx = select_alpha(mean_clipped, alphas)
     return {
@@ -422,7 +482,140 @@ def cross_validate_alpha(X, Y, y_strat, alphas=ALPHA_GRID, n_splits=N_SPLITS,
         "fold_min_col_std": fold_min_col_std,
         "fold_min_col_std_col": fold_min_col_std_col,
         "fold_worst_mean_col": fold_worst_mean_col,
+        "fold_s_max": fold_s_max, "fold_s_min": fold_s_min,
+        "fold_kappa_alpha": fold_kappa_by_alpha[:, idx],
+        "fold_kappa_by_alpha": fold_kappa_by_alpha,
+        "fold_coef_norm": fold_coef_norm_by_alpha[:, idx],
+        "fold_coef_norm_by_alpha": fold_coef_norm_by_alpha,
+        "fold_numerical_rank": fold_numerical_rank,
+        "fold_rank_threshold": fold_rank_threshold,
+        "rank_threshold_rule": "s_i > eps * s_max * max(n_train, p)",
     }
+
+
+def oof_per_image_mse(X, Y, y_strat, alphas=ALPHA_GRID, n_splits=N_SPLITS,
+                       random_state=FOLD_SEED):
+    """Out-of-fold per-image reconstruction error under the frozen five-fold
+    partition: for every image, the error of the prediction made by the
+    model fitted on the four folds that image was NOT in.
+
+    AUDIT_PROTOCOL.md's prediction basis. In-sample error from a full
+    refit is descriptive only and never feeds a trigger, because a refit
+    absorbs representational change into its own coefficients.
+
+    Same splitter, same per-fold `StandardScaler`, same
+    `svd_ridge_fit` / `ridge_predict` / `clipped_per_image_mse` as
+    `cross_validate_alpha`, at the same locked constants. `X` goes in
+    UNSCALED for the same reason it does there.
+
+    ## Why the fold loop is separate from `cross_validate_alpha`'s
+
+    The two paths compute the fold quantities independently, and that
+    independence is the point: the per-fold mean of `oof_clipped_mse`
+    reproducing `cross_validate_alpha`'s already-stored
+    `fold_clipped_val_mse` is a check on new machinery against numbers
+    this project already trusts. Deriving one from the other would make
+    the agreement a tautology and check nothing.
+
+    ## Why every alpha, and why error rather than predictions
+
+    All `n_alpha` columns are returned, not just one. Both of
+    AUDIT_PROTOCOL.md's alpha regimes -- fixed (the alpha selected from
+    the production representation) and reselected (independent selection
+    per budget) -- are then served from a single pass of five SVDs, and
+    the reselected regime's own alpha is not known until
+    `cross_validate_alpha` has run. The cost is nil: per-image error for
+    all nine alphas is `(n, 9)` float64, 4.3 MB at n=60,000.
+
+    Predictions themselves are not returned, and per-image error is not
+    reconstructible from them afterwards without keeping them: one
+    alpha's out-of-fold predictions are `(60000, 505)` float64, 242 MB.
+    A caller that genuinely needs predictions rather than error fits with
+    `fit_final` and calls `ridge_predict` directly.
+
+    Returns a dict:
+      `oof_clipped_mse`  (n, n_alpha) -- the primary error, prediction
+                         clipped to [0, 1], target untouched.
+      `oof_raw_mse`      (n, n_alpha) -- unclipped, diagnostic only, the
+                         per-image analogue of `fold_raw_val_mse`.
+      `fold_index`       (n,) int64 -- which validation fold each image
+                         fell in, so a caller can group per-image values
+                         by fold without re-deriving the partition.
+      `alphas`, `n_splits`, `random_state` -- the partition and grid the
+                         values above are out-of-fold with respect to.
+
+    Every image lies in exactly one validation fold, so the coverage is a
+    partition of `range(n)` and is asserted as one before returning: an
+    unwritten row would otherwise reach a caller as a silent nan.
+
+    ## Every returned array is indexed POSITIONALLY, by row of `X`
+
+    `fold_index[i]` is the fold of row `i`, not of KMNIST image `i`. This
+    function has no idea which official image any row is, and correctly so
+    -- the caller owns row order.
+
+    AUDIT_PROTOCOL.md requires that all cross-artifact comparison happen
+    **by official KMNIST image index, never by positional prefix**. That
+    requirement therefore lands entirely on the caller: an audit driver
+    must carry the official-index array alongside `X` and map through it
+    before comparing anything computed here against anything computed
+    elsewhere. Two artifacts encoded from differently-ordered index lists
+    would otherwise align row-for-row, agree on shape, and compare
+    entirely wrong numbers -- with no error raised at any point.
+
+    This is CLAUDE.md principle 16 stated at the seam where it applies: a
+    component verified field by field can still feed a wrong result when
+    the glue around it loses a mapping. The audit driver owes a test that
+    the official-index array travels with the features and round-trips."""
+    X = np.asarray(X, dtype=np.float64)
+    Y = np.asarray(Y, dtype=np.float64)
+    n = X.shape[0]
+    n_alpha = len(alphas)
+    oof_clipped = np.full((n, n_alpha), np.nan, dtype=np.float64)
+    oof_raw = np.full((n, n_alpha), np.nan, dtype=np.float64)
+    fold_index = np.full(n, -1, dtype=np.int64)
+
+    skf = StratifiedKFold(n_splits=n_splits, shuffle=True, random_state=random_state)
+    for f, (tr, va) in enumerate(skf.split(X, y_strat)):
+        scaler = StandardScaler().fit(X[tr])
+        X_tr, X_va = scaler.transform(X[tr]), scaler.transform(X[va])
+        fit = svd_ridge_fit(X_tr, Y[tr], alphas=alphas)
+        for a in range(n_alpha):
+            pred = ridge_predict(fit, X_va, a)
+            oof_clipped[va, a] = clipped_per_image_mse(pred, Y[va])
+            oof_raw[va, a] = per_image_mse(pred, Y[va])
+        fold_index[va] = f
+
+    unassigned = int(np.count_nonzero(fold_index < 0))
+    if unassigned or not np.all(np.isfinite(oof_clipped)) \
+            or not np.all(np.isfinite(oof_raw)):
+        raise RuntimeError(
+            f"out-of-fold coverage is not a partition of the corpus: "
+            f"{unassigned} of {n} images were in no validation fold, and "
+            f"{int(np.count_nonzero(~np.isfinite(oof_clipped)))} of "
+            f"{oof_clipped.size} clipped entries are unwritten")
+
+    return {
+        "oof_clipped_mse": oof_clipped,
+        "oof_raw_mse": oof_raw,
+        "fold_index": fold_index,
+        "alphas": np.asarray(alphas, dtype=np.float64),
+        "n_splits": int(n_splits),
+        "random_state": int(random_state),
+    }
+
+
+def oof_clipped_mse_at_alpha(X, Y, y_strat, alpha, n_splits=N_SPLITS,
+                              random_state=FOLD_SEED):
+    """`oof_per_image_mse` at one alpha, as the bare `(n,)` vector.
+
+    AUDIT_PROTOCOL.md's fixed-alpha regime: the alpha selected from the
+    production representation, applied identically to both budgets'
+    out-of-fold fits. A named entry point for that regime, so a caller
+    with an alpha already in hand does not rebuild the fold loop."""
+    return oof_per_image_mse(X, Y, y_strat, alphas=(float(alpha),),
+                             n_splits=n_splits,
+                             random_state=random_state)["oof_clipped_mse"][:, 0]
 
 
 def fit_final(X_train, Y_train, alpha):

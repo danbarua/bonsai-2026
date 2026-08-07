@@ -26,7 +26,7 @@ a dead session would resume having lost at most one step.
 
 The encoder-on-noisy-inputs gate's first execution on real, majority-
 censored KMNIST (commit `7723b96`, `ENCODER_STEPS=150`) failed the
-pre-registered threshold:
+pre-registered `rho <= 10` threshold:
 
 | quantity | clean | noisy |
 |---|---|---|
@@ -36,7 +36,27 @@ pre-registered threshold:
 
 **rho = 169.851** against threshold 10 -- roughly 17x over. Zero
 non-finite values anywhere: a clean ratio failure, not a numerical
-blow-up. Per `DESIGN.md`'s locked stop-gate this halted the stage
+blow-up.
+
+**What this failure was, and what it was not.** The original Stage 1
+failure was not itself a numerical-floor artefact. It showed that 150
+iterations were insufficient for noisy inputs under the original
+relative gate. The noisy median, 3.698e-05, and its p95, 1.784e-04, sit
+far above any numerical floor -- seven orders above the `ABS_CONV_EPS`
+of 1e-12 adopted later, and nine or more above the float64 dust Part 2
+observes at 1e-14 to 1e-16. The
+floor artefact identified in Part 2 is a distinct defect with a
+distinct cause: it is a property of the DIAGNOSTIC trajectory at 600
+steps and above, where both series have decayed into numerical dust.
+The two are not the same failure mode and neither implies the other.
+
+What the gate's own summary reports is the median, the p95 and the
+non-finite counts -- not per-image counts of exactly-zero and nonzero
+final-Delta, and not the max. The per-image `delta_clean` and
+`delta_noisy` arrays are stored inside `encoder_gate.npz`, so those
+counts are recoverable from the artifact rather than lost.
+
+Per `DESIGN.md`'s locked stop-gate this halted the stage
 immediately (`STAGE1_FAIL`, session torn down, nothing billing);
 steps 5-10 never ran. Confirmed against the live bucket listing before
 any further work: 11 objects existed under `stage2b/train/stage1/`,
@@ -65,11 +85,22 @@ deltas and rho to full reported precision.
 | 600 | **0.0** | **0.0** | 1.776e-14 | 1.043e-11 | 17.76 |
 | 1200 | **0.0** | **0.0** | **0.0** | **0.0** | **0.0** |
 
-Noisy final-Delta decays geometrically all the way to exact float64
-zero -- median AND p95, every one of 1,000 images -- by 1,200 steps, the
-same fixed point clean reaches. No floor above a meaningful scale
-exists; the encoder converges on censored inputs, it is simply slower
-to.
+Noisy final-Delta decays geometrically: by 1,200 steps both its median
+and its p95 are exact float64 zero, the same fixed point clean reaches.
+No floor above a meaningful scale exists; on censored inputs the encoder
+reaches numerical convergence below any practically relevant tolerance,
+it is simply slower to get there.
+
+**Two quantiles are not a distribution.** The median and the p95 are the
+only order statistics this table carries, and median and p95 ratios do
+not by themselves prove a whole-distribution shift -- they show a shift
+at two quantiles. Concretely, the steps=1,200 row supports "median and
+p95 are exactly zero across these 1,000 images", not "every one of
+1,000 images is exactly zero": no per-image exact-zero count and no max
+was reported at this rung. The 54,000-image measurement recorded further
+down shows the stronger reading is false at larger corpus sizes. The
+per-image arrays are stored in the stage-1 `encoder_gate*.npz`
+artifacts, so the unreported counts remain recoverable from the record.
 
 **A second, independent defect is visible in the same table.** The rho
 column is non-monotone (14.98, 169.9, 1.915e4, 17.76, 0.0) because clean
@@ -100,28 +131,64 @@ not a qualitatively different regime on noisy inputs.
 ## Part 3 -- disclosed post-lock amendment
 
 Full text: `DESIGN.md`'s "Encoder-on-noisy-inputs gate" section and
-Review History. Two changes, both required by the diagnosis above:
+Review History. **The 1,200-step budget and absolute-convergence clause
+were prospective amendments made after Stage 1 failure and before
+downstream confirmatory evaluation; they were not preregistered
+components of the original design.** Two changes, answering two
+different failures:
 
 1. **`ENCODER_STEPS` raised 150 -> 1200**, uniformly (every encoding
-   site, clean and noisy identically). Mirrors Stage 2A's own
-   `max_iter` 1,000 -> 10,000 precedent: halt honestly, diagnose
-   mechanism, amend with disclosure, re-verify.
+   site, clean and noisy identically). This answers the Part 1 failure:
+   150 iterations were insufficient budget for noisy inputs. Mirrors
+   Stage 2A's own `max_iter` 1,000 -> 10,000 precedent: halt honestly,
+   diagnose mechanism, amend with disclosure, re-verify.
 2. **Gate formula gains an absolute-convergence escape**: PASS if
    `rho <= 10` OR both medians are already below `ABS_CONV_EPS=1e-12`
    (5+ orders below the smallest meaningful measured Delta, well above
    observed float64 dust). Non-finite auto-fail stays unconditional.
+   This answers the separate Part 2 defect -- the ratio gate flooring
+   out at 600 steps and above -- and would not have rescued the Part 1
+   failure, where both medians sit far above 1e-12.
 
-**The decision rule that selected S\*=1200 is stated as verdict-
-invariant, not merely correct.** An earlier, looser reading of the rule
-("some S\* brings noisy within 10x of clean-at-150") was caught before
-being applied -- it selects S\*=300, which immediately fails its own
-same-step re-run at rho=1.915e4. The corrected rule (same-step, both
-series required to have genuinely converged) passes at S\*=1200 under
-EITHER reading, so the correction did not select this outcome. No finer
-scan between 600 and 1200 was run: 1200 is the only step count in the
-five-point scan that passes robustly (exact zero, both medians and both
-p95s), rather than sitting near the fragile crossover band a smaller,
-untested value might land in.
+### Why S\* = 1,200: three separate things, kept separate
+
+**(a) The contemporaneous decision-time reason, as it was actually
+given.** 1,200 was the only step count in the five-point scan at which
+both reported statistics -- median and p95, on the clean series and the
+noisy series alike -- sat at exact float64 zero. That was read at the
+time as maximal distance from the fragile crossover band where clean and
+noisy pass their own numerical floors at different step counts, the band
+that produced the spurious rho=17.76 FAIL at 600. No finer scan between
+600 and 1,200 was run, on the reasoning that a smaller untested value
+might land inside that band.
+
+The decision rule that selected S\*=1200 was stated as verdict-invariant,
+not merely correct. An earlier, looser reading of the rule ("some S\*
+brings noisy within 10x of clean-at-150") was caught before being
+applied -- it selects S\*=300, which immediately fails its own same-step
+re-run at rho=1.915e4. The corrected rule (same-step, both series
+required to have genuinely converged) passes at S\*=1200 under EITHER
+reading, so the correction did not select this outcome.
+
+**(b) The durable rationale, identified retrospectively.** 600 is the
+first measured budget satisfying the amended absolute gate: noisy median
+1.776e-14 and clean median exactly 0, both below `ABS_CONV_EPS=1e-12`,
+where 300's clean median of 1.538e-12 is not. 1,200 is a conservative
+twofold safety margin over that first passing budget, frozen before any
+downstream fitting. This reading is derivable from the scan table above
+and does not rest on (a)'s exact-zero premise.
+
+**(c) Subsequent evidence narrowing (a)'s premise.** (a) rests on exact
+zero being a property of the converged encoder, as the n=1,000 scan's
+two reported order statistics showed at the time it was reasoned. That
+premise did not survive scale, and degraded monotonically with corpus
+size: stage 2's n=5,000 encode already recorded a nonzero max
+(2.22e-14), and the 54,000-image encoding recorded further down found 79
+images with nonzero final-Delta, max 2.468e-10. (a) is preserved here as
+the decision record -- what was actually reasoned, on the evidence then
+available -- not as a claim that still stands unmodified. (b) is
+untouched by this: it turns on medians, which are exactly zero at every
+corpus size where a median is on the record, n=1,000 and n=54,000.
 
 A second, independent bug was found and fixed in the same investigation,
 by tracing "every encoding site" through the actual call graph rather
@@ -155,8 +222,14 @@ encoder-on-noisy-inputs gate: PASS
   non-finite phases/deltas : 0/0, 0/0
 ```
 
-Exact float64 zero on both sides, matching the diagnostic's own
-steps=1200 measurement precisely. Because the gate passed, the driver
+Both medians at exact float64 zero, matching the diagnostic's own
+steps=1200 measurement precisely. What the gate's summary reports is
+medians, p95s and non-finite counts (0/0 on both sides); it reports no
+per-image count of exactly-zero or nonzero final-Delta and no max, and a
+median of zero is not a per-image claim -- see the 54,000-image tail
+below. What this run establishes is numerical convergence below any
+practically relevant tolerance, not exact convergence for every image.
+Because the gate passed, the driver
 continued automatically through steps 5-10 in the same run, per the
 amendment's own instruction -- the halt rule is satisfied by a passing
 verdict, no separate authorization needed. **This is the first time any
@@ -369,7 +442,9 @@ hours)** for encoding alone -- by far the dominant cost in the whole
 pipeline at that scale, and the number that should drive any stage-3
 planning decision about parallelizing or otherwise restructuring this
 step. Not validated at that scale; a linear projection from one
-measurement, stated as such.
+measurement, stated as such. It was projected against a 54,000-image
+stage-3 scale; the stage-3 populations are fixed differently -- see
+"Population roles" in the Phase A section below.
 
 **(2) `curr_random` centering margin vs. the amendment's ~0.075
 prediction.** Measured: **`margin_ratio = 0.0807`** (`||mean(X)|| =
@@ -434,6 +509,13 @@ NON-INFERENTIAL, NOT A RESULT`.
 | ridge | 305.5s | 3,299.7s (55.0min) |
 | CNN | 99.5s | 1,074.9s (17.9min), basis differs -- see caveat below |
 
+Every row was projected against a 54,000-image stage-3 scale. The
+ridge CV and final-fit corpus is the full 60,000-image training side
+(see "Population roles" below), so the ridge row's population is not the
+one that will actually be fitted; no revised projection is stated here,
+because rescaling one row by a population ratio is exactly the
+cross-stage extrapolation this project has already been bitten by.
+
 Never one blended rate. The CNN projection is explicitly weaker than the
 others: CNN cost scales with epochs x batches, not simply n, and early
 stopping means the epoch count itself is not fixed by corpus size --
@@ -450,15 +532,21 @@ not duplicated).
 
 ## Next step
 
-Feasibility ladder stage 3 -- Phase A complete, see below.
+Feasibility ladder stage 3 -- Phase A complete at 54,000 images and
+pending regeneration at 60,000, see below.
 
 # Stage 2B: Feasibility Ladder Stage 3, Phase A (encoding)
 
-**Status: Phase A only. Phase B (evolution, ridge, CNN) has NOT run, and
-stage 3 has produced no denoising number of any kind.** This section
+**Status: Phase A only, and at the wrong population -- this run encoded
+54,000 images. It has since been SUPERSEDED by the 60,000-image
+regeneration recorded in the next section, which is the authoritative
+Phase A artifact. Phase B (evolution, ridge, CNN) has NOT run, and stage
+3 has produced no denoising number of any kind.** This section
 records the encoding phase because it is a complete, measured unit with
 a durable artifact -- and because this project's own Part 4 lesson is
 that an unwritten result does not survive the session that produced it.
+Its numbers stand: the regeneration reproduced every one of them
+bit-exactly.
 
 ## The two-phase split, and why encoding moved off the GPU
 
@@ -516,10 +604,31 @@ the encoded array in GCS is the artifact of record.
 ## Result
 
 **54,000 fit-side images, 1,200 steps, 9 workers (Darwin arm64, 10
-cores).** The 6,000-image locked validation partition is deliberately
-not encoded -- the CNN consumes validation images as raw corrupted
-grids, and ridge selects alpha by internal cross-validation on the fit
-side, so an encoded validation array would be an artifact nothing reads.
+cores).** This run encoded the CNN fit side only, on the reading that
+the CNN consumes validation images as raw corrupted grids and ridge
+selects alpha by internal cross-validation on the fit side, so an
+encoded validation array would be an artifact nothing reads. That
+reading is wrong for the ridge path: ridge CV and the final refits run
+on the full 60,000-image training side, so the 6,000 locked-validation
+images must be encoded too. Phase A will be regenerated at 60,000; the
+measurements below are the 54,000-image run's own.
+
+**Population roles.** `DESIGN.md:479` defines "full training" at stage 3
+as the 54,000 fit plus 6,000 locked validation composite, and `:492`'s
+compute cell reads `~48-60k x 1008`, where 48,000 = 0.8 x 60,000 is a
+five-fold CV training portion of 60,000. The 54,000 / 6,000 split
+governs CNN weight-fitting and model selection only: the 6,000 are held
+out from CNN gradient updates, not from training-side analysis.
+
+| role | n |
+|---|---:|
+| official training corpus | 60,000 |
+| CNN weight-fit subset | 54,000 |
+| CNN validation / model-selection subset | 6,000 |
+| **ridge CV and final-fit corpus** | **60,000** |
+
+Frozen as Freeze 2 in `AUDIT_PROTOCOL.md`, which is authoritative for
+these roles.
 
 | quantity | measured |
 |---|---:|
@@ -536,29 +645,50 @@ rest parallelism.
 
 ## A scale-dependent finding: the convergence tail is not exactly zero
 
-Stage 1 concluded final-Delta reaches "exact float64 zero -- median AND
-p95, every one of 1,000 images", and stage 2 measured a max of 2.22e-14
+Stage 1 reported final-Delta at exact float64 zero at both the median
+and the p95 across 1,000 images, and stage 2 measured a max of 2.22e-14
 across 5,000. At 54,000 the maximum is **2.468e-10** -- four orders
-larger, and only visible at this scale:
+larger, and only visible at this scale. Neither earlier rung reported a
+count of exactly-zero or nonzero final-Delta; both stored their
+per-image arrays, so both counts are recoverable from the artifacts
+without re-encoding.
 
-| final-Delta | count of 54,000 |
+Population: **the 54,000 fit-side images of the official KMNIST training
+split**, encoded by this Phase A run. The 6,000-image locked validation
+subset has never been encoded, so no tail measurement exists for it and
+none of the counts below speak to it. Nothing here touches the test
+split.
+
+| final-Delta, over the 54,000 encoded fit-side images | count |
 |---|---:|
 | exactly 0.0 | 53,921 (99.854%) |
-| > 0 | 79 (0.146%) |
+| > 0 | **79 (0.146%)** |
 | > 1e-13 | 9 |
 | > 1e-12 | 4 |
 | > 1e-10 | 2 |
+| non-finite | 0 |
 
-median 0.0, p95 0.0, max 2.468e-10.
+median 0.0, p95 0.0, max 2.468e-10; non-finite theta 0, non-finite delta
+0. Derived from the counts above rather than measured directly: p99 is
+0.0 (only 79 of 54,000 values are nonzero), and p99.9 lies in
+(0, 1e-13] -- it falls inside the nonzero tail, but only 9 values exceed
+1e-13.
 
 Recorded rather than smoothed over, with its consequences stated
 precisely. It does not affect the encoder gate, which keys on the
 MEDIAN (0.0 here, so the absolute-convergence escape fires regardless of
 the tail). It does not affect the pipeline: the worst image sits 4,053x
 below the ODE solver's `rtol=1e-6`. What it does do is narrow stage 1's
-claim -- "every one of 1,000 images" was true of 1,000 images, and at 54
-times that corpus size a 0.146% tail of not-quite-settled images
-appears. Two images in 54,000 remain above 1e-10 after 1,200 steps.
+claim -- "every one of 1,000 images" was never established by the two
+order statistics stage 1 actually reported, and at 54 times that corpus
+size a 0.146% tail of not-quite-settled images appears. Two images in
+54,000 remain above 1e-10 after 1,200 steps.
+
+The standing wording for what the encoder achieves is therefore
+**numerical convergence below any practically relevant tolerance**,
+never exact convergence as a universal claim. Aggregate quantiles
+sitting at zero do not mean every image sits at zero, and this is the
+in-project proof of it.
 
 ## Code and artifacts
 
@@ -567,9 +697,10 @@ appears. Two images in 54,000 remain above 1e-10 after 1,200 steps.
 `corrupt_corpus` and `encode_with_final_delta_batch` unchanged -- same
 numerics as both prior rungs, different machine. Output:
 `stage2b/train/stage3/common/encoded_fit_s1200.npz` (206.1 MB,
-crc32c-verified), carrying the encoded array, per-image final-Deltas,
-the fit indices and active support for self-description, and the run
-summary. The object name carries the step count, so a future
+crc32c-verified), carrying the encoded array for the 54,000 fit-side
+images, their per-image final-Deltas, the fit indices and active support
+for self-description, and the run summary. The object name carries the
+step count, so a future
 `ENCODER_STEPS` change mints a new object rather than silently resuming
 a stale one -- the same self-invalidation discipline the stage-1
 encoder-gate artifact uses.
@@ -581,11 +712,202 @@ this is its first use on an artifact large enough to need it.
 
 ## Next step
 
-Phase B: a GPU-session driver that reads
-`stage2b/train/stage3/common/encoded_fit_s1200.npz`, regenerates
+Regeneration at 60,000 -- done, and recorded in the next section.
+
+# Stage 2B: Feasibility Ladder Stage 3, Phase A regenerated at 60,000
+
+**Status: the authoritative Phase A artifact.
+`stage2b/train/stage3/common/encoded_train_s1200.npz` supersedes
+`encoded_fit_s1200.npz`, which stays in the bucket as the baseline this
+run was checked against. Phase B has still NOT run and stage 3 has still
+produced no denoising number.**
+
+This is also the first Stage 2B artifact of any kind published with
+provenance attached. Every earlier one carries none.
+
+## Why it was rerun, and what that cost
+
+The original Phase A encoded the 54,000-image CNN fit side on the
+reading that the 6,000 locked-validation images would be "an artifact
+nothing reads". That reading was wrong: `DESIGN.md:479` defines "full
+training" at stage 3 as the 54,000 fit plus 6,000 validation composite,
+`:492`'s compute cell corroborates it arithmetically (`~48-60k x 1008`,
+where 48,000 = 0.8 x 60,000), and the ridge path cross-validates and
+refits on all 60,000. The error is disclosed at the point it was made,
+in `encode_stage3_local.py`'s own docstring, rather than edited away --
+it was resolved in the direction that avoided re-work, which is exactly
+the kind of choice that has to stay visible.
+
+The rerun cost 11.3 minutes of local CPU.
+
+## Two populations, two kinds of evidence
+
+The regeneration spans images that already had an artifact and images
+that did not, and the acceptance report keeps them apart deliberately.
+A single "regeneration passed" would claim verification for a half of it
+that nothing verified.
+
+| population | n | status | judged how |
+|---|---:|---|---|
+| CNN fit side | 54,000 | reproduction | bit-exact against the prior artifact, joined by official index |
+| locked validation | 6,000 | **new measurement** | fingerprinted at birth; tail reported, nothing compared |
+
+## Part 1 -- the 54,000 reproduce bit-exactly
+
+| array | shape | verdict |
+|---|---|---|
+| `thetas_505` | (54000, 505) float64 | **BIT-EXACT**, sha256 `1113cec3...bc7e85fc` both sides |
+| `deltas` | (54000,) float64 | **BIT-EXACT**, sha256 `6a7753ff...740954f` both sides |
+
+The match is on the aligned subset, joined by official KMNIST index --
+`AUDIT_PROTOCOL.md` forbids positional-prefix comparison, and the new
+artifact is in ascending official order, so the fit rows are scattered
+through it: 53,985 of 54,000 sit at a different row than they did in the
+baseline. `compare_stage3_regeneration.py` refuses an alignment that
+turns out to BE a prefix, because a join that accepts that case cannot
+be distinguished from never having joined.
+
+An independent second check from the other direction: the aligned
+subset's nonzero final-Delta count is **79**, exactly reproducing the
+count this file already records for the 54,000-image run. Digests
+agreeing while that count moved would have meant the comparison was not
+looking at the rows it believed it was.
+
+Bit-exactness is expected rather than lucky, and the reason is now
+pinned by test rather than reasoned about: every per-image encode job
+carries a constant seed and builds a fresh `default_rng(seed)`, so an
+image's perturbation depends on the image and the seed and nothing else
+-- not the chunk it landed in, not the worker count. Both runs used 9
+workers on the same machine but different chunk sizes (5,400 then
+6,000), which is precisely the situation CLAUDE.md principle 19 says not
+to assume your way through.
+
+## Part 2 -- the 6,000, measured for the first time
+
+| role | n | final-Delta > 0 | rate | 95% CI (Clopper-Pearson) | max |
+|---|---:|---:|---:|---|---:|
+| all | 60,000 | 89 | 0.148% | [0.1191%, 0.1825%] | 2.468e-10 |
+| fit | 54,000 | 79 | 0.146% | [0.1158%, 0.1823%] | 2.468e-10 |
+| **validation** | **6,000** | **10** | **0.167%** | **[0.0800%, 0.3063%]** | **2.887e-13** |
+
+`AUDIT_PROTOCOL.md` sets **no expected-agreement criterion** between the
+two rates, and the intervals are why that matters: at n=6,000 the
+interval is roughly three times wider than at n=54,000, so 0.167% and
+0.146% are not distinguishable and a bare comparison of the percentages
+would invite a conclusion the data does not support. Reported exactly as
+the protocol requires -- numerator, denominator, split membership,
+uncertainty -- and nothing inferred from it.
+
+One descriptive observation, not a claim: the validation subset's worst
+final-Delta is 2.887e-13, roughly three orders of magnitude below the fit
+side's 2.468e-10. With ten nonzero values, that is a small-sample
+observation about an extreme order statistic and nothing more. Both sit
+far below the ODE solver's `rtol=1e-6`.
+
+### The ARM/x86 stress set now has 89 cases, not 79
+
+`AUDIT_PROTOCOL.md`'s companion section names "the 79 convergence-tail
+stress cases", written when only the 54,000-image artifact existed.
+`COMPANION_PROTOCOLS.md` states the construction as a rule rather than a
+count -- every image with final-Delta > 0 in the regenerated artifact --
+which is now **89**. Both documents are frozen and neither is wrong; the
+rule is what governs, and the count moved because the population did.
+Recorded here so that anyone building the set from the audit protocol
+alone, and arriving at 79, can see why. The 500-case cap frozen in
+`COMPANION_PROTOCOLS.md` before the count was known remains inert, as
+expected.
+
+## Result
+
+**60,000 official KMNIST training images, 1,200 steps, 9 workers (Darwin
+arm64, 10 cores), chunk 6,000.**
+
+| quantity | measured |
+|---|---:|
+| encode wall-clock | **679.0s (11.3 min)** |
+| per image | **11.32 ms** |
+| upload (229 MB compressed, chunked) | 113.0s |
+| non-finite theta / delta | 0 / 0 |
+| final-Delta median / p95 / max | 0.0 / 0.0 / 2.468e-10 |
+
+Per-image cost rose from 8.80 ms to 11.32 ms against the 54,000-image
+run on the same machine. Not investigated; the plausible causes are
+ordinary (thermal state, other load, the different chunk size), it
+changes no result, and attributing it without measuring would be a
+guess.
+
+## Provenance -- what is now attached, and what the record shows
+
+The artifact is published with a sidecar manifest
+(`...npz.manifest.json`) carrying the payload digest, per-array
+dtype/shape/SHA-256 for all seven arrays, and a fingerprint: commit
+`12a8c46a`, the 18-file static-union-runtime source closure with each
+file's digest, the environment, and the declared scientific config
+(digest `768bf201...`). The closure was established BEFORE generation
+and revalidated after: 0 modules imported that the fingerprint did not
+already describe.
+
+The recorded git state is worth reading rather than skipping, because
+it is the first real exercise of a guard that was narrowed while it was
+blocking this very run:
+
+```
+commit         : 12a8c46ad5aad152874b4a618f5b60784779f098
+source closure : CLEAN -- every file committed at HEAD
+working tree   : dirty elsewhere
+  | M .gitignore
+  | ?? .claude/claude2claude/DESKTOP_PROTOCOL.md
+  | ?? .claude/claude2claude/c2c-mcp/deploy-proxy.sh
+  | ?? .claude/claude2claude/c2c-mcp/run-c2c-mcp.sh
+```
+
+All four belong to an unrelated concurrent effort and none is in the
+source closure, so none can reach this artifact. The whole-tree check
+would have refused this run; the closure check names what actually
+matters and records the rest. Detection is shown intact by test rather
+than argued: a dirty closure file still halts and is named, staging is
+not committing, and an untracked closure file is dirty rather than
+silently clean.
+
+## Code and artifacts
+
+`encode_stage3_local.py` (`make stage2b-encode-stage3-local`) and
+`compare_stage3_regeneration.py` (`make stage2b-compare-stage3`, read-
+only). The acceptance report is
+`results/stage3_regeneration_acceptance.json`. Object:
+`stage2b/train/stage3/common/encoded_train_s1200.npz` (229.1 MB,
+crc32c-verified), carrying `thetas_505`, `deltas`, `train_indices`,
+`fit_indices`, `validation_indices`, `active_indices` and the run
+summary. Rows are in ascending official index order, so row `i` is
+official training image `i` -- the index arrays are stored anyway rather
+than left implied.
+
+## Next step
+
+Phase B: a GPU-session driver that reads this artifact, regenerates
 corruption and clean targets in-session, and runs evolution, ridge (with
 the ladder's third real-data equivalence gate) and CNN training at full
 scale. Not yet written. It should carry a spot-check that one image's
 encoding re-derived in-session matches the stored array, with the
 tolerance stated as ULP-level rather than exact, for the
 cross-architecture reason recorded above.
+
+It should also consume through `consume_validated` rather than
+`download_file`. The contract is now built and this artifact publishes
+under it, but no driver READS under it yet -- `ensure_artifact` still
+does not call it, `force=True` still bypasses its trust point, and two
+call sites still download directly. `NEGATIVE_PATH_EVIDENCE.md` records
+that demand as covered-at-the-module-layer and not yet adopted.
+
+**A decision Phase B's Makefile target has to make deliberately.** Two
+definitions of "clean enough to run" now coexist and they disagree. The
+ladder targets refuse on whole-tree `git status --porcelain`; the
+fingerprint refuses on the source closure. This run is the case that
+separates them: the closure check passed, the whole-tree check would
+have refused. Leaving both in place means the guard that actually fires
+is the coarse one -- the one this project concluded was the wrong
+question -- while the sharper one sits behind it never reached. Phase B's
+recipe should gate on the closure and say so in the recipe comment,
+rather than inheriting the porcelain check by copying the stage-1 target.
+Noted here rather than changed unilaterally, because it alters the
+pre-flight on targets that spend money.
