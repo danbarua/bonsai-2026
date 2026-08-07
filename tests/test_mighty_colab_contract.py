@@ -167,6 +167,24 @@ def test_teardown_failure_fails_an_otherwise_successful_target(stub_cli):
         "a teardown failure must not be reported as a scientific failure")
 
 
+def test_a_nonzero_exec_fails_the_target_even_when_the_sentinel_is_present(stub_cli):
+    """The other half of `[ $rc -ne 0 ] || ! grep sentinel`, and the half a
+    sentinel check alone cannot cover: a driver that printed its verdict and
+    THEN died -- a crash in teardown, an upload that failed after the
+    science ran, a non-zero exit from the exec transport itself.
+
+    The sentinel is deliberately correct here. If the recipe consulted only
+    the sentinel, this run would pass; the target's own exit code must
+    instead carry `exec`'s, not be reset to 0 by a successful grep."""
+    rc, r = _run_target(stub_cli, {"STUB_EXEC_RC": "5"})
+    assert rc == 5, (
+        f"a nonzero exec must propagate its own code -- got {rc}. A correct "
+        f"sentinel must not rescue a run that exited nonzero.\n{r.stdout}{r.stderr}")
+    assert "FAILED: the GPU ridge gate" in r.stdout
+    assert "exec rc=5" in r.stdout, (
+        "the reported code must be exec's own, so the failure is diagnosable")
+
+
 def test_a_leak_never_masks_the_scientific_verdict(stub_cli):
     """Both wrong: the run's own failure stays the headline and exit code,
     and the leak is still reported rather than swallowed."""
@@ -263,6 +281,19 @@ def test_ladder_missing_sentinel_fails_even_on_a_zero_exit(stub_cli, git_stubs):
                         {"STUB_SENTINEL": "nothing useful here"})
     assert rc == 1, r.stdout + r.stderr
     assert "FAILED: ladder stage 1" in r.stdout
+
+
+def test_ladder_nonzero_exec_fails_the_target_even_when_the_sentinel_is_present(
+        stub_cli, git_stubs):
+    """The converse case, on the target that spends real money: the driver
+    printed its verdict and then died. The sentinel is deliberately correct,
+    so only the `[ $rc -ne 0 ]` half of the disjunct can catch this."""
+    rc, r = _run_ladder(stub_cli, git_stubs["ready"],
+                        {"STUB_SENTINEL": "STAGE1_OK", "STUB_EXEC_RC": "5"})
+    assert rc == 5, (
+        f"a nonzero exec must propagate its own code -- got {rc}\n{r.stdout}{r.stderr}")
+    assert "FAILED: ladder stage 1" in r.stdout
+    assert "exec rc=5" in r.stdout
 
 
 def test_ladder_absent_session_is_not_treated_as_a_leak(stub_cli, git_stubs):

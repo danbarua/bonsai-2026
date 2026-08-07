@@ -284,7 +284,8 @@ STAGE2B_TEST_FILES := tests/test_stage2b_corruption.py tests/test_stage2b_encode
                       tests/test_stage2b_gcs_roundtrip.py \
                       tests/test_stage2b_ladder_stage1.py \
                       tests/test_stage2b_ladder_stage2.py \
-                      tests/test_stage2b_fingerprint.py
+                      tests/test_stage2b_fingerprint.py \
+                      tests/test_stage2b_negative_path_evidence.py
 
 .PHONY: stage2b-test
 stage2b-test:  ## Run the Stage 2B test suite (fast only; the Colab round trip is excluded)

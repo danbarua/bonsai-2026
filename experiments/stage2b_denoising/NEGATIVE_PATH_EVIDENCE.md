@@ -1,16 +1,20 @@
 # Negative-path evidence: what fails, and the test that proves it
 
 The pre-Stage-4 package (`STAGE3_PLAN.md`, item 7) owes a reviewer
-evidence for five negative paths. Four are covered by tests that exist.
-The fifth — stale-artifact refusal — is not, and is marked pending
-throughout rather than assembled from adjacent material.
+evidence for five negative paths. Four are covered end to end. The fifth —
+stale-artifact refusal — now has its mechanism built and tested, but no
+driver consumes through it yet, so it is recorded as covered-at-the-module-
+layer and unenforced rather than as green.
 
-Every row names a test file, a test function, a line number, and what the
-assertion actually checks. Line numbers are as of the commit that added
-this document; the function names are the stable handle. Where a guard was
-confirmed by deliberately breaking what it watches, the commit that
-records the breakage is cited by SHA and what it broke is quoted from that
-commit, not paraphrased.
+Every row names a test file, a test function, and what the assertion
+actually checks. The **function name is the citation**; a
+`tests/test_stage2b_negative_path_evidence.py` asserts that every function
+this document names still exists, so a rename or deletion fails the suite
+instead of quietly leaving a citation pointing at nothing. Line numbers,
+where they appear, are as of the commit that wrote the line and are
+navigational only. Where a guard was confirmed by deliberately breaking
+what it watches, what was broken and what failed is recorded here or cited
+by commit SHA, not paraphrased.
 
 Two conventions this table follows, both from CLAUDE.md principle 21. A
 test is cited only where it would fail if the named behaviour regressed —
@@ -55,12 +59,31 @@ Positive controls, without which a refusal test proves nothing:
   for this demand — delete the sentinel grep and `rc` reaches
   `check_teardown` as 0, gets promoted to 7, and the `rc == 1` assertion
   fails — but the isolated mismatch case exists only on the ladder target.
-- The `[ $rc -ne 0 ]` half of the disjunct is never exercised. The stub
-  CLI declares `STUB_EXEC_RC` (`tests/test_mighty_colab_contract.py:105`)
-  and **no test sets it**. So "a zero-exit run that never reported its
-  verdict fails" is evidenced; "a nonzero `exec` exit propagates to the
-  target's exit code" is visible in the recipe (`|| rc=$$?` … `exit $$rc`)
-  and is not evidenced by any test.
+The converse case — `exec` exiting nonzero while the sentinel is
+**present**, i.e. a driver that printed its verdict and then died — is the
+`[ $rc -ne 0 ]` half of the disjunct, and is covered separately:
+
+| test | asserts |
+|---|---|
+| `tests/test_mighty_colab_contract.py` `test_a_nonzero_exec_fails_the_target_even_when_the_sentinel_is_present` | `STUB_EXEC_RC=5` with a correct sentinel on `stage2b-verify-gpu`: recipe exit is **5**, not 0 and not a generic 1, and `exec rc=5` is on stdout so the failure is diagnosable. |
+| `tests/test_mighty_colab_contract.py` `test_ladder_nonzero_exec_fails_the_target_even_when_the_sentinel_is_present` | The same on `stage2b-ladder-stage1`, the target that spends real money. |
+
+**Deliberate breakage.** Both halves of the mechanism were broken
+separately and the specific expected failure observed. Removing `[ $$rc
+-ne 0 ] ||` from the verify recipe's disjunct leaves the exit code intact
+at 5 but drops the `FAILED:` diagnostic — the test fails on the message
+assertion. Replacing `|| rc=$$?` with `|| true` leaves the diagnostic
+untouched but the target exits **0** — the test fails on the exit-code
+assertion. Neither break is caught by the other's assertion, which is why
+both are asserted.
+
+**Where this is narrower than it looks.**
+
+- On `stage2b-verify-gpu` the missing-sentinel case is only ever exercised
+  *together with* a failing teardown (`STUB_STOP_RC=7`). The test still
+  has teeth for this demand — delete the sentinel grep and `rc` reaches
+  `check_teardown` as 0, gets promoted to 7, and the `rc == 1` assertion
+  fails — but the isolated mismatch case exists only on the ladder target.
 
 ## Demand 2 — a missing or corrupted artifact fails rather than being silently accepted
 
@@ -190,27 +213,68 @@ substring search that matched an unrelated, correct call site elsewhere in
 the same file) and rewritten to target the specific call site"* — the
 reason breaking the guard is the check, and reading it is not.
 
-## Demand 5 — stale artifacts are refused — **PENDING, NOT COVERED**
+## Demand 5 — stale artifacts are refused — **MECHANISM COVERED, NOT YET ADOPTED**
 
-No test evidences this, because the mechanism does not exist yet. It is
-item 1 of `STAGE3_PLAN.md`'s sequencing: a provenance fingerprint on GCS
-artifacts, carrying the static ∪ runtime import closure, with per-artifact
-field selection.
+The mechanism now exists (`stage2b_fingerprint.py` plus the sidecar
+manifest layer in `stage2b_gcs.py`) and is evidenced by the tests below.
+What is **not** yet true is that any driver consumes through it — see the
+narrowing at the end of this section, which is the load-bearing part.
 
-Three facts bound what coverage will have to reach, all verified from the
-code:
+**A completed artifact whose provenance no longer matches its consumer**
 
-- `ensure_artifact`'s trust point is one line — `stage2b_gcs.py:1299`,
-  `if not force and object_exists(...)`. `force=True` bypasses it
-  entirely.
-- `run_ladder_stage1.py:342` calls `download_file` **directly**, outside
-  `ensure_artifact`. A check placed only in `ensure_artifact` does not
-  cover that path.
-- Per-artifact field selection is required, not optional: stage 2
-  deliberately consumes stage 1's `topologies.npz` and the KMNIST IDX
-  files staged under stage 1, both written under a different commit. A
-  commit-keyed fingerprint applied uniformly would refuse legitimate
-  cross-stage reuse.
+| test | asserts |
+|---|---|
+| `tests/test_stage2b_gcs.py` `test_a_payload_with_no_manifest_is_refused` | The core of the contract: an object that exists but carries no manifest raises `ManifestMissingError`. Existence alone buys nothing. |
+| `tests/test_stage2b_gcs.py` `test_a_payload_edited_after_publication_is_refused` | Bytes changed after publication raise `ManifestMismatchError` on the recorded payload digest — the object still exists, and that is not enough. |
+| `tests/test_stage2b_gcs.py` `test_a_fingerprint_from_a_different_config_is_refused` | A consumer whose expected fingerprint differs in `config_digest` raises `FingerprintMismatch`, naming the field that disagreed. |
+| `tests/test_stage2b_fingerprint.py` `test_strict_policy_catches_a_changed_digest` | Parametrised over each participating field: any single changed digest is caught under `STRICT`. |
+| `tests/test_stage2b_fingerprint.py` `test_strict_policy_catches_a_changed_commit` | A different producing commit is refused under `STRICT`. |
+| `tests/test_stage2b_fingerprint.py` `test_content_only_still_refuses_a_different_fingerprint_format` | The relaxed policy is a relaxation about the producer, not an escape from the contract's own version. |
+| `tests/test_stage2b_fingerprint.py` `test_a_non_mapping_recorded_fingerprint_is_reported_not_crashed` | A malformed recorded fingerprint is a refusal, not a traceback — otherwise "unreadable provenance" degrades into "no check". |
+
+**Staleness that is invisible to the whole-file digest**
+
+| test | asserts |
+|---|---|
+| `tests/test_stage2b_fingerprint.py` `test_revalidation_refuses_a_repo_module_absent_from_the_manifest` | A repo module imported *during* execution but absent from the pre-run closure is caught by the post-run revalidation. This is the case a pre-run-only check cannot see. |
+| `tests/test_stage2b_fingerprint.py` `test_revalidation_refuses_a_source_file_that_changed_during_execution` | A participating source edited mid-run is refused at revalidation. |
+| `tests/test_stage2b_fingerprint.py` `test_array_manifest_detects_a_single_changed_value` | One changed element in one array is caught by the per-array digest. |
+| `tests/test_stage2b_fingerprint.py` `test_array_manifest_distinguishes_nan_bit_patterns` | Two NaNs that compare unequal under `==` still differ by bit pattern, and the manifest sees it. |
+
+**Positive controls** — a refusal test proves nothing without them:
+`test_a_published_artifact_validates_against_its_own_manifest`,
+`test_cross_stage_reuse_under_content_only_is_permitted` (stage 2 and 3
+consume stage 1's topologies deliberately; a uniformly commit-keyed check
+would break correct behaviour), and
+`test_the_no_manifest_optout_is_explicit_and_permits_pre_contract_artifacts`
+(ladder stages 1 and 2 predate the contract).
+
+**Deliberate breakage.** Seven fingerprint guards and four manifest guards
+were each broken and the specific expected failure observed. The fourth
+manifest break is the one worth recording: it fired **nothing**, because
+the whole-file payload digest caught the corruption first — which exposed
+`test_the_per_array_manifest_is_what_survives_a_container_rewrite` as
+vacuous in its original form. It now tests the cross-file regeneration
+case the per-array manifest actually serves, where the whole-file digest
+is useless because `np.savez` embeds zip timestamps.
+
+**Where this is narrower than it looks — the important part.** The
+mechanism is built and tested; **no driver consumes through it yet**.
+Three specific gaps, all verified from the code as it stands:
+
+- `ensure_artifact` does not call `consume_validated`. Its trust point is
+  still one line — `if not force and object_exists(...)` — so a
+  fingerprint check placed only in the module does not run on the
+  resumption path.
+- `force=True` bypasses that trust point entirely, and `step11_report`
+  uses it.
+- `run_ladder_stage1.py` calls `download_file` **directly**, outside
+  `ensure_artifact` altogether, as does `stage_kmnist`.
+
+Adoption is the Phase A regeneration's job (`STAGE3_PLAN.md` step 3),
+which is the first run to publish under the contract. Until then this
+demand is evidenced at the module layer and unenforced at the call sites,
+and the summary table says so rather than reading green.
 
 **Adjacent, and explicitly not coverage.** `stage2b_gcs.py` already
 discards stale **transfer state** — a checkpoint from a differently sized
@@ -222,8 +286,9 @@ left by a previous larger upload that must not be composed in (:1196).
 Every one of those refuses *in-flight state left by a previous attempt
 against the same local file and object*. None of them refuses a
 **completed artifact whose provenance no longer matches its consumer**,
-which is what this demand asks for. Counting them here would make the
-table read as five covered demands.
+which is what this demand asks for, and which the manifest tests above
+now cover. Counting them here would have made the table read as five
+covered demands while the mechanism did not exist.
 
 ---
 
@@ -257,8 +322,8 @@ read `exec`'s exit status only.
 
 | # | demand | status | primary evidence |
 |---|---|---|---|
-| 1 | verification mismatch → nonzero top-level exit | covered | `test_ladder_missing_sentinel_fails_even_on_a_zero_exit`; nonzero-`exec` propagation untested |
+| 1 | verification mismatch → nonzero top-level exit | covered | `test_ladder_missing_sentinel_fails_even_on_a_zero_exit` for a clean exit with no verdict; `test_a_nonzero_exec_fails_the_target_even_when_the_sentinel_is_present` and its ladder twin for the converse |
 | 2 | missing or corrupted artifact fails, not silently accepted | covered | the transfer-refusal tests plus `test_an_object_with_no_recorded_digest_is_refused_rather_than_trusted`; `verify_content=False` is a visible opt-out |
 | 3 | inner remote failure survives teardown | covered | `test_a_leak_never_masks_the_scientific_verdict` — sole test, one target |
 | 4 | teardown success cannot overwrite a failure verdict | covered | `test_ladder_missing_sentinel_fails_even_on_a_zero_exit` plus both pre-flight refusals |
-| 5 | stale artifacts are refused | **pending** | none — mechanism under construction |
+| 5 | stale artifacts are refused | mechanism covered, **not yet adopted** | `test_a_payload_with_no_manifest_is_refused`, `test_a_payload_edited_after_publication_is_refused`, `test_a_fingerprint_from_a_different_config_is_refused`, and the revalidation pair — but no driver consumes through `consume_validated` yet |

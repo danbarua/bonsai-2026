@@ -56,15 +56,34 @@ At 218 MB the upload crosses `ensure_artifact`'s 64 MB auto-chunk
 threshold, so the resumable chunked path engages on its own -- no call
 site has to ask for it.
 
-## Scope
+## Scope -- and a disclosed error in this script's first run
 
-Fit side only (54,000 images). The 6,000-image locked validation
-partition is NOT encoded: the CNN consumes validation images as raw
-corrupted 28x28 grids, and ridge selects alpha by cross-validation
-internally on the fit side. Encoding it would produce an artifact
-nothing reads.
+As first written and first run, this script encoded the fit side only
+(54,000 images), on the stated reasoning that the 6,000-image locked
+validation partition "would produce an artifact nothing reads": the CNN
+consumes validation images as raw corrupted 28x28 grids, and ridge
+selects alpha by cross-validation internally.
 
-No test-side data of any kind is touched.
+**That reasoning was wrong, and the population is 60,000.** The second
+clause is where it fails. `DESIGN.md:479` defines the term outright --
+at stage 3, "full training" = 54,000 fit + 6,000 locked validation --
+and `DESIGN.md:492`'s compute table corroborates it arithmetically:
+"~48-60k x 1008" is 0.8 x 60,000 for the fold-level SVDs and 60,000 for
+the final refits. Under a 54,000 corpus that cell would read ~43-54k.
+The 6,000 are held out from CNN gradient updates only; they are not held
+out from the ridge path, which fits and cross-validates on all 60,000.
+So the artifact IS read, by the ridge.
+
+The error was mine, made in the direction that avoided re-work, which is
+exactly why it is disclosed here rather than quietly edited away. The
+regeneration closes it empirically: the 54,000 fit-side arrays
+payload-compare bit-exact against the artifact this script already
+uploaded, and the 6,000 validation arrays are new evidence with no prior
+artifact to compare against -- fingerprinted at birth, with their
+final-Delta tail computed and reported separately rather than folded
+into one "regeneration passed".
+
+No test-side data of any kind is touched, at either population.
 """
 import argparse
 import json

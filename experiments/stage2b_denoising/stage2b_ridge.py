@@ -546,7 +546,27 @@ def oof_per_image_mse(X, Y, y_strat, alphas=ALPHA_GRID, n_splits=N_SPLITS,
 
     Every image lies in exactly one validation fold, so the coverage is a
     partition of `range(n)` and is asserted as one before returning: an
-    unwritten row would otherwise reach a caller as a silent nan."""
+    unwritten row would otherwise reach a caller as a silent nan.
+
+    ## Every returned array is indexed POSITIONALLY, by row of `X`
+
+    `fold_index[i]` is the fold of row `i`, not of KMNIST image `i`. This
+    function has no idea which official image any row is, and correctly so
+    -- the caller owns row order.
+
+    AUDIT_PROTOCOL.md requires that all cross-artifact comparison happen
+    **by official KMNIST image index, never by positional prefix**. That
+    requirement therefore lands entirely on the caller: an audit driver
+    must carry the official-index array alongside `X` and map through it
+    before comparing anything computed here against anything computed
+    elsewhere. Two artifacts encoded from differently-ordered index lists
+    would otherwise align row-for-row, agree on shape, and compare
+    entirely wrong numbers -- with no error raised at any point.
+
+    This is CLAUDE.md principle 16 stated at the seam where it applies: a
+    component verified field by field can still feed a wrong result when
+    the glue around it loses a mapping. The audit driver owes a test that
+    the official-index array travels with the features and round-trips."""
     X = np.asarray(X, dtype=np.float64)
     Y = np.asarray(Y, dtype=np.float64)
     n = X.shape[0]

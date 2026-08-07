@@ -5,13 +5,20 @@ evolution, on top of the same already-dynamically-encoded local phase
 state, improve single-step denoising prediction error relative to the
 unevolved encoded state alone? The design is locked (`DESIGN.md`).
 
-**Status: built, not yet run.** Every component below exists and is
-tested; no feasibility-ladder stage has been executed, and there is no
-`FINDINGS.md` yet because there are no findings. Nothing here has
-produced a number about denoising. Read `DESIGN.md` first — it is the
-authoritative spec for every constant, gate and statistical rule this
-code implements, and it was locked through seven drafts and six review
-rounds before any of this was written.
+**Status: feasibility ladder stages 1 and 2 complete; stage 3 in
+progress.** Stage 1 (n=1,000) and stage 2 (n=5,000) have both run end to
+end on Colab A100s, and stage 3's Phase A (local CPU encoding) has run
+once and is being regenerated at the corrected 60,000-image population
+under the provenance contract. `FINDINGS.md` carries every result,
+including stage 1's first honest FAIL and the disclosed post-lock
+amendment it produced. No confirmatory statistic has been computed on the
+test split, and none may be before the Stage 4 gate.
+
+Read `DESIGN.md` first — it is the authoritative spec for every constant,
+gate and statistical rule this code implements, and it was locked through
+seven drafts and six review rounds before any of this was written.
+Amendments to it after the lock are disclosed as amendments, never edited
+in silently.
 
 ## Reading order
 
@@ -115,8 +122,10 @@ mention here, in the same commit that creates it.
   package's five demanded negative paths: which test evidences each, what
   that test asserts, where the deliberate breakage that confirmed a guard
   is recorded, and where coverage is narrower than the demand.
-  Stale-artifact refusal is marked pending; its mechanism does not exist
-  yet.
+  Stale-artifact refusal is the one demand not yet green: its mechanism is
+  built and tested, but no driver consumes through `consume_validated`
+  yet, and the table says so rather than counting the mechanism as
+  adoption.
 
 **Diagnostics** (not part of the locked pipeline; convention of Stage
 2A's `diagnose_*.py` scripts — investigate, change nothing themselves):
@@ -346,6 +355,7 @@ make test                      # the whole repository suite
 |---|---|
 | `test_stage2b_gcs.py` | transport, guards, chunked resumable upload, content verification, the sidecar manifest and validated consume path |
 | `test_stage2b_fingerprint.py` | static ∪ runtime import closure, dirty-tree and revalidation refusals, per-kind consume policies, per-array payload manifests |
+| `test_stage2b_negative_path_evidence.py` | that every test `NEGATIVE_PATH_EVIDENCE.md` cites still exists under that name |
 | `test_stage2b_cnn.py` | architecture, shared masking, training loop |
 | `test_stage2b_stats.py` | sign-flip, Holm families, winner rule |
 | `test_stage2b_ridge.py` | SVD ridge vs sklearn oracle, alpha selection, the n-dependent centering tolerance |
