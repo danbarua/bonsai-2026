@@ -306,6 +306,10 @@ def _write(path, text="payload"):
 
 TRAIN_ARGS = dict(stage=2, condition="evolved_T", kind="features", ext="npz", split="train")
 TEST_ARGS = dict(stage=4, condition="evolved_T", kind="predictions", ext="npz", split="test")
+# A RUN_SCOPED name: the only class `force` is legal on, since nothing
+# pins it and nothing may adopt it as a parent.
+REPORT_ARGS = dict(stage=2, condition=None, kind="stage2_report", ext="json",
+                   split="train")
 
 
 # ---- infrastructure constants ----
@@ -865,7 +869,8 @@ def test_ensure_artifact_leaves_the_artifact_present_both_places_in_every_branch
 
 
 def test_force_recomputes_and_overwrites(bucket, tmp_path):
-    name = gcs.object_path(**TRAIN_ARGS)
+    """On a RUN_SCOPED name -- the only class force is legal on."""
+    name = gcs.object_path(**REPORT_ARGS)
     local = tmp_path / "features.npz"
     gcs.ensure_artifact(name, local, produce=_producer("first"), bucket=bucket)
     r = gcs.ensure_artifact(name, local, produce=_producer("second"), bucket=bucket,
@@ -2165,7 +2170,7 @@ def test_a_forced_overwrite_never_leaves_a_manifest_describing_the_old_bytes(
     """The stale sidecar is WORSE than no sidecar: the next consume raises a
     mismatch, which reads as corruption rather than as a deliberate
     regeneration. Force must republish or remove -- never leave."""
-    name = gcs.object_path(**TRAIN_ARGS)
+    name = gcs.object_path(**REPORT_ARGS)
     local = tmp_path / "features.npz"
     gcs.ensure_artifact(name, local, produce=_producer("first"), bucket=bucket,
                         fingerprint=_fingerprint())
@@ -2184,7 +2189,7 @@ def test_a_forced_overwrite_with_a_fingerprint_republishes_rather_than_removing(
         bucket, tmp_path):
     """The path a regeneration actually takes: new bytes, new manifest, and
     the pair agree immediately afterwards."""
-    name = gcs.object_path(**TRAIN_ARGS)
+    name = gcs.object_path(**REPORT_ARGS)
     local = tmp_path / "features.npz"
     gcs.ensure_artifact(name, local, produce=_producer("first"), bucket=bucket,
                         fingerprint=_fingerprint())
@@ -2267,7 +2272,7 @@ def test_a_forced_overwrite_through_ensure_artifact_still_succeeds(bucket, tmp_p
     """The positive control the guard must not break: `force=True` reads the
     current generation and requires exactly it, so the ordinary
     single-writer regeneration goes through untouched."""
-    name = gcs.object_path(**TRAIN_ARGS)
+    name = gcs.object_path(**REPORT_ARGS)
     local = tmp_path / "features.npz"
     gcs.ensure_artifact(name, local, produce=_producer("first"), bucket=bucket,
                         fingerprint=_fingerprint())
@@ -2432,3 +2437,205 @@ def test_the_sidecar_write_is_guarded_against_a_competing_writer(bucket, tmp_pat
         gcs.publish_manifest(local, name, bucket=bucket, fingerprint=_fingerprint(),
                              payload_generation=gcs.current_generation(name, bucket=bucket),
                              generation_match=0)
+
+
+# ---- The write-once invariant ----
+#
+# Generation pinning guarantees "the consumer reads what was committed"
+# only while the pinned generation survives. Versioning is OFF on this
+# bucket, so supersession destroys it -- which means semantic naming plus
+# manifest pinning is acceptable ONLY under a genuinely write-once policy
+# for anything a consumer pins. Enforced here rather than asserted in a
+# document.
+
+def test_a_lineage_artifact_cannot_be_overwritten_even_with_force(bucket, tmp_path):
+    """The invariant. `force` on a lineage name is a REFUSAL, not a
+    republish -- and the producer must not run either, since a refusal
+    that still recomputed would burn the GPU time it exists to protect."""
+    name = gcs.object_path(**TRAIN_ARGS)
+    gcs.ensure_artifact(name, tmp_path / "a.npz", produce=_producer("first"),
+                        bucket=bucket, fingerprint=_fingerprint())
+    calls = []
+    with pytest.raises(gcs.WriteOnceViolation, match="create-once"):
+        gcs.ensure_artifact(name, tmp_path / "b.npz",
+                            produce=_producer("second", counter=calls),
+                            bucket=bucket, force=True)
+    assert calls == [], "the refusal must happen BEFORE produce runs"
+    assert bucket.objects[name] == b"first"
+
+
+def test_the_refusal_fires_before_anything_is_computed_or_uploaded(bucket, tmp_path):
+    """Even on a name that does not exist yet: force on a lineage class is
+    refused on the class, not on whether a collision would occur. A check
+    that only fired when the object existed would be a race."""
+    name = gcs.object_path(**TRAIN_ARGS)
+    assert not gcs.object_exists(name, bucket=bucket)
+    with pytest.raises(gcs.WriteOnceViolation):
+        gcs.ensure_artifact(name, tmp_path / "a.npz", produce=_producer(),
+                            bucket=bucket, force=True)
+    assert not gcs.object_exists(name, bucket=bucket)
+
+
+def test_regeneration_is_a_new_name_not_an_overwrite(bucket, tmp_path):
+    """What the policy leaves available, and what Phase A actually did:
+    `encoded_train_s1200` rather than overwriting `encoded_fit_s1200`."""
+    old = gcs.object_path(stage=3, condition=None, kind="encoded_fit_s1200",
+                          ext="npz", split="train")
+    new = gcs.object_path(stage=3, condition=None, kind="encoded_train_s1200",
+                          ext="npz", split="train")
+    gcs.ensure_artifact(old, tmp_path / "old.npz", produce=_producer("54k"),
+                        bucket=bucket, fingerprint=_fingerprint())
+    gcs.ensure_artifact(new, tmp_path / "new.npz", produce=_producer("60k"),
+                        bucket=bucket, fingerprint=_fingerprint())
+    assert bucket.objects[old] == b"54k", "the baseline must survive the regeneration"
+    assert bucket.objects[new] == b"60k"
+
+
+def test_a_run_scoped_artifact_may_still_be_forced(bucket, tmp_path):
+    """The positive control. A policy that refused every overwrite would
+    also refuse the report steps, which are meant to be regenerated."""
+    name = gcs.object_path(**REPORT_ARGS)
+    gcs.ensure_artifact(name, tmp_path / "r.json", produce=_producer("first"),
+                        bucket=bucket)
+    r = gcs.ensure_artifact(name, tmp_path / "r.json", produce=_producer("second"),
+                            bucket=bucket, force=True)
+    assert r.uploaded and bucket.objects[name] == b"second"
+
+
+@pytest.mark.parametrize("kind,expected", [
+    ("features", gcs.LINEAGE),
+    ("theta_T", gcs.LINEAGE),
+    ("encoded_train_s1200", gcs.LINEAGE),
+    ("kmnist_train_images", gcs.LINEAGE),
+    ("ridge_final", gcs.LINEAGE),
+    ("stage2_report", gcs.RUN_SCOPED),
+    ("stage2_report_20260807T160000Z", gcs.RUN_SCOPED),   # run-scoped suffix
+    ("probe", gcs.RUN_SCOPED),
+    ("something_nobody_declared", gcs.LINEAGE),           # the safe default
+])
+def test_the_class_of_each_kind(kind, expected):
+    name = gcs.object_path(stage=2, condition=None, kind=kind, ext="npz",
+                           split="train")
+    assert gcs.artifact_class(name) == expected
+
+
+def test_an_undeclared_kind_defaults_to_the_protected_class():
+    """Stated as its own test because the direction of the default is the
+    whole safety property: the dangerous mistake is treating a pinned
+    artifact as disposable, so an unknown kind must be create-once."""
+    unknown = gcs.object_path(stage=3, condition=None, kind="future_artifact",
+                              ext="npz", split="train")
+    assert gcs.artifact_class(unknown) == gcs.LINEAGE
+
+
+def test_a_run_scoped_object_cannot_be_adopted_as_a_parent(bucket, tmp_path):
+    """The other half of the split. A run-scoped object is overwritable by
+    policy, so recording one as a parent would put a mutable thing inside
+    an immutable lineage and pin a digest for bytes allowed to change."""
+    report = gcs.object_path(**REPORT_ARGS)
+    child = gcs.object_path(**TRAIN_ARGS)
+    local = _npz_artifact(tmp_path)
+    gcs.upload_file(local, child, bucket=bucket)
+    with pytest.raises(gcs.WriteOnceViolation, match="RUN_SCOPED"):
+        gcs.publish_manifest(local, child, bucket=bucket, fingerprint=_fingerprint(),
+                             parents={report: "d" * 64})
+
+
+def test_a_lineage_object_is_a_legitimate_parent(bucket, tmp_path):
+    """Positive control for the guard above."""
+    parent = gcs.object_path(stage=1, condition=None, kind="topologies", ext="npz",
+                             split="train")
+    child = gcs.object_path(**TRAIN_ARGS)
+    local = _npz_artifact(tmp_path)
+    gcs.upload_file(local, child, bucket=bucket)
+    manifest = gcs.publish_manifest(local, child, bucket=bucket,
+                                    fingerprint=_fingerprint(),
+                                    parents={parent: "d" * 64})
+    assert manifest["parents"] == {parent: "d" * 64}
+
+
+def test_the_lineage_walk_is_transitive_not_one_hop(bucket, tmp_path):
+    """Checking only immediate parents leaves the property one link deep.
+    Here the run-scoped object is a GRANDparent -- the child's own parents
+    are all lineage, so a one-hop check passes it."""
+    report = gcs.object_path(**REPORT_ARGS)
+    mid = gcs.object_path(stage=1, condition=None, kind="topologies", ext="npz",
+                          split="train")
+    child = gcs.object_path(**TRAIN_ARGS)
+    local = _npz_artifact(tmp_path)
+
+    # `mid` records the report as a parent. Written by hand, because
+    # publish_manifest would refuse it -- which is the point: this is the
+    # manifest an older commit or a different tool could have left.
+    gcs.upload_file(local, mid, bucket=bucket)
+    bucket.objects[gcs.manifest_object_name(mid)] = json.dumps({
+        "format": gcs.MANIFEST_FORMAT, "object_path": mid,
+        "payload_sha256": fp.sha256_of_file(local),
+        "parents": {report: "d" * 64}, "fingerprint": _fingerprint(),
+    }).encode()
+
+    gcs.upload_file(local, child, bucket=bucket)
+    child_manifest = gcs.publish_manifest(local, child, bucket=bucket,
+                                          fingerprint=_fingerprint(),
+                                          parents={mid: "e" * 64})
+    # One hop is clean...
+    assert all(gcs.artifact_class(p) == gcs.LINEAGE for p in child_manifest["parents"])
+    # ...and the walk still catches it.
+    with pytest.raises(gcs.WriteOnceViolation, match="lineage"):
+        gcs.verify_lineage(child, child_manifest, bucket=bucket)
+
+
+def test_the_lineage_walk_accepts_a_clean_chain_and_reports_what_it_saw(bucket, tmp_path):
+    """Positive control, and the evidence half: a walk that returns the
+    ancestors it visited can be logged, where a bare pass cannot."""
+    grand = gcs.object_path(stage=1, condition=None, kind="kmnist_train_images",
+                            ext="idx", split="train")
+    mid = gcs.object_path(stage=1, condition=None, kind="topologies", ext="npz",
+                          split="train")
+    child = gcs.object_path(**TRAIN_ARGS)
+    local = _npz_artifact(tmp_path)
+    for name, parents in ((grand, None), (mid, {grand: "a" * 64}),
+                          (child, {mid: "b" * 64})):
+        gcs.upload_file(local, name, bucket=bucket)
+        gcs.publish_manifest(local, name, bucket=bucket, fingerprint=_fingerprint(),
+                             parents=parents)
+    manifest = gcs.read_manifest(child, bucket=bucket)
+    assert gcs.verify_lineage(child, manifest, bucket=bucket) == {mid, grand}
+
+
+def test_a_cyclic_lineage_is_reported_rather_than_hung_on(bucket, tmp_path):
+    a = gcs.object_path(stage=1, condition=None, kind="topologies", ext="npz",
+                        split="train")
+    b = gcs.object_path(**TRAIN_ARGS)
+    local = _npz_artifact(tmp_path)
+    for name, other in ((a, b), (b, a)):
+        gcs.upload_file(local, name, bucket=bucket)
+        bucket.objects[gcs.manifest_object_name(name)] = json.dumps({
+            "format": gcs.MANIFEST_FORMAT, "object_path": name,
+            "payload_sha256": fp.sha256_of_file(local),
+            "parents": {other: "d" * 64}, "fingerprint": _fingerprint(),
+        }).encode()
+    manifest = gcs.read_manifest(b, bucket=bucket)
+    # Visiting each object once means a 2-cycle terminates on its own; the
+    # depth bound is the backstop for a pathological graph, and the walk
+    # must return rather than spin either way.
+    assert gcs.verify_lineage(b, manifest, bucket=bucket, max_depth=8) == {a, b}
+
+
+def test_consume_refuses_an_artifact_whose_lineage_contains_a_run_scoped_object(
+        bucket, tmp_path):
+    """The consume-side check, which is not redundant with the publish-side
+    one: that binds what this code WRITES, this binds what it is willing to
+    READ -- including a manifest left by an older commit or by hand."""
+    report = gcs.object_path(**REPORT_ARGS)
+    child = gcs.object_path(**TRAIN_ARGS)
+    local = _npz_artifact(tmp_path)
+    gcs.upload_file(local, child, bucket=bucket)
+    bucket.objects[gcs.manifest_object_name(child)] = json.dumps({
+        "format": gcs.MANIFEST_FORMAT, "object_path": child,
+        "payload_sha256": fp.sha256_of_file(local),
+        "payload_generation": gcs.current_generation(child, bucket=bucket),
+        "parents": {report: "d" * 64}, "fingerprint": _fingerprint(),
+    }).encode()
+    with pytest.raises(gcs.WriteOnceViolation, match="RUN_SCOPED"):
+        gcs.consume_validated(child, str(local), bucket=bucket)

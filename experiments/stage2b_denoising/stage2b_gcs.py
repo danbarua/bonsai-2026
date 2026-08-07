@@ -404,6 +404,74 @@ def object_path(*, stage, condition, kind, ext, split, allow_test_split=False):
     return f"{prefix}/{kind}.{ext}"
 
 
+# =====================================================================
+# Artifact class: which names are write-once
+# =====================================================================
+#
+# Generation pinning guarantees "the consumer reads the object that was
+# committed" only while that generation is the surviving one. Object
+# versioning is OFF on this bucket (measured, `PHASE_B_PLAN.md`), so a
+# supersession destroys the pinned generation -- the soft-delete window
+# keeps the bytes for seven days but a pinned READ still 404s, which is a
+# forensic affordance and not availability.
+#
+# So semantic naming plus manifest pinning is only acceptable under a
+# genuinely write-once policy for anything a consumer pins. If an ordinary
+# overwrite path remained open for those artifacts, content-addressed
+# naming would become mandatory. It does not remain open: the policy is
+# enforced here rather than described in a document.
+#
+# Two classes:
+#
+#   LINEAGE     everything scientific -- anything that is or can be a
+#               PARENT in a manifest, anything whose generation a consumer
+#               pins. Strictly create-once. `force=True` on one of these
+#               is a REFUSAL, not a republish, so an accidental or
+#               external replacement surfaces as a loud availability
+#               failure rather than as silent corruption.
+#
+#   RUN_SCOPED  reports and timing summaries: deliberately regenerated,
+#               never a parent, never pinned. The drivers give these
+#               run-scoped names so they are create-once in practice too;
+#               the class exists so that if one ever is overwritten, it
+#               still cannot enter a lineage as a parent.
+#
+# The default for an undeclared kind is LINEAGE, deliberately. The
+# dangerous mistake is treating a pinned artifact as disposable, so the
+# default errs toward refusing a write rather than allowing one.
+
+LINEAGE = "lineage"
+RUN_SCOPED = "run_scoped"
+
+# Kind tokens that are run-scoped. Matched as prefixes, because the
+# drivers append a run id (`stage2_report_20260807T160000Z`).
+RUN_SCOPED_KIND_PREFIXES = (
+    "stage1_report", "stage2_report", "stage3_report",
+    "probe", "chunked_probe",          # smoke-check scratch, never consumed
+)
+
+
+class WriteOnceViolation(OSError):
+    """A write would have replaced a committed lineage artifact."""
+
+
+def artifact_kind(name):
+    """The kind token of an object path: the basename without its
+    extension. `object_path` builds `{prefix}/{kind}.{ext}`, so this is
+    the inverse of that last segment and nothing more."""
+    base = str(name).rsplit("/", 1)[-1]
+    return base.rsplit(".", 1)[0] if "." in base else base
+
+
+def artifact_class(name):
+    """`LINEAGE` or `RUN_SCOPED` for an object path."""
+    kind = artifact_kind(name)
+    for prefix in RUN_SCOPED_KIND_PREFIXES:
+        if kind == prefix or kind.startswith(prefix + "_"):
+            return RUN_SCOPED
+    return LINEAGE
+
+
 def _check_object_path_allowed(name, allow_test_split):
     """The same lock applied to an object name the caller assembled itself
     -- `object_path` is not the only way to produce a string, so the
@@ -1440,6 +1508,23 @@ def ensure_artifact(name, local_path, *, produce, bucket, allow_test_split=False
     if chunked is None:
         _check_chunk_size(chunk_size)
 
+    # The write-once invariant, enforced rather than described. A lineage
+    # artifact's generation is pinned by its manifest and by any manifest
+    # that names it as a parent; with versioning off, replacing it destroys
+    # a reference that something else is holding. There is no supported
+    # overwrite for these, `force` included.
+    if force and artifact_class(name) == LINEAGE:
+        raise WriteOnceViolation(
+            f"refusing to overwrite {name!r}: it is a LINEAGE artifact and lineage "
+            f"artifacts are create-once. Its generation is pinned by its own "
+            f"manifest, and possibly by another manifest naming it as a parent; "
+            f"object versioning is off on this bucket, so replacing it destroys a "
+            f"reference something else is holding. To regenerate, write a NEW "
+            f"name -- as the Phase A regeneration did, producing "
+            f"`encoded_train_s1200` rather than overwriting `encoded_fit_s1200`. "
+            f"`force` remains available only for run-scoped artifacts, which "
+            f"nothing pins and nothing may adopt as a parent.")
+
     if not force and object_exists(name, bucket=bucket, allow_test_split=allow_test_split):
         # THE trust point. Everything this function does for a resumed run
         # hangs off this branch, so it is the one place a provenance check
@@ -1592,6 +1677,19 @@ def build_manifest(local_path, *, object_name, fingerprint, parents=None,
     whose headers embed timestamps, so two runs producing bit-identical
     arrays produce different files. The per-array digests are what a
     regeneration is actually compared on."""
+    # The other half of the class split. A run-scoped object is
+    # overwritable by policy, so adopting one as a parent would put a
+    # mutable thing inside an immutable lineage -- and the resulting
+    # manifest would record a digest for bytes that are allowed to change
+    # underneath it.
+    for parent_name in (parents or {}):
+        if artifact_class(parent_name) == RUN_SCOPED:
+            raise WriteOnceViolation(
+                f"refusing to record {parent_name!r} as a parent of "
+                f"{object_name!r}: it is RUN_SCOPED, which means it may be "
+                f"regenerated in place. A lineage may only be built from "
+                f"create-once artifacts, or the parent digest describes bytes "
+                f"that are permitted to change.")
     manifest = {
         "format": MANIFEST_FORMAT,
         "object_path": object_name,
@@ -1697,6 +1795,51 @@ def validate_against_manifest(local_path, object_name, *, manifest,
     return manifest
 
 
+def verify_lineage(object_name, manifest, *, bucket, allow_test_split=False,
+                   max_depth=32):
+    """Walk an artifact's parents transitively; every one must be LINEAGE.
+
+    Checking only the immediate parents would leave the property one link
+    deep. A lineage is immutable only if every link in it is: a RUN_SCOPED
+    object three hops up is still an overwritable thing inside a chain of
+    digests that claim to be fixed.
+
+    The walk is breadth-first over recorded manifests, visiting each object
+    once, and stops at any artifact with no manifest -- a pre-contract
+    input, which has no recorded parents to follow. `max_depth` bounds it
+    against a cycle; a cycle is itself a corrupt lineage and is reported as
+    one rather than hung on.
+
+    Returns the set of ancestors visited, so a caller can log the lineage
+    it actually verified rather than that it verified something."""
+    seen, frontier, depth = set(), [(object_name, manifest)], 0
+    while frontier:
+        depth += 1
+        if depth > max_depth:
+            raise WriteOnceViolation(
+                f"lineage walk from {object_name!r} exceeded depth {max_depth}; "
+                f"the parent graph is cyclic or implausibly deep, and either way "
+                f"it is not a lineage that can be verified.")
+        nxt = []
+        for name, current in frontier:
+            for parent_name in sorted((current or {}).get("parents") or {}):
+                if artifact_class(parent_name) == RUN_SCOPED:
+                    raise WriteOnceViolation(
+                        f"{parent_name!r} appears in {object_name!r}'s lineage (via "
+                        f"{name!r}) but is RUN_SCOPED, which means it may be "
+                        f"regenerated in place. A recorded parent digest must "
+                        f"describe bytes that cannot change.")
+                if parent_name in seen:
+                    continue
+                seen.add(parent_name)
+                parent_manifest = read_manifest(parent_name, bucket=bucket,
+                                                allow_test_split=allow_test_split)
+                if parent_manifest is not None:
+                    nxt.append((parent_name, parent_manifest))
+        frontier = nxt
+    return seen
+
+
 def consume_validated(object_name, local_path, *, bucket, expected_fingerprint=None,
                       policy=None, allow_test_split=False, verify_content=True,
                       require_manifest=True):
@@ -1765,6 +1908,14 @@ def consume_validated(object_name, local_path, *, bucket, expected_fingerprint=N
     if expected_fingerprint is not None:
         _fp.require_match(manifest.get("fingerprint") or {}, expected_fingerprint,
                           name=object_name, policy=policy or _fp.STRICT)
+
+    # Consume-side class check, and it is not redundant with the one in
+    # `publish_manifest`. That one binds what THIS code writes; this one
+    # binds what this code is willing to READ, including a manifest written
+    # by an older commit, by a different driver, or by hand. The walk is
+    # transitive: a lineage is only immutable if every link in it is.
+    verify_lineage(object_name, manifest, bucket=bucket,
+                   allow_test_split=allow_test_split)
 
     downloaded = False
     if not os.path.isfile(local_path):

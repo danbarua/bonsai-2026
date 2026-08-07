@@ -944,8 +944,16 @@ def step11_report(mods, bucket, record):
                   str(record.get("verdict", FAIL_SENTINEL))]
         return "\n".join(lines) + "\n"
 
-    ensure_json(mods, bucket, _obj(mods, "stage2_report", "json"), compute_json, force=True)
-    ensure_text(mods, bucket, _obj(mods, "stage2_report", "txt"), compute_text, force=True)
+    # Run-scoped, and therefore create-once like every other artifact.
+    # `force=True` used to overwrite one fixed report name, which meant a
+    # resumed run DESTROYED the record of what the attempt that died had
+    # seen -- the same "an unwritten result does not survive" failure this
+    # project already has a lesson about. Both reports now survive,
+    # distinguishable by run id, and the write-once policy needs no
+    # exception carved out for reports.
+    kind = f"stage2_report_{record['run']['run_id']}"
+    ensure_json(mods, bucket, _obj(mods, kind, "json"), compute_json)
+    ensure_text(mods, bucket, _obj(mods, kind, "txt"), compute_text)
 
 
 def build_stage3_projections(record, n_measured=5000):
@@ -987,7 +995,11 @@ def build_stage3_projections(record, n_measured=5000):
 
 
 def new_record():
-    return {"run": {}, "timings": {}, "gates": {}, "evolution": {}, "cnn": {},
+    # A run id, minted once per process. It scopes the report object name,
+    # so a resumed run writes a new report rather than replacing the one
+    # its predecessor left.
+    return {"run": {"run_id": time.strftime("%Y%m%dT%H%M%SZ", time.gmtime())},
+            "timings": {}, "gates": {}, "evolution": {}, "cnn": {},
             "encode_diagnostic": {}, "stats_smoke": {},
             "verdict": None, "halt_reason": None}
 

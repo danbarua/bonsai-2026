@@ -140,6 +140,53 @@ and granting a permission to make a one-off audit convenient would widen
 the credential that runs unattended on a rented VM. Config questions are
 answered with `gcloud` under a human identity, which is where they belong.
 
+### The write-once invariant — enforced, not described
+
+Generation pinning guarantees "the consumer reads what was committed" only
+while the pinned generation survives, and with versioning off a
+supersession destroys it. So semantic naming plus manifest pinning is
+acceptable **only** under a genuinely write-once policy for anything a
+consumer pins. Enforced in code:
+
+- **LINEAGE** — everything scientific; anything that is or can be a parent
+  in a manifest. **Create-once.** `force=True` on one of these is a named
+  refusal, raised *before* `produce` runs, so a refusal never burns the
+  GPU time it exists to protect. Regeneration means a **new name** — as
+  Phase A did, writing `encoded_train_s1200` rather than overwriting
+  `encoded_fit_s1200`.
+- **RUN_SCOPED** — reports and timing summaries. Never a parent, never
+  pinned.
+
+**Classification is fail-closed.** An undeclared kind is LINEAGE. A new
+scientific artifact inherits create-once automatically; falling into the
+overwrite-capable class requires an explicit declaration and can never
+happen by omission. Proven by test rather than assumed.
+
+**The lineage walk is transitive.** Checking immediate parents leaves the
+property one link deep — a run-scoped object three hops up is still a
+mutable thing inside a chain of digests claiming to be fixed. The walk
+runs on the **consume** side as well as the publish side, and the two are
+not redundant: publish binds what this code writes, consume binds what it
+is willing to read, including a manifest left by an older commit or by
+hand.
+
+**Reports are run-scoped, and no overwrite path survives anywhere.**
+`force=True` previously overwrote one fixed report name per rung, so a
+resumed run destroyed the record of what the attempt that died had seen —
+the same "an unwritten result does not survive" failure this project
+already has a lesson about, and reports are pre-test-package material.
+Report names now carry a run id, both attempts survive, and the storage
+model is uniformly append-only. No kind currently retains an overwrite
+path; if one ever must, the plan has to state which, why historical
+replacement is acceptable, and that no package claim depends on
+recovering earlier versions.
+
+All four negative paths were confirmed by breaking what they watch, each
+firing its own test and no other: force against LINEAGE; a second create
+against a committed name losing its precondition; a RUN_SCOPED artifact
+offered as a parent, on the publish side and the consume side separately;
+and the fail-closed default.
+
 These measurements and this deviation are carried into the pre-test
 package.
 
