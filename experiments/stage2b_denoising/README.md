@@ -116,6 +116,20 @@ mention here, in the same commit that creates it.
   gate, and the first CNN training against real data (early-stopped on
   the locked 6,000-image validation partition, best of three seeds).
 
+**Frozen protocols** (each committed before any of its own numbers
+existed; nothing in them may change once a result has been seen):
+
+- **`AUDIT_PROTOCOL.md`** — the 150-vs-1200 amendment-impact audit: sign
+  convention, population roles, the out-of-fold prediction basis, both
+  alpha regimes, the analytic numerical-resolution limit, and all three
+  review triggers.
+- **`COMPANION_PROTOCOLS.md`** — the two protocols `AUDIT_PROTOCOL.md`
+  names as companions: the ARM/x86 propagation stress set (deterministic
+  construction, frozen ridge coefficients across both architectures) and
+  the `ABS_CONV_EPS` sensitivity table, each with its own pre-committed
+  halt condition.
+- **`STAGE3_PLAN.md`** — the stage-3 plan of record and its five freezes.
+
 **Evidence documents:**
 
 - **`NEGATIVE_PATH_EVIDENCE.md`** — the citation table for the pre-Stage-4
