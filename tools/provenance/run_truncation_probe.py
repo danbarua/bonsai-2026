@@ -36,7 +36,20 @@ SETTINGS_PATH = PROBE_DIR / "probe_settings.json"
 HOOK = REPO_ROOT / "tools" / "provenance" / "probe_hook_payload.py"
 EMITTER = "tools/provenance/emit_bytes.py"
 
-DEFAULT_SIZES = (1_000, 50_000, 200_000, 1_000_000)
+# Each case answers one question the capture design turns on.
+DEFAULT_CASES = (
+    # Is anything persisted BELOW the cap? Decides whether the inline-field
+    # fallback is the common path or dead code.
+    {"bytes": 1_000, "stream": "stdout", "exit_code": 0},
+    {"bytes": 25_000, "stream": "stdout", "exit_code": 0},
+    # Where is the cap, and is it constant rather than proportional?
+    {"bytes": 200_000, "stream": "stdout", "exit_code": 0},
+    {"bytes": 1_000_000, "stream": "stdout", "exit_code": 0},
+    # Is stderr capped the same way, and does the persisted file contain it?
+    {"bytes": 200_000, "stream": "stderr", "exit_code": 0},
+    # Does a FAILING call deliver a payload at all, on PostToolUseFailure?
+    {"bytes": 200_000, "stream": "both", "exit_code": 1},
+)
 
 # Sentinel line width, from emit_bytes.LINE_WIDTH + newline. Used only to
 # turn a byte count back into an expected line count for the report.
@@ -68,7 +81,24 @@ def write_settings() -> Path:
                         }
                     ],
                 }
-            ]
+            ],
+            # A separate event, fired instead of PostToolUse when the tool
+            # call fails. Registered because "survive mid-run death" is the
+            # case the capture design exists for -- a scratch script that
+            # dies is exactly the one whose record matters most, and it
+            # never reaches PostToolUse at all.
+            "PostToolUseFailure": [
+                {
+                    "matcher": "Bash",
+                    "hooks": [
+                        {
+                            "type": "command",
+                            "if": f"Bash(*{EMITTER}*)",
+                            "command": f"uv run python {HOOK}",
+                        }
+                    ],
+                }
+            ],
         },
     }
     PROBE_DIR.mkdir(parents=True, exist_ok=True)
@@ -76,13 +106,16 @@ def write_settings() -> Path:
     return SETTINGS_PATH
 
 
-def run_probe(size: int, settings: Path, timeout: int) -> subprocess.CompletedProcess:
-    """One headless session that runs the emitter once at `size`."""
+def run_probe(case: dict, settings: Path, timeout: int) -> subprocess.CompletedProcess:
+    """One headless session that runs the emitter once, per `case`."""
+    command = (f"uv run python {EMITTER} --bytes {case['bytes']} "
+               f"--stream {case['stream']} --exit-code {case['exit_code']}")
     prompt = (
         f"Run this exact command with the Bash tool, once, and then reply "
-        f"with just the word DONE. Do not summarise the output, do not pipe "
-        f"it anywhere, do not run anything else.\n\n"
-        f"uv run python {EMITTER} --bytes {size}"
+        f"with just the word DONE. It is EXPECTED to fail if it exits "
+        f"non-zero -- do not retry it, do not investigate, do not summarise "
+        f"the output, do not pipe it anywhere, do not run anything else.\n\n"
+        f"{command}"
     )
     env = dict(os.environ)
     # The hook writes here; keeping it explicit means a stray default cannot
@@ -105,46 +138,75 @@ def read_records():
     return [json.loads(line) for line in LOG_PATH.read_text().splitlines() if line.strip()]
 
 
+def _flag(value) -> str:
+    return {True: "yes", False: "no", None: "-"}[value]
+
+
+def _arg(command: str, name: str, cast=str):
+    """Pull a flag's value back out of the recorded command line."""
+    if name not in command:
+        return None
+    try:
+        return cast(command.split(name)[1].split()[0])
+    except (IndexError, ValueError):
+        return None
+
+
 def report(records) -> None:
-    """Print the table the design document quotes."""
-    print(f"\n{'sent':>10} {'hook saw':>10} {'payload':>10} {'lines':>7} "
-          f"{'first':>7} {'last':>7} {'contig':>7} {'sentinel':>9}  verdict")
-    print("-" * 96)
+    """Print the table the design document quotes.
+
+    Includes the persisted-file columns, not only the cap: the claim that
+    the persisted copy is byte-exact is the one the design leans on hardest,
+    so a rerun of this driver has to reproduce it without anyone reaching
+    for an ad-hoc query.
+    """
+    header = (f"\n{'sent':>9} {'stream':>7} {'exit':>5} {'event':>20} "
+              f"{'inline_out':>10} {'inline_err':>10} {'persistSize':>11} "
+              f"{'fullLen':>9} {'sha_ok':>7}  verdict")
+    print(header)
+    print("-" * len(header.strip()))
     for rec in records:
         if "probe_error" in rec:
             print(f"  PROBE ERROR: {rec['probe_error']}")
             continue
         command = rec.get("command") or ""
-        sent = None
-        if "--bytes" in command:
-            try:
-                sent = int(command.split("--bytes")[1].split()[0])
-            except (IndexError, ValueError):
-                sent = None
+        sent = _arg(command, "--bytes", int)
+        stream = _arg(command, "--stream") or "stdout"
+        exit_code = _arg(command, "--exit-code", int)
+        out, err = rec.get("stdout", {}), rec.get("stderr", {})
         expected_lines = (sent // PER_LINE) if sent is not None else None
-        saw = rec["text_len"]
-        complete = rec["sentinel_present"] and rec["first_line_index"] == 0 \
-            and rec["line_index_contiguous"]
-        if complete and expected_lines is not None \
-                and rec["n_labelled_lines"] == expected_lines:
-            verdict = "UNTRUNCATED"
-        elif rec["sentinel_present"] and not rec["line_index_contiguous"]:
-            verdict = "MIDDLE ELIDED"
-        elif not rec["sentinel_present"]:
-            verdict = "TAIL DROPPED"
+
+        primary = out if stream in ("stdout", "both") else err
+        if primary.get("body_matches_sentinel") and \
+                primary.get("n_labelled_lines") == expected_lines:
+            verdict = "inline COMPLETE"
+        elif rec.get("persisted_body_matches_sentinel"):
+            verdict = "inline capped, persisted COMPLETE"
+        elif primary.get("len", 0) == 0:
+            verdict = "NO TEXT IN PAYLOAD"
         else:
-            verdict = "PARTIAL"
-        print(f"{sent!s:>10} {saw:>10} {rec['payload_json_bytes']:>10} "
-              f"{rec['n_labelled_lines']:>7} {rec['first_line_index']!s:>7} "
-              f"{rec['last_line_index']!s:>7} "
-              f"{str(rec['line_index_contiguous']):>7} "
-              f"{str(rec['sentinel_present']):>9}  {verdict}")
+            verdict = "inline capped, NO COMPLETE COPY"
+
+        print(f"{sent!s:>9} {stream:>7} {exit_code!s:>5} "
+              f"{str(rec.get('hook_event_name')):>20} "
+              f"{out.get('len', 0):>10} {err.get('len', 0):>10} "
+              f"{rec.get('persisted_output_size')!s:>11} "
+              f"{rec.get('persisted_len')!s:>9} "
+              f"{_flag(rec.get('persisted_body_matches_sentinel')):>7}  {verdict}")
     print()
 
 
 def main(argv=None) -> int:
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("--sizes", type=int, nargs="+", default=list(DEFAULT_SIZES))
+    parser.add_argument("--sizes", type=int, nargs="+", default=None,
+                        help="stdout-only cases at these sizes, instead of "
+                             "the full default case list")
+    parser.add_argument("--case", nargs=3, metavar=("BYTES", "STREAM", "EXIT"),
+                        default=None,
+                        help="run a single ad-hoc case, e.g. "
+                             "--case 200000 both 1. Exists so that "
+                             "re-interrogating one condition is a flag on "
+                             "committed code rather than a throwaway script")
     parser.add_argument("--timeout", type=int, default=180)
     parser.add_argument("--keep-log", action="store_true",
                         help="append to any existing log instead of starting clean")
@@ -161,10 +223,20 @@ def main(argv=None) -> int:
     print(f"settings: {settings}")
     print(f"log:      {LOG_PATH}")
 
-    for size in args.sizes:
-        print(f"\n=== probing --bytes {size} ===")
+    if args.case:
+        cases = [{"bytes": int(args.case[0]), "stream": args.case[1],
+                  "exit_code": int(args.case[2])}]
+    elif args.sizes:
+        cases = [{"bytes": s, "stream": "stdout", "exit_code": 0}
+                 for s in args.sizes]
+    else:
+        cases = list(DEFAULT_CASES)
+
+    for case in cases:
+        print(f"\n=== probing bytes={case['bytes']} stream={case['stream']} "
+              f"exit={case['exit_code']} ===")
         try:
-            proc = run_probe(size, settings, args.timeout)
+            proc = run_probe(case, settings, args.timeout)
         except subprocess.TimeoutExpired:
             print(f"  TIMEOUT after {args.timeout}s")
             continue

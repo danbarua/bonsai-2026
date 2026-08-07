@@ -79,9 +79,26 @@ def main(argv=None) -> int:
         "--bytes", type=int, required=True,
         help="approximate size of the body in bytes (rounded down to whole "
              "lines; the sentinel line is emitted in addition)")
+    parser.add_argument(
+        "--stream", choices=("stdout", "stderr", "both"), default="stdout",
+        help="which stream to emit on. `stderr` matters because a scratch "
+             "script that dies leaves its traceback there, and because "
+             "`mighty-colab run` splits its own chatter onto stderr and the "
+             "script's output onto stdout")
+    parser.add_argument(
+        "--exit-code", type=int, default=0,
+        help="exit with this code after emitting. Non-zero routes the tool "
+             "call to PostToolUseFailure instead of PostToolUse -- a "
+             "different hook event, whose payload is not assumed to match")
     args = parser.parse_args(argv)
-    sys.stdout.write(build_stream(args.bytes))
-    return 0
+    stream = build_stream(args.bytes)
+    if args.stream in ("stdout", "both"):
+        sys.stdout.write(stream)
+    if args.stream in ("stderr", "both"):
+        sys.stderr.write(stream)
+    sys.stdout.flush()
+    sys.stderr.flush()
+    return args.exit_code
 
 
 if __name__ == "__main__":

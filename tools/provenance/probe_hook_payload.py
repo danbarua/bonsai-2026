@@ -70,6 +70,31 @@ def extract_text(tool_response):
     return None, ""
 
 
+def analyse(text: str) -> dict:
+    """Position and completeness evidence for one stream's text.
+
+    Kept separate from `observe` so stdout and stderr get the identical
+    treatment -- the question "is stderr capped the same way as stdout" is
+    only answerable if both are measured the same way.
+    """
+    indices = [int(m.group(1)) for m in _LINE_RE.finditer(text)]
+    sentinel = _SENTINEL_RE.search(text)
+    complete = None
+    if sentinel:
+        body = text[:sentinel.start()]
+        complete = hashlib.sha256(body.encode()).hexdigest() == sentinel.group(3)
+    return {
+        "len": len(text),
+        "n_labelled_lines": len(indices),
+        "first_line_index": indices[0] if indices else None,
+        "last_line_index": indices[-1] if indices else None,
+        "contiguous": (bool(indices)
+                       and indices == list(range(indices[0], indices[-1] + 1))),
+        "sentinel_present": bool(sentinel),
+        "body_matches_sentinel": complete,
+    }
+
+
 def observe(payload: dict) -> dict:
     """Everything about this invocation worth keeping, as a flat record."""
     tool_response = payload.get("tool_response")
@@ -88,6 +113,12 @@ def observe(payload: dict) -> dict:
         # How big the whole hook payload was, so a cap on the PAYLOAD is
         # distinguishable from a cap on the text field.
         "payload_json_bytes": len(json.dumps(payload)),
+        # Top-level shape, recorded because the failure event turned out to
+        # carry no `tool_response` at all -- so where its content lives is a
+        # question the payload itself has to answer.
+        "payload_keys": sorted(payload),
+        "payload_field_sizes": {
+            k: len(json.dumps(v)) for k, v in sorted(payload.items())},
         "tool_response_type": type(tool_response).__name__,
         "tool_response_keys": (sorted(tool_response)
                                if isinstance(tool_response, dict) else None),
@@ -108,6 +139,21 @@ def observe(payload: dict) -> dict:
         "sentinel_claims_body_bytes": int(sentinel.group(2)) if sentinel else None,
         "sentinel_body_sha256": sentinel.group(3) if sentinel else None,
     }
+
+    # stdout and stderr measured independently and identically. A cap that
+    # applies to one is not evidence about the other, and for a scratch
+    # script that dies the traceback on stderr IS the record worth keeping.
+    if isinstance(tool_response, dict):
+        record["stdout"] = analyse(tool_response.get("stdout") or "")
+        record["stderr"] = analyse(tool_response.get("stderr") or "")
+
+    # PostToolUseFailure carries no `tool_response` at all; the output of the
+    # call that died arrives under `error` instead, and nothing is persisted
+    # to disk. Measured separately because that asymmetry is the whole reason
+    # capture cannot rely on a single post-hoc event.
+    err_field = payload.get("error")
+    record["error_len"] = len(err_field) if isinstance(err_field, str) else None
+    record["error"] = analyse(err_field) if isinstance(err_field, str) else None
 
     # The escape hatch. When stdout exceeds the inline cap the harness
     # persists the full output to a file and names it here, so a hook can
