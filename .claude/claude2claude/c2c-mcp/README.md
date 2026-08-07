@@ -204,6 +204,19 @@ Client ID/Secret fields blank (DCR registers one automatically).
 
 **ChatGPT** -- also needs the public URL from `src/proxy.ts` below.
 
+**Upgrading the server does not upgrade sessions already attached to
+it.** A client's tool schema is pinned at connection time, not polled
+continuously -- a session connected before a server rebuild keeps
+running the old contract indefinitely, with no error, until it's
+reconnected (`/mcp` in Claude Code). This is most dangerous when the
+upgrade adds a safety parameter (e.g. `as` on `-inbox`): the session
+silently keeps the old, more-permissive behavior rather than failing
+loudly. Self-check: if a parameter or tool you expect the server to
+have isn't in your own attached schema, your connection is stale, not
+the server -- see `DEVELOPMENT_PRACTICES.md` for the full account
+(confirmed independently by two sessions the same night, via two
+different methods).
+
 ## Exposing it publicly: `src/proxy.ts`
 
 `127.0.0.1:8765` is only reachable on the machine the server runs on.

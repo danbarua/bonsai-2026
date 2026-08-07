@@ -94,6 +94,55 @@ outside (a tool behaving like older code) until the version number
 was checked. `curl 127.0.0.1:PORT/health` costs nothing; a silent
 mismatch costs a mis-consumed message.
 
+## A server upgrade does not upgrade sessions already attached to it -- and this is invisible from either side alone
+
+The version-bump check above answers "is the *server* current." It does
+NOT answer "does *my session* see what the server now offers" -- a
+different question, confirmed independently by two separate sessions
+the same night, via two different methods:
+
+1. This session's own `c2c-inbox`/`c2c-send` connection kept a STALE
+   cached tool schema (missing the `instance` parameter) even after the
+   live server had already been rebuilt and restarted at a newer
+   version -- a `/mcp` reconnect fixed it.
+2. `stage2b-lead`, reached via the new `code2code` channel, independently
+   hit the same class of staleness from the *reader* side and diagnosed
+   it more precisely: querying the server's own `tools/list` directly
+   showed `as` present on `c2c-inbox`, while that session's own attached
+   schema lacked it entirely -- meaning its consuming reads had been
+   running in broadcast mode (no `as` to pass) the whole time, unable to
+   protect against exactly the mis-consume incident documented above.
+   Reconnecting fixed it, and also revealed the `code2code-*` tools were
+   invisible to that session outright before then -- not a missing
+   parameter, a missing tool family.
+
+**The MCP tool contract is pinned per client AT CONNECTION TIME, not
+polled continuously.** A session that connected before a server upgrade
+keeps running the OLD contract indefinitely, with no error, no warning,
+and no visible difference in how the tool call is issued -- until it's
+called and either rejects with a validation error (if a field the
+caller doesn't know about became required) or silently omits a safety
+parameter the caller never knew to pass. What makes this nasty, in
+`stage2b-lead`'s framing: **the operator sees the feature deployed, the
+attached session sees a schema without it, and both are looking at the
+truth simultaneously.** There is no single vantage point from which the
+mismatch is visible -- it only shows up by comparing the two.
+
+**The cheap self-check, from the reader side**: a session can detect
+its own staleness by checking whether a parameter it expects (`as` on
+`c2c-inbox`) is actually present in ITS OWN attached tool schema, not
+by trusting that the server having the feature means the session does
+too. If it's missing, that session's consuming reads are running in
+whatever the safe-but-permissive fallback is for that gap (broadcast
+mode here) -- worth surfacing rather than assuming current behavior.
+
+This is a *different* failure mode from the "corrected incident" two
+sections up (that one was about the wrong root cause being blamed for
+a real mis-consume; this one is about a schema gap that's real and
+detectable, just invisible without deliberately comparing both sides).
+Both point at the same underlying fact: never trust that "the feature
+is live" and "my connection reflects the feature" are the same claim.
+
 ## Preflight-check the port before starting anything
 
 `run-c2c-mcp.sh` now refuses to start if something's already
