@@ -213,12 +213,22 @@ def main(argv=None):
     # recorded tail count exactly. Same conclusion from a different
     # direction -- if the digests agree but this moves, the comparison is
     # not looking at the rows it believes it is.
+    # The constant is pinned against the BASELINE ARTIFACT first, not only
+    # against prose. `old["deltas"]` is already loaded, so a count read out
+    # of FINDINGS and never checked against the file it describes would be
+    # a hand-maintained number standing in for a derivable one -- the shape
+    # of bug this project keeps producing (principle 21).
+    baseline_nonzero = int(np.count_nonzero(np.asarray(old["deltas"]) > 0.0))
+    constant_ok = baseline_nonzero == BASELINE_TAIL_NONZERO
+    print(f"\n  baseline artifact tail: {baseline_nonzero} nonzero final-Delta, "
+          f"BASELINE_TAIL_NONZERO declares {BASELINE_TAIL_NONZERO} "
+          f"-> {'MATCH' if constant_ok else 'MISMATCH'}")
     subset_deltas = np.asarray(new["deltas"])[rows]
     subset_nonzero = int(np.count_nonzero(subset_deltas > 0.0))
-    tail_ok = subset_nonzero == BASELINE_TAIL_NONZERO
-    print(f"\n  fit-side tail cross-check: {subset_nonzero} nonzero final-Delta "
-          f"in the aligned subset, FINDINGS records {BASELINE_TAIL_NONZERO} "
-          f"-> {'MATCH' if tail_ok else 'MISMATCH'}")
+    tail_ok = subset_nonzero == BASELINE_TAIL_NONZERO and constant_ok
+    print(f"  regenerated subset tail: {subset_nonzero} nonzero final-Delta "
+          f"in the aligned subset -> "
+          f"{'MATCH' if subset_nonzero == BASELINE_TAIL_NONZERO else 'MISMATCH'}")
 
     print("\n-- Part 2: the 6,000 validation images, NEW evidence")
     summary = json.loads(new["summary_json"].item())
@@ -257,8 +267,9 @@ def main(argv=None):
 
     if args.json_out:
         report = {"alignment": alignment, "arrays": findings,
-                  "fit_tail_crosscheck": {"observed": subset_nonzero,
-                                          "recorded": BASELINE_TAIL_NONZERO,
+                  "fit_tail_crosscheck": {"observed_in_regenerated_subset": subset_nonzero,
+                                          "observed_in_baseline_artifact": baseline_nonzero,
+                                          "declared_constant": BASELINE_TAIL_NONZERO,
                                           "match": tail_ok},
                   "validation_tail": val, "fit_tail": fit,
                   "manifest": new_manifest, "passed": ok}

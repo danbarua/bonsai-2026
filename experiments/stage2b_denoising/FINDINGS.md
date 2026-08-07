@@ -804,6 +804,19 @@ side's 2.468e-10. With ten nonzero values, that is a small-sample
 observation about an extreme order statistic and nothing more. Both sit
 far below the ODE solver's `rtol=1e-6`.
 
+### The ARM/x86 stress set now has 89 cases, not 79
+
+`AUDIT_PROTOCOL.md`'s companion section names "the 79 convergence-tail
+stress cases", written when only the 54,000-image artifact existed.
+`COMPANION_PROTOCOLS.md` states the construction as a rule rather than a
+count -- every image with final-Delta > 0 in the regenerated artifact --
+which is now **89**. Both documents are frozen and neither is wrong; the
+rule is what governs, and the count moved because the population did.
+Recorded here so that anyone building the set from the audit protocol
+alone, and arriving at 79, can see why. The 500-case cap frozen in
+`COMPANION_PROTOCOLS.md` before the count was known remains inert, as
+expected.
+
 ## Result
 
 **60,000 official KMNIST training images, 1,200 steps, 9 workers (Darwin
@@ -885,3 +898,16 @@ under it, but no driver READS under it yet -- `ensure_artifact` still
 does not call it, `force=True` still bypasses its trust point, and two
 call sites still download directly. `NEGATIVE_PATH_EVIDENCE.md` records
 that demand as covered-at-the-module-layer and not yet adopted.
+
+**A decision Phase B's Makefile target has to make deliberately.** Two
+definitions of "clean enough to run" now coexist and they disagree. The
+ladder targets refuse on whole-tree `git status --porcelain`; the
+fingerprint refuses on the source closure. This run is the case that
+separates them: the closure check passed, the whole-tree check would
+have refused. Leaving both in place means the guard that actually fires
+is the coarse one -- the one this project concluded was the wrong
+question -- while the sharper one sits behind it never reached. Phase B's
+recipe should gate on the closure and say so in the recipe comment,
+rather than inheriting the porcelain check by copying the stage-1 target.
+Noted here rather than changed unilaterally, because it alters the
+pre-flight on targets that spend money.
