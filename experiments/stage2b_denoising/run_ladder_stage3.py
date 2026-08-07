@@ -498,8 +498,16 @@ def evaluate_probe(measured, elapsed_so_far_s):
     is not yet a guard."""
     proj = probe_projections(measured)
     proj["elapsed_before_probe_s"] = elapsed_so_far_s
-    proj["run_projected_s"] = elapsed_so_far_s + proj["ridge_projected_s"] \
-        + measured.get("other_steps_projected_s", 0.0)
+    # NOT a forecast of total runtime, and named so it cannot be read as
+    # one. The probe runs before the 229 MB encoded-input download, the
+    # evolution and feature steps and the CNN, so none of those are in
+    # here: it is elapsed-so-far plus the ridge projection, which is the
+    # quantity the budget below actually gates. A run that overshoots does
+    # so on the steps this deliberately excludes.
+    proj["elapsed_plus_ridge_projected_s"] = elapsed_so_far_s + proj["ridge_projected_s"]
+    proj["excluded_from_projection"] = [
+        "encoded-input download (~229 MB)", "evolution", "features", "CNN",
+        "stats smoke", "artifact uploads (~3.4 GB)"]
     proj["budgets"] = {
         "ridge_s": PROBE_RIDGE_BUDGET_S,
         "run_s": PROBE_RUN_BUDGET_S,
@@ -512,10 +520,10 @@ def evaluate_probe(measured, elapsed_so_far_s):
             f"projected ridge {proj['ridge_projected_s']:.0f}s exceeds the "
             f"{PROBE_RIDGE_BUDGET_S:.0f}s budget (JAX {proj['jax_projected_s']:.0f}s "
             f"+ sklearn {proj['sklearn_projected_s']:.0f}s)")
-    if proj["run_projected_s"] > PROBE_RUN_BUDGET_S:
+    if proj["elapsed_plus_ridge_projected_s"] > PROBE_RUN_BUDGET_S:
         reasons.append(
-            f"projected run total {proj['run_projected_s']:.0f}s exceeds the "
-            f"{PROBE_RUN_BUDGET_S:.0f}s budget")
+            f"elapsed-plus-ridge {proj['elapsed_plus_ridge_projected_s']:.0f}s "
+            f"exceeds the {PROBE_RUN_BUDGET_S:.0f}s budget")
     peak = proj.get("device_peak_bytes")
     if peak is not None and peak > PROBE_DEVICE_PEAK_BUDGET_BYTES:
         reasons.append(
@@ -581,8 +589,9 @@ def step2b_sizing_probe(mods, record, n_total=EXPECTED_N):
     say("sizing probe projections: JAX "
         f"{proj['jax_projected_s']:.0f}s (x{PROBE_JAX_SVD_COUNT}) + sklearn "
         f"{proj['sklearn_projected_s']:.0f}s (x{PROBE_SKLEARN_FIT_COUNT}) = ridge "
-        f"{proj['ridge_projected_s']:.0f}s; run total "
-        f"{proj['run_projected_s']:.0f}s")
+        f"{proj['ridge_projected_s']:.0f}s; elapsed+ridge "
+        f"{proj['elapsed_plus_ridge_projected_s']:.0f}s "
+        f"(EXCLUDES download, evolution, features, CNN -- not a runtime forecast)")
     if reasons:
         raise Stage3Halt("sizing probe: " + "; ".join(reasons))
     say("sizing probe: within every budget; proceeding")

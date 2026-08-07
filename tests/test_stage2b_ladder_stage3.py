@@ -150,7 +150,7 @@ def test_probe_halts_on_an_over_budget_run_total(driver):
     _proj, reasons = driver.evaluate_probe(
         {"jax_svd_s": 1.0, "sklearn_fit_s": 1.0, "device_peak_bytes": 1024**3},
         driver.PROBE_RUN_BUDGET_S + 1)
-    assert any("run total" in r for r in reasons)
+    assert any("elapsed-plus-ridge" in r for r in reasons)
 
 
 def test_probe_treats_an_unreported_device_peak_as_absent_not_zero(driver):
