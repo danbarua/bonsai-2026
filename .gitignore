@@ -235,7 +235,9 @@ gcp-*-key.json
 # Node.js dependencies (c2c-mcp server)
 node_modules/
 .claude/claude2claude/c2c-mcp/dist-proxy/
+.claude/claude2claude/c2c-mcp/logs/
 
 # c2c-mcp's OAuth HMAC signing key (self-generated on first run, a live
 # credential -- anyone with it can forge access tokens for the connector).
 .claude/claude2claude/c2c-mcp/.data/
+
