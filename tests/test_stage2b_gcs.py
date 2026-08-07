@@ -1826,3 +1826,179 @@ def test_bucket_is_a_required_keyword_argument_everywhere(tmp_path):
         gcs.delete_prefix(gcs.TRAIN_ROOT)
     with pytest.raises(TypeError):
         gcs.ensure_artifact(name, tmp_path / "x.bin", produce=_producer())
+
+
+# ---- artifact manifests: the single validated consume path ----
+#
+# The contract these exercise: an object merely existing is never
+# sufficient evidence that it is resumable. Every test below either
+# demonstrates a refusal that must happen, or a legitimate reuse that must
+# NOT be refused -- both directions matter, because a check that refuses
+# everything is as useless as one that refuses nothing.
+
+import numpy as np                                        # noqa: E402
+import stage2b_fingerprint as fp                          # noqa: E402
+
+
+def _fingerprint(**over):
+    base = {
+        "format": fp.FINGERPRINT_FORMAT,
+        "entrypoint": "experiments/stage2b_denoising/encode_stage3_local.py",
+        "git": {"commit": "a" * 40, "clean": True},
+        "source_manifest": {"experiments/stage2b_denoising/x.py": "d" * 64},
+        "source_manifest_digest": "s" * 64,
+        "config": {"encoder_steps": 1200},
+        "config_digest": "c" * 64,
+        "parents": {},
+        "environment": {"python": "3.14.6", "packages": {}},
+    }
+    base.update(over)
+    return base
+
+
+def _npz_artifact(tmp_path, name="payload.npz", **arrays):
+    path = tmp_path / name
+    np.savez_compressed(path, **(arrays or {"x": np.arange(8, dtype=np.float64)}))
+    return str(path)
+
+
+def _published(bucket, tmp_path, fingerprint=None, **arrays):
+    """A payload uploaded with its manifest beside it, as a real run does."""
+    obj = gcs.object_path(stage=3, condition=None, kind="fixture", ext="npz",
+                          split="train")
+    local = _npz_artifact(tmp_path, **arrays)
+    gcs.upload_file(local, obj, bucket=bucket)
+    manifest = gcs.publish_manifest(local, obj, bucket=bucket,
+                                    fingerprint=fingerprint or _fingerprint())
+    return obj, local, manifest
+
+
+def test_manifest_object_name_is_a_sidecar_of_the_payload():
+    assert gcs.manifest_object_name("a/b/c.npz") == "a/b/c.npz.manifest.json"
+    assert gcs.is_manifest_name(gcs.manifest_object_name("a/b/c.npz"))
+    assert not gcs.is_manifest_name("a/b/c.npz")
+
+
+def test_a_published_artifact_validates_against_its_own_manifest(bucket, tmp_path):
+    obj, local, _ = _published(bucket, tmp_path)
+    manifest, downloaded = gcs.consume_validated(
+        obj, local, bucket=bucket, expected_fingerprint=_fingerprint())
+    assert manifest["payload_sha256"] == fp.sha256_of_file(local)
+    assert downloaded is False               # local file already present
+
+
+def test_a_payload_with_no_manifest_is_refused(bucket, tmp_path):
+    """The core of the contract: existence alone buys nothing."""
+    obj = gcs.object_path(stage=3, condition=None, kind="bare", ext="npz",
+                          split="train")
+    local = _npz_artifact(tmp_path, name="bare.npz")
+    gcs.upload_file(local, obj, bucket=bucket)
+    with pytest.raises(gcs.ManifestMissingError, match="carries no manifest"):
+        gcs.consume_validated(obj, local, bucket=bucket)
+
+
+def test_the_no_manifest_optout_is_explicit_and_permits_pre_contract_artifacts(
+        bucket, tmp_path):
+    """Ladder stages 1 and 2 predate the contract. Their artifacts must stay
+    readable, but only via a named opt-out that greps."""
+    obj = gcs.object_path(stage=1, condition=None, kind="legacy", ext="npz",
+                          split="train")
+    local = _npz_artifact(tmp_path, name="legacy.npz")
+    gcs.upload_file(local, obj, bucket=bucket)
+    manifest, _ = gcs.consume_validated(obj, local, bucket=bucket,
+                                        require_manifest=False)
+    assert manifest is None
+
+
+def test_a_payload_edited_after_publication_is_refused(bucket, tmp_path):
+    """The manifest records the payload's digest; changed bytes must not be
+    accepted just because the object still exists."""
+    obj, local, _ = _published(bucket, tmp_path)
+    np.savez_compressed(local, x=np.arange(8, dtype=np.float64) + 1.0)
+    with pytest.raises(gcs.ManifestMismatchError, match="payload sha256"):
+        gcs.consume_validated(obj, local, bucket=bucket)
+
+
+def test_the_per_array_manifest_is_what_survives_a_container_rewrite(tmp_path):
+    """What the per-array manifest is actually FOR, stated honestly.
+
+    Inside `validate_against_manifest` it is defence-in-depth only: a
+    changed array also changes the whole-payload SHA-256, so the payload
+    check catches that first and the per-array branch never decides
+    anything. (An earlier version of this test asserted the per-array check
+    caught a perturbed value; deleting the per-array comparison entirely
+    left it passing, because the payload digest was doing the work.)
+
+    Its real job is CROSS-FILE comparison -- the Phase A regeneration
+    acceptance test, where two independently written `.npz` files must be
+    judged equal on their scientific content. There the whole-file digest
+    is useless, because `np.savez` embeds timestamps in the zip headers, so
+    identical arrays produce different files."""
+    a = np.linspace(0, 1, 200).reshape(20, 10)
+    first, second = tmp_path / "first.npz", tmp_path / "second.npz"
+    np.savez_compressed(first, x=a, y=np.arange(5))
+    np.savez_compressed(second, x=a, y=np.arange(5))
+
+    # Container bytes are deliberately NOT asserted either way. `npz`
+    # serialization is not SPECIFIED deterministic -- zip headers carry an
+    # mtime at two-second granularity -- so two writes in the same second
+    # usually match while a pair straddling a boundary need not. Measured:
+    # these two are byte-identical, which is exactly why the property must
+    # be recorded rather than tested. Relying on whole-file equality would
+    # pass here and fail intermittently in production.
+    assert fp.compare_array_manifests(fp.array_manifest(first),
+                                      fp.array_manifest(second)) == [], (
+        "identical arrays must compare equal regardless of container bytes")
+
+    # and a real difference is still caught
+    np.savez_compressed(second, x=a + np.nextafter(0.0, 1.0), y=np.arange(5))
+    assert fp.compare_array_manifests(fp.array_manifest(first),
+                                      fp.array_manifest(second)) != []
+
+
+def test_a_fingerprint_from_a_different_config_is_refused(bucket, tmp_path):
+    obj, local, _ = _published(bucket, tmp_path)
+    with pytest.raises(fp.FingerprintMismatch, match="config_digest"):
+        gcs.consume_validated(obj, local, bucket=bucket,
+                              expected_fingerprint=_fingerprint(config_digest="x" * 64))
+
+
+def test_cross_stage_reuse_under_content_only_is_permitted(bucket, tmp_path):
+    """Stage 2 and 3 consume stage 1's topologies deliberately. A policy that
+    refused a different producing commit would break correct behaviour."""
+    obj, local, _ = _published(bucket, tmp_path)
+    other = _fingerprint(config_digest="x" * 64, source_manifest_digest="y" * 64,
+                         git={"commit": "b" * 40, "clean": True})
+    manifest, _ = gcs.consume_validated(obj, local, bucket=bucket,
+                                        expected_fingerprint=other,
+                                        policy=fp.CONTENT_ONLY)
+    assert manifest is not None
+
+
+def test_content_only_still_verifies_the_payload(bucket, tmp_path):
+    """The relaxation is about the PRODUCER, never about the bytes."""
+    obj, local, _ = _published(bucket, tmp_path)
+    np.savez_compressed(local, x=np.arange(8, dtype=np.float64) + 1.0)
+    with pytest.raises(gcs.ManifestMismatchError, match="payload sha256"):
+        gcs.consume_validated(obj, local, bucket=bucket,
+                              expected_fingerprint=_fingerprint(),
+                              policy=fp.CONTENT_ONLY)
+
+
+def test_a_manifest_records_the_payload_generation(bucket, tmp_path):
+    obj, local, manifest = _published(bucket, tmp_path)
+    assert "payload_generation" in manifest
+
+
+def test_a_missing_payload_raises_rather_than_reporting_absence_quietly(bucket, tmp_path):
+    obj = gcs.object_path(stage=3, condition=None, kind="absent", ext="npz",
+                          split="train")
+    with pytest.raises(FileNotFoundError):
+        gcs.consume_validated(obj, str(tmp_path / "nope.npz"), bucket=bucket)
+
+
+def test_the_manifest_sidecar_is_itself_subject_to_the_test_split_guard():
+    """A sidecar name must not become a hole in the split guard."""
+    with pytest.raises(PermissionError):
+        gcs._check_object_path_allowed(
+            gcs.manifest_object_name("stage2b/testsplit/stage4/common/x.npz"), False)

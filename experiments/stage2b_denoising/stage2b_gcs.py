@@ -1324,3 +1324,217 @@ def ensure_artifact(name, local_path, *, produce, bucket, allow_test_split=False
     return StepResult(object_path=name, local_path=local_path, skipped=False,
                       produced=True, uploaded=True, downloaded=False,
                       size_bytes=os.path.getsize(local_path))
+
+
+# =====================================================================
+# Artifact manifests: the single validated consume path
+# =====================================================================
+#
+# **An object merely existing is never sufficient evidence that it is
+# resumable.**
+#
+# `ensure_artifact` above treats existence as proof a step is done, which
+# is what makes a dead session cost one step rather than an afternoon. That
+# same property silently accepts an artifact produced under a different
+# configuration once configuration can change. The manifest is the missing
+# evidence.
+#
+# ## Why a sidecar object rather than blob metadata
+#
+# Both were viable -- verified against the real bucket rather than assumed:
+# custom metadata set on a destination handle BEFORE `compose()` survives
+# composition, and `patch()` works afterwards, so the chunked route could
+# have carried it. A sidecar was chosen anyway, for two reasons. GCS custom
+# metadata is size-limited and a source manifest grows with the dependency
+# set; and "valid only when payload and manifest both exist and agree" is
+# expressed directly by two objects, where a half-published artifact is
+# detectably incomplete rather than merely odd.
+#
+# ## Publication order is the atomicity mechanism
+#
+# Payload first, then the manifest recording that payload's digest AND the
+# GCS generation it had at publication. A reader requires both, so a run
+# that died between the two writes leaves an artifact that is refused, not
+# one that is silently trusted. If the payload is later overwritten its
+# generation changes and the recorded generation no longer matches, which
+# is detected on the next consume.
+
+FINGERPRINT_AVAILABLE = True
+try:                                            # pragma: no cover - import shape
+    import stage2b_fingerprint as _fp
+except ImportError:                             # pragma: no cover
+    FINGERPRINT_AVAILABLE = False
+    _fp = None
+
+MANIFEST_SUFFIX = ".manifest.json"
+MANIFEST_FORMAT = "stage2b-artifact-manifest/1"
+
+
+class ManifestMissingError(OSError):
+    """A payload exists with no manifest beside it.
+
+    Distinct from a mismatch: this means the artifact carries no evidence
+    of what produced it, which under the fingerprint contract is a refusal
+    rather than a reason to fall back on trusting it."""
+
+
+class ManifestMismatchError(OSError):
+    """A manifest and its payload disagree, or the recorded fingerprint is
+    not what this run expects."""
+
+
+def manifest_object_name(payload_name):
+    """The sidecar manifest's object name for a payload."""
+    return f"{payload_name}{MANIFEST_SUFFIX}"
+
+
+def is_manifest_name(name):
+    return str(name).endswith(MANIFEST_SUFFIX)
+
+
+def build_manifest(local_path, *, object_name, fingerprint, parents=None,
+                   generation=None):
+    """The manifest recorded beside a payload.
+
+    `arrays` is per-array dtype/shape/SHA-256 for `.npz` payloads. It is
+    recorded in addition to the whole-payload digest because the whole-file
+    digest is the WRONG test for that container: `np.savez` writes a zip
+    whose headers embed timestamps, so two runs producing bit-identical
+    arrays produce different files. The per-array digests are what a
+    regeneration is actually compared on."""
+    manifest = {
+        "format": MANIFEST_FORMAT,
+        "object_path": object_name,
+        "payload_sha256": _fp.sha256_of_file(local_path),
+        "payload_crc32c": crc32c_of_file(local_path),
+        "payload_size": os.path.getsize(local_path),
+        "payload_generation": generation,
+        "fingerprint": fingerprint,
+        "parents": dict(parents or {}),
+    }
+    if str(local_path).endswith(".npz"):
+        try:
+            manifest["arrays"] = _fp.array_manifest(local_path)
+        except Exception as exc:               # noqa: BLE001 - recorded, not fatal
+            manifest["arrays_error"] = f"{type(exc).__name__}: {exc}"
+    return manifest
+
+
+def publish_manifest(local_path, object_name, *, bucket, fingerprint,
+                     parents=None, allow_test_split=False):
+    """Write the manifest sidecar for an already-uploaded payload.
+
+    Reads the payload's generation from the bucket first, so the manifest
+    records the exact object version it describes."""
+    blob = bucket.blob(object_name)
+    generation = None
+    reload_ = getattr(blob, "reload", None)
+    if callable(reload_):
+        try:
+            reload_()
+            generation = getattr(blob, "generation", None)
+        except Exception:                      # noqa: BLE001 - generation is optional
+            generation = None
+    manifest = build_manifest(local_path, object_name=object_name,
+                              fingerprint=fingerprint, parents=parents,
+                              generation=generation)
+    payload = json.dumps(manifest, indent=2, sort_keys=True, default=str)
+    name = manifest_object_name(object_name)
+    _check_object_path_allowed(name, allow_test_split)
+    bucket.blob(name).upload_from_string(payload.encode("utf-8"),
+                                         content_type="application/json")
+    return manifest
+
+
+def read_manifest(object_name, *, bucket, allow_test_split=False):
+    """The recorded manifest for a payload, or None if there is none."""
+    name = manifest_object_name(object_name)
+    _check_object_path_allowed(name, allow_test_split)
+    blob = bucket.blob(name)
+    if not blob.exists():
+        return None
+    import tempfile
+    with tempfile.TemporaryDirectory() as tmp:
+        path = os.path.join(tmp, "manifest.json")
+        blob.download_to_filename(path)
+        with open(path, "r", encoding="utf-8") as handle:
+            return json.load(handle)
+
+
+def validate_against_manifest(local_path, object_name, *, manifest,
+                              expected_fingerprint=None, policy=None):
+    """The one place a manifest is checked against a payload.
+
+    Recomputes the payload digest from the local bytes rather than trusting
+    anything recorded, compares the per-array manifest where present, and
+    only then compares the producer fingerprint under `policy`. Raises
+    `ManifestMismatchError` naming every disagreement; returns the manifest
+    on success."""
+    problems = []
+    if manifest.get("format") != MANIFEST_FORMAT:
+        problems.append(f"manifest format {manifest.get('format')!r} "
+                        f"!= {MANIFEST_FORMAT!r}")
+    recorded = manifest.get("payload_sha256")
+    computed = _fp.sha256_of_file(local_path)
+    if recorded != computed:
+        problems.append(f"payload sha256: manifest {recorded!r} != local {computed!r}")
+    if "arrays" in manifest and str(local_path).endswith(".npz"):
+        problems += _fp.compare_array_manifests(manifest["arrays"],
+                                                _fp.array_manifest(local_path))
+    if problems:
+        raise ManifestMismatchError(
+            f"{object_name!r} does not match its recorded manifest. An object "
+            f"merely existing is never sufficient evidence that it is resumable.\n  "
+            + "\n  ".join(problems))
+    if expected_fingerprint is not None:
+        _fp.require_match(manifest.get("fingerprint") or {}, expected_fingerprint,
+                          name=object_name, policy=policy or _fp.STRICT)
+    return manifest
+
+
+def consume_validated(object_name, local_path, *, bucket, expected_fingerprint=None,
+                      policy=None, allow_test_split=False, verify_content=True,
+                      require_manifest=True):
+    """THE central validated consume path. Every read of an existing
+    artifact goes through here -- `ensure_artifact`'s skip branch, report
+    steps, and the drivers' direct downloads alike.
+
+    A raw `download_file` reaches bytes without ever consulting a manifest,
+    which is exactly the bypass the contract exists to close; call sites
+    that need an existing artifact call this instead.
+
+    `require_manifest=False` is the named, greppable opt-out for artifacts
+    written BEFORE the fingerprint contract existed (ladder stages 1 and 2).
+    Their configurations are fixed history, recorded in their own run
+    reports, and retrofitting manifests onto them would fabricate
+    provenance rather than record it."""
+    _check_object_path_allowed(object_name, allow_test_split)
+    if not object_exists(object_name, bucket=bucket, allow_test_split=allow_test_split):
+        raise FileNotFoundError(f"{object_name!r} does not exist in {bucket.name!r}")
+
+    manifest = read_manifest(object_name, bucket=bucket, allow_test_split=allow_test_split)
+    if manifest is None:
+        if require_manifest:
+            raise ManifestMissingError(
+                f"{object_name!r} exists but carries no manifest at "
+                f"{manifest_object_name(object_name)!r}. Under the fingerprint "
+                f"contract an artifact without recorded provenance is refused: an "
+                f"object merely existing is never sufficient evidence that it is "
+                f"resumable. Pass require_manifest=False, deliberately, only for "
+                f"artifacts written before the contract existed.")
+        downloaded = False
+        if not os.path.isfile(local_path):
+            download_file(object_name, local_path, bucket=bucket,
+                          allow_test_split=allow_test_split,
+                          verify_content=verify_content)
+            downloaded = True
+        return None, downloaded
+
+    downloaded = False
+    if not os.path.isfile(local_path):
+        download_file(object_name, local_path, bucket=bucket,
+                      allow_test_split=allow_test_split, verify_content=verify_content)
+        downloaded = True
+    validate_against_manifest(local_path, object_name, manifest=manifest,
+                              expected_fingerprint=expected_fingerprint, policy=policy)
+    return manifest, downloaded

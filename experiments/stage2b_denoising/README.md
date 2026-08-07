@@ -68,7 +68,17 @@ mention here, in the same commit that creates it.
 - **`stage2b_gcs.py`** — artifact transport: object paths, the
   test-split guards, idempotent `ensure_artifact`, chunked checkpointed
   upload that resumes after a process death, and content verification on
-  every transfer.
+  every transfer. It also carries the sidecar-manifest layer —
+  `publish_manifest` alongside each artifact, and `consume_validated` as
+  the one validated read path — so an artifact's provenance travels next
+  to it rather than inside it.
+- **`stage2b_fingerprint.py`** — what "the same code produced this" means
+  here: the union of the static and runtime import closures over the
+  scientific source files, hashed, established before a run and
+  revalidated after it. `ConsumePolicy` selects which fields must match
+  for a given artifact kind, because stage 2 legitimately reuses stage
+  1's topologies under a different commit; `array_manifest` pins the
+  payload itself, per array, by dtype/shape/SHA-256.
 
 **The feasibility ladder:**
 
@@ -325,7 +335,8 @@ make test                      # the whole repository suite
 
 | file | covers |
 |---|---|
-| `test_stage2b_gcs.py` | transport, guards, chunked resumable upload, content verification |
+| `test_stage2b_gcs.py` | transport, guards, chunked resumable upload, content verification, the sidecar manifest and validated consume path |
+| `test_stage2b_fingerprint.py` | static ∪ runtime import closure, dirty-tree and revalidation refusals, per-kind consume policies, per-array payload manifests |
 | `test_stage2b_cnn.py` | architecture, shared masking, training loop |
 | `test_stage2b_stats.py` | sign-flip, Holm families, winner rule |
 | `test_stage2b_ridge.py` | SVD ridge vs sklearn oracle, alpha selection, the n-dependent centering tolerance |
