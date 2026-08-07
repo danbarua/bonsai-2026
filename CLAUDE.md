@@ -34,6 +34,15 @@ where a shared, hardened library actually earns its cost.
   taxonomy, and what actually caught each one. Principles 10, 20 and 21
   are the rules distilled from it; that document is the evidence they
   came from and the place to add the next incident.
+- **`docs/MULTI_AGENT_PRACTICE.md`** -- the OPERATIONAL counterpart to
+  the methodological principles below: how to run this work across
+  several agents that cannot see each other, on localhost and on
+  ephemeral metered cloud. Coordination (convergence is declared by the
+  reviewer, not the responder; a summary borrows authority its source
+  never granted), ephemeral compute (nothing survives a dead session but
+  a commit; teardown is unconditional and its status is read), and
+  artifacts as the only durable interface between agents. Read it before
+  driving a cloud session or delegating to a subagent.
 - **`benchmark_programme/`** -- the CLOSED benchmark-feature programme
   (does oscillator dynamics produce useful exported classifier
   features? -- answered, largely negatively, see PROJECT_MEMORY.md Part
