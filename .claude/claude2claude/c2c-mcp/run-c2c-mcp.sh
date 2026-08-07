@@ -27,7 +27,9 @@ trap 'echo -e "\n🛑 Stopping services..."; kill $DEV_PID 2>/dev/null; exit 0' 
 echo "🚀 Starting local server on port $C2C_MCP_PORT..."
 # 2. Run npm dev in the background and save its process ID (PID)
 mkdir -p ./logs
-npm run dev >./logs/stdout.log 2>./logs/err.log &
+# #npm run dev >./logs/stdout.log 2>./logs/err.log &
+npm run build
+npm run dist/index.js >./logs/stdout.log 2>./logs/err.log &
 DEV_PID=$!
 
 # 3. Poll /health instead of a blind sleep -- a fixed sleep either wastes
