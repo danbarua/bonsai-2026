@@ -151,11 +151,23 @@ Specifics worth keeping:
 | `PostToolUse` | same | Write the `close` record: output (from `persistedOutputPath` when named, else inline), fidelity flag, duration. |
 | `PostToolUseFailure` | same | Write the `close` record with `outcome: failed`, the capped `error` text, and `fidelity: elided`. |
 
-Registration goes in a **committed `.claude/settings.json`**. This project
-currently has none — only a gitignored `.claude/settings.local.json`, which
-is per-machine and invisible to other agents. Capture that only runs on one
-machine is not infrastructure. Adding that file is part of implementing
-this design and is called out because it is a new shared surface.
+Registration goes in the committed `.claude/settings.json` — which now
+**exists**, shipped at `3ec12ad` on `stage2b` by the c2c-mail hooks. An
+earlier draft of this document said the project had none; that was true at
+the time of branching and is no longer.
+
+The consequence is a rule, not a footnote: **merge into that file, never
+create or clobber it.** Two tracks now write it, so the collision is a
+named risk any PR here must handle explicitly, and rebasing against current
+`stage2b` before building is the standing discipline.
+
+The c2c-mail hooks in `.claude/hooks/c2c-mail/` are the layout convention
+this feature follows: a per-feature directory, shared logic in `lib/`,
+`test/` holding break-tests that run each hook against synthetic stdin
+under throwaway environment overrides, and a README recording design
+decisions and the incidents behind them. Capture departs on one point only
+— it is written in Python rather than bash, because it needs shell-aware
+tokenising, heredoc extraction, and a predicate importable by pytest.
 
 Narrowing uses the `if` field (permission-rule syntax) so the hook process
 is not spawned on every tool call:
@@ -224,7 +236,15 @@ record per invocation, one `close` record joined to it by `tool_use_id`.
   "cwd": "...",
   "git": {"commit": "15fa025...", "branch": "infra-tooling", "dirty": true},
   "tool_name": "Bash",
-  "trigger_reason": "python -c inline code",  // which predicate clause fired
+  "trigger_reason": "inline_c",               // which predicate rule fired
+  // What executed it, where knowable. A capture recording WHAT ran but not
+  // WHICH VERSION ran it inherits the same skew blindness it exists to
+  // close -- the c2c track lost a message to exactly that gap (a deployment
+  // silently lacking a feature the caller assumed present), and a GPU number
+  // from an older mighty-colab or a different CUDA build is a different
+  // number. Absent rather than guessed when it cannot be determined.
+  "executor": {"tool": "mighty-colab", "version": "0.5.0",
+               "endpoint": "colab:gpu1", "resolved_from": "--version"},
   "script": {
     "text": "...",                            // the code, in full
     "source": "inline_c | heredoc | file_snapshot | stdin_pipe",
@@ -296,8 +316,32 @@ Three rules, each with a mechanism rather than an exhortation:
    verifier in §5 explicitly rejects capture-ID-shaped tokens where a
    citation is required, and has a break-test proving it rejects them.
 
-Retention: prune by age, not by size, so the log cannot silently lose the
-oldest and most-likely-to-matter records first.
+### 3.5.1 Storage and death model
+
+Stated explicitly, because a forensic log with an unexamined lifecycle is
+the failure it was built to prevent, one level up.
+
+- **Where.** `.provenance/runs/<session_id>/` in the working tree, holding
+  `capture.jsonl` plus a content-addressed `blobs/` directory. In the
+  working tree rather than under `~/.claude/` so that a worktree's captures
+  travel with the worktree and die with it, and so `git status` never shows
+  them (the path is gitignored).
+- **How big.** Blobs are content-addressed, so re-running the same script
+  fifty times costs one copy. Output blobs are capped: above a ceiling the
+  record keeps head, tail, digest and true size rather than the whole
+  payload, and says so in `fidelity`. The ceiling is a parameter, not yet
+  measured — see the open questions.
+- **How it dies.** Pruned **by age, never by size.** A size-capped log
+  evicts its oldest records first, which are exactly the ones whose
+  generator is most likely already gone — the failure mode inverted. Age
+  pruning removes records whose window for mattering has closed.
+- **What deletes it.** Nothing automatic on session end. A session that
+  dies mid-run is the case this exists for, so teardown must not be
+  entangled with it. Pruning is a separate, idempotent pass.
+- **What must never read it.** Any committed artifact. The log is a leaf
+  (§3.5), and `.provenance/` being gitignored is the mechanism: no
+  derivation from it can be committed without the derivation being visible
+  in a diff.
 
 ### 3.6 Non-goals, held literally
 
@@ -465,9 +509,18 @@ Built and measured: the payload probe (`tools/provenance/`).
 
 Proposed order, smallest first, each landing with its break-tests:
 
-1. `is_scratch` predicate + corpus test — no hooks, pure function.
-2. Capture hook (Pre/Post/Failure) + committed `.claude/settings.json`.
-3. Classification skill + durable-doc `PreToolUse` hook.
+1. ~~`is_scratch` predicate + corpus test — no hooks, pure function.~~
+   **Done** — `.claude/hooks/provenance-capture/scratch_predicate.py`,
+   `tests/test_provenance_capture.py`.
+2. Capture hook (Pre/Post/Failure), merged into `.claude/settings.json`.
+   **Authorized to build.** Conditions attached to that authorization:
+   fail-open proven by break-test (missing log directory, unwritable disk
+   and malformed input must each pass silently, never block), and the
+   storage/death model above stated — which §3.5.1 now does.
+3. Classification skill + durable-doc `PreToolUse` hook. **Held**, on
+   sequencing rather than merit: it changes behavior inside science-track
+   sessions at a moment when those sessions are gated on writing FINDINGS.
+   It lands with the verifier round, after the current gates clear.
 4. Citation verifier — the largest, and the one most improved by having
    the first three in use first.
 
