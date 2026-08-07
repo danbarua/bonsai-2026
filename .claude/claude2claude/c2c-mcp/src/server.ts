@@ -74,7 +74,11 @@ function registerChannelTools(server: McpServer, cfg: ChannelToolConfig): void {
         `gets a -2, -3, ... suffix. Pass \`to\` to address this message to one specific session ` +
         `(e.g. a name from the code-sessions tool) rather than broadcasting to whichever reader ` +
         `gets there first -- an addressed message is skipped (left unread, not consumed) by any ` +
-        `-inbox call passing a different \`as\` name.`,
+        `-inbox call passing a different \`as\` name. Pass \`instance\` when sending as ` +
+        `"claude-code" to say WHICH Claude Code session wrote it (its \`/rename\`-set name -- ` +
+        `see code-sessions -- never a raw session_id, which is an opaque GUID) -- a PreToolUse ` +
+        `hook surfaces this session's own name as additional context right before this tool is ` +
+        `called, specifically so it can be passed here.`,
       inputSchema: {
         sender: z
           .enum(allRoles)
@@ -88,30 +92,48 @@ function registerChannelTools(server: McpServer, cfg: ChannelToolConfig): void {
               "Omit to broadcast (any reader may consume it) -- the default, and the only " +
               "behavior that existed before addressing was added.",
           ),
+        instance: z
+          .string()
+          .optional()
+          .describe(
+            "Which Claude Code session sent this (its /rename-set name, e.g. from " +
+              "code-sessions or the PreToolUse hook's additionalContext) -- meaningful when " +
+              "sender is \"claude-code\", since multiple Code sessions can share this mailbox. " +
+              "Omit if unknown or not applicable.",
+          ),
       },
       outputSchema: {
         filename: z.string().describe("The written message's filename."),
         path: z.string().describe("Absolute path to the written file."),
         directory: z.enum(["inbox", "outbox"]).describe("Which directory it landed in."),
         to: z.string().optional().describe("The addressee, if this message was addressed."),
+        instance: z.string().optional().describe("The sending Claude Code session's name, if provided."),
       },
     },
-    async ({ sender, content, to }) => {
+    async ({ sender, content, to, instance }) => {
       const dir = isCodeRole(sender) ? cfg.channel.outbox : cfg.channel.inbox;
       const dirName = isCodeRole(sender) ? "outbox" : "inbox";
-      const result = await sendMessage(dir, sender, content, to);
+      const result = await sendMessage(dir, sender, content, to, instance);
       const addressing = to ? ` (addressed to ${to})` : "";
-      const structuredContent: { filename: string; path: string; directory: "inbox" | "outbox"; to?: string } = {
+      const instanceNote = instance ? ` (from instance ${instance})` : "";
+      const structuredContent: {
+        filename: string;
+        path: string;
+        directory: "inbox" | "outbox";
+        to?: string;
+        instance?: string;
+      } = {
         filename: result.filename,
         path: result.path,
         directory: dirName,
         ...(to ? { to } : {}),
+        ...(instance ? { instance } : {}),
       };
       return {
         content: [
           {
             type: "text",
-            text: `Wrote ${cfg.channelLabel} ${dirName} message: ${result.filename}${addressing}`,
+            text: `Wrote ${cfg.channelLabel} ${dirName} message: ${result.filename}${addressing}${instanceNote}`,
           },
         ],
         structuredContent,
@@ -198,7 +220,8 @@ function registerChannelTools(server: McpServer, cfg: ChannelToolConfig): void {
       const body = messages
         .map((m) => {
           const addressing = m.to ? ` (to: ${m.to})` : "";
-          return `### ${m.filename}${addressing}\n\n${m.content.trim()}`;
+          const instanceNote = m.instance ? ` (instance: ${m.instance})` : "";
+          return `### ${m.filename}${addressing}${instanceNote}\n\n${m.content.trim()}`;
         })
         .join("\n\n---\n\n");
       return {

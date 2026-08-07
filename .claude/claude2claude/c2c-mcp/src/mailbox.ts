@@ -81,6 +81,20 @@ function timestampIso(date: Date): string {
   return date.toISOString().replace(/\.\d{3}Z$/, "Z");
 }
 
+// Slugifies a Claude Code session name (which may contain spaces or other
+// non-filename-friendly characters -- session names aren't restricted to
+// the kebab-case convention some users happen to follow) for use as a
+// filename component: lowercase, non-alphanumeric runs collapsed to a
+// single hyphen, leading/trailing hyphens stripped. Returns "" (not a
+// bare "-") if nothing alphanumeric survives, so the caller can tell
+// "no usable slug" apart from "a slug that happens to be a hyphen."
+function slugify(name: string): string {
+  return name
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, "-")
+    .replace(/^-+|-+$/g, "");
+}
+
 export interface SendResult {
   filename: string;
   path: string;
@@ -92,6 +106,23 @@ export interface SendResult {
  * Filename collisions (two sends in the same second) are resolved with a
  * `-2`, `-3`, ... suffix, using an atomic exclusive-create so concurrent
  * callers can't race each other onto the same filename.
+ *
+ * `instance` is the sending Claude Code session's `/rename`-set name (never
+ * its raw session_id -- that's an opaque GUID, not useful to a reader; see
+ * `.claude/hooks/c2c-mail/pre-c2c-mcp.sh`, which resolves and surfaces this
+ * name to the model before every c2c-mcp call specifically so it can be
+ * passed here). When set, it's appended to the header as `· instance:
+ * <name>` (parsed back out by `parseInstance` below, exact/unslugified)
+ * AND, slugified, to the FILENAME itself -- e.g.
+ * `2026-08-07T21-30-00Z-c2c-implementation.md` -- so a reader can filter
+ * by sender with a plain `ls`/glob, no file reads needed. Session names
+ * aren't restricted to filename-safe characters (spaces are allowed), so
+ * the filename component is always slugified (`slugify` above); the
+ * header keeps the exact original name for display. Appended AFTER the
+ * timestamp, never before, so filenames still sort chronologically first
+ * -- `readMailbox`/`c2c_list_unread`'s oldest-first ordering depends on
+ * plain lexicographic sort staying aligned with time. Distinct from `to`
+ * (below): `instance` says who SENT it, `to` says who it's addressed to.
  *
  * `to` is optional addressing (a specific session's `/rename`-set name,
  * e.g. from the `code-sessions` tool): when set, it's appended to the
@@ -105,12 +136,15 @@ export async function sendMessage(
   sender: string,
   content: string,
   to?: string,
+  instance?: string,
 ): Promise<SendResult> {
   await ensureDir(dir);
   const now = new Date();
-  const base = timestampFilename(now);
+  const instanceSlug = instance ? slugify(instance) : "";
+  const base = timestampFilename(now) + (instanceSlug ? `-${instanceSlug}` : "");
+  const instancePart = instance ? ` · instance: ${instance}` : "";
   const toPart = to ? ` · to: ${to}` : "";
-  const header = `<!-- from: ${sender} · ${timestampIso(now)}${toPart} -->\n\n`;
+  const header = `<!-- from: ${sender} · ${timestampIso(now)}${instancePart}${toPart} -->\n\n`;
   const body = content.endsWith("\n") ? content : `${content}\n`;
   const data = header + body;
 
@@ -135,6 +169,7 @@ export interface InboxMessage {
   filename: string;
   content: string;
   to?: string;
+  instance?: string;
 }
 
 // Extracts the optional "to: <name>" addressee from a message's header
@@ -148,6 +183,18 @@ export function parseAddressee(content: string): string | undefined {
   const firstLine = content.split("\n", 1)[0];
   const beforeClose = firstLine.split("-->", 1)[0];
   const match = /to:\s*(\S+)/i.exec(beforeClose);
+  return match ? match[1] : undefined;
+}
+
+// Extracts the optional "instance: <name>" sender identity from a
+// message's header comment, the same way parseAddressee extracts "to:".
+// Undefined means the sender didn't provide one (older messages, or a
+// sender role -- claude-desktop, chatgpt -- that isn't itself
+// multi-instance in the way Claude Code sessions are).
+export function parseInstance(content: string): string | undefined {
+  const firstLine = content.split("\n", 1)[0];
+  const beforeClose = firstLine.split("-->", 1)[0];
+  const match = /instance:\s*(\S+)/i.exec(beforeClose);
   return match ? match[1] : undefined;
 }
 
@@ -195,13 +242,14 @@ export async function readMailbox(
     const filePath = path.join(sourceDir, filename);
     const content = await fs.readFile(filePath, "utf8");
     const to = parseAddressee(content);
+    const instance = parseInstance(content);
 
     if (archive && asName && to && to !== asName) {
       skipped.push(filename); // addressed to someone else: leave it in place, unconsumed
       continue;
     }
 
-    messages.push({ filename, content, to });
+    messages.push({ filename, content, to, instance });
     if (archive) {
       await ensureDir(archiveDir);
       await fs.rename(filePath, path.join(archiveDir, filename));

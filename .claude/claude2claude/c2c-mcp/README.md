@@ -54,6 +54,22 @@ generated from `sender` and the current UTC time. A same-second
 filename collision gets a `-2`, `-3`, ... suffix rather than
 overwriting anything.
 
+Pass `instance` on `-send` when `sender` is `"claude-code"` to say
+*which* Claude Code session sent it (its `/rename`-set name, e.g. from
+`code-sessions` -- never the raw `session_id`, an opaque GUID not
+useful to a reader). `.claude/hooks/c2c-mail/pre-c2c-mcp.sh` resolves
+and surfaces this session's own name as `additionalContext` right
+before every c2c-mcp tool call, specifically so it can be passed here.
+`instance` shows up three places: the exact name in the header comment
+(`· instance: <name>`), a slugified version appended to the *filename*
+itself (`2026-08-07T21-30-00Z-c2c-implementation.md`, spaces and other
+non-filename characters collapsed to hyphens) so a reader can filter
+by sender with a plain `ls`/glob without opening any files, and in
+`-inbox`'s response (both the `(instance: <name>)` text annotation and
+`structuredContent`). Omit it and nothing changes from before this
+field existed -- no `instance:` in the header, no slug in the
+filename.
+
 `-inbox`'s `archive` (default `true`) moves each returned message to
 `archive/` after reading, matching the existing c2c protocol (both
 sides archive what they read, since Desktop's filesystem connector can
