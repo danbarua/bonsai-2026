@@ -249,3 +249,7 @@ node_modules/
 # leading slash, so it also matches .claude/hooks/c2c-mail/lib/ -- real
 # tracked shell code, not a packaging artifact. Un-ignore it explicitly.
 !.claude/hooks/c2c-mail/lib/
+
+# Provenance probe scratch: generated settings + observation logs from
+# tools/provenance/run_truncation_probe.py. Regenerable by running it.
+.provenance/

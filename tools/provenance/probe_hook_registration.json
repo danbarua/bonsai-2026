@@ -1,0 +1,34 @@
+{
+  "_comment": [
+    "Registration fixture for probe_hook_payload.py. `.claude/settings.local.json`",
+    "is gitignored, so the live registration is not a committed artifact -- this",
+    "file is, which is what makes the truncation measurement reproducible rather",
+    "than a step somebody has to reconstruct from a chat log.",
+    "",
+    "To reproduce the measurement:",
+    "  1. Merge the `hooks` block below into `.claude/settings.local.json`,",
+    "     replacing ${CLAUDE_PROJECT_DIR} if your harness does not expand it.",
+    "  2. Ask the agent to run, as separate Bash tool calls:",
+    "       uv run python tools/provenance/emit_bytes.py --bytes N",
+    "     for N in 1000, 50000, 200000, 1000000.",
+    "  3. Read .provenance/probe_payload.jsonl.",
+    "  4. Remove the block again -- it is a probe, not standing infrastructure.",
+    "",
+    "The `if` clause narrows to the probe command; the hook ALSO self-filters on",
+    "the same marker, because this settings file is read by a parallel session."
+  ],
+  "hooks": {
+    "PostToolUse": [
+      {
+        "matcher": "Bash",
+        "hooks": [
+          {
+            "type": "command",
+            "if": "Bash(*tools/provenance/emit_bytes.py*)",
+            "command": "uv run python ${CLAUDE_PROJECT_DIR}/tools/provenance/probe_hook_payload.py"
+          }
+        ]
+      }
+    ]
+  }
+}
