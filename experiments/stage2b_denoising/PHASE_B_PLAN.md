@@ -98,28 +98,50 @@ was committed", and only the second is structural.
 ### Retention, measured rather than assumed
 
 Generation-pinning protects against races but not against later
-re-fetchability unless the bucket retains superseded generations. Probed
-directly against `bonsai-2026-stage2b-cache` on 2026-08-07, on a scratch
-object deleted afterwards:
+re-fetchability unless the bucket retains superseded generations. Measured
+against `bonsai-2026-stage2b-cache` on 2026-08-07, two ways — the bucket's
+declared config via `gcloud`, and live probes on scratch objects deleted
+afterwards:
 
-| question | finding |
-|---|---|
-| can a current generation be pinned and read? | **yes** — 5,366 bytes fetched at an explicit generation |
-| is a superseded generation retrievable? | **no** — `NotFound`. Object versioning is OFF |
-| does the service actually refuse a stale precondition? | **yes** — `PreconditionFailed` |
-| is `versioning_enabled` readable directly? | **no** — the pipeline's service account lacks `storage.buckets.get` (403), so the finding rests on behaviour rather than on the bucket's declared config |
+| question | finding | how established |
+|---|---|---|
+| can a current generation be pinned and read? | **yes** — 5,366 bytes at an explicit generation | live probe |
+| is object versioning enabled? | **no** | `gcloud storage buckets describe` returns no `versioning` key, and a pinned read of a superseded generation 404s |
+| does the service refuse a stale precondition? | **yes** — `PreconditionFailed` | live probe |
+| are superseded bytes retained at all? | **yes, for 7 days** — `soft_delete_policy.retentionDurationSeconds: 604800` | `gcloud`, confirmed by listing |
+| is a superseded generation recoverable? | **yes, administratively** — it appears in `list_blobs(soft_deleted=True)` as `<name>#<generation>` | live probe |
+
+**Correcting the first version of this finding.** An earlier probe used
+only a pinned read, got `NotFound`, and concluded the superseded bytes
+were gone. They are not: soft delete retains them for seven days. The
+pinned read 404s because a normal read does not see soft-deleted objects,
+not because nothing is there. The conclusion happened to be right about
+what a *consumer* can do and wrong about what *exists* — which is the
+distinction that matters when the question is "can we diagnose a
+superseded artifact after the fact."
 
 Exact-generation reads **are** guaranteed, so the reviewer's fallback —
 content-addressed names becoming mandatory — is **not** triggered. The
-honest declaration, adopted:
+declaration, revised:
 
 > Artifacts are **immutable by policy**, enforced by preconditions. A
 > superseded generation is a **halt-worthy anomaly** detected by a failed
-> pinned read or a digest mismatch, not a supported operation. Durable
-> re-fetch of superseded payloads is **out of scope**.
+> pinned read or a digest mismatch, never a supported read path. Superseded
+> bytes are nonetheless retained for **7 days** by the bucket's soft-delete
+> policy and can be listed and restored administratively — so a halt has a
+> bounded **forensic window** in which what replaced an artifact can still
+> be examined. That window is a diagnostic affordance, not durable
+> retention, and no code path depends on it.
 
-This deviation and its supporting measurements are carried into the
-pre-test package.
+**Permissions, deliberately not changed.** The pipeline's service account
+cannot read bucket config (`storage.buckets.get` denied, 403). That is the
+correct posture rather than a gap: the driver never needs bucket metadata,
+and granting a permission to make a one-off audit convenient would widen
+the credential that runs unattended on a rented VM. Config questions are
+answered with `gcloud` under a human identity, which is where they belong.
+
+These measurements and this deviation are carried into the pre-test
+package.
 
 ---
 
