@@ -117,8 +117,17 @@ check "c2gpt message landed in claude2gpt/inbox/, not claude2claude/" \
   "$(ls "$TMP_ROOT/.claude/claude2gpt/inbox" | wc -l | tr -d ' ')" "1"
 check "claude2claude/inbox/ unaffected by c2gpt-send" \
   "$(ls "$TMP_ROOT/.claude/claude2claude/inbox" 2>/dev/null | wc -l | tr -d ' ')" "0"
-GPTPEEK="$(call c2gpt-inbox '{"reader":"claude-code","archive":false}' | text_of)"
-check "c2gpt-inbox as claude-code surfaces chatgpt's message" "$(echo "$GPTPEEK" | grep -c 'from chatgpt')" "1"
+GPTPEEK="$(call c2gpt-inbox '{"reader":"claude-desktop","archive":false}' | text_of)"
+check "c2gpt-inbox as claude-desktop surfaces chatgpt's message" "$(echo "$GPTPEEK" | grep -c 'from chatgpt')" "1"
+
+echo "== 7b. c2gpt is a shared code-side channel: BOTH claude-code and claude-desktop are valid roles =="
+CODE_PEEK="$(call c2gpt-inbox '{"reader":"claude-code","archive":false}' | text_of)"
+check "c2gpt-inbox as claude-code ALSO surfaces chatgpt's message (not desktop-exclusive)" \
+  "$(echo "$CODE_PEEK" | grep -c 'from chatgpt')" "1"
+call c2gpt-send '{"sender":"claude-code","content":"from code, direct to gpt"}' > /dev/null
+call c2gpt-send '{"sender":"claude-desktop","content":"from desktop, direct to gpt"}' > /dev/null
+check "both code-side roles' sends landed in the SAME outbox/ (one shared code-side identity for GPT)" \
+  "$(ls "$TMP_ROOT/.claude/claude2gpt/outbox" | wc -l | tr -d ' ')" "2"
 
 echo "== 8. NEGATIVE: sender outside the channel's enum is rejected, not silently accepted =="
 BADSENDER="$(call c2c-send '{"sender":"chatgpt","content":"wrong channel entirely"}' | text_of)"

@@ -16,20 +16,32 @@ implementation of the same mailbox convention, not a different one.
 
 ## Tools
 
-Each channel has two roles, and the directories are named from
-`claude-code`'s side (matching the existing protocol docs): `outbox/`
-is what `claude-code` writes and the peer (`claude-desktop` or
-`chatgpt`) reads; `inbox/` is the reverse. Both `-send` and `-inbox`
-take an identity argument that decides which directory they touch --
-neither tool has a silent default for "which side am I," since that
-ambiguity is exactly what caused a real bug here once (see git log).
+Each channel has an internal ("code-side") set of roles and one
+external peer role, and the directories are named from the code side
+(matching the existing protocol docs): `outbox/` is what a code-side
+role writes and the peer (`claude-desktop` or `chatgpt`) reads;
+`inbox/` is the reverse. Both `-send` and `-inbox` take an identity
+argument that decides which directory they touch -- neither tool has
+a silent default for "which side am I," since that ambiguity is
+exactly what caused a real bug here once (see git log).
+
+c2c's code side is `claude-code` alone (its peer, `claude-desktop`, is
+the OTHER party on this channel). c2gpt's code side is BOTH
+`claude-code` and `claude-desktop` -- either may message ChatGPT
+directly, sharing the same `outbox/`/`inbox/`; `chatgpt` is the sole
+peer. This isn't symmetric with c2c: on c2gpt, `claude-desktop` is a
+code-side role, not the peer -- the intended mail topology overall is
+ChatGPT <-> Claude Desktop <-> Claude Code (Desktop relays into
+`claude2claude/` for Code's benefit), but Code and Desktop can each
+also reach ChatGPT directly on `claude2gpt/` without going through
+each other first.
 
 | Tool | Channel dir | Roles | Effect |
 |---|---|---|---|
 | `c2c-send` | `.claude/claude2claude/` | `claude-code`, `claude-desktop` | `{ sender, content }` -- `claude-code` writes `outbox/`, `claude-desktop` writes `inbox/` |
 | `c2c-inbox` | `.claude/claude2claude/` | `claude-code`, `claude-desktop` | `{ reader, archive? }` -- `claude-code` reads `inbox/`, `claude-desktop` reads `outbox/` |
-| `c2gpt-send` | `.claude/claude2gpt/` | `claude-code`, `chatgpt` | Same as `c2c-send`, `chatgpt` in place of `claude-desktop` |
-| `c2gpt-inbox` | `.claude/claude2gpt/` | `claude-code`, `chatgpt` | Same as `c2c-inbox`, `chatgpt` in place of `claude-desktop` |
+| `c2gpt-send` | `.claude/claude2gpt/` | `claude-code`, `claude-desktop`, `chatgpt` | `{ sender, content }` -- `claude-code`/`claude-desktop` (either) write `outbox/`, `chatgpt` writes `inbox/` |
+| `c2gpt-inbox` | `.claude/claude2gpt/` | `claude-code`, `claude-desktop`, `chatgpt` | `{ reader, archive? }` -- `claude-code`/`claude-desktop` (either) read `inbox/`, `chatgpt` reads `outbox/` |
 
 `-send`'s `content` is just the message body; the header comment is
 generated from `sender` and the current UTC time. A same-second

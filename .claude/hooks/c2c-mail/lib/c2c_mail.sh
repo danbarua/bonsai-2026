@@ -4,30 +4,37 @@
 # unread mail" and "how a notification is formatted" defined in exactly
 # one place, since the three hooks all need the same answer.
 
-# Watched inbox dirs. Default is DERIVED from the actual directory layout
-# (glob .claude/claude2*/inbox under $CLAUDE_PROJECT_DIR), not a
-# hand-maintained channel list -- a third mailbox channel then just works,
-# with nothing here to drift out of sync with reality. This is principle
-# 21 from this repo's own docs/VACUOUS_TESTS.md: a hand-maintained list
-# standing in for a derivable set will silently under-cover, and the
-# broader tool you verify with is what hides it -- found live, not
-# anticipated: a spawned smoke-test session flagged that every break-test
-# either takes this default or overrides it explicitly, so none would
-# have noticed a third channel going unwatched.
+# Watched inbox dirs. Default is claude2claude/inbox ONLY -- deliberately
+# NOT a glob over every .claude/claude2*/inbox, despite that being this
+# file's original design (principle 21 from docs/VACUOUS_TESTS.md: derive
+# a set rather than hand-list it, so a new channel isn't silently
+# under-covered). That principle still holds for "which channels get
+# discovered automatically" in general, but a real incident showed the
+# glob was solving the wrong problem here: the intended mail topology is
+# ChatGPT -> Claude Desktop -> Claude Code (via claude2claude), NOT
+# ChatGPT -> Claude Code directly, so a Claude Code session's Stop hook
+# blocking on raw, unaddressed claude2gpt/inbox traffic (content meant
+# for Desktop to triage and relay, not for an arbitrary unrelated Code
+# session to consume or archive) is a false positive, not under-coverage.
+# Confirmed live: a substantive ChatGPT review ruling about an unrelated
+# ML pipeline stage landed in claude2gpt/inbox and blocked a Claude Code
+# session doing unrelated MCP-server engineering, with no clean way to
+# unblock without either mishandling content that wasn't its business or
+# leaving the session stuck. The fix is scope, not addressing: Code only
+# watches the channel Desktop relays INTO it on, full stop.
 #
 # Set C2C_MAIL_WATCH_DIRS (space-separated, relative-to-project or
-# absolute) to bypass the glob entirely with an explicit list instead --
-# used by test/break-tests.sh, which needs a throwaway location, not
-# whatever the glob happens to match on this machine.
+# absolute) to override with an explicit list instead -- used by
+# test/break-tests.sh for a throwaway location, and available if a future
+# channel genuinely does deliver straight to Code (bypassing Desktop) and
+# needs watching too.
 c2c_watch_dirs() {
   if [ -n "${C2C_MAIL_WATCH_DIRS:-}" ]; then
     printf '%s\n' $C2C_MAIL_WATCH_DIRS
     return
   fi
-  local d
-  for d in "${CLAUDE_PROJECT_DIR:-.}"/.claude/claude2*/inbox; do
-    [ -d "$d" ] && printf '%s\n' "$d"
-  done
+  local d="${CLAUDE_PROJECT_DIR:-.}/.claude/claude2claude/inbox"
+  [ -d "$d" ] && printf '%s\n' "$d"
 }
 
 # Prints one path per line for every unread message across the watched

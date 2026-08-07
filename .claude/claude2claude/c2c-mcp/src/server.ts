@@ -12,12 +12,21 @@ interface ChannelToolConfig {
   toolPrefix: string; // e.g. "c2c" -> tools named c2c-send / c2c-inbox
   channel: Channel;
   channelLabel: string; // human-readable, for tool descriptions
-  // codeRole always writes outbox/ and reads inbox/ (the roles the
+  // Any of codeRoles writes outbox/ and reads inbox/ (the roles the
   // directories are named for); peerRole is the mirror image: writes
   // inbox/, reads outbox/. Both archive what they read to the same
   // archive/, matching the existing c2c protocol (Desktop can't delete,
   // only move -- Code follows the same convention for symmetry).
-  codeRole: string;
+  //
+  // codeRoles is a list, not a single string, because a channel can have
+  // more than one legitimate internal-side sender: c2gpt is read/written
+  // by BOTH claude-code and claude-desktop (either may message ChatGPT
+  // directly), with chatgpt as the sole external peer -- there is no
+  // ambiguity about which DIRECTORY a role writes to (any codeRole ->
+  // outbox/, the peer -> inbox/), only about which of possibly-several
+  // internal parties actually sent a given message (recorded in the
+  // message's own "from:" header, unaffected by this).
+  codeRoles: string[];
   peerRole: string;
 }
 
@@ -26,20 +35,31 @@ const CHANNEL_TOOLS: ChannelToolConfig[] = [
     toolPrefix: "c2c",
     channel: CHANNELS.c2c,
     channelLabel: "claude2claude (.claude/claude2claude/)",
-    codeRole: "claude-code",
+    codeRoles: ["claude-code"],
     peerRole: "claude-desktop",
   },
   {
     toolPrefix: "c2gpt",
     channel: CHANNELS.c2gpt,
     channelLabel: "claude2gpt (.claude/claude2gpt/)",
-    codeRole: "claude-code",
+    // Both claude-code and claude-desktop, not just one: either may
+    // message ChatGPT directly (confirmed live -- Desktop was already
+    // doing so, forced to pose as "claude-code" when that was the only
+    // code-side role this tool offered, compensating with a manual
+    // "btw I'm Claude Desktop" disclaimer in the message body). Listing
+    // both roles here makes that disclaimer structural instead of an ad
+    // hoc workaround in free text, without shutting Code out of the
+    // channel it was originally built to use directly.
+    codeRoles: ["claude-code", "claude-desktop"],
     peerRole: "chatgpt",
   },
 ];
 
 function registerChannelTools(server: McpServer, cfg: ChannelToolConfig): void {
-  const { codeRole, peerRole } = cfg;
+  const { codeRoles, peerRole } = cfg;
+  const allRoles = [...codeRoles, peerRole] as unknown as [string, ...string[]];
+  const isCodeRole = (role: string) => codeRoles.includes(role);
+  const codeRoleList = codeRoles.map((r) => `"${r}"`).join(" or ");
 
   server.registerTool(
     `${cfg.toolPrefix}-send`,
@@ -47,8 +67,8 @@ function registerChannelTools(server: McpServer, cfg: ChannelToolConfig): void {
       title: `Send a ${cfg.toolPrefix} message`,
       description:
         `Write a new markdown message on the ${cfg.channelLabel} mailbox for the other side to read. ` +
-        `\`sender\` decides which directory it lands in: "${codeRole}" writes to outbox/ (read by ` +
-        `"${peerRole}"), "${peerRole}" writes to inbox/ (read by "${codeRole}"). A leading ` +
+        `\`sender\` decides which directory it lands in: ${codeRoleList} write to outbox/ (read by ` +
+        `"${peerRole}"), "${peerRole}" writes to inbox/ (read by ${codeRoleList}). A leading ` +
         `"<!-- from: <sender> · <timestamp> -->" header is added automatically -- pass only the ` +
         `message body in \`content\`. Never overwrites an existing file: a same-second collision ` +
         `gets a -2, -3, ... suffix. Pass \`to\` to address this message to one specific session ` +
@@ -57,8 +77,8 @@ function registerChannelTools(server: McpServer, cfg: ChannelToolConfig): void {
         `-inbox call passing a different \`as\` name.`,
       inputSchema: {
         sender: z
-          .enum([codeRole, peerRole])
-          .describe(`Who this message is from: "${codeRole}" (-> outbox/) or "${peerRole}" (-> inbox/).`),
+          .enum(allRoles)
+          .describe(`Who this message is from: ${codeRoleList} (-> outbox/) or "${peerRole}" (-> inbox/).`),
         content: z.string().min(1).describe("The markdown message body (no header needed)."),
         to: z
           .string()
@@ -69,12 +89,24 @@ function registerChannelTools(server: McpServer, cfg: ChannelToolConfig): void {
               "behavior that existed before addressing was added.",
           ),
       },
+      outputSchema: {
+        filename: z.string().describe("The written message's filename."),
+        path: z.string().describe("Absolute path to the written file."),
+        directory: z.enum(["inbox", "outbox"]).describe("Which directory it landed in."),
+        to: z.string().optional().describe("The addressee, if this message was addressed."),
+      },
     },
     async ({ sender, content, to }) => {
-      const dir = sender === codeRole ? cfg.channel.outbox : cfg.channel.inbox;
-      const dirName = sender === codeRole ? "outbox" : "inbox";
+      const dir = isCodeRole(sender) ? cfg.channel.outbox : cfg.channel.inbox;
+      const dirName = isCodeRole(sender) ? "outbox" : "inbox";
       const result = await sendMessage(dir, sender, content, to);
       const addressing = to ? ` (addressed to ${to})` : "";
+      const structuredContent: { filename: string; path: string; directory: "inbox" | "outbox"; to?: string } = {
+        filename: result.filename,
+        path: result.path,
+        directory: dirName,
+        ...(to ? { to } : {}),
+      };
       return {
         content: [
           {
@@ -82,6 +114,7 @@ function registerChannelTools(server: McpServer, cfg: ChannelToolConfig): void {
             text: `Wrote ${cfg.channelLabel} ${dirName} message: ${result.filename}${addressing}`,
           },
         ],
+        structuredContent,
       };
     },
   );
@@ -92,8 +125,8 @@ function registerChannelTools(server: McpServer, cfg: ChannelToolConfig): void {
       title: `Read a ${cfg.toolPrefix} mailbox`,
       description:
         `Read pending messages on the ${cfg.channelLabel} mailbox, oldest first. \`reader\` decides ` +
-        `which directory gets read: "${codeRole}" reads inbox/ (what "${peerRole}" sent), "${peerRole}" ` +
-        `reads outbox/ (what "${codeRole}" sent). By default each message read is moved to archive/ ` +
+        `which directory gets read: ${codeRoleList} read inbox/ (what "${peerRole}" sent), "${peerRole}" ` +
+        `reads outbox/ (what ${codeRoleList} sent). By default each message read is moved to archive/ ` +
         `(mirroring the existing c2c protocol), so a later call only returns messages nobody has ` +
         `processed yet. Pass archive=false to peek without consuming. Pass \`as\` (this reader's own ` +
         `session name, see code-sessions) to skip -- leave unarchived, not returned as consumed -- any ` +
@@ -102,8 +135,8 @@ function registerChannelTools(server: McpServer, cfg: ChannelToolConfig): void {
         `message visible and archivable, addressed or not.`,
       inputSchema: {
         reader: z
-          .enum([codeRole, peerRole])
-          .describe(`Whose mailbox to read: "${codeRole}" (<- inbox/) or "${peerRole}" (<- outbox/).`),
+          .enum(allRoles)
+          .describe(`Whose mailbox to read: ${codeRoleList} (<- inbox/) or "${peerRole}" (<- outbox/).`),
         archive: z
           .boolean()
           .default(true)
@@ -118,11 +151,28 @@ function registerChannelTools(server: McpServer, cfg: ChannelToolConfig): void {
               "the pre-addressing behavior.",
           ),
       },
+      outputSchema: {
+        directory: z.enum(["inbox", "outbox"]).describe("Which directory was read."),
+        archived: z.boolean().describe("Whether returned messages were moved to archive/."),
+        messages: z
+          .array(
+            z.object({
+              filename: z.string(),
+              content: z.string(),
+              to: z.string().optional().describe("The addressee, if this message was addressed."),
+            }),
+          )
+          .describe("Messages returned, oldest first."),
+        skipped: z
+          .array(z.string())
+          .describe("Filenames left unarchived because they're addressed to a different name than `as`."),
+      },
     },
     async ({ reader, archive, as }) => {
-      const sourceDir = reader === codeRole ? cfg.channel.inbox : cfg.channel.outbox;
-      const dirName = reader === codeRole ? "inbox" : "outbox";
+      const sourceDir = isCodeRole(reader) ? cfg.channel.inbox : cfg.channel.outbox;
+      const dirName = isCodeRole(reader) ? "inbox" : "outbox";
       const { messages, skipped } = await readMailbox(sourceDir, cfg.channel.archive, archive, as);
+      const structuredContent = { directory: dirName, archived: archive, messages, skipped };
       if (messages.length === 0) {
         const skipNote =
           skipped.length > 0
@@ -135,6 +185,7 @@ function registerChannelTools(server: McpServer, cfg: ChannelToolConfig): void {
               text: `${cfg.channelLabel} ${dirName} is empty -- no pending messages for ${reader}.${skipNote}`,
             },
           ],
+          structuredContent,
         };
       }
       const skipNote =
@@ -152,6 +203,7 @@ function registerChannelTools(server: McpServer, cfg: ChannelToolConfig): void {
         .join("\n\n---\n\n");
       return {
         content: [{ type: "text", text: `${summary}\n\n${body}` }],
+        structuredContent,
       };
     },
   );
@@ -175,12 +227,27 @@ function registerCodeSessionsTool(server: McpServer): void {
         "Useful for seeing which named sessions currently exist, e.g. before " +
         "addressing a mailbox message to a specific one.",
       inputSchema: {},
+      outputSchema: {
+        sessions: z.array(
+          z.object({
+            sessionId: z.string(),
+            name: z.string(),
+            cwd: z.string().describe("Absolute path, relative-displayed in the text summary only."),
+            status: z.string(),
+            pid: z.number(),
+            jobId: z.string(),
+            updatedAt: z.string().describe("ISO 8601, empty string if unavailable."),
+            alive: z.boolean().describe("Checked directly (kill -0), not trusted from the file's own status."),
+          }),
+        ),
+      },
     },
     async () => {
       const sessions = await listCodeSessions(REPO_ROOT);
       if (sessions.length === 0) {
         return {
           content: [{ type: "text", text: "No Claude Code sessions found under this repository." }],
+          structuredContent: { sessions: [] },
         };
       }
       const lines = sessions.map((s) => {
@@ -192,6 +259,7 @@ function registerCodeSessionsTool(server: McpServer): void {
       });
       return {
         content: [{ type: "text", text: `${sessions.length} session(s) under this repo:\n\n${lines.join("\n")}` }],
+        structuredContent: { sessions },
       };
     },
   );

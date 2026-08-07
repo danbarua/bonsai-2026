@@ -1,8 +1,8 @@
 # c2c mail-awareness hooks
 
 Makes any Claude Code session in this repo aware of unread mail in the
-c2c mailboxes (`.claude/claude2*/inbox/`) automatically, so a human no
-longer has to relay "check your inbox" into a running session.
+c2c mailbox (`.claude/claude2claude/inbox/`) automatically, so a human
+no longer has to relay "check your inbox" into a running session.
 
 Registered project-wide via `.claude/settings.json` (so every session
 inherits them, per this repo's convention of project-level settings
@@ -56,22 +56,28 @@ after a peek. That's the right behavior -- a peek genuinely hasn't
 handled the mail -- but worth knowing if a peek is ever used mid-turn
 expecting the Stop hook to then let the turn end.
 
-**Watched dirs are derived, not hand-maintained.** `c2c_watch_dirs` in
-`lib/c2c_mail.sh` globs `.claude/claude2*/inbox` under
-`$CLAUDE_PROJECT_DIR` by default, rather than hardcoding the channel
-names (`claude2claude`, `claude2gpt`) in a list here. A third mailbox
-channel then just works, with nothing to drift out of sync with the
-real directory layout -- this repo's own `docs/VACUOUS_TESTS.md`
-principle 21: a hand-maintained list standing in for a derivable set
-will silently under-cover, and the broader tool you verify with is
-what hides it. Found live while building this, not anticipated in
-advance: a spawned smoke-test session flagged that every break-test
-either took the default or overrode it explicitly, so none would have
-noticed a third channel going unwatched with the original
-hand-maintained version. Set `C2C_MAIL_WATCH_DIRS` (space-separated)
-to bypass the glob with an explicit list instead -- used by the tests,
-which need a throwaway location, not whatever the glob happens to
-match on a given machine.
+**Watched dir is `claude2claude/inbox` only -- deliberately not every
+mailbox channel.** This reverses an earlier version of this file: the
+first design globbed `.claude/claude2*/inbox` so a new channel would
+"just work" (principle 21 of this repo's `docs/VACUOUS_TESTS.md` --
+a hand-maintained list standing in for a derivable set will silently
+under-cover). That principle still holds for "which channels get
+discovered" in the abstract, but it was solving the wrong problem
+here. The intended mail topology is ChatGPT <-> Claude Desktop <->
+Claude Code (Desktop relays into `claude2claude/` for Code's benefit),
+not ChatGPT talking to Code directly -- so a Code session's Stop hook
+auto-watching `claude2gpt/inbox` meant it could block on raw ChatGPT
+traffic that was never addressed to it and wasn't its business to
+consume or archive. Confirmed live: a substantive ChatGPT review
+ruling about an unrelated ML pipeline stage did exactly this to an
+unrelated Claude Code session doing MCP-server engineering, with no
+clean way to unblock without either mishandling content that wasn't
+its business or getting stuck. The fix is scope, not addressing: Code
+only watches the channel Desktop relays INTO it on. Set
+`C2C_MAIL_WATCH_DIRS` (space-separated) to override with an explicit
+list instead -- used by the tests for a throwaway location, and
+available if a future channel genuinely does deliver straight to Code
+(bypassing Desktop) and needs watching too.
 
 **Hooks fail open.** Claude Code's own hook contract (confirmed
 against current docs before implementing, not assumed): any hook exit
@@ -134,11 +140,12 @@ mailboxes or the real global session registry. Covers: mail present
 / stop allowed), a watched dir missing entirely (still silent
 success), the `stop_hook_active` loop guard (proven non-vacuously: the
 same mail still blocks when `stop_hook_active` is false), the
-body-content injection-surface guard, the glob-derived watch-dir
-default actually covering a channel that was never hand-listed
-anywhere, and per-session addressing (section (f): addressed-elsewhere
-mail excluded, broadcast and addressed-to-me mail still counted, the
-fail-open case, and a negative proving the filter isn't vacuous).
+body-content injection-surface guard, section (e) (`claude2gpt/inbox`
+and a hypothetical third channel are NOT auto-watched by default, only
+`claude2claude/inbox` is), and per-session addressing (section (f):
+addressed-elsewhere mail excluded, broadcast and addressed-to-me mail
+still counted, the fail-open case, and a negative proving the filter
+isn't vacuous).
 
 ```bash
 bash test/break-tests.sh

@@ -132,19 +132,43 @@ check "Stop's block reason does NOT contain the body marker" "$(echo "$STOP_LEAK
 check "...but DOES still name the file" "$(echo "$STOP_LEAK_CHECK" | grep -c '2026-01-03T00-00-00Z.md')" "1"
 
 # ============================================================
-echo "== (e) default watch dirs are DERIVED (glob), not hand-maintained -- a third channel just works =="
-# Deliberately unset the override for this section: proving the glob
-# default actually covers an arbitrary channel is the entire point, so
-# this must NOT be told where to look via C2C_MAIL_WATCH_DIRS.
+echo "== (e) default watch dir is claude2claude/inbox ONLY -- other channels are NOT auto-watched =="
+# Deliberately unset the override for this section: proving the default
+# does NOT reach beyond claude2claude/inbox is the entire point, so this
+# must NOT be told where to look via C2C_MAIL_WATCH_DIRS.
+#
+# This reverses the prior version of this test, which asserted the
+# OPPOSITE (a glob over claude2*/inbox picked up any new channel
+# automatically). That was principle 21 applied to "which channels get
+# discovered" -- correct in general, but found live to be solving the
+# wrong problem for c2gpt specifically: the intended mail topology is
+# ChatGPT -> Claude Desktop -> Claude Code (via claude2claude), not
+# ChatGPT -> Code directly, so a Code session's Stop hook auto-watching
+# claude2gpt/inbox meant it could block on raw ChatGPT traffic that was
+# never addressed to it and wasn't its business to consume or archive.
+# Confirmed live: a substantive ChatGPT review ruling about an unrelated
+# ML pipeline stage did exactly this to an unrelated engineering session.
 reset_mailboxes
-mkdir -p "$TMP_ROOT/.claude/claude2slack/inbox"
-printf '<!-- from: slack-bot -->\n\na third channel nobody hand-added to any list\n' \
-  > "$TMP_ROOT/.claude/claude2slack/inbox/2026-01-04T00-00-00Z.md"
+mkdir -p "$TMP_ROOT/.claude/claude2gpt/inbox" "$TMP_ROOT/.claude/claude2slack/inbox"
+printf '<!-- from: chatgpt -->\n\nnot claude-codes business to watch directly\n' \
+  > "$TMP_ROOT/.claude/claude2gpt/inbox/2026-01-04T00-00-00Z.md"
+printf '<!-- from: slack-bot -->\n\na hypothetical future channel, also not auto-watched\n' \
+  > "$TMP_ROOT/.claude/claude2slack/inbox/2026-01-04T00-01-00Z.md"
 
-GLOB_OUT="$(env -u C2C_MAIL_WATCH_DIRS CLAUDE_PROJECT_DIR="$TMP_ROOT" "$HOOKS_DIR/user-prompt-submit.sh" <<< "$UPS_STDIN")"
-check "a third, never-hand-listed channel is picked up via the glob default" \
-  "$(echo "$GLOB_OUT" | grep -c '2026-01-04T00-00-00Z.md')" "1"
-rm -rf "$TMP_ROOT/.claude/claude2slack"
+NO_GLOB_OUT="$(env -u C2C_MAIL_WATCH_DIRS CLAUDE_PROJECT_DIR="$TMP_ROOT" "$HOOKS_DIR/user-prompt-submit.sh" <<< "$UPS_STDIN")"
+check "claude2gpt/inbox is NOT watched by default" \
+  "$(echo "$NO_GLOB_OUT" | grep -c '2026-01-04T00-00-00Z.md')" "0"
+check "a hypothetical third channel is NOT watched by default either" \
+  "$(echo "$NO_GLOB_OUT" | grep -c '2026-01-04T00-01-00Z.md')" "0"
+
+echo "== (e-continued) ...but claude2claude/inbox IS watched (sanity: this isn't watching nothing at all) =="
+printf '<!-- from: claude-desktop -->\n\nthis one IS claude-codes business\n' \
+  > "$INBOX_C2C/2026-01-04T00-02-00Z.md"
+STILL_WATCHED_OUT="$(env -u C2C_MAIL_WATCH_DIRS CLAUDE_PROJECT_DIR="$TMP_ROOT" "$HOOKS_DIR/user-prompt-submit.sh" <<< "$UPS_STDIN")"
+check "claude2claude/inbox is still watched by default" \
+  "$(echo "$STILL_WATCHED_OUT" | grep -c '2026-01-04T00-02-00Z.md')" "1"
+
+rm -rf "$TMP_ROOT/.claude/claude2gpt" "$TMP_ROOT/.claude/claude2slack"
 
 # ============================================================
 echo "== (f) addressing: to: field scopes unread mail to the addressed session (or broadcast) =="
