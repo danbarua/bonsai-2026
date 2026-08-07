@@ -179,10 +179,20 @@ export interface InboxMessage {
 // nothing matching. Tolerant of trailing text after the name (stops at the
 // first `-->` or `·`) rather than requiring an exact byte-for-byte match to
 // sendMessage's own format.
+//
+// ANCHORED to a preceding `·` (or start of string) -- NOT a bare substring
+// search. Found live: an unanchored /to:\s*(\S+)/ matches "to:" wherever it
+// appears, including inside another field's VALUE (e.g. a hypothetical
+// future "branch: auto-import-photo:staging" segment would misparse as
+// `to: staging`, silently hijacking the addressing/instance mechanism this
+// whole feature exists to make reliable). No such field exists in the
+// header today, but the parser shouldn't depend on that staying true --
+// anchoring on the `·` delimiter that actually separates fields is what
+// makes this safe regardless of what content later fields carry.
 export function parseAddressee(content: string): string | undefined {
   const firstLine = content.split("\n", 1)[0];
   const beforeClose = firstLine.split("-->", 1)[0];
-  const match = /to:\s*(\S+)/i.exec(beforeClose);
+  const match = /(?:^|·)\s*to:\s*(\S+)/i.exec(beforeClose);
   return match ? match[1] : undefined;
 }
 
@@ -190,11 +200,12 @@ export function parseAddressee(content: string): string | undefined {
 // message's header comment, the same way parseAddressee extracts "to:".
 // Undefined means the sender didn't provide one (older messages, or a
 // sender role -- claude-desktop, chatgpt -- that isn't itself
-// multi-instance in the way Claude Code sessions are).
+// multi-instance in the way Claude Code sessions are). Anchored on `·` for
+// the same reason parseAddressee is -- see its comment.
 export function parseInstance(content: string): string | undefined {
   const firstLine = content.split("\n", 1)[0];
   const beforeClose = firstLine.split("-->", 1)[0];
-  const match = /instance:\s*(\S+)/i.exec(beforeClose);
+  const match = /(?:^|·)\s*instance:\s*(\S+)/i.exec(beforeClose);
   return match ? match[1] : undefined;
 }
 

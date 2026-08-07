@@ -134,6 +134,61 @@ and hook layers), not "the model will probably notice." Where a
 consuming operation can't yet check an address, treat that as a
 missing feature to close, not an acceptable manual-review step.
 
+**Closed further, later the same session**: even with `to`/`as` built,
+a caller could still forget to pass `as` -- which is exactly what
+caused the mis-consume incident two sections up (a stale connection
+had no way to pass it, but an up-to-date one that simply omits it
+fails exactly the same way). The fix that actually closes this: don't
+rely on the model remembering an optional safety parameter at all --
+`.claude/hooks/c2c-mail/pre-c2c-mcp.sh` now auto-injects `as` (and the
+send-side `instance`) via a PreToolUse hook's `hookSpecificOutput.updatedInput`,
+proven safe for this specific tool first (see the `updatedInput`
+section below) before being trusted to mutate real calls. Re-verified
+against the real, live mailbox, not a synthetic case: two genuine
+messages addressed to other sessions were sitting in the real inbox;
+calling `c2c-inbox` with **zero** `as` argument left both untouched
+(`"skipped":[...]`) because the hook supplied it automatically. A
+parameter that must be remembered on every call is a parameter that
+will eventually be omitted -- if the call site can determine the
+correct value itself, don't leave it to the caller to ask for it.
+
+## `hookSpecificOutput.updatedInput` is real, but prove it per-tool before trusting it — and expect the verification path to surprise you
+
+Found via `docs.claude.com`, not assumed: `updatedInput` **replaces**
+the tool's entire input, it does not merge -- "any fields you omit
+will be removed from the original input." A hook that returns
+`{updatedInput: {instance: name}}` for a `c2c-send` call would silently
+drop `content` and `sender` from what actually executes. Always spread
+the original `tool_input` first and overlay only the new field(s).
+
+Also found, and load-bearing for the decision to even attempt this:
+[github.com/anthropics/claude-code/issues/39814](https://github.com/anthropics/claude-code/issues/39814)
+documents `updatedInput` being **silently dropped** for the `Agent`
+(subagent/Task) tool specifically, while `additionalContext` and
+`permissionDecision` from the same hook response worked fine. A
+commenter confirms it generally: "`updatedInput` is not supported for
+all tools." Nothing documents MCP tool support either way. Given
+REPLACE semantics, a silent failure here is worse than a no-op --
+proceeding without checking would have risked corrupting every future
+`c2c-send` call the moment the mechanism didn't apply.
+
+**Verification, and how it actually went**: the plan was to add a
+`PostToolUse` hook on the same matcher as a second, independent
+signal, cross-checking what Claude Code reports post-execution against
+what was sent. That signal never arrived -- the `PostToolUse` hook
+never fired at all, across two real calls, despite `PreToolUse` on the
+*identical* matcher firing both times. That's a genuine, separate
+anomaly, not explained here, and not chased further once the stronger
+proof was available: a real `c2c-send` call with a sentinel `content`
+value, mutated by the hook to a different sentinel, confirmed via **the
+actual file written to disk**. That's not a fallback -- reading the
+real, persisted side effect of a real call is strictly stronger
+evidence than any hook-reported signal could be, since it can't be
+fooled by a hook lying about what it saw. Don't assume your planned
+verification method will be the one that actually delivers the
+answer; when it doesn't, look for the most direct evidence the system
+already produces before inventing a workaround.
+
 ## Verify a guard by watching it fail, not by trusting the code review
 
 Every non-trivial filter added this session (the addressing skip, the

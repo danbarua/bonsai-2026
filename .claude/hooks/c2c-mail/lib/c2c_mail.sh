@@ -166,14 +166,20 @@ for path in glob.glob(os.path.join(d, "*.json")):
 # comment (its first line). Prints nothing if absent (broadcast) -- mirrors
 # mailbox.ts's parseAddressee exactly (same tolerance: stops at the first
 # "-->" or whitespace after "to:", so it doesn't require byte-for-byte
-# agreement with this project's own generated format).
+# agreement with this project's own generated format; same anchoring too --
+# "to:" must be preceded by the "·" field delimiter or start-of-line, not a
+# bare substring match, so a future field whose VALUE happens to contain
+# "to:" -- e.g. "auto-import-photo:staging" -- can't get misparsed as the
+# addressee. Confirmed live as a real, not hypothetical, failure mode
+# before this anchoring existed -- see mailbox.ts's parseAddressee comment
+# for the exact adversarial case).
 c2c_message_addressee() {
   local file="$1"
   head -n1 "$file" 2>/dev/null | python3 -c '
 import sys, re
 line = sys.stdin.readline()
 before_close = line.split("-->", 1)[0]
-m = re.search(r"to:\s*(\S+)", before_close, re.IGNORECASE)
+m = re.search(r"(?:^|·)\s*to:\s*(\S+)", before_close, re.IGNORECASE)
 if m:
     print(m.group(1))
 '

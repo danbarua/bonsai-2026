@@ -114,6 +114,26 @@ ORDER="$(call c2c-inbox '{"reader":"claude-desktop","archive":false}' | text_of 
 SORTED="$(echo "$ORDER" | sort)"
 check "readMailbox's returned order already matches a plain lexicographic sort" "$ORDER" "$SORTED"
 
+echo "== 7. parseAddressee/parseInstance are ANCHORED to the · delimiter, not a bare substring search =="
+# Direct unit-style check against the compiled parser functions, not an
+# HTTP round trip -- this tests a header no current sendMessage call can
+# produce (no field besides instance/to exists yet), but the parser must
+# not depend on that staying true. Found live: an unanchored /to:\s*(\S+)/
+# matched "staging" out of ".../branch: auto-import-photo:staging · to:
+# real-target -->" -- the substring "photo:staging" contains a spurious
+# "to:" that isn't the real field at all. Two adversarial fields here:
+# "branch: auto-import-photo:staging" (embeds a spurious "to:" via
+# "photo:") and "other: reinstance:old" (embeds a spurious "instance:" via
+# "reinstance:") -- neither is preceded by "·", so neither should match.
+ANCHOR_CHECK="$(node -e "
+const { parseAddressee, parseInstance } = require('$PKG_DIR/dist/mailbox.js');
+const adversarial = '<!-- from: claude-code · 2026-08-07T21:50:00Z · branch: auto-import-photo:staging · other: reinstance:old · instance: real-instance-name · to: real-target -->';
+const to = parseAddressee(adversarial);
+const inst = parseInstance(adversarial);
+console.log(to === 'real-target' && inst === 'real-instance-name' ? 'PASS' : 'FAIL to=' + to + ' instance=' + inst);
+")"
+check "adversarial substrings in earlier fields don't hijack to:/instance: parsing" "$ANCHOR_CHECK" "PASS"
+
 echo
 echo "== $PASS_COUNT passed, $FAILURES failed =="
 exit $((FAILURES > 0))
