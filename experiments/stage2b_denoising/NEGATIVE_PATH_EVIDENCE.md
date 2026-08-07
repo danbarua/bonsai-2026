@@ -181,12 +181,28 @@ preserved — the code path that could touch it is never entered.
 | test | asserts |
 |---|---|
 | `tests/test_mighty_colab_contract.py:259` `test_ladder_missing_sentinel_fails_even_on_a_zero_exit` | `STUB_STOP_RC` unset, so teardown exits 0. The verdict-derived exit code 1 survives to the top level. |
-| `tests/test_mighty_colab_contract.py:278` `test_ladder_refuses_a_dirty_tree_before_provisioning` | Exit 1 with `REFUSING` and `dirty` on stdout, and `stub] created` **absent** — refused before any session was provisioned, so there is no teardown to overwrite anything. |
+| `tests/test_mighty_colab_contract.py` `test_ladder_refuses_a_dirty_source_closure_before_provisioning` | Exit 1 with `REFUSING` and `closure` on stdout, and `stub] created` **absent** — refused before any session was provisioned, so there is no teardown to overwrite anything. The pre-flight is closure-keyed: it asks whether the driver's own imports are committed, not whether the repository is tidy. |
+| `tests/test_mighty_colab_contract.py` `test_ladder_proceeds_when_only_unrelated_files_are_uncommitted` | The positive control for the row above, and the case that motivated narrowing the guard: a clean closure inside a dirty tree must reach provisioning. A refusal test without this proves only that the target can refuse. |
 | `tests/test_mighty_colab_contract.py:288` `test_ladder_refuses_an_unpushed_head_before_provisioning` | Exit 1 with `REFUSING` and `not on any remote`, `stub] created` absent. The runtime fetches one pinned commit, so an unpushed HEAD would run code that is not the code under test. |
 
 The pre-flight refusals are the same demand one step earlier: the two
 failure modes they catch would both surface as *scientific* results rather
 than mistakes, and neither reaches the teardown path at all.
+
+**The first refusal was narrowed, and the narrowing has its own guards.**
+It used to be whole-tree `git status --porcelain`. Uncommitted work
+outside a driver's import closure cannot reach the computation — the
+runtime executes one pinned commit — so the coarse check refused correct
+runs while reporting a genuinely dirty closure file as one line among
+many. Two static checks keep the replacement honest, both derived rather
+than listed: `test_no_gpu_target_still_gates_on_whole_tree_porcelain`
+(the coarse gate must not return, because it would fire first and make
+the closure check dead code) and
+`test_every_repo_fetching_gpu_target_runs_the_closure_check` (any recipe
+pinning a commit for the runtime must ask whether that commit contains
+the driver's sources — so a new ladder target is covered the day it is
+written). Both were confirmed by breaking what they watch: restoring a
+porcelain gate in stage 2's recipe fails both and names stage 2.
 
 **Supporting — a teardown signal must not fabricate a verdict either.**
 `test_ladder_absent_session_is_not_treated_as_a_leak` (:268) and

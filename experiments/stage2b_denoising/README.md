@@ -87,7 +87,12 @@ mention here, in the same commit that creates it.
   revalidated after it. `ConsumePolicy` selects which fields must match
   for a given artifact kind, because stage 2 legitimately reuses stage
   1's topologies under a different commit; `array_manifest` pins the
-  payload itself, per array, by dtype/shape/SHA-256.
+  payload itself, per array, by dtype/shape/SHA-256. It is also the
+  GPU targets' pre-flight — `--check-closure <driver.py>` exits non-zero
+  naming any file in that driver's own closure which differs from HEAD.
+  Uncommitted work elsewhere in the tree is recorded in the manifest and
+  does not block, because the runtime executes one pinned commit and
+  cannot see it.
 
 **The feasibility ladder:**
 

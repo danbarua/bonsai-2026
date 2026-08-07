@@ -57,6 +57,38 @@ MIGHTY_COLAB ?= uv run --group gpu mighty-colab
 # escape hatch in the recipe: there is no flag that skips the checks, only
 # a different git to ask.
 GIT ?= git
+
+# The pre-flight refusal that gates every GPU target on the DRIVER'S OWN
+# SOURCE CLOSURE being committed, replacing the whole-tree `git status
+# --porcelain` check the targets used to carry.
+#
+# Why the coarse check went: its own refusal message defeated it. "The
+# runtime fetches one pinned commit; uncommitted work would not be in it"
+# is an argument about code that reaches the computation -- and the remote
+# executes that pinned commit by construction, so uncommitted work
+# ELSEWHERE in the tree cannot reach it. What can is a file in the
+# driver's import closure differing from HEAD, which porcelain reports as
+# one line among many with no way to tell it apart from an editor's
+# leftovers or a second concurrent effort's scratch. The stage-3
+# regeneration is the case that separated them: closure clean, tree dirty
+# with four unrelated paths, and the run correct to proceed. Keeping both
+# would have meant the coarse one fires first and the sharp one is dead
+# code, while every GPU launch waits on a spotless tree.
+#
+# The check is a CLI entry into `stage2b_fingerprint`, not shell: one
+# definition of "dirty", owned by the module that already implements it
+# blob-by-blob against HEAD and has the tests for it. A shell
+# reimplementation is the reimplemented-helper failure CLAUDE.md
+# principle 16 names.
+#
+# Overridable for exactly the reason `GIT` is -- the refusal is behaviour
+# worth testing in both directions, and `tests/test_mighty_colab_contract.py`
+# stubs this to drive them. Not an escape hatch: there is no flag that
+# skips the check, only a different checker to ask.
+#
+# Whole-tree state is still RECORDED -- the fingerprint captures it in
+# every artifact's manifest -- and never enforced.
+CLOSURE_CHECK ?= uv run python $(STAGE2B_DIR)/stage2b_fingerprint.py --check-closure
 SESSION_TRAIN ?= stage3-evolve
 SESSION_TEST ?= stage4-evolve
 SESSION_CLASS0 ?= class0-audit-gpu
@@ -450,19 +482,19 @@ stage2b-stage-inputs:  ## Upload the four KMNIST IDX files to the Stage 2B bucke
 # verdict".
 #
 # Two refusals before any money is spent. The runtime fetches ONE pinned
-# commit from the public repo, so a dirty tree or an unpushed HEAD would
-# run code that is not the code being tested -- and the failure would look
-# like a science result rather than a mistake. The driver hashes the
-# clone's copy of itself against BONSAI_DRIVER_SHA256 computed here, which
-# is what closes the gap that `exec --file` transmits code with no __file__
-# to check.
+# commit from the public repo, so an uncommitted file THIS DRIVER IMPORTS,
+# or an unpushed HEAD, would run code that is not the code being tested --
+# and the failure would look like a science result rather than a mistake.
+# The first refusal is closure-keyed (see CLOSURE_CHECK): it asks whether
+# the driver's own import closure is committed, not whether the repository
+# is tidy. The driver hashes the clone's copy of itself against
+# BONSAI_DRIVER_SHA256 computed here, which is what closes the gap that
+# `exec --file` transmits code with no __file__ to check.
 .PHONY: stage2b-ladder-stage1
 stage2b-ladder-stage1:  ## Run Stage 2B ladder stage 1 (n=1,000) on a Colab GPU -- bills while running
 	rc=0; src=0; \
 	cd $(REPO_ROOT) && \
-	if [ -n "$$($(GIT) status --porcelain)" ]; then \
-		echo "[make] REFUSING: the working tree is dirty. The runtime fetches one pinned commit; uncommitted work would not be in it."; \
-		$(GIT) status --short; \
+	if ! $(CLOSURE_CHECK) $(STAGE2B_DIR)/run_ladder_stage1.py; then \
 		exit 1; \
 	fi; \
 	commit=$$($(GIT) rev-parse HEAD); \
@@ -536,9 +568,7 @@ stage2b-compare-stage3:  ## Verify the stage-3 regeneration against the 54,000-i
 stage2b-ladder-stage2:  ## Run Stage 2B ladder stage 2 (n=5,000, CNN development) on a Colab GPU -- bills while running
 	rc=0; src=0; \
 	cd $(REPO_ROOT) && \
-	if [ -n "$$($(GIT) status --porcelain)" ]; then \
-		echo "[make] REFUSING: the working tree is dirty. The runtime fetches one pinned commit; uncommitted work would not be in it."; \
-		$(GIT) status --short; \
+	if ! $(CLOSURE_CHECK) $(STAGE2B_DIR)/run_ladder_stage2.py; then \
 		exit 1; \
 	fi; \
 	commit=$$($(GIT) rev-parse HEAD); \

@@ -557,3 +557,74 @@ def compare_array_manifests(recorded, computed):
                 problems.append(f"{key}.{field}: recorded {was.get(field)!r} "
                                 f"!= payload {now.get(field)!r}")
     return problems
+
+
+# =====================================================================
+# CLI: the pre-flight closure check the GPU Makefile targets gate on
+# =====================================================================
+#
+# The GPU targets used to refuse on `git status --porcelain` being
+# non-empty. That was the blunt first draft, written before the closure
+# concept existed, and its own refusal message defeats it: "the runtime
+# fetches one pinned commit; uncommitted work would not be in it." The
+# remote executes the pinned commit BY CONSTRUCTION, so dirt outside the
+# driver's source closure cannot reach the computation. What can is a
+# closure file differing from HEAD -- which the porcelain check reports
+# as one line among many, with no way to tell it apart from an unrelated
+# scratch file.
+#
+# This entry point exists so the Makefile can ask the question in shell
+# without reimplementing the answer. One definition of "dirty", owned by
+# the module that already has it and its tests; principle 16 says the
+# risk of reimplementing a helper is distinct from the helper being
+# wrong, and a shell reimplementation of a blob-by-blob HEAD comparison
+# is exactly that shape.
+#
+#     python stage2b_fingerprint.py --check-closure <driver.py>
+#
+# Exit 0: every file in the driver's closure matches HEAD. Exit 1: at
+# least one does not, and each is named on stdout. The whole-tree state
+# is printed either way and never gates -- it is recorded in the
+# artifact's manifest, not enforced at the door.
+
+def _cli(argv=None):
+    import argparse
+    parser = argparse.ArgumentParser(
+        description="Refuse a run whose own source closure is not committed.")
+    parser.add_argument("--check-closure", metavar="ENTRYPOINT", required=True,
+                        help="driver whose import closure must be committed at HEAD")
+    parser.add_argument("--repo-root", default=None)
+    args = parser.parse_args(argv)
+
+    entrypoint = os.path.abspath(args.check_closure)
+    repo_root = os.path.abspath(
+        args.repo_root or os.path.join(os.path.dirname(__file__), "..", ".."))
+    if not os.path.isfile(entrypoint):
+        print(f"[closure] REFUSING: no such entrypoint {entrypoint!r}")
+        return 2
+
+    paths = sorted(scientific_source_paths(entrypoint, repo_root))
+    dirty = closure_dirty_paths(paths, repo_root)
+    identity = git_identity(repo_root, require_clean=False)
+
+    print(f"[closure] entrypoint {repo_relative(entrypoint, repo_root)}: "
+          f"{len(paths)} files in closure, commit {identity['commit']}")
+    if dirty:
+        print("[closure] REFUSING: these files in this driver's own source "
+              "closure differ from HEAD (or are untracked), so the runtime "
+              "would fetch a commit that does not contain them:")
+        for path in dirty:
+            print(f"[closure]   {path}")
+        print("[closure] Commit them first. Uncommitted work ELSEWHERE in the "
+              "tree does not block -- it cannot reach the computation.")
+        return 1
+    if not identity["clean"]:
+        print("[closure] closure is clean; the working tree is dirty elsewhere, "
+              "which is recorded in the artifact manifest and does not block.")
+    else:
+        print("[closure] closure is clean; working tree is clean.")
+    return 0
+
+
+if __name__ == "__main__":
+    sys.exit(_cli())
