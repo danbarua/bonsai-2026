@@ -112,10 +112,30 @@ OUT11="$(run '{"session_id":"test-session-id","cwd":"/tmp","tool_name":"mcp__cla
 check "peek still gets as injected" "$(echo "$OUT11" | grep -c '"as":"test-instance-name"')" "1"
 check "peek's archive:false is preserved, not flipped" "$(echo "$OUT11" | grep -c '"archive":false')" "1"
 
-echo "== 12. logging still happens on every call, auto-inject or not =="
+echo "== 13. code2code-send has no sender field to check -- the tool-name glob alone must match =="
+echo "      (found in review: *c2c-send does NOT match ...code2code-send -- 'ode-send' != 'c2c-send')"
+OUT13="$(run '{"session_id":"test-session-id","cwd":"/tmp","tool_name":"mcp__claude_ai_c2c__code2code-send","tool_input":{"content":"hi","to":"someone"}}')"
+check "updatedInput present for code2code-send" "$(echo "$OUT13" | grep -c 'updatedInput')" "1"
+check "original content/to echoed back" "$(echo "$OUT13" | grep -c '"content":"hi"')" "1"
+check "instance added" "$(echo "$OUT13" | grep -c '"instance":"test-instance-name"')" "1"
+
+echo "== 14. code2code-inbox: same glob concern on the read side =="
+OUT14="$(run '{"session_id":"test-session-id","cwd":"/tmp","tool_name":"mcp__claude_ai_c2c__code2code-inbox","tool_input":{}}')"
+check "updatedInput present for code2code-inbox" "$(echo "$OUT14" | grep -c 'updatedInput')" "1"
+check "as added" "$(echo "$OUT14" | grep -c '"as":"test-instance-name"')" "1"
+
+echo "== 15. NEGATIVE: code2code-send with instance already set -- NOT overridden =="
+OUT15="$(run '{"session_id":"test-session-id","cwd":"/tmp","tool_name":"mcp__claude_ai_c2c__code2code-send","tool_input":{"content":"hi","instance":"explicit-choice"}}')"
+check "no updatedInput when instance was already explicit" "$(echo "$OUT15" | grep -c 'updatedInput')" "0"
+
+echo "== 16. NEGATIVE: code2code-inbox with as already set -- NOT overridden =="
+OUT16="$(run '{"session_id":"test-session-id","cwd":"/tmp","tool_name":"mcp__claude_ai_c2c__code2code-inbox","tool_input":{"as":"explicit-choice"}}')"
+check "no updatedInput when as was already explicit" "$(echo "$OUT16" | grep -c 'updatedInput')" "0"
+
+echo "== 17. logging still happens on every call, auto-inject or not =="
 find "$CLAUDE_PROJECT_DIR/.claude/claude2claude/c2c-mcp/logs/mcp_calls.log" -type f > /dev/null 2>&1
-check "mcp_calls.log has 11 entries (one per run() call above)" \
-  "$(grep -c '"tool_name"' "$CLAUDE_PROJECT_DIR/.claude/claude2claude/c2c-mcp/logs/mcp_calls.log" 2>/dev/null)" "11"
+check "mcp_calls.log has 15 entries (one per run() call above)" \
+  "$(grep -c '"tool_name"' "$CLAUDE_PROJECT_DIR/.claude/claude2claude/c2c-mcp/logs/mcp_calls.log" 2>/dev/null)" "15"
 
 echo
 echo "== $PASS_COUNT passed, $FAILURES failed =="

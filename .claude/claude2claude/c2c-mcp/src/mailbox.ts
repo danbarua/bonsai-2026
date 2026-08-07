@@ -55,9 +55,24 @@ function makeChannel(id: string, dirName: string): Channel {
   };
 }
 
+// For a channel with no fixed peer role -- every party is a Claude Code
+// session, so there's no "the other side" to give a separate directory to.
+// inbox and outbox are the SAME physical directory: whoever sends writes
+// there, whoever reads reads from there. This only works because every
+// message on such a channel carries its own sender identity (`instance`,
+// required at the tool layer -- see server.ts's code2code registration)
+// and readMailbox's excludeSelfSent option (below) keeps a sender from
+// consuming their own unaddressed broadcast before anyone else sees it.
+function makeSharedChannel(id: string, dirName: string): Channel {
+  const root = path.join(REPO_ROOT, ".claude", dirName);
+  const mailbox = path.join(root, "mailbox");
+  return { id, inbox: mailbox, outbox: mailbox, archive: path.join(root, "archive") };
+}
+
 export const CHANNELS = {
   c2c: makeChannel("c2c", "claude2claude"),
   c2gpt: makeChannel("c2gpt", "claude2gpt"),
+  code2code: makeSharedChannel("code2code", "code2code"),
 } as const;
 
 async function ensureDir(dir: string): Promise<void> {
@@ -142,17 +157,32 @@ export async function sendMessage(
   const now = new Date();
   const instanceSlug = instance ? slugify(instance) : "";
   const toSlug = to ? slugify(to) : "";
-  // `--to-<slug>` uses a DOUBLE hyphen deliberately, unlike the single-hyphen
-  // instance suffix above -- slugify() collapses runs of non-alnum chars to
-  // a single hyphen and strips leading/trailing ones, so a slug can never
-  // itself contain "--". That makes "--to-" an unambiguous marker a reader
-  // can search for in a bare filename (parseToSlugFromFilename below), with
-  // no risk of it colliding with slug content the way an earlier unanchored
-  // header-comment regex once did (see parseAddressee's comment). This is
-  // purely additive to the existing instance-slug convention -- a filename
-  // with only an instance slug (no `to`) is unchanged from before.
+  // `--to-<slug>` and `--from-<slug>` use a DOUBLE hyphen deliberately,
+  // unlike the single-hyphen instance suffix above -- slugify() collapses
+  // runs of non-alnum chars to a single hyphen and strips leading/trailing
+  // ones, so a slug can never itself contain "--". That makes these
+  // unambiguous markers a reader can search for in a bare filename
+  // (parseToSlugFromFilename/parseFromSlugFromFilename below), with no risk
+  // of colliding with slug content the way an earlier unanchored
+  // header-comment regex once did (see parseAddressee's comment).
+  //
+  // `--from-<slug>` duplicates the bare instance suffix's value (both are
+  // `instanceSlug` whenever instance is set) -- deliberately, not an
+  // oversight. The bare suffix exists for a human eyeballing `ls` output;
+  // `--from-` exists so code can extract the sender's slug from a filename
+  // WITHOUT depending on the timestamp's exact width to know where the
+  // suffix starts (parseToSlugFromFilename already works this way for
+  // `to`). It's what lets code2code's Stop-hook/inbox filtering answer
+  // "did I send this broadcast myself" from a directory listing alone --
+  // see c2c_mail.sh's c2c_message_from_slug_from_filename and readMailbox's
+  // excludeSelfSent below. Both tags are purely additive: a filename with
+  // only an instance slug and no `to` is unchanged from before either tag
+  // existed.
   const base =
-    timestampFilename(now) + (instanceSlug ? `-${instanceSlug}` : "") + (toSlug ? `--to-${toSlug}` : "");
+    timestampFilename(now) +
+    (instanceSlug ? `-${instanceSlug}` : "") +
+    (instanceSlug ? `--from-${instanceSlug}` : "") +
+    (toSlug ? `--to-${toSlug}` : "");
   const instancePart = instance ? ` · instance: ${instance}` : "";
   const toPart = to ? ` · to: ${to}` : "";
   const header = `<!-- from: ${sender} · ${timestampIso(now)}${instancePart}${toPart} -->\n\n`;
@@ -245,6 +275,27 @@ export function parseToSlugFromFilename(filename: string): string | undefined {
   return match ? match[1] : undefined;
 }
 
+// Extracts the slugified `instance` (sender) directly from a FILENAME (the
+// `--from-<slug>` marker sendMessage now writes), mirroring
+// parseToSlugFromFilename exactly -- see its comment and sendMessage's own
+// comment on why `--from-` exists as an explicit tag rather than parsing
+// the bare instance suffix (which is also present, but not
+// timestamp-width-independent to parse back out reliably). Used by
+// readMailbox's excludeSelfSent below and by c2c_mail.sh's bash mirror,
+// c2c_message_from_slug_from_filename -- both answer "did I send this
+// myself" without opening the file.
+// Non-greedy capture, deliberately: `--from-` can be followed by `--to-`
+// in the same filename (e.g. "...--from-infra--to-stage2b-lead.md"), and a
+// GREEDY `[a-z0-9-]+` would swallow "infra--to-stage2b-lead" whole, since
+// hyphens are valid slug characters and it can't tell "--to-" apart from
+// slug content by character class alone. Non-greedy expansion stops at the
+// first point where the rest of the pattern (an optional "--to-..." tag,
+// then ".md") can match, which is exactly the real slug boundary.
+export function parseFromSlugFromFilename(filename: string): string | undefined {
+  const match = /--from-([a-z0-9-]+?)(?:--to-[a-z0-9-]+)?\.md$/.exec(filename);
+  return match ? match[1] : undefined;
+}
+
 /**
  * Reads every `.md` file in `sourceDir` (the caller picks inbox or outbox
  * based on whose messages the reader wants -- see server.ts's role
@@ -265,11 +316,27 @@ export function parseToSlugFromFilename(filename: string): string | undefined {
  * the exact pre-addressing behavior (every message visible and
  * archivable) -- callers that don't know their own name (Desktop, ChatGPT,
  * or an un-updated caller) are unaffected.
+ *
+ * `excludeSelfSent`, when true, ALSO skips (same "left in place,
+ * unconsumed" treatment) any UNADDRESSED message whose `instance` matches
+ * `asName` -- i.e. a session's own broadcast. Meaningless, and never
+ * passed, on a two-role channel (c2c/c2gpt): there, a reader's own sends go
+ * to `outbox`, and `-inbox` always reads `inbox` -- a reader structurally
+ * never sees its own writes, so no self-match can occur regardless of this
+ * flag. It matters only for a shared-directory channel where inbox and
+ * outbox are the same physical directory (code2code -- see
+ * makeSharedChannel), where without it, a session broadcasting an
+ * announcement would immediately consume its own message on its very next
+ * `-inbox` call, before any other session ever saw it. Defaults to false
+ * (undefined), preserving the exact prior behavior for every existing
+ * caller -- this is an explicit opt-in, not a change to what `asName` alone
+ * does.
  */
 export interface ReadMailboxResult {
   messages: InboxMessage[];
-  // Filenames left in place, unarchived, because they're addressed to a
-  // different name than asName -- always empty unless archive && asName.
+  // Filenames left in place, unarchived: addressed to a different name
+  // than asName, or (excludeSelfSent) a broadcast this same asName sent.
+  // Always empty unless archive && asName.
   skipped: string[];
 }
 
@@ -278,6 +345,7 @@ export async function readMailbox(
   archiveDir: string,
   archive: boolean,
   asName?: string,
+  excludeSelfSent?: boolean,
 ): Promise<ReadMailboxResult> {
   await ensureDir(sourceDir);
   const entries = await fs.readdir(sourceDir);
@@ -295,6 +363,10 @@ export async function readMailbox(
       skipped.push(filename); // addressed to someone else: leave it in place, unconsumed
       continue;
     }
+    if (archive && excludeSelfSent && asName && !to && instance && slugify(instance) === slugify(asName)) {
+      skipped.push(filename); // my own broadcast: leave it for someone else to consume
+      continue;
+    }
 
     messages.push({ filename, content, to, instance });
     if (archive) {
@@ -303,6 +375,47 @@ export async function readMailbox(
     }
   }
   return { messages, skipped };
+}
+
+/**
+ * Moves ONE specific, named file from `dir` to `archiveDir`, unconditionally
+ * -- no addressing or self-exclusion logic applies, since the caller is
+ * explicitly naming the exact file to archive, not doing a bulk consuming
+ * read. Exists specifically as the escape hatch for code2code's
+ * excludeSelfSent behavior: a session's own unaddressed broadcast is never
+ * archived by that session's own readMailbox calls (so it can't accidentally
+ * consume its own announcement before anyone else sees it), which also means
+ * there's otherwise no way for that session to retract or clean up a stale
+ * broadcast once it's served its purpose -- see server.ts's
+ * code2code-archive tool. Not restricted to broadcasts or to the caller's
+ * own messages; it archives whatever filename it's given, matching this
+ * project's existing trust model (mailbox identity is a routing hint, not a
+ * credential -- see README.md).
+ *
+ * Rejects a filename containing a path separator or a bare "." / ".." --
+ * defense against being pointed outside `dir` by a malformed argument,
+ * rather than trusting the caller to only ever pass a real basename.
+ * Returns false (not an error) if the file isn't present in `dir` --
+ * already archived, already gone, or never existed -- so a caller doesn't
+ * need to peek first just to avoid an exception.
+ */
+export async function archiveMessageByFilename(
+  dir: string,
+  archiveDir: string,
+  filename: string,
+): Promise<boolean> {
+  if (filename.includes("/") || filename.includes("\\") || filename === "." || filename === "..") {
+    throw new Error(`Invalid filename: ${filename}`);
+  }
+  const filePath = path.join(dir, filename);
+  try {
+    await fs.access(filePath);
+  } catch {
+    return false;
+  }
+  await ensureDir(archiveDir);
+  await fs.rename(filePath, path.join(archiveDir, filename));
+  return true;
 }
 
 // The Claude Code CLI itself (not this server) writes one JSON file per

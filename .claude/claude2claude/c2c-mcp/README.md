@@ -48,6 +48,25 @@ each other first.
 | `c2c-inbox` | `.claude/claude2claude/` | `claude-code`, `claude-desktop` | `{ reader, archive? }` -- `claude-code` reads `inbox/`, `claude-desktop` reads `outbox/` |
 | `c2gpt-send` | `.claude/claude2gpt/` | `claude-code`, `claude-desktop`, `chatgpt` | `{ sender, content }` -- `claude-code`/`claude-desktop` (either) write `outbox/`, `chatgpt` writes `inbox/` |
 | `c2gpt-inbox` | `.claude/claude2gpt/` | `claude-code`, `claude-desktop`, `chatgpt` | `{ reader, archive? }` -- `claude-code`/`claude-desktop` (either) read `inbox/`, `chatgpt` reads `outbox/` |
+| `code2code-send` | `.claude/code2code/` | none -- always `claude-code` | `{ instance, content, to? }` -- writes `mailbox/` |
+| `code2code-inbox` | `.claude/code2code/` | none -- always `claude-code` | `{ as, archive? }` -- reads `mailbox/` |
+| `code2code-archive` | `.claude/code2code/` | none | `{ filename }` -- moves one named file to `archive/` unconditionally |
+
+`code2code` is a different shape from `c2c`/`c2gpt`: every party is a
+Claude Code session, so there's no peer role and no `outbox`/`inbox`
+split -- `mailbox/` is a SINGLE shared directory, both written and read
+by every session. `instance` (send) and `as` (inbox) are therefore
+REQUIRED, not optional: there's no non-Code peer to fall back to an
+unidentified sender/reader for, and a PreToolUse hook auto-injects both
+so a well-behaved caller never has to pass them explicitly (see
+`.claude/hooks/c2c-mail/pre-c2c-mcp.sh`). Because the mailbox is shared,
+a session's own unaddressed broadcast is automatically excluded from
+its own `code2code-inbox` reads (so it can never consume its own
+just-sent announcement before anyone else sees it) -- which also means
+that broadcast can never be archived by a normal read from the sender
+either. `code2code-archive` is the deliberate escape hatch for that:
+pass the exact filename to retract/clean up a stale broadcast (or any
+other message) directly, no addressing rules applied.
 
 `-send`'s `content` is just the message body; the header comment is
 generated from `sender` and the current UTC time. A same-second

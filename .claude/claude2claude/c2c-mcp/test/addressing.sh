@@ -106,29 +106,39 @@ NO_AS_READ="$(call c2c-inbox '{"reader":"claude-desktop"}' | text_of)"
 check "consuming read with NO as consumes an addressed message anyway (back-compat)" \
   "$(echo "$NO_AS_READ" | grep -c 'another addressed one')" "1"
 
-echo "== 7. combined instance + to: filename carries both tags, unambiguously (single-hyphen instance suffix, double-hyphen --to- marker) =="
+echo "== 7. combined instance + to: filename carries both tags, unambiguously (single-hyphen instance suffix, --from-/--to- markers) =="
 call c2c-send '{"sender":"claude-code","content":"from a specific instance, to a specific reader","instance":"c2c-implementation","to":"reader-d"}' > /dev/null
 FILE7="$(ls "$TMP_ROOT/.claude/claude2claude/outbox" | grep 'reader-d')"
-check "combined filename shape: <timestamp>-<instance-slug>--to-<to-slug>.md" \
-  "$(echo "$FILE7" | grep -cE '^[0-9T:Z-]+-c2c-implementation--to-reader-d\.md$')" "1"
+check "combined filename shape: <timestamp>-<instance-slug>--from-<instance-slug>--to-<to-slug>.md" \
+  "$(echo "$FILE7" | grep -cE '^[0-9T:Z-]+-c2c-implementation--from-c2c-implementation--to-reader-d\.md$')" "1"
 
-echo "== 8. parseToSlugFromFilename extracts the --to- tag directly from a filename, no file read =="
+echo "== 8. parseToSlugFromFilename/parseFromSlugFromFilename extract their tags directly from a filename, no file read =="
 UNIT_CHECK="$(node -e "
-const { parseToSlugFromFilename, slugify } = require('$PKG_DIR/dist/mailbox.js');
-const cases = [
+const { parseToSlugFromFilename, parseFromSlugFromFilename, slugify } = require('$PKG_DIR/dist/mailbox.js');
+const toCases = [
   ['2026-08-07T21-30-00Z--to-reader-b.md', 'reader-b'],
-  ['2026-08-07T21-30-00Z-c2c-implementation--to-reader-d.md', 'reader-d'],
+  ['2026-08-07T21-30-00Z-c2c-implementation--from-c2c-implementation--to-reader-d.md', 'reader-d'],
   ['2026-08-07T21-30-00Z.md', undefined],
   ['2026-08-07T21-30-00Z-c2c-implementation.md', undefined],
 ];
+const fromCases = [
+  ['2026-08-07T21-30-00Z-session-a--from-session-a.md', 'session-a'],
+  ['2026-08-07T21-30-00Z-session-a--from-session-a--to-session-b.md', 'session-a'],
+  ['2026-08-07T21-30-00Z.md', undefined],
+  ['2026-08-07T21-30-00Z--to-session-b.md', undefined],
+];
 let ok = true;
-for (const [name, want] of cases) {
+for (const [name, want] of toCases) {
   const got = parseToSlugFromFilename(name);
-  if (got !== want) { ok = false; console.error('mismatch', name, 'got', got, 'want', want); }
+  if (got !== want) { ok = false; console.error('to mismatch', name, 'got', got, 'want', want); }
+}
+for (const [name, want] of fromCases) {
+  const got = parseFromSlugFromFilename(name);
+  if (got !== want) { ok = false; console.error('from mismatch', name, 'got', got, 'want', want); }
 }
 console.log(ok && slugify('Reader B') === 'reader-b' ? 'PASS' : 'FAIL');
 ")"
-check "parseToSlugFromFilename matches tagged filenames and returns undefined for untagged ones" "$UNIT_CHECK" "PASS"
+check "parseToSlugFromFilename/parseFromSlugFromFilename match tagged filenames, undefined for untagged" "$UNIT_CHECK" "PASS"
 
 echo "== 9. pre-existing (untagged) real messages stay correct via the header fallback -- no migration needed =="
 UNTAGGED="$TMP_ROOT/.claude/claude2claude/outbox/2020-01-01T00-00-00Z.md"

@@ -29,9 +29,9 @@ actual security boundary, not a style preference: prompt-time
 injection of mailbox *content* would be a prompt-injection surface,
 since anything able to write a file into a watched directory could get
 arbitrary text injected into every session's context. The agent reads
-mail through the normal tools (`/c2c inbox`, the c2c-mcp `-inbox`
-tools) *after* seeing the notification; the hooks only ever point,
-never read bodies. Verified by `test/break-tests.sh`'s section (d): a
+mail through the normal MCP tools (`c2c-inbox`/`c2gpt-inbox`/
+`code2code-inbox`) *after* seeing the notification; the hooks only
+ever point, never read bodies. Verified by `test/break-tests.sh`'s section (d): a
 distinctive marker string placed in a message body is asserted absent
 from every hook's output, while the filename is asserted present.
 
@@ -56,28 +56,44 @@ after a peek. That's the right behavior -- a peek genuinely hasn't
 handled the mail -- but worth knowing if a peek is ever used mid-turn
 expecting the Stop hook to then let the turn end.
 
-**Watched dir is `claude2claude/inbox` only -- deliberately not every
-mailbox channel.** This reverses an earlier version of this file: the
-first design globbed `.claude/claude2*/inbox` so a new channel would
-"just work" (principle 21 of this repo's `docs/VACUOUS_TESTS.md` --
-a hand-maintained list standing in for a derivable set will silently
-under-cover). That principle still holds for "which channels get
-discovered" in the abstract, but it was solving the wrong problem
-here. The intended mail topology is ChatGPT <-> Claude Desktop <->
-Claude Code (Desktop relays into `claude2claude/` for Code's benefit),
-not ChatGPT talking to Code directly -- so a Code session's Stop hook
-auto-watching `claude2gpt/inbox` meant it could block on raw ChatGPT
-traffic that was never addressed to it and wasn't its business to
-consume or archive. Confirmed live: a substantive ChatGPT review
-ruling about an unrelated ML pipeline stage did exactly this to an
-unrelated Claude Code session doing MCP-server engineering, with no
-clean way to unblock without either mishandling content that wasn't
-its business or getting stuck. The fix is scope, not addressing: Code
-only watches the channel Desktop relays INTO it on. Set
-`C2C_MAIL_WATCH_DIRS` (space-separated) to override with an explicit
-list instead -- used by the tests for a throwaway location, and
-available if a future channel genuinely does deliver straight to Code
-(bypassing Desktop) and needs watching too.
+**Watched dirs are `claude2claude/inbox` and `code2code/mailbox` --
+deliberately not every mailbox channel.** This reverses an earlier
+version of this file: the first design globbed `.claude/claude2*/inbox`
+so a new channel would "just work" (principle 21 of this repo's
+`docs/VACUOUS_TESTS.md` -- a hand-maintained list standing in for a
+derivable set will silently under-cover). That principle still holds
+for "which channels get discovered" in the abstract, but it was
+solving the wrong problem here. The intended mail topology is ChatGPT
+<-> Claude Desktop <-> Claude Code (Desktop relays into
+`claude2claude/` for Code's benefit), not ChatGPT talking to Code
+directly -- so a Code session's Stop hook auto-watching
+`claude2gpt/inbox` meant it could block on raw ChatGPT traffic that
+was never addressed to it and wasn't its business to consume or
+archive. Confirmed live: a substantive ChatGPT review ruling about an
+unrelated ML pipeline stage did exactly this to an unrelated Claude
+Code session doing MCP-server engineering, with no clean way to
+unblock without either mishandling content that wasn't its business or
+getting stuck. The fix is scope, not addressing: Code only watches a
+channel where it's a genuinely intended recipient.
+
+`code2code/mailbox` is watched too, added when the code2code channel
+(Claude Code sessions messaging each other directly, no fixed peer
+role) was introduced -- a different case from `claude2gpt`, not an
+exception to the reasoning above: code2code traffic is BY Claude Code
+sessions FOR Claude Code sessions, exactly what these hooks exist to
+notice. `c2c_list_unread_for` still narrows it to "addressed to me, or
+broadcast" (same addressing mechanism as `claude2claude`), plus one
+extra rule unique to this channel: a session's OWN unaddressed
+broadcast is excluded from its own unread list (via the `--from-<slug>`
+filename tag), so a session's Stop hook never blocks on the
+announcement it just sent itself. See `.claude/claude2claude/c2c-mcp/
+src/mailbox.ts`'s `makeSharedChannel`/`excludeSelfSent` for the server
+side of the same rule.
+
+Set `C2C_MAIL_WATCH_DIRS` (space-separated) to override with an
+explicit list instead -- used by the tests for a throwaway location,
+and available if a future channel genuinely does deliver straight to
+Code (bypassing Desktop) and needs watching too.
 
 **Hooks fail open.** Claude Code's own hook contract (confirmed
 against current docs before implementing, not assumed): any hook exit

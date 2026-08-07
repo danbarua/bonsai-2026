@@ -6,7 +6,16 @@ import {
 } from "@modelcontextprotocol/sdk/types.js";
 import path from "node:path";
 import { z } from "zod";
-import { CHANNELS, listCodeSessions, PKG_VERSION, readMailbox, REPO_ROOT, sendMessage, type Channel } from "./mailbox.js";
+import {
+  archiveMessageByFilename,
+  CHANNELS,
+  listCodeSessions,
+  PKG_VERSION,
+  readMailbox,
+  REPO_ROOT,
+  sendMessage,
+  type Channel,
+} from "./mailbox.js";
 
 interface ChannelToolConfig {
   toolPrefix: string; // e.g. "c2c" -> tools named c2c-send / c2c-inbox
@@ -232,6 +241,194 @@ function registerChannelTools(server: McpServer, cfg: ChannelToolConfig): void {
   );
 }
 
+// code2code has no fixed peer role -- every party is a Claude Code
+// session (unlike c2c/c2gpt, which always have a non-Code peer:
+// claude-desktop or chatgpt) -- so it doesn't fit registerChannelTools'
+// two-role shape and gets its own registration instead of a third
+// CHANNEL_TOOLS entry. Differences that matter, not just naming:
+//
+// - No `sender`/`reader` role parameter at all -- there's only one role,
+//   so it'd always be the literal "claude-code", adding a field with one
+//   valid value for no benefit.
+// - `instance` (send) and `as` (inbox) are REQUIRED, not optional. On
+//   c2c/c2gpt, omitting them degrades gracefully to "sender/reader
+//   identity unknown" because a non-Code peer (Desktop, ChatGPT) doesn't
+//   have multiple instances to disambiguate. Here, EVERY party is
+//   Multi-instance-Code, so an unidentified sender/reader defeats the
+//   channel's entire reason to exist (see code-sessions) -- and
+//   pre-c2c-mcp.sh's PreToolUse hook already auto-injects both via
+//   updatedInput, so requiring them costs a well-behaved caller nothing.
+// - readMailbox is called with excludeSelfSent: true (always) -- see its
+//   doc comment. Without this, a session's own broadcast would show up as
+//   its own unread mail the moment it called -inbox after sending.
+function registerCode2CodeTools(server: McpServer): void {
+  const channel = CHANNELS.code2code;
+
+  server.registerTool(
+    "code2code-send",
+    {
+      title: "Send a message to another Claude Code session",
+      description:
+        "Write a new markdown message on the code2code mailbox (.claude/code2code/) for another " +
+        "Claude Code session to read. Unlike c2c/c2gpt, every party here is a Claude Code session " +
+        "-- there's no fixed peer role -- so `instance` (this session's own /rename-set name, see " +
+        "code-sessions) is REQUIRED: a PreToolUse hook auto-injects it if omitted, so a caller " +
+        "normally never has to supply it explicitly. Pass `to` (a name from code-sessions) to " +
+        "address one specific recipient -- STRONGLY preferred over omitting it: an unaddressed " +
+        "broadcast is consumed by whichever session calls code2code-inbox first, which is fine " +
+        "for a one-off announcement but wrong as a default for anything meant for one recipient. " +
+        "Never overwrites an existing file: a same-second collision gets a -2, -3, ... suffix.",
+      inputSchema: {
+        instance: z
+          .string()
+          .min(1)
+          .describe(
+            "This session's own /rename-set name (see code-sessions). Required -- every " +
+              "code2code message needs a known sender, since there's no fixed peer role to fall " +
+              "back on. A PreToolUse hook supplies this automatically; pass it explicitly only if " +
+              "overriding that.",
+          ),
+        content: z.string().min(1).describe("The markdown message body (no header needed)."),
+        to: z
+          .string()
+          .optional()
+          .describe(
+            "Address this message to one specific session name (see code-sessions). Omitting " +
+              "this broadcasts to whichever session calls code2code-inbox first -- prefer setting " +
+              "it for anything meant for one recipient.",
+          ),
+      },
+      outputSchema: {
+        filename: z.string().describe("The written message's filename."),
+        path: z.string().describe("Absolute path to the written file."),
+        to: z.string().optional().describe("The addressee, if this message was addressed."),
+        instance: z.string().describe("The sending Claude Code session's name."),
+      },
+    },
+    async ({ instance, content, to }) => {
+      const result = await sendMessage(channel.outbox, "claude-code", content, to, instance);
+      const addressing = to ? ` (addressed to ${to})` : " (broadcast -- first reader to call code2code-inbox consumes it)";
+      return {
+        content: [
+          {
+            type: "text",
+            text: `Wrote code2code message: ${result.filename}${addressing}, from instance ${instance}`,
+          },
+        ],
+        structuredContent: { filename: result.filename, path: result.path, ...(to ? { to } : {}), instance },
+      };
+    },
+  );
+
+  server.registerTool(
+    "code2code-inbox",
+    {
+      title: "Read code2code mail addressed to this session",
+      description:
+        "Read pending messages on the code2code mailbox (.claude/code2code/), oldest first. `as` " +
+        "(this reader's own /rename-set name, see code-sessions) is REQUIRED: a PreToolUse hook " +
+        "auto-injects it if omitted, so a caller normally never has to supply it explicitly. A " +
+        "consuming read (archive:true, the default) skips -- leaves unarchived, not returned -- " +
+        "any message addressed to a DIFFERENT session, AND any unaddressed broadcast this same " +
+        "session itself sent (so a session never consumes its own announcement before anyone else " +
+        "sees it). Pass archive=false to peek without consuming -- a peek always shows everything, " +
+        "self-sent or not.",
+      inputSchema: {
+        as: z
+          .string()
+          .min(1)
+          .describe(
+            "This reader's own /rename-set name (see code-sessions). Required. A PreToolUse " +
+              "hook supplies this automatically; pass it explicitly only if overriding that.",
+          ),
+        archive: z.boolean().default(true).describe("Move each returned message to archive/ after reading (default true)."),
+      },
+      outputSchema: {
+        archived: z.boolean().describe("Whether returned messages were moved to archive/."),
+        messages: z
+          .array(
+            z.object({
+              filename: z.string(),
+              content: z.string(),
+              to: z.string().optional().describe("The addressee, if this message was addressed."),
+              instance: z.string().optional().describe("The sending session's name."),
+            }),
+          )
+          .describe("Messages returned, oldest first."),
+        skipped: z
+          .array(z.string())
+          .describe(
+            "Filenames left unarchived: addressed to a different session, or this session's own broadcast.",
+          ),
+      },
+    },
+    async ({ as, archive }) => {
+      const { messages, skipped } = await readMailbox(channel.inbox, channel.archive, archive, as, true);
+      const structuredContent = { archived: archive, messages, skipped };
+      const skipNote =
+        skipped.length > 0
+          ? ` ${skipped.length} message(s) left unread (addressed elsewhere, or your own broadcast): ${skipped.join(", ")}.`
+          : "";
+      if (messages.length === 0) {
+        return {
+          content: [
+            { type: "text", text: `code2code mailbox is empty -- no pending messages for ${as}.${skipNote}` },
+          ],
+          structuredContent,
+        };
+      }
+      const summary = `${messages.length} message(s) read from code2code (as ${as}, archived: ${archive}).${skipNote}`;
+      const body = messages
+        .map((m) => {
+          const addressing = m.to ? ` (to: ${m.to})` : "";
+          const instanceNote = m.instance ? ` (from: ${m.instance})` : "";
+          return `### ${m.filename}${addressing}${instanceNote}\n\n${m.content.trim()}`;
+        })
+        .join("\n\n---\n\n");
+      return {
+        content: [{ type: "text", text: `${summary}\n\n${body}` }],
+        structuredContent,
+      };
+    },
+  );
+
+  server.registerTool(
+    "code2code-archive",
+    {
+      title: "Archive a specific code2code message by filename",
+      description:
+        "Move ONE specific message on the code2code mailbox (.claude/code2code/) to archive/, by " +
+        "filename (see a code2code-inbox result or a peek with archive:false). Mainly for " +
+        "retracting your own stale broadcast: a session's own unaddressed broadcast is never " +
+        "archived by that session's own code2code-inbox calls (so it can't accidentally consume " +
+        "its own announcement before anyone else sees it) -- this is the explicit, deliberate way " +
+        "to clear one once it's served its purpose. Not restricted to your own messages or to " +
+        "broadcasts -- it archives whatever filename it's given. No-op (found: false, not an " +
+        "error) if the filename isn't present -- already archived, already gone, or never existed.",
+      inputSchema: {
+        filename: z.string().min(1).describe("The exact filename to archive (from code2code-inbox or a peek)."),
+      },
+      outputSchema: {
+        found: z.boolean().describe("Whether the file was present and archived."),
+      },
+    },
+    async ({ filename }) => {
+      const found = await archiveMessageByFilename(channel.inbox, channel.archive, filename);
+      return {
+        content: [
+          {
+            type: "text",
+            text: found
+              ? `Archived ${filename}.`
+              : `${filename} was not found in the code2code mailbox (already archived, or never existed).`,
+          },
+        ],
+        structuredContent: { found },
+      };
+    },
+  );
+}
+
 // Not channel-scoped like registerChannelTools's tools -- this reads the
 // CLI's own global session registry (~/.claude/sessions/), not a mailbox
 // directory, so it gets its own standalone registration.
@@ -309,6 +506,7 @@ export function createServer(): McpServer {
   for (const cfg of CHANNEL_TOOLS) {
     registerChannelTools(server, cfg);
   }
+  registerCode2CodeTools(server);
   registerCodeSessionsTool(server);
   server.server.setRequestHandler(ListResourcesRequestSchema, async () => ({ resources: [] }));
   server.server.setRequestHandler(ListResourceTemplatesRequestSchema, async () => ({ resourceTemplates: [] }));

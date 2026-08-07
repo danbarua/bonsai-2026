@@ -3,6 +3,37 @@
 # SessionStart). Sourced, not executed directly -- keeps "what counts as
 # unread mail" and "how a notification is formatted" defined in exactly
 # one place, since the three hooks all need the same answer.
+#
+# This file DUPLICATES filesystem-matching logic that also lives in
+# .claude/claude2claude/c2c-mcp/src/mailbox.ts (slugify, the
+# --to-/--from- filename tag scheme, the addressing/self-exclusion
+# decision) -- deliberately, not an oversight to eventually fix. These
+# hooks fire synchronously on every prompt/stop/session-start and must
+# answer "is there unread mail" from a plain directory listing, without
+# depending on the c2c-mcp server being up or paying an HTTP round-trip
+# per hook invocation (unlike the MCP tools themselves, which the model
+# calls explicitly and can tolerate that cost for). The tradeoff this
+# accepts: every function below that says "mirrors mailbox.ts's X" is a
+# second, independent implementation of the same rule, in a different
+# language, that must be kept in sync BY HAND when the TS side changes --
+# there is no shared source of truth between them. `test/break-tests.sh`
+# exists largely to catch exactly this kind of drift (each rule
+# proven with its own break-test, not just written and trusted), but a
+# change to mailbox.ts's filename/addressing conventions still requires a
+# matching, deliberate edit here -- it will not happen automatically.
+#
+# The actual fix (not done, deliberately deferred rather than half-done
+# under time pressure): a server endpoint (e.g. `GET /unread?as=<name>`)
+# that answers "what's unread for me" using mailbox.ts's real logic
+# directly, with these hooks calling it instead of re-parsing filenames in
+# bash. Real cost, not free: these hooks currently have ZERO dependency on
+# the c2c-mcp server being up (pure filesystem + bash, fails open
+# trivially); an HTTP-based version would need an explicit, tested
+# fail-open path for "server unreachable" on every one of the three hook
+# entry points, plus break-tests.sh rewritten against a live server
+# (closer to how test/addressing.sh and test/code2code.sh already work)
+# instead of pure bash fixtures. Considered and explicitly deferred this
+# session, not overlooked.
 
 # Watched inbox dirs. Default is claude2claude/inbox ONLY -- deliberately
 # NOT a glob over every .claude/claude2*/inbox, despite that being this
@@ -23,6 +54,15 @@
 # leaving the session stuck. The fix is scope, not addressing: Code only
 # watches the channel Desktop relays INTO it on, full stop.
 #
+# code2code/mailbox/ IS also watched by default, unlike claude2gpt above --
+# a different case, not an exception to the reasoning that excluded
+# claude2gpt: that exclusion was about topology (Code isn't the intended
+# recipient of raw ChatGPT<->Desktop relay traffic), not about "watch
+# fewer things." code2code messages are BY Claude Code sessions FOR Claude
+# Code sessions -- exactly the mail a Code session's Stop hook exists to
+# notice. Addressing (c2c_list_unread_for below) still narrows it to "mine
+# or broadcast," same as claude2claude.
+#
 # Set C2C_MAIL_WATCH_DIRS (space-separated, relative-to-project or
 # absolute) to override with an explicit list instead -- used by
 # test/break-tests.sh for a throwaway location, and available if a future
@@ -33,7 +73,10 @@ c2c_watch_dirs() {
     printf '%s\n' $C2C_MAIL_WATCH_DIRS
     return
   fi
-  local d="${CLAUDE_PROJECT_DIR:-.}/.claude/claude2claude/inbox"
+  local d
+  d="${CLAUDE_PROJECT_DIR:-.}/.claude/claude2claude/inbox"
+  [ -d "$d" ] && printf '%s\n' "$d"
+  d="${CLAUDE_PROJECT_DIR:-.}/.claude/code2code/mailbox"
   [ -d "$d" ] && printf '%s\n' "$d"
 }
 
@@ -87,7 +130,7 @@ lines = [l.strip() for l in sys.stdin if l.strip()]
 if not lines:
     sys.exit(0)
 names = [os.path.basename(l) for l in lines]
-context = "c2c mail waiting: {} unread ({}). Check with /c2c inbox or the c2c-mcp tools.".format(
+context = "c2c mail waiting: {} unread ({}). Check with the c2c-inbox/code2code-inbox MCP tools.".format(
     len(names), ", ".join(names)
 )
 print(json.dumps({"hookSpecificOutput": {"hookEventName": hook_event, "additionalContext": context}}))
@@ -189,6 +232,25 @@ c2c_message_to_slug_from_filename() {
   esac
 }
 
+# Extracts the slugified `instance` (sender) directly from a FILENAME's
+# `--from-<slug>` tag, mirroring c2c_message_to_slug_from_filename exactly
+# -- see mailbox.ts's parseFromSlugFromFilename for why this is a separate
+# explicit tag rather than parsed out of the bare instance suffix. Unlike
+# `--to-`, `--from-` is never the LAST tag when both are present (sendMessage
+# always writes `--from-` before `--to-`), so this strips up to the (sole)
+# "--from-" first, then trims a trailing "--to-..." tag if one follows,
+# then trims ".md".
+c2c_message_from_slug_from_filename() {
+  local base="${1##*/}"
+  case "$base" in
+    *--from-*.md)
+      local rest="${base##*--from-}"
+      rest="${rest%%--to-*}"
+      printf '%s\n' "${rest%.md}"
+      ;;
+  esac
+}
+
 # Extracts the optional "to: <name>" addressee from a message file's header
 # comment (its first line). Prints nothing if absent (broadcast) -- mirrors
 # mailbox.ts's parseAddressee exactly (same tolerance: stops at the first
@@ -233,8 +295,20 @@ if m:
 # this session isn't in it for some reason), every message is treated as
 # broadcast -- fails open to the exact pre-addressing behavior rather than
 # silently hiding all mail from a session whose identity is unknown.
+#
+# Also excludes a session's OWN unaddressed broadcast from its own unread
+# list, via the `--from-<slug>` fast path -- needed for code2code (a
+# shared-directory channel; see mailbox.ts's makeSharedChannel), where
+# without it, a session broadcasting an announcement would have its own
+# Stop hook immediately block on the message it just sent. Inert for
+# claude2claude/claude2gpt: Code's own sends never land in the directory
+# c2c_list_unread reads from there, so `from_slug` can never match `my_slug`
+# on those channels regardless. Only applies when the message is otherwise
+# unaddressed (`to_slug` empty) -- an addressed message already gets the
+# correct "leave for the real recipient" treatment above regardless of who
+# sent it.
 c2c_list_unread_for() {
-  local session_id="$1" my_name my_slug file to_slug addressee
+  local session_id="$1" my_name my_slug file to_slug from_slug addressee
   my_name="$(c2c_session_name_for_id "$session_id")"
   [ -n "$my_name" ] && my_slug="$(c2c_slugify "$my_name")"
   while IFS= read -r file; do
@@ -248,6 +322,10 @@ c2c_list_unread_for() {
       # Fast path: filename already says who this is addressed to.
       [ "$to_slug" = "$my_slug" ] && printf '%s\n' "$file"
       continue
+    fi
+    from_slug="$(c2c_message_from_slug_from_filename "$file")"
+    if [ -n "$from_slug" ] && [ "$from_slug" = "$my_slug" ]; then
+      continue # my own broadcast -- not unread mail for me
     fi
     # Slow path: no filename tag -- open the file and check its header,
     # exactly as before the filename tag existed.

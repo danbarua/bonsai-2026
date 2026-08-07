@@ -219,18 +219,22 @@ bonsai-colab-storage-key.json
 gcp-*-key.json
 
 
-# Claude Code <-> Claude Desktop filesystem mailbox: a local, personal
-# experiment (see .claude/skills/c2c/SKILL.md). The c2c-mcp server that
-# reads/writes it (.claude/claude2claude/c2c-mcp/) IS real project
-# tooling and stays tracked -- only the mailbox message directories are
-# ignored here, not the whole claude2claude/ tree.
-.claude/skills/c2c/
+# Claude Code <-> Claude Desktop/ChatGPT/Claude Code filesystem mailbox: a
+# local, personal experiment. The c2c-mcp server that reads/writes it
+# (.claude/claude2claude/c2c-mcp/) IS real project tooling and stays
+# tracked -- only the mailbox message directories are ignored here, not
+# the whole claude2claude/ tree. code2code/ is the Code-to-Code channel
+# (no fixed peer role, unlike claude2claude/claude2gpt) -- a single shared
+# mailbox/ dir, not a inbox/outbox split, since every party on it is a
+# Claude Code session.
 .claude/claude2claude/inbox/
 .claude/claude2claude/outbox/
 .claude/claude2claude/archive/
 .claude/claude2gpt/inbox/
 .claude/claude2gpt/outbox/
 .claude/claude2gpt/archive/
+.claude/code2code/mailbox/
+.claude/code2code/archive/
 
 # Node.js dependencies (c2c-mcp server)
 node_modules/

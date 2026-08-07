@@ -1,5 +1,5 @@
 #!/bin/bash
-# PreToolUse hook for the c2c-mcp/c2gpt-mcp tools (matcher:
+# PreToolUse hook for the c2c-mcp/c2gpt-mcp/code2code-mcp tools (matcher:
 # mcp__claude_ai_c2c__*, see .claude/settings.json). Three jobs:
 #
 # 1. Log the raw call to logs/mcp_calls.log (unchanged behavior from the
@@ -19,7 +19,13 @@
 #    session, which is exactly what happened in a real incident earlier
 #    this session (a stale connection had no way to pass `as` at all).
 #    Auto-injection closes that gap going forward for any call that
-#    reaches this hook.
+#    reaches this hook. code2code-send/code2code-inbox get the identical
+#    treatment, but there's no `sender`/`reader` field to check first --
+#    every party on that channel IS a Claude Code session (see
+#    server.ts's registerCode2CodeTools) -- and `instance`/`as` are
+#    REQUIRED on that tool's schema, not optional: an unresolvable name
+#    here means the call fails loudly with a validation error rather than
+#    quietly falling back to additionalContext like c2c/c2gpt do.
 # 3. For every other call (or when auto-injection doesn't apply --
 #    field already set, name unresolvable, not a send/inbox call), fall
 #    back to reminding the model of its own session name via
@@ -86,6 +92,25 @@ case "$tool_name" in
       exit 0
     fi
     ;;
+  *code2code-send)
+    # No `sender` field exists on this tool at all -- every party on
+    # code2code IS "claude-code" (see server.ts's registerCode2CodeTools),
+    # so there's no role to check, unlike c2c/c2gpt above. `instance` is a
+    # REQUIRED field on this tool's schema (not optional like on c2c/c2gpt)
+    # -- if it can't be resolved here, the call will fail loudly with a
+    # schema-validation error rather than silently sending unidentified,
+    # which is the point: code2code has no non-Code peer to fall back to
+    # broadcast-style anonymous sends for.
+    if [ -z "$existing_instance" ] && [ -n "$my_name" ]; then
+      echo "$INPUT" | jq -c --arg name "$my_name" '{
+        hookSpecificOutput: {
+          hookEventName: "PreToolUse",
+          updatedInput: (.tool_input + {instance: $name})
+        }
+      }'
+      exit 0
+    fi
+    ;;
   *c2c-inbox|*c2gpt-inbox)
     # The read-side mirror of the above, and arguably more important: a
     # consuming read (archive:true, the default) with no `as` doesn't just
@@ -97,6 +122,20 @@ case "$tool_name" in
     # here closes that gap for any future call through THIS hook,
     # regardless of whether the model remembered to pass it.
     if [ "$reader" = "claude-code" ] && [ -z "$existing_as" ] && [ -n "$my_name" ]; then
+      echo "$INPUT" | jq -c --arg name "$my_name" '{
+        hookSpecificOutput: {
+          hookEventName: "PreToolUse",
+          updatedInput: (.tool_input + {as: $name})
+        }
+      }'
+      exit 0
+    fi
+    ;;
+  *code2code-inbox)
+    # No `reader` field either -- see the code2code-send case above. `as`
+    # is REQUIRED on this tool's schema; a call that reaches the server
+    # without it fails loudly instead of silently reading anonymously.
+    if [ -z "$existing_as" ] && [ -n "$my_name" ]; then
       echo "$INPUT" | jq -c --arg name "$my_name" '{
         hookSpecificOutput: {
           hookEventName: "PreToolUse",

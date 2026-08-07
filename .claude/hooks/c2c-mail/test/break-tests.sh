@@ -170,6 +170,19 @@ check "claude2claude/inbox is still watched by default" \
 
 rm -rf "$TMP_ROOT/.claude/claude2gpt" "$TMP_ROOT/.claude/claude2slack"
 
+echo "== (e2) code2code/mailbox IS watched by default -- a different case from claude2gpt, not an exception to it =="
+# code2code is BY Claude Code sessions FOR Claude Code sessions -- exactly
+# the traffic a Code session's Stop hook exists to notice, unlike
+# claude2gpt's Desktop/ChatGPT relay traffic excluded in (e) above. Confirm
+# it live rather than trust the doc comment in c2c_watch_dirs.
+mkdir -p "$TMP_ROOT/.claude/code2code/mailbox"
+printf '<!-- from: claude-code · 2026-01-04T00-03-00Z -->\n\ncode2code broadcast, no addressing\n' \
+  > "$TMP_ROOT/.claude/code2code/mailbox/2026-01-04T00-03-00Z.md"
+CODE2CODE_WATCHED_OUT="$(env -u C2C_MAIL_WATCH_DIRS CLAUDE_PROJECT_DIR="$TMP_ROOT" "$HOOKS_DIR/user-prompt-submit.sh" <<< "$UPS_STDIN")"
+check "code2code/mailbox IS watched by default" \
+  "$(echo "$CODE2CODE_WATCHED_OUT" | grep -c '2026-01-04T00-03-00Z.md')" "1"
+rm -f "$TMP_ROOT/.claude/code2code/mailbox/2026-01-04T00-03-00Z.md"
+
 # ============================================================
 echo "== (f) addressing: to: field scopes unread mail to the addressed session (or broadcast) =="
 # UPS_STDIN/SESSTART_STDIN/stop_stdin all hardcode session_id "test" -- map
@@ -243,6 +256,43 @@ SLUG_OUT="$(echo "$UPS_STDIN" | "$HOOKS_DIR/user-prompt-submit.sh")"
 check "session named 'Me Session' still matches the --to-me-session filename tag via slugify" \
   "$(echo "$SLUG_OUT" | grep -c '2026-01-06T00-01-00Z--to-me-session.md')" "1"
 
+rm -f "$C2C_MAIL_SESSIONS_DIR/424242.json"
+
+# ============================================================
+echo "== (g) code2code end-to-end through the Stop hook: self-broadcast exclusion AND addressing both work, together =="
+# reset_mailboxes clears claude2claude/inbox and claude2gpt/inbox --
+# REQUIRED here, not optional cleanup: this section deliberately runs with
+# the suite's C2C_MAIL_WATCH_DIRS override unset (env -u below) to exercise
+# the real default watch set, which includes claude2claude/inbox too. Left
+# over files from section (f2) (still sitting there -- nothing before this
+# point ever cleared them) would otherwise block Stop for reasons that have
+# nothing to do with code2code, and did exactly that the first time this
+# section was written.
+reset_mailboxes
+cat > "$C2C_MAIL_SESSIONS_DIR/424242.json" <<'EOF'
+{"pid":424242,"sessionId":"test","name":"me-session","status":"idle"}
+EOF
+mkdir -p "$TMP_ROOT/.claude/code2code/mailbox"
+rm -f "$TMP_ROOT/.claude/code2code/mailbox"/*.md 2>/dev/null
+
+printf '<!-- from: claude-code · 2026-01-07T00-00-00Z · instance: me-session -->\n\nmy own announcement\n' \
+  > "$TMP_ROOT/.claude/code2code/mailbox/2026-01-07T00-00-00Z-me-session--from-me-session.md"
+SELF_BROADCAST_EXIT="$(stop_stdin false | env -u C2C_MAIL_WATCH_DIRS CLAUDE_PROJECT_DIR="$TMP_ROOT" "$HOOKS_DIR/stop.sh" >/dev/null 2>/dev/null; echo $?)"
+check "Stop does NOT block on my own code2code broadcast (default watch dirs, not the suite's override)" "$SELF_BROADCAST_EXIT" "0"
+
+printf '<!-- from: claude-code · 2026-01-07T00-01-00Z · instance: other-session · to: me-session -->\n\nfor you\n' \
+  > "$TMP_ROOT/.claude/code2code/mailbox/2026-01-07T00-01-00Z-other-session--from-other-session--to-me-session.md"
+ADDRESSED_TO_ME_EXIT="$(stop_stdin false | env -u C2C_MAIL_WATCH_DIRS CLAUDE_PROJECT_DIR="$TMP_ROOT" "$HOOKS_DIR/stop.sh" >/dev/null 2>/dev/null; echo $?)"
+check "Stop DOES block once a code2code message addressed to me also exists (own broadcast still correctly ignored)" \
+  "$ADDRESSED_TO_ME_EXIT" "2"
+
+rm -f "$TMP_ROOT/.claude/code2code/mailbox"/*.md
+printf '<!-- from: claude-code · 2026-01-07T00-02-00Z · instance: other-session · to: someone-else -->\n\nnot for you\n' \
+  > "$TMP_ROOT/.claude/code2code/mailbox/2026-01-07T00-02-00Z-other-session--from-other-session--to-someone-else.md"
+ADDRESSED_ELSEWHERE_EXIT="$(stop_stdin false | env -u C2C_MAIL_WATCH_DIRS CLAUDE_PROJECT_DIR="$TMP_ROOT" "$HOOKS_DIR/stop.sh" >/dev/null 2>/dev/null; echo $?)"
+check "Stop does NOT block on a code2code message addressed to someone else" "$ADDRESSED_ELSEWHERE_EXIT" "0"
+
+rm -rf "$TMP_ROOT/.claude/code2code"
 rm -f "$C2C_MAIL_SESSIONS_DIR/424242.json"
 
 echo
