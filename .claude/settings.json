@@ -32,6 +32,17 @@
           }
         ]
       }
+    ],
+    "PreToolUse": [
+      {
+        "matcher": "mcp__claude_ai_c2c__*",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "jq -r . >> \"$CLAUDE_PROJECT_DIR\"/.claude/claude2claude/c2c-mcp/logs/mcp_calls.log"
+          }
+        ]
+      }
     ]
   }
 }
