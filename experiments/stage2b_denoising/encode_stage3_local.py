@@ -413,9 +413,30 @@ def upload(thetas, deltas, roles, active_indices, summary, fp,
     print(f"  payload sha256   : {manifest['payload_sha256']}")
     print(f"  arrays recorded  : {sorted(manifest.get('arrays', {}))}")
     print(f"  source files     : {len(fp['source_manifest'])}")
-    print(f"  commit           : {fp['git']['commit']} "
-          f"(clean={fp['git']['clean']})")
+    print_git_state(fp["git"], indent="  ")
     return result, manifest
+
+
+def print_git_state(git, indent=""):
+    """Both cleanliness claims, closure first.
+
+    Printing only `clean` would report this artifact as coming from a
+    dirty tree, which is true of the REPOSITORY and false of the thing a
+    reader cares about. The closure is what determines reproducibility, so
+    it leads -- and the tree's state is shown underneath rather than
+    hidden, since a reader who wants to check that the dirt is irrelevant
+    needs to see what it was."""
+    print(f"{indent}commit           : {git['commit']}")
+    if "closure_clean" in git:
+        print(f"{indent}source closure   : "
+              f"{'CLEAN -- every file committed at HEAD' if git['closure_clean'] else 'DIRTY: ' + ', '.join(git['closure_dirty_paths'])}")
+    print(f"{indent}working tree     : {'clean' if git['clean'] else 'dirty elsewhere'}")
+    porcelain = git.get("tree_dirty_porcelain")
+    if porcelain:
+        for line in porcelain.splitlines():
+            print(f"{indent}  | {line}")
+        print(f"{indent}  (recorded, not blocking: none of these are in the "
+              f"source closure)")
 
 
 def main(argv=None):
@@ -444,8 +465,8 @@ def main(argv=None):
         entrypoint=os.path.abspath(__file__), repo_root=_REPO_ROOT,
         require_clean=not args.allow_dirty,
         config={"probe": "pre-generation source closure"})
-    print(f"source closure    : {len(pre['source_manifest'])} files, "
-          f"commit {pre['git']['commit']} (clean={pre['git']['clean']})")
+    print(f"source closure    : {len(pre['source_manifest'])} files")
+    print_git_state(pre["git"], indent="  ")
 
     thetas, deltas, roles, active_indices, summary = encode_training_side(
         kmnist_dir=args.kmnist_dir, n_workers=args.workers, limit=args.limit,

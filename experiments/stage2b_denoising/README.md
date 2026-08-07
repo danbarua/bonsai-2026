@@ -5,11 +5,13 @@ evolution, on top of the same already-dynamically-encoded local phase
 state, improve single-step denoising prediction error relative to the
 unevolved encoded state alone? The design is locked (`DESIGN.md`).
 
-**Status: feasibility ladder stages 1 and 2 complete; stage 3 in
-progress.** Stage 1 (n=1,000) and stage 2 (n=5,000) have both run end to
-end on Colab A100s, and stage 3's Phase A (local CPU encoding) has run
-once and is being regenerated at the corrected 60,000-image population
-under the provenance contract. `FINDINGS.md` carries every result,
+**Status: feasibility ladder stages 1 and 2 complete; stage 3 Phase A
+complete, Phase B not written.** Stage 1 (n=1,000) and stage 2 (n=5,000)
+have both run end to end on Colab A100s. Stage 3's Phase A encoded all
+60,000 official training images on local CPU and is the first Stage 2B
+artifact published with provenance attached; the 54,000 images its
+54,000-image predecessor covered reproduced bit-exactly.
+`FINDINGS.md` carries every result,
 including stage 1's first honest FAIL and the disclosed post-lock
 amendment it produced. No confirmatory statistic has been computed on the
 test split, and none may be before the Stage 4 gate.

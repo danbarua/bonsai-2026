@@ -50,6 +50,7 @@ _THIS_DIR = os.path.dirname(os.path.abspath(__file__))
 _REPO_ROOT = os.path.abspath(os.path.join(_THIS_DIR, "..", ".."))
 sys.path.insert(0, _THIS_DIR)
 
+import encode_stage3_local as enc                # noqa: E402
 import stage2b_encoder_gate as encoder_gate      # noqa: E402
 import stage2b_fingerprint as fingerprint        # noqa: E402
 import stage2b_gcs as gcs                        # noqa: E402
@@ -236,7 +237,7 @@ def main(argv=None):
     print("\n-- Provenance")
     if new_manifest:
         fp = new_manifest["fingerprint"]
-        print(f"  commit          : {fp['git']['commit']} (clean={fp['git']['clean']})")
+        enc.print_git_state(fp["git"], indent="  ")
         print(f"  source files    : {len(fp['source_manifest'])}")
         print(f"  config digest   : {fp['config_digest']}")
         print(f"  payload sha256  : {new_manifest['payload_sha256']}")
