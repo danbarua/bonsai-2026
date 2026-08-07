@@ -1,4 +1,5 @@
 import { promises as fs } from "node:fs";
+import os from "node:os";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 
@@ -131,4 +132,96 @@ export async function readMailbox(
     }
   }
   return messages;
+}
+
+// The Claude Code CLI itself (not this server) writes one JSON file per
+// running/recently-run process here, keyed by PID -- confirmed by direct
+// inspection on this machine, not from any documented API. Overridable so
+// tests can point at a throwaway directory instead of real global state
+// (this project has been bitten before by a test writing into a real,
+// shared registry -- see the OAuth client-registry equivalent).
+export const SESSIONS_DIR = process.env.CLAUDE_SESSIONS_DIR
+  ? path.resolve(process.env.CLAUDE_SESSIONS_DIR)
+  : path.join(os.homedir(), ".claude", "sessions");
+
+export interface CodeSessionInfo {
+  sessionId: string;
+  name: string;
+  cwd: string;
+  status: string;
+  pid: number;
+  jobId: string;
+  updatedAt: string; // ISO 8601, "" if the source file had no valid updatedAt
+  alive: boolean;
+}
+
+// process.kill with signal 0 sends nothing -- it only probes whether the PID
+// exists and is signalable. Checked directly rather than trusting the JSON
+// file's own `status` field, since a crashed or killed session leaves its
+// file behind unmodified (confirmed live on this machine: one found session
+// file was hours stale with no messagingSocketPath, i.e. already dead).
+function isProcessAlive(pid: number): boolean {
+  try {
+    process.kill(pid, 0);
+    return true;
+  } catch (err) {
+    // EPERM means the process exists but is owned by another user -- still
+    // alive, just not signalable by us. Any other error (ESRCH, etc.) means
+    // no such process.
+    return (err as NodeJS.ErrnoException).code === "EPERM";
+  }
+}
+
+/**
+ * Lists Claude Code sessions known to this machine, filtered to those whose
+ * `cwd` falls under `repoRoot` (the main checkout or any of its
+ * `.claude/worktrees/*`). The filter is not cosmetic: SESSIONS_DIR is
+ * global across every project on the machine, so an unfiltered list would
+ * surface unrelated sessions (a different repo entirely) to any MCP client
+ * connected to this per-repo server. Malformed or mid-write JSON files are
+ * skipped individually rather than failing the whole call -- the CLI can be
+ * writing a new one at the exact moment this reads the directory.
+ */
+export async function listCodeSessions(repoRoot: string): Promise<CodeSessionInfo[]> {
+  let entries: string[];
+  try {
+    entries = await fs.readdir(SESSIONS_DIR);
+  } catch (err) {
+    if ((err as NodeJS.ErrnoException).code === "ENOENT") return [];
+    throw err;
+  }
+
+  const sessions: CodeSessionInfo[] = [];
+  for (const entry of entries.filter((f) => f.endsWith(".json"))) {
+    let raw: string;
+    try {
+      raw = await fs.readFile(path.join(SESSIONS_DIR, entry), "utf8");
+    } catch {
+      continue; // removed between readdir and readFile -- benign race
+    }
+    let parsed: Record<string, unknown>;
+    try {
+      parsed = JSON.parse(raw);
+    } catch {
+      continue; // not fully written yet, or not a session file at all
+    }
+    if (typeof parsed.cwd !== "string" || typeof parsed.pid !== "number") continue;
+
+    const resolvedCwd = path.resolve(parsed.cwd);
+    const rel = path.relative(repoRoot, resolvedCwd);
+    if (rel.startsWith("..") || path.isAbsolute(rel)) continue; // outside this repo
+
+    sessions.push({
+      sessionId: typeof parsed.sessionId === "string" ? parsed.sessionId : "",
+      name: typeof parsed.name === "string" ? parsed.name : "",
+      cwd: resolvedCwd,
+      status: typeof parsed.status === "string" ? parsed.status : "unknown",
+      pid: parsed.pid,
+      jobId: typeof parsed.jobId === "string" ? parsed.jobId : "",
+      updatedAt: typeof parsed.updatedAt === "number" ? new Date(parsed.updatedAt).toISOString() : "",
+      alive: isProcessAlive(parsed.pid),
+    });
+  }
+  sessions.sort((a, b) => a.name.localeCompare(b.name));
+  return sessions;
 }

@@ -43,6 +43,20 @@ move but not delete). Pass `archive: false` to peek without consuming
 -- useful for checking what's sitting unread in either direction
 without disturbing it.
 
+A fifth tool, `code-sessions`, isn't channel-scoped: it takes no
+arguments and lists Claude Code sessions on this machine whose working
+directory is under this repo (the main checkout or any
+`.claude/worktrees/*`), reading the CLI's own local session registry
+(`~/.claude/sessions/*.json`, not any mailbox) rather than anything
+this server writes itself. Each entry has the session's `/rename`-set
+name, its `cwd`, last-known status, and whether its process is still
+actually alive (checked directly via a zero-signal `kill` probe, not
+just trusted from a possibly-stale file) -- useful for a peer deciding
+which named session a mailbox message should be addressed to.
+`CLAUDE_SESSIONS_DIR` overrides the registry location (used by
+`test/code-sessions.sh` to point at a throwaway directory instead of
+real global state).
+
 ## Build & run
 
 ```bash
@@ -202,12 +216,14 @@ the server (as `run-c2c-mcp.sh`-style dev loops do) doesn't invalidate
 already-issued tokens, which matters because the whole point is
 keeping a long-running claude.ai chat connected across restarts.
 Authorization codes stay in-memory with a 60-second TTL and don't
-survive a restart, and registered DCR clients aren't persisted either
--- both are self-healing (Claude re-registers/re-consents on demand),
-unlike losing a live session's tokens. One known gap from this
-simplification: refresh "rotation" issues a new refresh token but
-can't revoke the old one without a persisted store. Acceptable for a
-single-user tool; would need real storage to harden further.
+survive a restart -- self-healing, since a client whose code was
+mid-flight during a restart just re-authorizes. Registered DCR
+clients, unlike codes, *are* persisted (the gitignored
+`.data/oauth-clients.json`), so a client's `client_id` survives a
+server restart without needing to re-register. One known gap from
+this simplification: refresh "rotation" issues a new refresh token but
+can't revoke the old one without a persisted token store. Acceptable
+for a single-user tool; would need real storage to harden further.
 
 Verified end-to-end, not just endpoint-by-endpoint, in
 `test/oauth-flow.sh`: the full DCR -> consent -> code exchange -> `/mcp`

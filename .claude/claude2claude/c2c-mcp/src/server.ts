@@ -4,8 +4,9 @@ import {
   ListResourceTemplatesRequestSchema,
   ListResourcesRequestSchema,
 } from "@modelcontextprotocol/sdk/types.js";
+import path from "node:path";
 import { z } from "zod";
-import { CHANNELS, readMailbox, sendMessage, type Channel } from "./mailbox.js";
+import { CHANNELS, listCodeSessions, readMailbox, REPO_ROOT, sendMessage, type Channel } from "./mailbox.js";
 
 interface ChannelToolConfig {
   toolPrefix: string; // e.g. "c2c" -> tools named c2c-send / c2c-inbox
@@ -120,6 +121,46 @@ function registerChannelTools(server: McpServer, cfg: ChannelToolConfig): void {
   );
 }
 
+// Not channel-scoped like registerChannelTools's tools -- this reads the
+// CLI's own global session registry (~/.claude/sessions/), not a mailbox
+// directory, so it gets its own standalone registration.
+function registerCodeSessionsTool(server: McpServer): void {
+  server.registerTool(
+    "code-sessions",
+    {
+      title: "List Claude Code sessions",
+      description:
+        "Lists Claude Code sessions on this machine whose working directory is under " +
+        "this repository (the main checkout or any .claude/worktrees/* inside it), " +
+        "read from the CLI's own local session registry -- not this mailbox. Each " +
+        "entry has the session's human-assigned name (set via /rename), its working " +
+        "directory, last-known status, and whether its process is still actually " +
+        "alive (checked directly, not just trusted from a possibly-stale file). " +
+        "Useful for seeing which named sessions currently exist, e.g. before " +
+        "addressing a mailbox message to a specific one.",
+      inputSchema: {},
+    },
+    async () => {
+      const sessions = await listCodeSessions(REPO_ROOT);
+      if (sessions.length === 0) {
+        return {
+          content: [{ type: "text", text: "No Claude Code sessions found under this repository." }],
+        };
+      }
+      const lines = sessions.map((s) => {
+        const relCwd = path.relative(REPO_ROOT, s.cwd) || ".";
+        return (
+          `- **${s.name || "(unnamed)"}** -- ${s.alive ? "alive" : "not running"}, ` +
+          `status=${s.status}, cwd=${relCwd}, sessionId=${s.sessionId}, pid=${s.pid}`
+        );
+      });
+      return {
+        content: [{ type: "text", text: `${sessions.length} session(s) under this repo:\n\n${lines.join("\n")}` }],
+      };
+    },
+  );
+}
+
 export function createServer(): McpServer {
   const server = new McpServer(
     {
@@ -141,6 +182,7 @@ export function createServer(): McpServer {
   for (const cfg of CHANNEL_TOOLS) {
     registerChannelTools(server, cfg);
   }
+  registerCodeSessionsTool(server);
   server.server.setRequestHandler(ListResourcesRequestSchema, async () => ({ resources: [] }));
   server.server.setRequestHandler(ListResourceTemplatesRequestSchema, async () => ({ resourceTemplates: [] }));
   server.server.setRequestHandler(ListPromptsRequestSchema, async () => ({ prompts: [] }));
