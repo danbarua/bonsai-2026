@@ -39,7 +39,7 @@
         "hooks": [
           {
             "type": "command",
-            "command": "jq -r . >> \"$CLAUDE_PROJECT_DIR\"/.claude/claude2claude/c2c-mcp/logs/mcp_calls.log"
+            "command": "\"$CLAUDE_PROJECT_DIR\"/.claude/hooks/c2c-mail/pre-c2c-mcp.sh"
           }
         ]
       }
