@@ -319,7 +319,8 @@ STAGE2B_TEST_FILES := tests/test_stage2b_corruption.py tests/test_stage2b_encode
                       tests/test_stage2b_fingerprint.py \
                       tests/test_stage2b_negative_path_evidence.py \
                       tests/test_stage2b_encode_stage3_local.py \
-                      tests/test_stage2b_compare_stage3.py
+                      tests/test_stage2b_compare_stage3.py \
+                      tests/test_stage2b_ladder_stage3.py
 
 .PHONY: stage2b-test
 stage2b-test:  ## Run the Stage 2B test suite (fast only; the Colab round trip is excluded)
@@ -606,6 +607,56 @@ stage2b-ladder-stage2:  ## Run Stage 2B ladder stage 2 (n=5,000, CNN development
 		if [ $$rc -eq 0 ]; then rc=1; fi; \
 	fi; \
 	$(call check_teardown,$(SESSION_2B_LADDER2)); \
+	exit $$rc
+
+SESSION_2B_LADDER3 ?= stage2b-ladder3
+
+# Ladder stage 3, PHASE B: the full 60,000-image corpus on an A100.
+#
+# `EXEC_TIMEOUT` is overridden here rather than left at the 3600s default,
+# and the reason is measured rather than precautionary. Stage 2's recorded
+# `8_ridge` is 305.53s at n=5,000, dominated not by the JAX SVD but by
+# `sklearn_ridge_predict` -- `Ridge(solver="svd")` once per alpha on the
+# CPU, 315 oracle fits against 35 production ones. The SVD of an (n x 1008)
+# matrix is linear in n for n >> p, so ridge alone projects to ~3,700s at
+# 12x scale. With evolution (~490s), features (~560s) and the CNN (~1,200s)
+# the projected total is ~5,900s of compute before bootstrap, install and a
+# 229MB download -- so the default would time out mid-ridge ON A HEALTHY
+# RUN. The driver's own step-2b sizing probe is what actually gates the
+# spend; this only stops the harness from killing a run that is fine.
+STAGE3_EXEC_TIMEOUT ?= 10800
+
+.PHONY: stage2b-ladder-stage3
+stage2b-ladder-stage3:  ## Run Stage 2B ladder stage 3 Phase B (n=60,000) on a Colab GPU -- bills while running
+	rc=0; src=0; \
+	cd $(REPO_ROOT) && \
+	if ! $(CLOSURE_CHECK) $(STAGE2B_DIR)/run_ladder_stage3.py; then \
+		exit 1; \
+	fi; \
+	commit=$$($(GIT) rev-parse HEAD); \
+	if ! $(GIT) branch -r --contains $$commit 2>/dev/null | grep -q .; then \
+		echo "[make] REFUSING: HEAD $$commit is not on any remote. Push before running -- the runtime can only fetch what origin has."; \
+		exit 1; \
+	fi; \
+	driver_sha=$$(shasum -a 256 $(STAGE2B_DIR)/run_ladder_stage3.py | cut -d' ' -f1); \
+	echo "[make] commit $$commit, driver sha256 $$driver_sha"; \
+	cd $(STAGE2B_DIR) && \
+	$(MIGHTY_COLAB) sessions && \
+	if $(MIGHTY_COLAB) status -s $(SESSION_2B_LADDER3) 2>&1 | grep -q "not found"; then \
+		$(MIGHTY_COLAB) new -s $(SESSION_2B_LADDER3) --gpu $(LADDER_GPU); \
+	else \
+		echo "[make] Reusing existing session $(SESSION_2B_LADDER3)"; \
+	fi && \
+	$(MIGHTY_COLAB) reinstall -s $(SESSION_2B_LADDER3) jax[cuda12]==0.11.0 diffrax==0.7.2 google-cloud-storage equinox optax && \
+	$(MIGHTY_COLAB) upload -s $(SESSION_2B_LADDER3) $(BONSAI_GCS_CREDENTIALS) $(REMOTE_KEY_PATH) && \
+	rc=0; out=$$($(MIGHTY_COLAB) exec -s $(SESSION_2B_LADDER3) -f run_ladder_stage3.py --timeout $(STAGE3_EXEC_TIMEOUT) $(GCS_EXEC_ENV) --env BONSAI_COMMIT="$$commit" --env BONSAI_DRIVER_SHA256="$$driver_sha" --env JAX_ENABLE_X64=1 2>&1) || rc=$$?; \
+	echo "$$out"; \
+	src=0; $(MIGHTY_COLAB) stop -s $(SESSION_2B_LADDER3) || src=$$?; \
+	if [ $$rc -ne 0 ] || ! echo "$$out" | grep -q STAGE3_OK; then \
+		echo "[make] FAILED: ladder stage 3 did not report success (exec rc=$$rc)."; \
+		if [ $$rc -eq 0 ]; then rc=1; fi; \
+	fi; \
+	$(call check_teardown,$(SESSION_2B_LADDER3)); \
 	exit $$rc
 
 .PHONY: help

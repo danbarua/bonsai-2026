@@ -2639,3 +2639,122 @@ def test_consume_refuses_an_artifact_whose_lineage_contains_a_run_scoped_object(
     }).encode()
     with pytest.raises(gcs.WriteOnceViolation, match="RUN_SCOPED"):
         gcs.consume_validated(child, str(local), bucket=bucket)
+
+
+# ---- the orphan payload: the crash window, and the way out of it ----
+
+def _orphaned(bucket, tmp_path):
+    """The state a session leaves when it dies between the payload write
+    and the sidecar write: bytes under a LINEAGE name, no manifest."""
+    obj = gcs.object_path(**TRAIN_ARGS)
+    local = _npz_artifact(tmp_path)
+    gcs.upload_file(local, obj, bucket=bucket)
+    assert gcs.artifact_class(obj) == gcs.LINEAGE
+    assert gcs.read_manifest(obj, bucket=bucket) is None
+    return obj, local
+
+
+def test_an_orphan_payload_closes_every_ordinary_route(bucket, tmp_path):
+    """The reason `discard_uncommitted` exists, pinned as a test rather
+    than described in its docstring.
+
+    Each of these three refusals is individually correct. Together they
+    mean a resumed run has NO forward path on its own, which is why the
+    recovery is a named function rather than something a caller improvises.
+    If a later change opens one of these routes, this test says so."""
+    obj, _ = _orphaned(bucket, tmp_path)
+    produced = []
+
+    def produce(path):
+        produced.append(path)
+        np.savez_compressed(path, x=np.arange(8, dtype=np.float64))
+
+    with pytest.raises(gcs.ManifestMissingError):
+        gcs.ensure_artifact(obj, str(tmp_path / "a.npz"), produce=produce,
+                            bucket=bucket, fingerprint=_fingerprint())
+    with pytest.raises(gcs.WriteOnceViolation):
+        gcs.ensure_artifact(obj, str(tmp_path / "b.npz"), produce=produce,
+                            bucket=bucket, fingerprint=_fingerprint(), force=True)
+    assert produced == [], (
+        "no route may recompute the step: burning the GPU time and THEN "
+        "refusing to land it is the failure the pre-produce checks exist to "
+        "prevent")
+
+
+def test_discard_uncommitted_clears_the_orphan_and_the_run_proceeds(bucket, tmp_path):
+    """The recovery, end to end: after the discard, the ordinary create
+    path runs and commits normally."""
+    obj, _ = _orphaned(bucket, tmp_path)
+    assert gcs.discard_uncommitted(obj, bucket=bucket) is True
+    assert not gcs.object_exists(obj, bucket=bucket)
+
+    def produce(path):
+        np.savez_compressed(path, x=np.arange(8, dtype=np.float64))
+
+    result = gcs.ensure_artifact(obj, str(tmp_path / "c.npz"), produce=produce,
+                                 bucket=bucket, fingerprint=_fingerprint())
+    assert result.manifest_published
+    manifest, _ = gcs.consume_validated(obj, str(tmp_path / "d.npz"), bucket=bucket)
+    assert manifest["payload_generation"] == gcs.current_generation(obj, bucket=bucket)
+
+
+def test_discard_uncommitted_refuses_a_committed_artifact(bucket, tmp_path):
+    """The whole safety property. A committed artifact's generation is
+    pinned by its own manifest and possibly by another naming it a parent;
+    there is no supported delete for one."""
+    obj, _, _ = _published(bucket, tmp_path)
+    with pytest.raises(gcs.WriteOnceViolation, match="COMMITTED"):
+        gcs.discard_uncommitted(obj, bucket=bucket)
+    assert gcs.object_exists(obj, bucket=bucket)
+    assert gcs.read_manifest(obj, bucket=bucket) is not None
+
+
+def test_discard_uncommitted_reads_the_manifest_at_call_time(bucket, tmp_path):
+    """Not from a listing taken earlier. Between a caller observing "no
+    manifest" and calling this, the write that commits the payload may have
+    landed -- so the check that matters is the one made here."""
+    obj, local = _orphaned(bucket, tmp_path)
+    assert gcs.read_manifest(obj, bucket=bucket) is None      # the stale observation
+    gcs.publish_manifest(local, obj, bucket=bucket, fingerprint=_fingerprint())
+    with pytest.raises(gcs.WriteOnceViolation, match="COMMITTED"):
+        gcs.discard_uncommitted(obj, bucket=bucket)
+
+
+def test_discard_uncommitted_refuses_a_manifest_name(bucket, tmp_path):
+    """Deleting the sidecar would UNCOMMIT an artifact whose bytes remain
+    -- manufacturing the orphan state instead of clearing it."""
+    obj, _, _ = _published(bucket, tmp_path)
+    with pytest.raises(ValueError, match="not a payload"):
+        gcs.discard_uncommitted(gcs.manifest_object_name(obj), bucket=bucket)
+
+
+def test_discard_uncommitted_is_the_exact_name_not_a_prefix(bucket, tmp_path):
+    """`manifest_object_name` is the payload name plus a suffix, so a
+    prefix-matching delete reaches a DIFFERENT artifact's manifest. This
+    one deletes only what it was given."""
+    obj, _ = _orphaned(bucket, tmp_path)
+    sibling = obj + ".sibling.npz"
+    gcs.upload_file(_npz_artifact(tmp_path, name="s.npz"), sibling, bucket=bucket)
+    assert gcs.discard_uncommitted(obj, bucket=bucket) is True
+    assert gcs.object_exists(sibling, bucket=bucket), (
+        "a prefix delete would have taken this too")
+
+
+def test_discard_uncommitted_on_a_missing_object_is_not_an_error(bucket, tmp_path):
+    """A resume that already cleared the orphan, or raced another operator
+    doing so, reports False rather than raising."""
+    assert gcs.discard_uncommitted(gcs.object_path(**TRAIN_ARGS), bucket=bucket) is False
+
+
+def test_discard_uncommitted_refuses_the_test_split(bucket, tmp_path):
+    """The stage-4 lock reaches this like every other way of touching an
+    object.
+
+    The name is built WITH `allow_test_split=True` and then passed without
+    it, deliberately: constructing it the ordinary way raises inside
+    `object_path`, so the test would pass without `discard_uncommitted`
+    ever being called and would keep passing if its own check were
+    deleted."""
+    name = gcs.object_path(allow_test_split=True, **TEST_ARGS)
+    with pytest.raises(PermissionError, match="test-split root"):
+        gcs.discard_uncommitted(name, bucket=bucket)
