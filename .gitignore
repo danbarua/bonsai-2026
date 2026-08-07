@@ -239,3 +239,8 @@ node_modules/
 # c2c-mcp's OAuth HMAC signing key (self-generated on first run, a live
 # credential -- anyone with it can forge access tokens for the connector).
 .claude/claude2claude/c2c-mcp/.data/
+
+# The generic `lib/` rule above (Python packaging boilerplate) has no
+# leading slash, so it also matches .claude/hooks/c2c-mail/lib/ -- real
+# tracked shell code, not a packaging artifact. Un-ignore it explicitly.
+!.claude/hooks/c2c-mail/lib/
