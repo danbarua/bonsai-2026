@@ -26,7 +26,7 @@ a dead session would resume having lost at most one step.
 
 The encoder-on-noisy-inputs gate's first execution on real, majority-
 censored KMNIST (commit `7723b96`, `ENCODER_STEPS=150`) failed the
-pre-registered threshold:
+pre-registered `rho <= 10` threshold:
 
 | quantity | clean | noisy |
 |---|---|---|
@@ -36,7 +36,27 @@ pre-registered threshold:
 
 **rho = 169.851** against threshold 10 -- roughly 17x over. Zero
 non-finite values anywhere: a clean ratio failure, not a numerical
-blow-up. Per `DESIGN.md`'s locked stop-gate this halted the stage
+blow-up.
+
+**What this failure was, and what it was not.** The original Stage 1
+failure was not itself a numerical-floor artefact. It showed that 150
+iterations were insufficient for noisy inputs under the original
+relative gate. The noisy median, 3.698e-05, and its p95, 1.784e-04, sit
+far above any numerical floor -- seven orders above the `ABS_CONV_EPS`
+of 1e-12 adopted later, and nine or more above the float64 dust Part 2
+observes at 1e-14 to 1e-16. The
+floor artefact identified in Part 2 is a distinct defect with a
+distinct cause: it is a property of the DIAGNOSTIC trajectory at 600
+steps and above, where both series have decayed into numerical dust.
+The two are not the same failure mode and neither implies the other.
+
+What the gate's own summary reports is the median, the p95 and the
+non-finite counts -- not per-image counts of exactly-zero and nonzero
+final-Delta, and not the max. The per-image `delta_clean` and
+`delta_noisy` arrays are stored inside `encoder_gate.npz`, so those
+counts are recoverable from the artifact rather than lost.
+
+Per `DESIGN.md`'s locked stop-gate this halted the stage
 immediately (`STAGE1_FAIL`, session torn down, nothing billing);
 steps 5-10 never ran. Confirmed against the live bucket listing before
 any further work: 11 objects existed under `stage2b/train/stage1/`,
@@ -65,11 +85,22 @@ deltas and rho to full reported precision.
 | 600 | **0.0** | **0.0** | 1.776e-14 | 1.043e-11 | 17.76 |
 | 1200 | **0.0** | **0.0** | **0.0** | **0.0** | **0.0** |
 
-Noisy final-Delta decays geometrically all the way to exact float64
-zero -- median AND p95, every one of 1,000 images -- by 1,200 steps, the
-same fixed point clean reaches. No floor above a meaningful scale
-exists; the encoder converges on censored inputs, it is simply slower
-to.
+Noisy final-Delta decays geometrically: by 1,200 steps both its median
+and its p95 are exact float64 zero, the same fixed point clean reaches.
+No floor above a meaningful scale exists; on censored inputs the encoder
+reaches numerical convergence below any practically relevant tolerance,
+it is simply slower to get there.
+
+**Two quantiles are not a distribution.** The median and the p95 are the
+only order statistics this table carries, and median and p95 ratios do
+not by themselves prove a whole-distribution shift -- they show a shift
+at two quantiles. Concretely, the steps=1,200 row supports "median and
+p95 are exactly zero across these 1,000 images", not "every one of
+1,000 images is exactly zero": no per-image exact-zero count and no max
+was reported at this rung. The 54,000-image measurement recorded further
+down shows the stronger reading is false at larger corpus sizes. The
+per-image arrays are stored in the stage-1 `encoder_gate*.npz`
+artifacts, so the unreported counts remain recoverable from the record.
 
 **A second, independent defect is visible in the same table.** The rho
 column is non-monotone (14.98, 169.9, 1.915e4, 17.76, 0.0) because clean
@@ -100,28 +131,64 @@ not a qualitatively different regime on noisy inputs.
 ## Part 3 -- disclosed post-lock amendment
 
 Full text: `DESIGN.md`'s "Encoder-on-noisy-inputs gate" section and
-Review History. Two changes, both required by the diagnosis above:
+Review History. **The 1,200-step budget and absolute-convergence clause
+were prospective amendments made after Stage 1 failure and before
+downstream confirmatory evaluation; they were not preregistered
+components of the original design.** Two changes, answering two
+different failures:
 
 1. **`ENCODER_STEPS` raised 150 -> 1200**, uniformly (every encoding
-   site, clean and noisy identically). Mirrors Stage 2A's own
-   `max_iter` 1,000 -> 10,000 precedent: halt honestly, diagnose
-   mechanism, amend with disclosure, re-verify.
+   site, clean and noisy identically). This answers the Part 1 failure:
+   150 iterations were insufficient budget for noisy inputs. Mirrors
+   Stage 2A's own `max_iter` 1,000 -> 10,000 precedent: halt honestly,
+   diagnose mechanism, amend with disclosure, re-verify.
 2. **Gate formula gains an absolute-convergence escape**: PASS if
    `rho <= 10` OR both medians are already below `ABS_CONV_EPS=1e-12`
    (5+ orders below the smallest meaningful measured Delta, well above
    observed float64 dust). Non-finite auto-fail stays unconditional.
+   This answers the separate Part 2 defect -- the ratio gate flooring
+   out at 600 steps and above -- and would not have rescued the Part 1
+   failure, where both medians sit far above 1e-12.
 
-**The decision rule that selected S\*=1200 is stated as verdict-
-invariant, not merely correct.** An earlier, looser reading of the rule
-("some S\* brings noisy within 10x of clean-at-150") was caught before
-being applied -- it selects S\*=300, which immediately fails its own
-same-step re-run at rho=1.915e4. The corrected rule (same-step, both
-series required to have genuinely converged) passes at S\*=1200 under
-EITHER reading, so the correction did not select this outcome. No finer
-scan between 600 and 1200 was run: 1200 is the only step count in the
-five-point scan that passes robustly (exact zero, both medians and both
-p95s), rather than sitting near the fragile crossover band a smaller,
-untested value might land in.
+### Why S\* = 1,200: three separate things, kept separate
+
+**(a) The contemporaneous decision-time reason, as it was actually
+given.** 1,200 was the only step count in the five-point scan at which
+both reported statistics -- median and p95, on the clean series and the
+noisy series alike -- sat at exact float64 zero. That was read at the
+time as maximal distance from the fragile crossover band where clean and
+noisy pass their own numerical floors at different step counts, the band
+that produced the spurious rho=17.76 FAIL at 600. No finer scan between
+600 and 1,200 was run, on the reasoning that a smaller untested value
+might land inside that band.
+
+The decision rule that selected S\*=1200 was stated as verdict-invariant,
+not merely correct. An earlier, looser reading of the rule ("some S\*
+brings noisy within 10x of clean-at-150") was caught before being
+applied -- it selects S\*=300, which immediately fails its own same-step
+re-run at rho=1.915e4. The corrected rule (same-step, both series
+required to have genuinely converged) passes at S\*=1200 under EITHER
+reading, so the correction did not select this outcome.
+
+**(b) The durable rationale, identified retrospectively.** 600 is the
+first measured budget satisfying the amended absolute gate: noisy median
+1.776e-14 and clean median exactly 0, both below `ABS_CONV_EPS=1e-12`,
+where 300's clean median of 1.538e-12 is not. 1,200 is a conservative
+twofold safety margin over that first passing budget, frozen before any
+downstream fitting. This reading is derivable from the scan table above
+and does not rest on (a)'s exact-zero premise.
+
+**(c) Subsequent evidence narrowing (a)'s premise.** (a) rests on exact
+zero being a property of the converged encoder, as the n=1,000 scan's
+two reported order statistics showed at the time it was reasoned. That
+premise did not survive scale, and degraded monotonically with corpus
+size: stage 2's n=5,000 encode already recorded a nonzero max
+(2.22e-14), and the 54,000-image encoding recorded further down found 79
+images with nonzero final-Delta, max 2.468e-10. (a) is preserved here as
+the decision record -- what was actually reasoned, on the evidence then
+available -- not as a claim that still stands unmodified. (b) is
+untouched by this: it turns on medians, which are exactly zero at every
+corpus size where a median is on the record, n=1,000 and n=54,000.
 
 A second, independent bug was found and fixed in the same investigation,
 by tracing "every encoding site" through the actual call graph rather
@@ -155,8 +222,14 @@ encoder-on-noisy-inputs gate: PASS
   non-finite phases/deltas : 0/0, 0/0
 ```
 
-Exact float64 zero on both sides, matching the diagnostic's own
-steps=1200 measurement precisely. Because the gate passed, the driver
+Both medians at exact float64 zero, matching the diagnostic's own
+steps=1200 measurement precisely. What the gate's summary reports is
+medians, p95s and non-finite counts (0/0 on both sides); it reports no
+per-image count of exactly-zero or nonzero final-Delta and no max, and a
+median of zero is not a per-image claim -- see the 54,000-image tail
+below. What this run establishes is numerical convergence below any
+practically relevant tolerance, not exact convergence for every image.
+Because the gate passed, the driver
 continued automatically through steps 5-10 in the same run, per the
 amendment's own instruction -- the halt rule is satisfied by a passing
 verdict, no separate authorization needed. **This is the first time any
@@ -369,7 +442,9 @@ hours)** for encoding alone -- by far the dominant cost in the whole
 pipeline at that scale, and the number that should drive any stage-3
 planning decision about parallelizing or otherwise restructuring this
 step. Not validated at that scale; a linear projection from one
-measurement, stated as such.
+measurement, stated as such. It was projected against a 54,000-image
+stage-3 scale; the stage-3 populations are fixed differently -- see
+"Population roles" in the Phase A section below.
 
 **(2) `curr_random` centering margin vs. the amendment's ~0.075
 prediction.** Measured: **`margin_ratio = 0.0807`** (`||mean(X)|| =
@@ -434,6 +509,13 @@ NON-INFERENTIAL, NOT A RESULT`.
 | ridge | 305.5s | 3,299.7s (55.0min) |
 | CNN | 99.5s | 1,074.9s (17.9min), basis differs -- see caveat below |
 
+Every row was projected against a 54,000-image stage-3 scale. The
+ridge CV and final-fit corpus is the full 60,000-image training side
+(see "Population roles" below), so the ridge row's population is not the
+one that will actually be fitted; no revised projection is stated here,
+because rescaling one row by a population ratio is exactly the
+cross-stage extrapolation this project has already been bitten by.
+
 Never one blended rate. The CNN projection is explicitly weaker than the
 others: CNN cost scales with epochs x batches, not simply n, and early
 stopping means the epoch count itself is not fixed by corpus size --
@@ -450,12 +532,15 @@ not duplicated).
 
 ## Next step
 
-Feasibility ladder stage 3 -- Phase A complete, see below.
+Feasibility ladder stage 3 -- Phase A complete at 54,000 images and
+pending regeneration at 60,000, see below.
 
 # Stage 2B: Feasibility Ladder Stage 3, Phase A (encoding)
 
-**Status: Phase A only. Phase B (evolution, ridge, CNN) has NOT run, and
-stage 3 has produced no denoising number of any kind.** This section
+**Status: Phase A only, and at the wrong population -- this run encoded
+54,000 images and Phase A will be regenerated at 60,000. Phase B
+(evolution, ridge, CNN) has NOT run, and stage 3 has produced no
+denoising number of any kind.** This section
 records the encoding phase because it is a complete, measured unit with
 a durable artifact -- and because this project's own Part 4 lesson is
 that an unwritten result does not survive the session that produced it.
@@ -516,10 +601,31 @@ the encoded array in GCS is the artifact of record.
 ## Result
 
 **54,000 fit-side images, 1,200 steps, 9 workers (Darwin arm64, 10
-cores).** The 6,000-image locked validation partition is deliberately
-not encoded -- the CNN consumes validation images as raw corrupted
-grids, and ridge selects alpha by internal cross-validation on the fit
-side, so an encoded validation array would be an artifact nothing reads.
+cores).** This run encoded the CNN fit side only, on the reading that
+the CNN consumes validation images as raw corrupted grids and ridge
+selects alpha by internal cross-validation on the fit side, so an
+encoded validation array would be an artifact nothing reads. That
+reading is wrong for the ridge path: ridge CV and the final refits run
+on the full 60,000-image training side, so the 6,000 locked-validation
+images must be encoded too. Phase A will be regenerated at 60,000; the
+measurements below are the 54,000-image run's own.
+
+**Population roles.** `DESIGN.md:479` defines "full training" at stage 3
+as the 54,000 fit plus 6,000 locked validation composite, and `:492`'s
+compute cell reads `~48-60k x 1008`, where 48,000 = 0.8 x 60,000 is a
+five-fold CV training portion of 60,000. The 54,000 / 6,000 split
+governs CNN weight-fitting and model selection only: the 6,000 are held
+out from CNN gradient updates, not from training-side analysis.
+
+| role | n |
+|---|---:|
+| official training corpus | 60,000 |
+| CNN weight-fit subset | 54,000 |
+| CNN validation / model-selection subset | 6,000 |
+| **ridge CV and final-fit corpus** | **60,000** |
+
+Frozen as Freeze 2 in `AUDIT_PROTOCOL.md`, which is authoritative for
+these roles.
 
 | quantity | measured |
 |---|---:|
@@ -536,29 +642,50 @@ rest parallelism.
 
 ## A scale-dependent finding: the convergence tail is not exactly zero
 
-Stage 1 concluded final-Delta reaches "exact float64 zero -- median AND
-p95, every one of 1,000 images", and stage 2 measured a max of 2.22e-14
+Stage 1 reported final-Delta at exact float64 zero at both the median
+and the p95 across 1,000 images, and stage 2 measured a max of 2.22e-14
 across 5,000. At 54,000 the maximum is **2.468e-10** -- four orders
-larger, and only visible at this scale:
+larger, and only visible at this scale. Neither earlier rung reported a
+count of exactly-zero or nonzero final-Delta; both stored their
+per-image arrays, so both counts are recoverable from the artifacts
+without re-encoding.
 
-| final-Delta | count of 54,000 |
+Population: **the 54,000 fit-side images of the official KMNIST training
+split**, encoded by this Phase A run. The 6,000-image locked validation
+subset has never been encoded, so no tail measurement exists for it and
+none of the counts below speak to it. Nothing here touches the test
+split.
+
+| final-Delta, over the 54,000 encoded fit-side images | count |
 |---|---:|
 | exactly 0.0 | 53,921 (99.854%) |
-| > 0 | 79 (0.146%) |
+| > 0 | **79 (0.146%)** |
 | > 1e-13 | 9 |
 | > 1e-12 | 4 |
 | > 1e-10 | 2 |
+| non-finite | 0 |
 
-median 0.0, p95 0.0, max 2.468e-10.
+median 0.0, p95 0.0, max 2.468e-10; non-finite theta 0, non-finite delta
+0. Derived from the counts above rather than measured directly: p99 is
+0.0 (only 79 of 54,000 values are nonzero), and p99.9 lies in
+(0, 1e-13] -- it falls inside the nonzero tail, but only 9 values exceed
+1e-13.
 
 Recorded rather than smoothed over, with its consequences stated
 precisely. It does not affect the encoder gate, which keys on the
 MEDIAN (0.0 here, so the absolute-convergence escape fires regardless of
 the tail). It does not affect the pipeline: the worst image sits 4,053x
 below the ODE solver's `rtol=1e-6`. What it does do is narrow stage 1's
-claim -- "every one of 1,000 images" was true of 1,000 images, and at 54
-times that corpus size a 0.146% tail of not-quite-settled images
-appears. Two images in 54,000 remain above 1e-10 after 1,200 steps.
+claim -- "every one of 1,000 images" was never established by the two
+order statistics stage 1 actually reported, and at 54 times that corpus
+size a 0.146% tail of not-quite-settled images appears. Two images in
+54,000 remain above 1e-10 after 1,200 steps.
+
+The standing wording for what the encoder achieves is therefore
+**numerical convergence below any practically relevant tolerance**,
+never exact convergence as a universal claim. Aggregate quantiles
+sitting at zero do not mean every image sits at zero, and this is the
+in-project proof of it.
 
 ## Code and artifacts
 
@@ -567,9 +694,10 @@ appears. Two images in 54,000 remain above 1e-10 after 1,200 steps.
 `corrupt_corpus` and `encode_with_final_delta_batch` unchanged -- same
 numerics as both prior rungs, different machine. Output:
 `stage2b/train/stage3/common/encoded_fit_s1200.npz` (206.1 MB,
-crc32c-verified), carrying the encoded array, per-image final-Deltas,
-the fit indices and active support for self-description, and the run
-summary. The object name carries the step count, so a future
+crc32c-verified), carrying the encoded array for the 54,000 fit-side
+images, their per-image final-Deltas, the fit indices and active support
+for self-description, and the run summary. The object name carries the
+step count, so a future
 `ENCODER_STEPS` change mints a new object rather than silently resuming
 a stale one -- the same self-invalidation discipline the stage-1
 encoder-gate artifact uses.
@@ -581,11 +709,17 @@ this is its first use on an artifact large enough to need it.
 
 ## Next step
 
-Phase B: a GPU-session driver that reads
-`stage2b/train/stage3/common/encoded_fit_s1200.npz`, regenerates
-corruption and clean targets in-session, and runs evolution, ridge (with
-the ladder's third real-data equivalence gate) and CNN training at full
-scale. Not yet written. It should carry a spot-check that one image's
+Phase A regeneration at the full 60,000, covering the 6,000
+locked-validation images this run omitted, with their final-Delta tail
+measured on first encoding. The regenerated artifact, not
+`encoded_fit_s1200.npz`, is the authoritative Phase A input from that
+point on. Sequencing and acceptance shape: `STAGE3_PLAN.md`.
+
+Then Phase B: a GPU-session driver that reads the regenerated encoded
+array, regenerates corruption and clean targets in-session, and runs
+evolution, ridge (with the ladder's third real-data equivalence gate)
+and CNN training at full scale. Not yet written. It should carry a
+spot-check that one image's
 encoding re-derived in-session matches the stored array, with the
 tolerance stated as ULP-level rather than exact, for the
 cross-architecture reason recorded above.
