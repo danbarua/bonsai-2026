@@ -1,4 +1,4 @@
-import { promises as fs } from "node:fs";
+import { promises as fs, readFileSync } from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
@@ -14,6 +14,29 @@ function defaultRepoRoot(): string {
 export const REPO_ROOT = process.env.BONSAI_PROJECT_ROOT
   ? path.resolve(process.env.BONSAI_PROJECT_ROOT)
   : defaultRepoRoot();
+
+// Read once from package.json (one level up from src/ or dist/, same as
+// this file) rather than hardcoded in server.ts/index.ts -- found live: a
+// hardcoded "0.1.0" in server.ts's McpServer constructor meant a version
+// bump there silently had no effect on what a running (but not rebuilt)
+// server actually advertised, which is exactly what happened here (dist/
+// was stale after an src/-only edit, so both the MCP version AND the new
+// code-sessions tool were invisible to a client until a real rebuild).
+// Reading the single source of truth at runtime instead means a stale
+// build now visibly reports its OWN (old) version rather than silently
+// echoing back whatever string was last typed into server.ts.
+function readPackageVersion(): string {
+  const here = path.dirname(fileURLToPath(import.meta.url));
+  try {
+    const raw = readFileSync(path.join(here, "..", "package.json"), "utf8");
+    const version = JSON.parse(raw).version;
+    return typeof version === "string" ? version : "0.0.0";
+  } catch {
+    return "0.0.0";
+  }
+}
+
+export const PKG_VERSION = readPackageVersion();
 
 export interface Channel {
   id: string;
@@ -69,16 +92,25 @@ export interface SendResult {
  * Filename collisions (two sends in the same second) are resolved with a
  * `-2`, `-3`, ... suffix, using an atomic exclusive-create so concurrent
  * callers can't race each other onto the same filename.
+ *
+ * `to` is optional addressing (a specific session's `/rename`-set name,
+ * e.g. from the `code-sessions` tool): when set, it's appended to the
+ * header as `· to: <name>`, parsed back out by `parseAddressee` below.
+ * Omitted (the default -- every message sent before this existed has no
+ * `to:` field) means broadcast: any reader may consume it, matching the
+ * exact behavior before addressing existed.
  */
 export async function sendMessage(
   dir: string,
   sender: string,
   content: string,
+  to?: string,
 ): Promise<SendResult> {
   await ensureDir(dir);
   const now = new Date();
   const base = timestampFilename(now);
-  const header = `<!-- from: ${sender} · ${timestampIso(now)} -->\n\n`;
+  const toPart = to ? ` · to: ${to}` : "";
+  const header = `<!-- from: ${sender} · ${timestampIso(now)}${toPart} -->\n\n`;
   const body = content.endsWith("\n") ? content : `${content}\n`;
   const data = header + body;
 
@@ -102,6 +134,21 @@ export async function sendMessage(
 export interface InboxMessage {
   filename: string;
   content: string;
+  to?: string;
+}
+
+// Extracts the optional "to: <name>" addressee from a message's header
+// comment (its first line, as written by sendMessage above). Undefined
+// means broadcast -- either no to: field at all, or a header this project
+// didn't generate (e.g. a hand-typed message via the c2c skill) with
+// nothing matching. Tolerant of trailing text after the name (stops at the
+// first `-->` or `·`) rather than requiring an exact byte-for-byte match to
+// sendMessage's own format.
+export function parseAddressee(content: string): string | undefined {
+  const firstLine = content.split("\n", 1)[0];
+  const beforeClose = firstLine.split("-->", 1)[0];
+  const match = /to:\s*(\S+)/i.exec(beforeClose);
+  return match ? match[1] : undefined;
 }
 
 /**
@@ -111,27 +158,56 @@ export interface InboxMessage {
  * is true (the default, matching the existing c2c protocol), each file is
  * moved to `archiveDir` after being read, so a later call only returns
  * messages nobody has processed yet.
+ *
+ * `asName`, if given, is this reader's own addressed identity (e.g. a
+ * Claude Code session's `/rename`-set name). It only changes behavior on
+ * the *consuming* path (`archive: true`): a message addressed to a
+ * DIFFERENT name is skipped entirely -- neither returned nor archived --
+ * so it's left untouched for its actual addressee rather than accidentally
+ * consumed by the wrong reader. A peek (`archive: false`) always returns
+ * everything regardless of addressing, since peeking doesn't consume
+ * anything and hiding mailbox state during a peek would make the mailbox
+ * harder to reason about, not safer. Omitting `asName` entirely preserves
+ * the exact pre-addressing behavior (every message visible and
+ * archivable) -- callers that don't know their own name (Desktop, ChatGPT,
+ * or an un-updated caller) are unaffected.
  */
+export interface ReadMailboxResult {
+  messages: InboxMessage[];
+  // Filenames left in place, unarchived, because they're addressed to a
+  // different name than asName -- always empty unless archive && asName.
+  skipped: string[];
+}
+
 export async function readMailbox(
   sourceDir: string,
   archiveDir: string,
   archive: boolean,
-): Promise<InboxMessage[]> {
+  asName?: string,
+): Promise<ReadMailboxResult> {
   await ensureDir(sourceDir);
   const entries = await fs.readdir(sourceDir);
   const filenames = entries.filter((f) => f.endsWith(".md")).sort();
 
   const messages: InboxMessage[] = [];
+  const skipped: string[] = [];
   for (const filename of filenames) {
     const filePath = path.join(sourceDir, filename);
     const content = await fs.readFile(filePath, "utf8");
-    messages.push({ filename, content });
+    const to = parseAddressee(content);
+
+    if (archive && asName && to && to !== asName) {
+      skipped.push(filename); // addressed to someone else: leave it in place, unconsumed
+      continue;
+    }
+
+    messages.push({ filename, content, to });
     if (archive) {
       await ensureDir(archiveDir);
       await fs.rename(filePath, path.join(archiveDir, filename));
     }
   }
-  return messages;
+  return { messages, skipped };
 }
 
 // The Claude Code CLI itself (not this server) writes one JSON file per

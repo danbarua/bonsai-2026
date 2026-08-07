@@ -4,7 +4,7 @@ import express from "express";
 import { StreamableHTTPServerTransport } from "@modelcontextprotocol/sdk/server/streamableHttp.js";
 import { createMcpExpressApp } from "@modelcontextprotocol/sdk/server/express.js";
 import { createServer } from "./server.js";
-import { REPO_ROOT } from "./mailbox.js";
+import { PKG_VERSION, REPO_ROOT } from "./mailbox.js";
 import { mountOAuth } from "./oauth.js";
 
 const HOST = process.env.C2C_MCP_HOST ?? "127.0.0.1";
@@ -101,7 +101,7 @@ app.use(logErrorRequests);
 app.use(express.urlencoded({ extended: false }));
 
 app.get("/health", (_req, res) => {
-  res.json({ ok: true, repoRoot: REPO_ROOT });
+  res.json({ ok: true, repoRoot: REPO_ROOT, version: PKG_VERSION });
 });
 
 let requireBearerAuth: express.RequestHandler = (_req, _res, next) => next();

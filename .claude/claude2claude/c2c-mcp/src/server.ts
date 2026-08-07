@@ -6,7 +6,7 @@ import {
 } from "@modelcontextprotocol/sdk/types.js";
 import path from "node:path";
 import { z } from "zod";
-import { CHANNELS, listCodeSessions, readMailbox, REPO_ROOT, sendMessage, type Channel } from "./mailbox.js";
+import { CHANNELS, listCodeSessions, PKG_VERSION, readMailbox, REPO_ROOT, sendMessage, type Channel } from "./mailbox.js";
 
 interface ChannelToolConfig {
   toolPrefix: string; // e.g. "c2c" -> tools named c2c-send / c2c-inbox
@@ -51,23 +51,35 @@ function registerChannelTools(server: McpServer, cfg: ChannelToolConfig): void {
         `"${peerRole}"), "${peerRole}" writes to inbox/ (read by "${codeRole}"). A leading ` +
         `"<!-- from: <sender> · <timestamp> -->" header is added automatically -- pass only the ` +
         `message body in \`content\`. Never overwrites an existing file: a same-second collision ` +
-        `gets a -2, -3, ... suffix.`,
+        `gets a -2, -3, ... suffix. Pass \`to\` to address this message to one specific session ` +
+        `(e.g. a name from the code-sessions tool) rather than broadcasting to whichever reader ` +
+        `gets there first -- an addressed message is skipped (left unread, not consumed) by any ` +
+        `-inbox call passing a different \`as\` name.`,
       inputSchema: {
         sender: z
           .enum([codeRole, peerRole])
           .describe(`Who this message is from: "${codeRole}" (-> outbox/) or "${peerRole}" (-> inbox/).`),
         content: z.string().min(1).describe("The markdown message body (no header needed)."),
+        to: z
+          .string()
+          .optional()
+          .describe(
+            "Address this message to one specific session name (see code-sessions). " +
+              "Omit to broadcast (any reader may consume it) -- the default, and the only " +
+              "behavior that existed before addressing was added.",
+          ),
       },
     },
-    async ({ sender, content }) => {
+    async ({ sender, content, to }) => {
       const dir = sender === codeRole ? cfg.channel.outbox : cfg.channel.inbox;
       const dirName = sender === codeRole ? "outbox" : "inbox";
-      const result = await sendMessage(dir, sender, content);
+      const result = await sendMessage(dir, sender, content, to);
+      const addressing = to ? ` (addressed to ${to})` : "";
       return {
         content: [
           {
             type: "text",
-            text: `Wrote ${cfg.channelLabel} ${dirName} message: ${result.filename}`,
+            text: `Wrote ${cfg.channelLabel} ${dirName} message: ${result.filename}${addressing}`,
           },
         ],
       };
@@ -83,7 +95,11 @@ function registerChannelTools(server: McpServer, cfg: ChannelToolConfig): void {
         `which directory gets read: "${codeRole}" reads inbox/ (what "${peerRole}" sent), "${peerRole}" ` +
         `reads outbox/ (what "${codeRole}" sent). By default each message read is moved to archive/ ` +
         `(mirroring the existing c2c protocol), so a later call only returns messages nobody has ` +
-        `processed yet. Pass archive=false to peek without consuming.`,
+        `processed yet. Pass archive=false to peek without consuming. Pass \`as\` (this reader's own ` +
+        `session name, see code-sessions) to skip -- leave unarchived, not returned as consumed -- any ` +
+        `message addressed to a DIFFERENT name; a peek still shows everything regardless of \`as\`, ` +
+        `since peeking never consumes anything. Omit \`as\` for the pre-addressing behavior: every ` +
+        `message visible and archivable, addressed or not.`,
       inputSchema: {
         reader: z
           .enum([codeRole, peerRole])
@@ -92,27 +108,47 @@ function registerChannelTools(server: McpServer, cfg: ChannelToolConfig): void {
           .boolean()
           .default(true)
           .describe("Move each returned message to archive/ after reading (default true)."),
+        as: z
+          .string()
+          .optional()
+          .describe(
+            "This reader's own session name (see code-sessions). When set, a consuming read " +
+              "(archive:true) skips mail addressed to a different name instead of consuming it. " +
+              "Has no effect on a peek (archive:false), which always shows everything. Omit for " +
+              "the pre-addressing behavior.",
+          ),
       },
     },
-    async ({ reader, archive }) => {
+    async ({ reader, archive, as }) => {
       const sourceDir = reader === codeRole ? cfg.channel.inbox : cfg.channel.outbox;
       const dirName = reader === codeRole ? "inbox" : "outbox";
-      const messages = await readMailbox(sourceDir, cfg.channel.archive, archive);
+      const { messages, skipped } = await readMailbox(sourceDir, cfg.channel.archive, archive, as);
       if (messages.length === 0) {
+        const skipNote =
+          skipped.length > 0
+            ? ` (${skipped.length} message(s) addressed to another session were left unread: ${skipped.join(", ")})`
+            : "";
         return {
           content: [
             {
               type: "text",
-              text: `${cfg.channelLabel} ${dirName} is empty -- no pending messages for ${reader}.`,
+              text: `${cfg.channelLabel} ${dirName} is empty -- no pending messages for ${reader}.${skipNote}`,
             },
           ],
         };
       }
+      const skipNote =
+        skipped.length > 0
+          ? ` ${skipped.length} message(s) addressed to another session were left unread: ${skipped.join(", ")}.`
+          : "";
       const summary =
         `${messages.length} message(s) read from the ${cfg.channelLabel} ${dirName} ` +
-        `(as ${reader}, archived: ${archive}).`;
+        `(as ${reader}, archived: ${archive}).${skipNote}`;
       const body = messages
-        .map((m) => `### ${m.filename}\n\n${m.content.trim()}`)
+        .map((m) => {
+          const addressing = m.to ? ` (to: ${m.to})` : "";
+          return `### ${m.filename}${addressing}\n\n${m.content.trim()}`;
+        })
         .join("\n\n---\n\n");
       return {
         content: [{ type: "text", text: `${summary}\n\n${body}` }],
@@ -165,7 +201,7 @@ export function createServer(): McpServer {
   const server = new McpServer(
     {
       name: "c2c-mcp",
-      version: "0.1.0",
+      version: PKG_VERSION,
     },
     // Declared even though we have none of either: some MCP clients (found
     // debugging ChatGPT's Developer Mode connector) call resources/list and

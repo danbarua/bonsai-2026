@@ -17,6 +17,13 @@ HOOKS_DIR="$(dirname "$SCRIPT_DIR")"
 TMP_ROOT="$(mktemp -d)"
 export CLAUDE_PROJECT_DIR="$TMP_ROOT"
 export C2C_MAIL_WATCH_DIRS=".claude/claude2claude/inbox .claude/claude2gpt/inbox"
+# Hermetic session registry too -- without this, c2c_session_name_for_id
+# would default to the REAL $HOME/.claude/sessions and read real global
+# state. Harmless for sections (a)-(e) (their messages are all broadcast,
+# so resolution result doesn't matter), but section (f) below populates
+# this directly and every section should stay isolated regardless.
+export C2C_MAIL_SESSIONS_DIR="$TMP_ROOT/.claude-sessions"
+mkdir -p "$C2C_MAIL_SESSIONS_DIR"
 INBOX_C2C="$TMP_ROOT/.claude/claude2claude/inbox"
 INBOX_C2GPT="$TMP_ROOT/.claude/claude2gpt/inbox"
 
@@ -138,6 +145,50 @@ GLOB_OUT="$(env -u C2C_MAIL_WATCH_DIRS CLAUDE_PROJECT_DIR="$TMP_ROOT" "$HOOKS_DI
 check "a third, never-hand-listed channel is picked up via the glob default" \
   "$(echo "$GLOB_OUT" | grep -c '2026-01-04T00-00-00Z.md')" "1"
 rm -rf "$TMP_ROOT/.claude/claude2slack"
+
+# ============================================================
+echo "== (f) addressing: to: field scopes unread mail to the addressed session (or broadcast) =="
+# UPS_STDIN/SESSTART_STDIN/stop_stdin all hardcode session_id "test" -- map
+# that exact id to a resolvable name in the (hermetic) session registry, so
+# the existing stdin fixtures can be reused instead of inventing new ones.
+cat > "$C2C_MAIL_SESSIONS_DIR/424242.json" <<'EOF'
+{"pid":424242,"sessionId":"test","name":"me-session","status":"idle"}
+EOF
+
+reset_mailboxes
+printf '<!-- from: claude-desktop · 2026-01-05T00-00-00Z · to: someone-else -->\n\nnot for me\n' \
+  > "$INBOX_C2C/2026-01-05T00-00-00Z.md"
+printf '<!-- from: claude-desktop · 2026-01-05T00-01-00Z -->\n\nbroadcast, no to: field\n' \
+  > "$INBOX_C2C/2026-01-05T00-01-00Z.md"
+printf '<!-- from: claude-desktop · 2026-01-05T00-02-00Z · to: me-session -->\n\naddressed to me\n' \
+  > "$INBOX_C2C/2026-01-05T00-02-00Z.md"
+
+UPS_ADDR_OUT="$(echo "$UPS_STDIN" | "$HOOKS_DIR/user-prompt-submit.sh")"
+check "addressed-to-someone-else message NOT surfaced" \
+  "$(echo "$UPS_ADDR_OUT" | grep -c '2026-01-05T00-00-00Z.md')" "0"
+check "broadcast (no to:) message IS surfaced" \
+  "$(echo "$UPS_ADDR_OUT" | grep -c '2026-01-05T00-01-00Z.md')" "1"
+check "addressed-to-me message IS surfaced" \
+  "$(echo "$UPS_ADDR_OUT" | grep -c '2026-01-05T00-02-00Z.md')" "1"
+
+STOP_ADDR_EXIT="$(stop_stdin false | "$HOOKS_DIR/stop.sh" >/dev/null 2>/dev/null; echo $?)"
+check "Stop still blocks (broadcast + addressed-to-me mail present)" "$STOP_ADDR_EXIT" "2"
+
+echo "== (f-continued) NEGATIVE: with ONLY someone-else-addressed mail present, Stop must NOT block =="
+reset_mailboxes
+printf '<!-- from: claude-desktop · 2026-01-05T00-03-00Z · to: someone-else -->\n\nstill not for me\n' \
+  > "$INBOX_C2C/2026-01-05T00-03-00Z.md"
+STOP_ONLY_OTHER_EXIT="$(stop_stdin false | "$HOOKS_DIR/stop.sh" >/dev/null 2>/dev/null; echo $?)"
+check "Stop allowed when ONLY someone-else-addressed mail is present (filter has teeth)" \
+  "$STOP_ONLY_OTHER_EXIT" "0"
+
+echo "== (f-continued) fail-open: an unresolvable session_id still sees ALL mail (pre-addressing behavior) =="
+UNKNOWN_STDIN='{"session_id":"unresolvable-id-not-in-registry","prompt_id":"22222222-2222-2222-2222-222222222222","transcript_path":"/tmp/t.jsonl","cwd":"'"$TMP_ROOT"'","permission_mode":"default","hook_event_name":"UserPromptSubmit","user_prompt":"hello"}'
+UNKNOWN_OUT="$(echo "$UNKNOWN_STDIN" | "$HOOKS_DIR/user-prompt-submit.sh")"
+check "unresolvable session still sees mail addressed to someone else (fails open)" \
+  "$(echo "$UNKNOWN_OUT" | grep -c '2026-01-05T00-03-00Z.md')" "1"
+
+rm -f "$C2C_MAIL_SESSIONS_DIR/424242.json"
 
 echo
 echo "== $PASS_COUNT passed, $FAILURES failed =="

@@ -48,6 +48,21 @@ for _ in $(seq 1 50); do
 done
 curl -s "$BASE/health" | grep -q '"ok":true' || { echo "server did not start"; cat "$TMP_ROOT/server.log"; exit 1; }
 
+echo "== 0. /health and the MCP initialize handshake both report package.json's real version =="
+PKG_VERSION="$(node -p "require('$PKG_DIR/package.json').version")"
+HEALTH_VERSION="$(curl -s "$BASE/health" | node -e "console.log(JSON.parse(require('fs').readFileSync(0,'utf8')).version)")"
+check "/health version matches package.json (not hardcoded elsewhere)" "$HEALTH_VERSION" "$PKG_VERSION"
+
+INIT_RESP="$(curl -s -X POST "$BASE/mcp" -H 'Content-Type: application/json' \
+  -H 'Accept: application/json, text/event-stream' \
+  -d '{"jsonrpc":"2.0","id":1,"method":"initialize","params":{"protocolVersion":"2025-06-18","capabilities":{},"clientInfo":{"name":"test","version":"0"}}}')"
+MCP_VERSION="$(echo "$INIT_RESP" | grep '^data:' | node -e "
+  const raw = require('fs').readFileSync(0,'utf8');
+  const line = raw.split('\n').find(l => l.startsWith('data:'));
+  console.log(JSON.parse(line.slice(5)).result.serverInfo.version);
+")"
+check "MCP initialize serverInfo.version matches package.json too" "$MCP_VERSION" "$PKG_VERSION"
+
 call() {
   # call <tool> <json-arguments>
   curl -s -X POST "$BASE/mcp" -H 'Content-Type: application/json' \

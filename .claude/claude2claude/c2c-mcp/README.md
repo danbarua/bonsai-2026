@@ -152,6 +152,21 @@ Env vars (all optional): `C2C_PROXY_LISTEN_HOST` (default `0.0.0.0`),
 `C2C_PROXY_LISTEN_PORT` (default `80`), `C2C_PROXY_TARGET_HOST`
 (default `127.0.0.1`), `C2C_PROXY_TARGET_PORT` (default `8765`).
 
+The `ssh -R` command above is illustrative; `run-c2c-mcp.sh` is the
+actual dev-loop launcher used in practice, and automates it with
+retry/keepalive (see the script's own comments) plus a real `/health`
+poll before opening the tunnel, rather than a blind sleep. Its two
+ports are env vars, not hardcoded: `C2C_MCP_PORT` (local server,
+default `8765`) and `C2C_TUNNEL_REMOTE_PORT` (the VM-side port,
+default `8767` -- **must match whatever `C2C_PROXY_TARGET_PORT` the
+proxy is actually started with on the VM**, since the two sides don't
+discover each other). The remote port has had to move twice already
+(`8765` -> `8766` -> `8767`): an abruptly-killed SSH client leaves the
+remote sshd holding the old binding open, with no `lsof`/`ss`/`fuser`/
+`sudo` available on that host to clear it, so bumping both this env
+var and the VM-side proxy invocation is the actual fix each time this
+recurs.
+
 The proxy rewrites the `Host` header to the target before forwarding
 -- c2c-mcp's DNS-rebinding guard (from `createMcpExpressApp`) checks
 `Host` against `localhost`/`127.0.0.1`/`[::1]`, and would reject every

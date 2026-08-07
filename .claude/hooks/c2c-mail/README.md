@@ -82,41 +82,63 @@ error, a hook failure can never block normal work when the mailbox is
 empty or absent, by two independent layers (the script's own logic,
 and the runtime's fail-open contract as a backstop).
 
-## Known limitation: no per-session addressing (not yet handled)
+## Per-session addressing
 
-Raised during review, not yet designed or implemented: nothing in the
-mailbox format addresses a message to a *specific* Claude Code
-session. If multiple sessions share the same live checkout (not
+If multiple Claude Code sessions share the same live checkout (not
 worktrees -- `.claude/claude2*/` is gitignored, so a worktree doesn't
-see the real mailbox at all unless explicitly pointed at it), every
-session's Stop hook blocks on *any* unread mail, regardless of whether
-that mail is relevant to what that particular session is doing. A
-session that archives mail just to unblock its own Stop hook could
-consume a message meant for a different session's task, making it
-invisible to the intended recipient.
+see the real mailbox at all unless explicitly pointed at it), a
+session's Stop hook only counting mail it never sent for itself was a
+real, observed problem: every session's Stop hook blocked on *any*
+unread mail, regardless of whether that mail was relevant to what that
+particular session was doing, and a session archiving mail just to
+unblock its own Stop hook could consume a message meant for a
+different session's task, making it invisible to the intended
+recipient.
 
-No fix implemented here. A plausible direction: a per-message
-addressing convention (e.g. a session name/ID in the header comment)
-and hook logic that only counts a message as "this session's unread
-mail" if addressed to it or unaddressed (broadcast); a message
-addressed elsewhere would be left alone and NOT counted toward this
-session's Stop-hook block, avoiding the archive-to-unblock conflict
-entirely. Left as an open design question for whoever owns the
-mailbox conventions next, rather than solved speculatively without a
-real multi-session scenario driving the design.
+Fixed with an optional `to: <name>` field in the message header
+comment (`<!-- from: <sender> · <timestamp> · to: <name> -->`,
+matching the exact convention the c2c-mcp server's mailbox.ts
+implements for the `-send`/`-inbox` MCP tools' `to`/`as` params).
+Absent `to:` means broadcast -- every message sent before this
+existed, and every message a peer sends without addressing, stays
+visible to every session exactly as before.
+
+All three hooks resolve "who am I" from the hook's own `session_id`
+(present in every hook's stdin JSON) by cross-referencing the CLI's
+own local session registry (`~/.claude/sessions/*.json`, the same
+registry the `code-sessions` MCP tool reads) for the matching
+`sessionId`'s `/rename`-set `name`. `c2c_list_unread_for` in
+`lib/c2c_mail.sh` then only counts a message as "this session's
+unread mail" if it's addressed to that name or unaddressed
+(broadcast); a message addressed elsewhere is excluded entirely --
+neither notified on nor counted toward the Stop-hook block -- and is
+left untouched in the filesystem for its actual addressee, avoiding
+the archive-to-unblock conflict entirely.
+
+**Fails open, not closed, when a session's name can't be resolved**
+(registry missing, or this session isn't in it for some reason): every
+message is then treated as broadcast, i.e. the exact pre-addressing
+behavior, rather than silently hiding all mail from a session whose
+identity is unknown. Covered by `test/break-tests.sh` section (f),
+including the fail-open case and a negative proving the filter isn't
+vacuous (mail addressed only to a different session must not block
+Stop at all, not just "block less").
 
 ## Testing
 
 `test/break-tests.sh` invokes each hook directly with synthetic JSON
-on stdin, in its own throwaway `C2C_MAIL_WATCH_DIRS`/`CLAUDE_PROJECT_DIR`
-under a temp directory -- never the real project mailboxes. Covers:
-mail present (notify / block with the exact required wording), inbox
-empty (silent / stop allowed), a watched dir missing entirely (still
-silent success), the `stop_hook_active` loop guard (proven
-non-vacuously: the same mail still blocks when `stop_hook_active` is
-false), the body-content injection-surface guard, and the
-glob-derived watch-dir default actually covering a channel that was
-never hand-listed anywhere.
+on stdin, in its own throwaway `C2C_MAIL_WATCH_DIRS`/`C2C_MAIL_SESSIONS_DIR`/
+`CLAUDE_PROJECT_DIR` under a temp directory -- never the real project
+mailboxes or the real global session registry. Covers: mail present
+(notify / block with the exact required wording), inbox empty (silent
+/ stop allowed), a watched dir missing entirely (still silent
+success), the `stop_hook_active` loop guard (proven non-vacuously: the
+same mail still blocks when `stop_hook_active` is false), the
+body-content injection-surface guard, the glob-derived watch-dir
+default actually covering a channel that was never hand-listed
+anywhere, and per-session addressing (section (f): addressed-elsewhere
+mail excluded, broadcast and addressed-to-me mail still counted, the
+fail-open case, and a negative proving the filter isn't vacuous).
 
 ```bash
 bash test/break-tests.sh

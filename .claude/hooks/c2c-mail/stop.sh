@@ -1,8 +1,9 @@
 #!/bin/bash
 # Stop hook: blocks the turn from ending while c2c/c2gpt mail is unread,
 # so mail doesn't just get silently noticed (via the UserPromptSubmit
-# hook) and then ignored. See lib/c2c_mail.sh for the shared unread
-# check, and README.md for the full design.
+# hook) and then ignored. Only blocks on mail addressed to this session
+# (by /rename'd name) or unaddressed/broadcast -- see lib/c2c_mail.sh's
+# c2c_list_unread_for, and README.md for the full design.
 #
 # Deliberately not `set -e`: every exit point below is explicit, and
 # `set -e` interacting with the grep/test conditions here is easy to get
@@ -26,7 +27,8 @@ if echo "$INPUT" | grep -q '"stop_hook_active"[[:space:]]*:[[:space:]]*true'; th
   exit 0
 fi
 
-mail_files="$(c2c_list_unread)"
+session_id="$(echo "$INPUT" | c2c_session_id_from_json)"
+mail_files="$(c2c_list_unread_for "$session_id")"
 if [ -z "$mail_files" ]; then
   exit 0
 fi
