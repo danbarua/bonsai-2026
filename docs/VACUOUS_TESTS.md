@@ -6,8 +6,8 @@ would stay green if the thing it guards were deleted.
 
 This project has produced them repeatedly enough that the pattern is worth
 recording as its own artifact rather than as scattered commit messages.
-Fourteen incidents are catalogued below with dates and SHAs, spanning
-2026-08-04 to 2026-08-07 and two model generations. Every one was written
+Fifteen incidents are catalogued below with dates and SHAs, spanning
+2026-08-04 to 2026-08-08 and two model generations. Every one was written
 by an AI agent — mostly me — and every one was caught, which is the more
 useful half of the record: the catching has a method, and the method is
 mechanical.
@@ -36,6 +36,7 @@ claim the rest of this repository's discipline exists to prevent.
 | 12 | 08-07 | session | Revalidation test dropped a module that was never imported in the first place | review |
 | 13 | 08-07 | session | `STAGE2B_TEST_FILES` (a narrowing) verified by running `pytest tests/` (the broader form) — two missing files ran anyway, suite green | review |
 | 14 | 08-07 | `a73c5cd` | Generation-pin test asserted on `download_file` directly; removing the pin from `consume_validated` left it green | deliberate breakage |
+| 15 | 08-08 | `2184644` | Three fail-open tests for the provenance capture hook ran it through a shell wrapper ending in unconditional `exit 0`, which masks any exit code from the Python layer beneath | deliberate breakage |
 
 Two near-misses belong here too, because they were caught *before* becoming
 tests:
@@ -93,11 +94,33 @@ the one that keeps biting, and it deserves its own statement:
 files ran, the suite was green, and the gap was invisible *from the very
 command used to check it*. This became CLAUDE.md principle 21.
 
+**#15 is the same shape with layers instead of lists, and it is the worse
+variant.** The provenance capture hook is `capture.sh` wrapping
+`capture.py`. The wrapper ends in an unconditional `exit 0` — deliberately,
+so that a forensic hook can never block a session even if the interpreter
+is missing. Three fail-open tests invoked the wrapper and asserted the exit
+code was 0. All three would have passed on a Python layer that blocked
+outright, and did: returning `2` from `capture.py`'s exception handler left
+every one of them green.
+
+The distinction worth drawing: in #5 and #13 the broader form merely
+*included* the narrow one. Here the outer layer **normalises the signal the
+test reads**, so no input exists that could make the wrapper-routed test
+fail. A superset can at least fail for the right reason by accident; a
+normaliser cannot. The fix was to parameterise each case over both layers —
+via the wrapper and invoking `capture.py` directly — after which the same
+break fails exactly the direct variants and correctly leaves the wrapped
+ones passing, since masking is the wrapper's actual job.
+
+Generalised: **any catch-all, default return, or unconditional exit between
+the test and the mechanism is a candidate normaliser**, and every test
+routed through one is blind to everything beneath it.
+
 ---
 
 ## What actually catches them
 
-**Deliberate breakage, six of fourteen.** Break what the guard watches;
+**Deliberate breakage, eight of fifteen.** Break what the guard watches;
 observe the specific expected failure. The corollary in CLAUDE.md
 principle 21 states it as: *a guard you have not seen fail is not yet a
 guard.* Incident #10 is the clearest demonstration — the break fired
@@ -112,6 +135,11 @@ Two details matter in practice:
   guard has an exit-code half and a diagnostic half; each break trips a
   different assertion and neither trips the other's. One break would have
   left half the guard unevidenced.
+- **Break each layer separately when there are two.** #15. The break was
+  applied to the inner layer and observed through the outer one, which
+  swallowed it. What made the break informative was re-running it against
+  each layer directly: the finding is not "the break failed to fire" but
+  "the break fired and one route could not see it."
 
 **Asking what a green result rules out.** Incidents #1, #2, #5, #11, #12,
 #13 were caught by review rather than breakage — in every case by asking
@@ -180,6 +208,10 @@ looked for. That is an encouraging shape for a problem to have.
 6. Make tests **report evidence**, not merely assert. An empty set should
    be visible in the output.
 7. When a break fires **nothing**, that is a finding. Follow it.
+8. **Test each layer directly where a guard has layers.** A catch-all, a
+   default return, or an unconditional exit between the test and the
+   mechanism is a *normaliser*: every test routed through it is blind to
+   everything beneath, and no input can make it fail.
 
 ## Related
 
