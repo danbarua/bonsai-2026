@@ -159,5 +159,7 @@ app.get("/mcp", methodNotAllowed);
 app.delete("/mcp", methodNotAllowed);
 
 app.listen(PORT, HOST, () => {
-  console.log(`c2c-mcp listening on http://${HOST}:${PORT}/mcp (repo root: ${REPO_ROOT})`);
+  console.log(
+    `c2c-mcp v${PKG_VERSION} listening on http://${HOST}:${PORT}/mcp (pid ${process.pid}, repo root: ${REPO_ROOT})`,
+  );
 });

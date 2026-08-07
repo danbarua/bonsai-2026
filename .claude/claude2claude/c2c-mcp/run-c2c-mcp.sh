@@ -21,6 +21,25 @@ C2C_MCP_PORT="${C2C_MCP_PORT:-8765}"
 C2C_TUNNEL_REMOTE_PORT="${C2C_TUNNEL_REMOTE_PORT:-8767}"
 export C2C_MCP_PORT
 
+# 0. Refuse to start if something is already listening on C2C_MCP_PORT,
+#    instead of racing a fresh server against a stale one that was never
+#    actually killed -- exactly what happened once already: an old `tsx`
+#    process outlived several restart attempts, kept answering /health with
+#    stale (pre-this-session) output, and both processes writing to the
+#    same logs/stdout.log without the old one being killed first produced a
+#    file that was mostly NUL bytes (each truncating the other's writes out
+#    from under it). Printing the actual PID(s) means the fix is a
+#    copy-pasteable command, not a manual lsof/ps hunt.
+EXISTING_PIDS="$(lsof -nP -iTCP:"$C2C_MCP_PORT" -sTCP:LISTEN -t 2>/dev/null | tr '\n' ' ' | sed 's/ *$//')"
+if [ -n "$EXISTING_PIDS" ]; then
+  echo "❌ Something is already listening on port $C2C_MCP_PORT (PID(s): $EXISTING_PIDS)." >&2
+  echo "   Kill it first, then re-run this script:" >&2
+  echo >&2
+  echo "   kill $EXISTING_PIDS" >&2
+  echo >&2
+  exit 1
+fi
+
 # 1. Catch Ctrl+C (SIGINT) and exit (SIGTERM) signals to clean up
 trap 'echo -e "\n🛑 Stopping services..."; kill $DEV_PID 2>/dev/null; exit 0' SIGINT SIGTERM
 
