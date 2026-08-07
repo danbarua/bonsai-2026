@@ -30,18 +30,34 @@ grounded in something that actually went wrong in one session on
    connector (tool names like `mcp__claude_ai_c2c__*`). This is
    effectively an alias for path 2 from this project's side (it's
    still hitting the public tunnel underneath), so it inherits path
-   2's staleness — but LOOKS like "the MCP tools are just available,"
-   which hid exactly how stale it was until a tool call failed in a
-   way that mattered (see below).
+   2's staleness whenever that path actually is stale — see the
+   corrected incident account below for why "the tool call went
+   through this path" is not by itself evidence that it was.
 
-**The incident**: a tool call through path 3 archived a message
-addressed to a different Claude Code session, because that path was
-running code from before the `as` parameter existed — there was
-literally no way to pass it. The fix wasn't "be more careful which
-tool you call" (unenforceable); it was giving Claude Code path 1 as a
-real, working alternative and making staleness detectable (next
-section), so a stale connection is caught by inspection instead of by
-the mistake it eventually causes.
+**The incident, corrected**: a tool call through path 3 archived a
+message addressed to a different Claude Code session. The first
+write-up of this blamed a stale deployment lacking the `as` parameter
+entirely — plausible at the time, and *wrong*, corrected after Claude
+Desktop flagged a contradiction (their own session's calls through the
+same tunnel host had been getting `to:`/`as:`-aware behavior all
+evening) and a direct check confirmed the public tunnel's live
+`tools/list` already had `as` in `c2c-inbox`'s schema. No surviving
+log evidence covered the exact moment of the original call (overwritten
+by later restarts), so this can't be proven with total certainty either
+way — but the weight of evidence says the parameter was almost
+certainly already available, and the call simply omitted it. **The
+real lesson is sharper than "redeploy fixes staleness": an optional
+safety parameter that silently falls back to the *unsafe* behavior
+when omitted (no `as` → archive everything, addressed or not) makes
+"I forgot to pass it" and "the feature doesn't exist here"
+indistinguishable from the outside, after the fact.** Checking a
+route's version before trusting its capabilities (next section) still
+matters — it would have caught either explanation — but it's not a
+substitute for asking whether a safety-relevant parameter should
+default to safe-but-narrower instead of compatible-but-permissive.
+Left open here rather than resolved unilaterally, since the current
+default exists specifically so old callers who don't know their own
+name keep working unaffected.
 
 ## Every restart with fresh changes gets a version bump, no exceptions
 
