@@ -323,8 +323,16 @@ def stage_kmnist(mods, bucket, clone_dir):
         if os.path.isfile(dest):
             say(f"{filename} already present ({os.path.getsize(dest)} bytes)")
         else:
-            mods.gcs.download_file(name, dest, bucket=bucket)
-            say(f"downloaded {name} -> {filename} ({os.path.getsize(dest)} bytes)")
+            # Through the central validated consume path, not a raw
+            # download -- there is exactly one way bytes get from GCS into
+            # a consumer here, and it validates. `require_manifest=False`
+            # by name: the IDX objects were staged under the stage-1 prefix
+            # before the fingerprint contract existed. See stage2b_gcs's
+            # legacy policy.
+            manifest, _ = mods.gcs.consume_validated(name, dest, bucket=bucket,
+                                                     require_manifest=False)
+            say(f"downloaded {name} -> {filename} ({os.path.getsize(dest)} bytes)"
+                f"{'' if manifest is None else ', manifest validated'}")
         staged[filename] = dest
     return dest_dir, staged
 
@@ -505,7 +513,13 @@ def step2_corruption(mods, bucket, corpus):
     # above already checks).
     stage1_corr_name = _obj(mods, "corruption", "npz", stage=1)
     stage1_local = local_path_for(stage1_corr_name)
-    mods.gcs.download_file(stage1_corr_name, stage1_local, bucket=bucket)
+    # Central validated consume, with the pre-contract opt-out named:
+    # stage 1's corruption artifact is completed-rung history, written
+    # before the fingerprint contract. See stage2b_gcs's legacy policy --
+    # a refusal here would mean new code reached for old history, and this
+    # reach is deliberate and documented.
+    mods.gcs.consume_validated(stage1_corr_name, stage1_local, bucket=bucket,
+                               require_manifest=False)
     with np.load(stage1_local) as handle:
         stage1_x_t_clip = handle["x_t_clip"]
     n_prefix = corpus["stage1_indices"].size

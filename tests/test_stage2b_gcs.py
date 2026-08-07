@@ -761,10 +761,12 @@ def test_ensure_artifact_skips_a_step_that_already_landed(bucket, tmp_path):
     name = gcs.object_path(**TRAIN_ARGS)
     local = tmp_path / "work" / "features.npz"
     calls = []
-    gcs.ensure_artifact(name, local, produce=_producer(counter=calls), bucket=bucket)
+    gcs.ensure_artifact(name, local, produce=_producer(counter=calls), bucket=bucket,
+                        fingerprint=_fingerprint())
     r = gcs.ensure_artifact(name, local, produce=_producer(counter=calls), bucket=bucket)
     assert len(calls) == 1
     assert (r.skipped, r.produced, r.uploaded, r.downloaded) == (True, False, False, False)
+    assert r.validated is True, "the skip branch is a consume, and consumes validate"
 
 
 def test_ensure_artifact_on_a_fresh_runtime_downloads_instead_of_recomputing(bucket, tmp_path):
@@ -772,13 +774,15 @@ def test_ensure_artifact_on_a_fresh_runtime_downloads_instead_of_recomputing(buc
     and the local disk is empty because the runtime is new."""
     name = gcs.object_path(**TRAIN_ARGS)
     first = tmp_path / "session_a" / "features.npz"
-    gcs.ensure_artifact(name, first, produce=_producer("from session a"), bucket=bucket)
+    gcs.ensure_artifact(name, first, produce=_producer("from session a"), bucket=bucket,
+                        fingerprint=_fingerprint())
 
     calls = []
     second = tmp_path / "session_b" / "features.npz"
     r = gcs.ensure_artifact(name, second, produce=_producer(counter=calls), bucket=bucket)
     assert calls == []
     assert (r.skipped, r.produced, r.uploaded, r.downloaded) == (True, False, False, True)
+    assert r.validated is True
     assert second.read_text() == "from session a"
 
 
@@ -786,7 +790,8 @@ def test_ensure_artifact_leaves_the_artifact_present_both_places_in_every_branch
         bucket, tmp_path):
     name = gcs.object_path(**TRAIN_ARGS)
     for i, local in enumerate([tmp_path / "a.npz", tmp_path / "b.npz", tmp_path / "b.npz"]):
-        r = gcs.ensure_artifact(name, local, produce=_producer(f"run{i}"), bucket=bucket)
+        r = gcs.ensure_artifact(name, local, produce=_producer(f"run{i}"), bucket=bucket,
+                                fingerprint=_fingerprint())
         assert Path(r.local_path).is_file()
         assert gcs.object_exists(name, bucket=bucket)
 
@@ -833,11 +838,12 @@ def test_ensure_artifact_requires_a_callable_producer(bucket, tmp_path):
 def test_step_result_summary_records_what_happened(bucket, tmp_path):
     name = gcs.object_path(**TRAIN_ARGS)
     r = gcs.ensure_artifact(name, tmp_path / "features.npz", produce=_producer(),
-                            bucket=bucket)
+                            bucket=bucket, fingerprint=_fingerprint())
     assert r.summary() == {
         "object_path": name, "local_path": str(tmp_path / "features.npz"),
         "skipped": False, "produced": True, "uploaded": True, "downloaded": False,
         "size_bytes": len("computed"),
+        "validated": False, "manifest_published": True,
     }
 
 
@@ -1719,9 +1725,13 @@ def test_ensure_artifact_verifies_the_artifact_it_downloads(tmp_path):
     first = tmp_path / "session_a" / "features.npz"
     gcs.ensure_artifact(name, first, produce=_producer("from session a"), bucket=bucket)
 
+    # No manifest, deliberately: this is about TRANSPORT verification, and
+    # the checksum must fire on its own rather than being reached only
+    # because a provenance check happened to run first.
     second = tmp_path / "session_b" / "features.npz"
     with pytest.raises(gcs.ChecksumMismatchError):
-        gcs.ensure_artifact(name, second, produce=_producer(), bucket=bucket)
+        gcs.ensure_artifact(name, second, produce=_producer(), bucket=bucket,
+                            require_manifest=False)
     assert not second.exists()
 
 
@@ -1746,7 +1756,7 @@ def test_ensure_artifact_verification_can_be_switched_off(tmp_path):
     gcs.ensure_artifact(name, tmp_path / "a" / "features.npz",
                         produce=_producer("session a"), bucket=bucket)
     r = gcs.ensure_artifact(name, tmp_path / "b" / "features.npz", produce=_producer(),
-                            bucket=bucket, verify_content=False)
+                            bucket=bucket, verify_content=False, require_manifest=False)
     assert r.downloaded is True
 
 
@@ -2002,3 +2012,132 @@ def test_the_manifest_sidecar_is_itself_subject_to_the_test_split_guard():
     with pytest.raises(PermissionError):
         gcs._check_object_path_allowed(
             gcs.manifest_object_name("stage2b/testsplit/stage4/common/x.npz"), False)
+
+
+# ---- ensure_artifact under the manifest contract ----
+#
+# The trust point. `ensure_artifact` treats an object's existence as proof
+# its step is done, which is what makes a dead session cost one step rather
+# than an afternoon -- and is exactly why a provenance check has to sit
+# here rather than only in a function drivers may forget to call.
+
+def test_ensure_artifact_refuses_to_resume_from_an_object_with_no_manifest(
+        bucket, tmp_path):
+    """The default, and the whole contract in one assertion: an object
+    merely existing is never sufficient evidence that it is resumable."""
+    name = gcs.object_path(**TRAIN_ARGS)
+    gcs.ensure_artifact(name, tmp_path / "a.npz", produce=_producer("first"),
+                        bucket=bucket)                    # no fingerprint
+    calls = []
+    with pytest.raises(gcs.ManifestMissingError, match="carries no manifest"):
+        gcs.ensure_artifact(name, tmp_path / "b.npz",
+                            produce=_producer(counter=calls), bucket=bucket)
+    assert calls == [], "it must refuse, not silently recompute"
+
+
+def test_ensure_artifact_refuses_when_the_manifest_disagrees_with_the_payload(
+        bucket, tmp_path):
+    """Existence plus a manifest is still not enough -- they have to agree.
+    The object is overwritten behind the manifest's back, which is what a
+    partially-completed regeneration looks like from the next run."""
+    name = gcs.object_path(**TRAIN_ARGS)
+    gcs.ensure_artifact(name, tmp_path / "a.npz", produce=_producer("first"),
+                        bucket=bucket, fingerprint=_fingerprint())
+    bucket.objects[name] = b"something else entirely"
+    with pytest.raises(gcs.ManifestMismatchError, match="payload sha256"):
+        gcs.ensure_artifact(name, tmp_path / "b.npz", produce=_producer(),
+                            bucket=bucket)
+
+
+def test_ensure_artifact_refuses_a_fingerprint_the_consumer_did_not_expect(
+        bucket, tmp_path):
+    """A consumer that knows what produced its input can say so, and the
+    resumption is refused when the recorded producer disagrees."""
+    name = gcs.object_path(**TRAIN_ARGS)
+    gcs.ensure_artifact(name, tmp_path / "a.npz", produce=_producer("first"),
+                        bucket=bucket, fingerprint=_fingerprint())
+    with pytest.raises(fp.FingerprintMismatch, match="config_digest"):
+        gcs.ensure_artifact(name, tmp_path / "b.npz", produce=_producer(),
+                            bucket=bucket,
+                            expected_fingerprint=_fingerprint(config_digest="x" * 64))
+
+
+def test_ensure_artifact_permits_cross_stage_reuse_under_content_only(bucket, tmp_path):
+    """Stage 3 consumes stage 1's topologies deliberately. A policy that
+    refused a different producing commit would break correct behaviour --
+    the relaxation is about the producer, never about the bytes."""
+    name = gcs.object_path(**TRAIN_ARGS)
+    gcs.ensure_artifact(name, tmp_path / "a.npz", produce=_producer("first"),
+                        bucket=bucket, fingerprint=_fingerprint())
+    other = _fingerprint(config_digest="x" * 64, source_manifest_digest="y" * 64,
+                         git={"commit": "b" * 40, "clean": True})
+    r = gcs.ensure_artifact(name, tmp_path / "b.npz", produce=_producer(),
+                            bucket=bucket, expected_fingerprint=other,
+                            policy=fp.CONTENT_ONLY)
+    assert r.skipped and r.validated
+
+
+def test_the_pre_contract_optout_is_what_keeps_a_completed_rung_rerunnable(
+        bucket, tmp_path):
+    """Ladder stages 1 and 2 wrote every artifact before this contract
+    existed. Retrofitting manifests onto them would fabricate provenance,
+    so their call sites opt out by name -- and the opt-out has to work, or
+    the policy is "those rungs can never run again"."""
+    name = gcs.object_path(**TRAIN_ARGS)
+    gcs.ensure_artifact(name, tmp_path / "a.npz", produce=_producer("legacy"),
+                        bucket=bucket)
+    r = gcs.ensure_artifact(name, tmp_path / "b.npz", produce=_producer(),
+                            bucket=bucket, require_manifest=False)
+    assert r.skipped is True
+    assert r.validated is False, "an unvalidated resume must not claim it validated"
+
+
+def test_a_forced_overwrite_never_leaves_a_manifest_describing_the_old_bytes(
+        bucket, tmp_path):
+    """The stale sidecar is WORSE than no sidecar: the next consume raises a
+    mismatch, which reads as corruption rather than as a deliberate
+    regeneration. Force must republish or remove -- never leave."""
+    name = gcs.object_path(**TRAIN_ARGS)
+    local = tmp_path / "features.npz"
+    gcs.ensure_artifact(name, local, produce=_producer("first"), bucket=bucket,
+                        fingerprint=_fingerprint())
+    sidecar = gcs.manifest_object_name(name)
+    assert sidecar in bucket.objects
+
+    # Forced overwrite WITHOUT a fingerprint: the sidecar must go.
+    gcs.ensure_artifact(name, local, produce=_producer("second"), bucket=bucket,
+                        force=True)
+    assert bucket.objects[name] == b"second"
+    assert sidecar not in bucket.objects, (
+        "a manifest describing the replaced bytes survived the overwrite")
+
+
+def test_a_forced_overwrite_with_a_fingerprint_republishes_rather_than_removing(
+        bucket, tmp_path):
+    """The path a regeneration actually takes: new bytes, new manifest, and
+    the pair agree immediately afterwards."""
+    name = gcs.object_path(**TRAIN_ARGS)
+    local = tmp_path / "features.npz"
+    gcs.ensure_artifact(name, local, produce=_producer("first"), bucket=bucket,
+                        fingerprint=_fingerprint())
+    r = gcs.ensure_artifact(name, local, produce=_producer("second"), bucket=bucket,
+                            force=True, fingerprint=_fingerprint())
+    assert r.manifest_published is True
+    manifest = gcs.read_manifest(name, bucket=bucket)
+    assert manifest["payload_sha256"] == fp.sha256_of_file(local)
+    # ...and the next ordinary run resumes from it without complaint.
+    again = gcs.ensure_artifact(name, local, produce=_producer(), bucket=bucket)
+    assert again.skipped and again.validated
+
+
+def test_the_manifest_is_published_only_after_the_payload_verifies(tmp_path):
+    """Ordering, not decoration: a sidecar that exists must describe a
+    complete object. A failed upload leaves neither."""
+    name = gcs.object_path(**TRAIN_ARGS)
+    bucket = TruncatingBucket(truncate_from=0)
+    with pytest.raises(gcs.ChecksumMismatchError):
+        gcs.ensure_artifact(name, tmp_path / "features.npz",
+                            produce=_producer("computed" * 100), bucket=bucket,
+                            fingerprint=_fingerprint())
+    assert gcs.manifest_object_name(name) not in bucket.objects
+    assert name not in bucket.objects

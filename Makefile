@@ -474,6 +474,17 @@ stage2b-stage-inputs:  ## Upload the four KMNIST IDX files to the Stage 2B bucke
 	cd $(REPO_ROOT) && $(GCS_ENV) \
 		uv run --group gpu python $(STAGE2B_DIR)/stage_kmnist_inputs.py
 
+# Brings the four already-staged objects under the manifest contract.
+# Sidecars only -- no payload bytes move, because the payloads are the same
+# IDX files that were uploaded once and have not changed. Each object is
+# verified against its local copy before being described, so a manifest
+# cannot record a digest for bytes the bucket does not hold.
+.PHONY: stage2b-publish-input-manifests
+stage2b-publish-input-manifests:  ## Attach manifests to the staged KMNIST objects (no payload upload)
+	cd $(REPO_ROOT) && $(GCS_ENV) \
+		uv run --group gpu python $(STAGE2B_DIR)/stage_kmnist_inputs.py \
+			--publish-manifests
+
 # Feasibility-ladder stage 1 (n=1,000): the first run that joins the Stage
 # 2B modules together. Same verdict discipline as the two verify targets
 # above -- capture the output, tear the session down unconditionally, and

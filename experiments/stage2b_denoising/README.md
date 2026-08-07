@@ -80,7 +80,12 @@ mention here, in the same commit that creates it.
   every transfer. It also carries the sidecar-manifest layer —
   `publish_manifest` alongside each artifact, and `consume_validated` as
   the one validated read path — so an artifact's provenance travels next
-  to it rather than inside it.
+  to it rather than inside it. `ensure_artifact`'s skip branch **is** a
+  `consume_validated` call, so a resumed step is validated by
+  construction: an object merely existing is never sufficient evidence
+  that it is resumable. Pass `fingerprint=` and publication becomes
+  atomic with the upload; pre-contract artifacts are read through a
+  `require_manifest=False` that names the rung at its call site.
 - **`stage2b_fingerprint.py`** — what "the same code produced this" means
   here: the union of the static and runtime import closures over the
   scientific source files, hashed, established before a run and

@@ -339,8 +339,16 @@ def stage_kmnist(mods, bucket, clone_dir):
         if os.path.isfile(dest):
             say(f"{filename} already present ({os.path.getsize(dest)} bytes)")
         else:
-            mods.gcs.download_file(name, dest, bucket=bucket)
-            say(f"downloaded {name} -> {filename} ({os.path.getsize(dest)} bytes)")
+            # Through the central validated consume path, not a raw
+            # download -- there is exactly one way bytes get from GCS into
+            # a consumer here, and it validates. `require_manifest=False`
+            # by name: the IDX objects were staged under the stage-1 prefix
+            # before the fingerprint contract existed. See stage2b_gcs's
+            # legacy policy.
+            manifest, _ = mods.gcs.consume_validated(name, dest, bucket=bucket,
+                                                     require_manifest=False)
+            say(f"downloaded {name} -> {filename} ({os.path.getsize(dest)} bytes)"
+                f"{'' if manifest is None else ', manifest validated'}")
         staged[filename] = dest
     return dest_dir, staged
 

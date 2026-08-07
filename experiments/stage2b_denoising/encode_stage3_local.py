@@ -402,13 +402,16 @@ def upload(thetas, deltas, roles, active_indices, summary, fp,
     print(f"object        : {name}")
     print(f"checksum      : {gcs.checksum_backend()}")
     t0 = time.time()
+    # The fingerprint goes IN, so publication is atomic with the upload
+    # rather than a second call this script has to remember -- and a forced
+    # overwrite republishes instead of leaving a manifest describing the
+    # bytes it replaced.
     result = gcs.ensure_artifact(name, local_path, produce=produce, bucket=bucket,
-                                 force=force)
+                                 force=force, fingerprint=fp)
     print(f"transfer      : {time.time() - t0:.1f}s")
     print(f"step result   : {result.summary()}")
 
-    manifest = gcs.publish_manifest(result.local_path, name, bucket=bucket,
-                                    fingerprint=fp)
+    manifest = gcs.read_manifest(name, bucket=bucket)
     print(f"manifest      : {gcs.manifest_object_name(name)}")
     print(f"  payload sha256   : {manifest['payload_sha256']}")
     print(f"  arrays recorded  : {sorted(manifest.get('arrays', {}))}")

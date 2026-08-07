@@ -1,10 +1,10 @@
 # Negative-path evidence: what fails, and the test that proves it
 
 The pre-Stage-4 package (`STAGE3_PLAN.md`, item 7) owes a reviewer
-evidence for five negative paths. Four are covered end to end. The fifth —
-stale-artifact refusal — now has its mechanism built and tested, but no
-driver consumes through it yet, so it is recorded as covered-at-the-module-
-layer and unenforced rather than as green.
+evidence for five negative paths. All five are covered end to end. The
+fifth — stale-artifact refusal — was the last to land: its mechanism was
+built first and adopted second, and it is recorded as covered only now
+that `ensure_artifact`'s trust point actually routes through it.
 
 Every row names a test file, a test function, and what the assertion
 actually checks. The **function name is the citation**; a
@@ -52,13 +52,6 @@ Positive controls, without which a refusal test proves nothing:
 `test_ladder_healthy_run_exits_zero` (:242) — correct sentinel, exit 0, no
 `LEAK WARNING`.
 
-**Where this is narrower than it looks.**
-
-- On `stage2b-verify-gpu` the mismatch is only ever exercised *together
-  with* a failing teardown (`STUB_STOP_RC=7`). The test still has teeth
-  for this demand — delete the sentinel grep and `rc` reaches
-  `check_teardown` as 0, gets promoted to 7, and the `rc == 1` assertion
-  fails — but the isolated mismatch case exists only on the ladder target.
 The converse case — `exec` exiting nonzero while the sentinel is
 **present**, i.e. a driver that printed its verdict and then died — is the
 `[ $rc -ne 0 ]` half of the disjunct, and is covered separately:
@@ -229,12 +222,48 @@ substring search that matched an unrelated, correct call site elsewhere in
 the same file) and rewritten to target the specific call site"* — the
 reason breaking the guard is the check, and reading it is not.
 
-## Demand 5 — stale artifacts are refused — **MECHANISM COVERED, NOT YET ADOPTED**
+## Demand 5 — stale artifacts are refused — **COVERED**
 
-The mechanism now exists (`stage2b_fingerprint.py` plus the sidecar
-manifest layer in `stage2b_gcs.py`) and is evidenced by the tests below.
-What is **not** yet true is that any driver consumes through it — see the
-narrowing at the end of this section, which is the load-bearing part.
+The mechanism (`stage2b_fingerprint.py` plus the sidecar manifest layer in
+`stage2b_gcs.py`) is now **adopted**: `ensure_artifact`'s trust point is a
+`consume_validated` call, so a resumed step validates by construction
+rather than by a driver remembering to. There is one way bytes get from
+GCS into a consumer, and it checks.
+
+**The wiring, and the tests that hold it**
+
+| test | asserts |
+|---|---|
+| `tests/test_stage2b_gcs.py` `test_ensure_artifact_refuses_to_resume_from_an_object_with_no_manifest` | The default. An object that exists but carries no manifest halts the step — and the producer is **not** silently re-run instead. |
+| `tests/test_stage2b_gcs.py` `test_ensure_artifact_refuses_when_the_manifest_disagrees_with_the_payload` | Existence plus a manifest is still not enough: the object is overwritten behind the manifest's back, as a half-finished regeneration would leave it, and the resume raises. |
+| `tests/test_stage2b_gcs.py` `test_ensure_artifact_refuses_a_fingerprint_the_consumer_did_not_expect` | A consumer that declares what produced its input is refused when the recorded producer disagrees, naming the field. |
+| `tests/test_stage2b_gcs.py` `test_a_forced_overwrite_never_leaves_a_manifest_describing_the_old_bytes` | The `force=True` hole, closed. A stale sidecar is worse than none — the next consume raises a mismatch that reads as corruption rather than as deliberate regeneration — so force republishes or removes, never leaves. |
+| `tests/test_stage2b_gcs.py` `test_the_manifest_is_published_only_after_the_payload_verifies` | Ordering: a failed upload leaves neither payload nor sidecar, so a manifest that exists always describes a complete object. |
+| `tests/test_stage2b_gcs_makefile.py` `test_no_stage2b_script_downloads_around_the_validated_consume_path` | **Derived by AST, not listed**: no Stage 2B script calls `download_file` directly. Exemptions are named with reasons and separately asserted to still need them. Confirmed by breaking it — reintroducing the raw call in `run_ladder_stage2.py` fails the check and names the file. |
+
+**Positive controls** — a contract that refuses everything is not a
+contract: `test_a_forced_overwrite_with_a_fingerprint_republishes_rather_than_removing`
+(regenerate, then resume from the new manifest without complaint),
+`test_ensure_artifact_permits_cross_stage_reuse_under_content_only`, and
+`test_the_pre_contract_optout_is_what_keeps_a_completed_rung_rerunnable`.
+
+**The opt-out, and why it is not a hole.** Ladder stages 1 and 2 wrote
+every artifact before this contract existed, and retrofitting manifests
+onto them would fabricate provenance rather than record it. Three call
+sites pass `require_manifest=False` inline with a comment naming the rung:
+the two `stage_kmnist` staging reads and stage 2's cross-rung corruption
+spot-check. Note what it does **not** mean — when a manifest is present it
+is validated regardless, so the opt-out relaxes the requirement that one
+exist, never the check itself. The four staged KMNIST objects now carry
+manifests (`make stage2b-publish-input-manifests`, sidecars only, each
+verified against its local copy first), so those two reads validate in
+practice while staying re-runnable against history.
+
+There is no grandfather allowlist and there will not be one. A future
+`ManifestMissingError` on pre-contract history is the **correct**
+behaviour: it means new code reached backwards, and the fix is to decide
+deliberately at that call site rather than to widen a policy centrally
+where nobody would see it.
 
 **A completed artifact whose provenance no longer matches its consumer**
 
@@ -274,23 +303,13 @@ vacuous in its original form. It now tests the cross-file regeneration
 case the per-array manifest actually serves, where the whole-file digest
 is useless because `np.savez` embeds zip timestamps.
 
-**Where this is narrower than it looks — the important part.** The
-mechanism is built and tested; **no driver consumes through it yet**.
-Three specific gaps, all verified from the code as it stands:
-
-- `ensure_artifact` does not call `consume_validated`. Its trust point is
-  still one line — `if not force and object_exists(...)` — so a
-  fingerprint check placed only in the module does not run on the
-  resumption path.
-- `force=True` bypasses that trust point entirely, and `step11_report`
-  uses it.
-- `run_ladder_stage1.py` calls `download_file` **directly**, outside
-  `ensure_artifact` altogether, as does `stage_kmnist`.
-
-Adoption is the Phase A regeneration's job (`STAGE3_PLAN.md` step 3),
-which is the first run to publish under the contract. Until then this
-demand is evidenced at the module layer and unenforced at the call sites,
-and the summary table says so rather than reading green.
+**Where this is still narrower than it looks.** The contract binds Stage
+2B's own transport. Nothing here stops a future script importing
+`google.cloud.storage` directly and never touching this module — the AST
+check above scans `experiments/stage2b_denoising/*.py` for
+`download_file`, so a genuinely separate client would be invisible to it.
+`tests/test_stage2b_gcs_makefile.py`'s live-GCS discovery does look for
+direct `google.cloud` imports, which narrows the gap without closing it.
 
 **Adjacent, and explicitly not coverage.** `stage2b_gcs.py` already
 discards stale **transfer state** — a checkpoint from a differently sized
@@ -342,4 +361,4 @@ read `exec`'s exit status only.
 | 2 | missing or corrupted artifact fails, not silently accepted | covered | the transfer-refusal tests plus `test_an_object_with_no_recorded_digest_is_refused_rather_than_trusted`; `verify_content=False` is a visible opt-out |
 | 3 | inner remote failure survives teardown | covered | `test_a_leak_never_masks_the_scientific_verdict` — sole test, one target |
 | 4 | teardown success cannot overwrite a failure verdict | covered | `test_ladder_missing_sentinel_fails_even_on_a_zero_exit` plus both pre-flight refusals |
-| 5 | stale artifacts are refused | mechanism covered, **not yet adopted** | `test_a_payload_with_no_manifest_is_refused`, `test_a_payload_edited_after_publication_is_refused`, `test_a_fingerprint_from_a_different_config_is_refused`, and the revalidation pair — but no driver consumes through `consume_validated` yet |
+| 5 | stale artifacts are refused | covered | `test_ensure_artifact_refuses_to_resume_from_an_object_with_no_manifest` and the rest of the wiring set, plus `test_no_stage2b_script_downloads_around_the_validated_consume_path` (derived by AST) |

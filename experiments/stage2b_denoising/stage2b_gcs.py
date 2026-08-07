@@ -1219,6 +1219,12 @@ class StepResult(NamedTuple):
     uploaded: bool
     downloaded: bool
     size_bytes: int
+    # Provenance, recorded for the same reason the rest is: a run log that
+    # says a step was resumed is only useful if it also says whether the
+    # thing resumed from was checked. `validated` False on a skip means the
+    # object was accepted under the named pre-contract opt-out.
+    validated: bool = False            # the skip path checked a manifest
+    manifest_published: bool = False   # the produce path wrote one
 
     def summary(self):
         return {
@@ -1229,12 +1235,15 @@ class StepResult(NamedTuple):
             "uploaded": self.uploaded,
             "downloaded": self.downloaded,
             "size_bytes": self.size_bytes,
+            "validated": self.validated,
+            "manifest_published": self.manifest_published,
         }
 
 
 def ensure_artifact(name, local_path, *, produce, bucket, allow_test_split=False,
                     force=False, chunked=None, chunk_size=CHUNK_SIZE_DEFAULT,
-                    verify_content=True):
+                    verify_content=True, fingerprint=None, require_manifest=True,
+                    expected_fingerprint=None, policy=None, parents=None):
     """Skip if already done, else compute and upload.
 
         r = stage2b_gcs.ensure_artifact(path, local, produce=build_it, bucket=bucket)
@@ -1263,7 +1272,46 @@ def ensure_artifact(name, local_path, *, produce, bucket, allow_test_split=False
     trusted-existing-local-file branch above, which transfers nothing.
 
     `force=True` recomputes and overwrites an existing object -- for the
-    case where the artifact is known stale, not as a routine flag.
+    case where the artifact is known stale, not as a routine flag. It does
+    NOT skip validation; there is nothing to validate on that path, because
+    the bytes are freshly produced here rather than trusted from the
+    bucket. What it must not do is leave a manifest describing the object
+    it just replaced, and it does not: see "force and the stale sidecar".
+
+    ## The skip branch is a CONSUME, and consumes are validated
+
+    An object merely existing is never sufficient evidence that it is
+    resumable. The skip branch goes through `consume_validated`, so an
+    object without a manifest, or one whose manifest disagrees with the
+    bytes, halts here instead of being read as a completed step.
+
+    `require_manifest=False` is the named opt-out, and it is not a
+    convenience: it is how a completed rung stays re-runnable. Ladder
+    stages 1 and 2 wrote every one of their artifacts before this contract
+    existed, and retrofitting manifests onto them would fabricate
+    provenance rather than record it. Those call sites pass it explicitly,
+    so each one greps. Everything written from stage 3 onward carries a
+    manifest and takes the default.
+
+    `expected_fingerprint` and `policy` are forwarded to
+    `consume_validated`: a consumer that knows what produced its input can
+    say so, and `CONTENT_ONLY` is how deliberate cross-stage reuse (stage
+    3 reading stage 1's topologies) stays legal without weakening payload
+    verification.
+
+    ## force and the stale sidecar
+
+    A forced overwrite replaces the payload. Any manifest already beside it
+    then describes bytes that no longer exist -- and that is WORSE than no
+    manifest, because the next `consume_validated` raises a mismatch, which
+    reads as corruption rather than as "this was deliberately regenerated".
+
+    So the produce path never leaves one: with `fingerprint`, it publishes
+    a manifest for what it just wrote; without, it removes any manifest it
+    finds. Passing `fingerprint` is what makes publication ATOMIC with the
+    upload rather than a second call every driver has to remember -- the
+    forgot-the-flag failure this function's `chunked` argument already
+    exists to prevent.
 
     `chunked` selects the upload route and defaults to deciding on size
     (`should_chunk`): an artifact needing more than one chunk goes
@@ -1297,14 +1345,17 @@ def ensure_artifact(name, local_path, *, produce, bucket, allow_test_split=False
         _check_chunk_size(chunk_size)
 
     if not force and object_exists(name, bucket=bucket, allow_test_split=allow_test_split):
-        downloaded = False
-        if not os.path.isfile(local_path):
-            download_file(name, local_path, bucket=bucket, allow_test_split=allow_test_split,
-                          verify_content=verify_content)
-            downloaded = True
+        # THE trust point. Everything this function does for a resumed run
+        # hangs off this branch, so it is the one place a provenance check
+        # has to sit -- and it is a consume like any other.
+        manifest, downloaded = consume_validated(
+            name, local_path, bucket=bucket, allow_test_split=allow_test_split,
+            verify_content=verify_content, require_manifest=require_manifest,
+            expected_fingerprint=expected_fingerprint, policy=policy)
         return StepResult(object_path=name, local_path=local_path, skipped=True,
                           produced=False, uploaded=False, downloaded=downloaded,
-                          size_bytes=os.path.getsize(local_path))
+                          size_bytes=os.path.getsize(local_path),
+                          validated=manifest is not None)
 
     parent = os.path.dirname(os.path.abspath(local_path))
     os.makedirs(parent, exist_ok=True)
@@ -1321,9 +1372,22 @@ def ensure_artifact(name, local_path, *, produce, bucket, allow_test_split=False
     else:
         upload_file(local_path, name, bucket=bucket, allow_test_split=allow_test_split,
                     verify_content=verify_content)
+
+    # After the payload verifies, never before: a sidecar that exists is a
+    # sidecar describing a complete object.
+    published = False
+    if fingerprint is not None:
+        publish_manifest(local_path, name, bucket=bucket, fingerprint=fingerprint,
+                         parents=parents, allow_test_split=allow_test_split)
+        published = True
+    else:
+        stale = manifest_object_name(name)
+        if bucket.blob(stale).exists():
+            _discard_object(bucket, stale)
     return StepResult(object_path=name, local_path=local_path, skipped=False,
                       produced=True, uploaded=True, downloaded=False,
-                      size_bytes=os.path.getsize(local_path))
+                      size_bytes=os.path.getsize(local_path),
+                      manifest_published=published)
 
 
 # =====================================================================
@@ -1507,7 +1571,24 @@ def consume_validated(object_name, local_path, *, bucket, expected_fingerprint=N
     written BEFORE the fingerprint contract existed (ladder stages 1 and 2).
     Their configurations are fixed history, recorded in their own run
     reports, and retrofitting manifests onto them would fabricate
-    provenance rather than record it."""
+    provenance rather than record it.
+
+    ## The legacy policy, stated so a refusal reads as designed
+
+    There is no grandfather allowlist and there will not be one. Every
+    artifact under the stage-1 and stage-2 prefixes is completed-rung
+    history; nothing from stage 3 onward consumes any of it except at three
+    call sites that say so out loud -- the two `stage_kmnist` staging reads
+    and stage 2's cross-rung corruption spot-check. Those pass
+    `require_manifest=False` inline, next to a comment naming the rung.
+
+    Everything else consumes under the contract. So if a future code path
+    meets a `ManifestMissingError` on an un-manifested object, **the
+    refusal is the correct behaviour, not an obstacle**: it means new code
+    reached for pre-contract history, and the fix is to decide deliberately
+    whether that reuse is legitimate -- adding the opt-out at that call
+    site with a reason -- rather than to widen a policy centrally where
+    nobody will see it."""
     _check_object_path_allowed(object_name, allow_test_split)
     if not object_exists(object_name, bucket=bucket, allow_test_split=allow_test_split):
         raise FileNotFoundError(f"{object_name!r} does not exist in {bucket.name!r}")

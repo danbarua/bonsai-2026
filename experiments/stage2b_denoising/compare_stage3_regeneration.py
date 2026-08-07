@@ -82,17 +82,21 @@ def load_npz(path):
 
 
 def fetch(object_name, local_path, bucket, require_manifest):
-    """Download unless already present, through the transport's own
-    verification. The baseline predates the manifest contract, so it is
-    read with the named opt-out rather than by weakening the check."""
-    if os.path.exists(local_path):
-        print(f"  using local copy: {local_path}")
-    else:
-        os.makedirs(os.path.dirname(local_path), exist_ok=True)
-        gcs.download_file(object_name, local_path, bucket=bucket)
-        print(f"  downloaded: {object_name} -> {local_path}")
-    manifest, _ = gcs.consume_validated(object_name, local_path, bucket=bucket,
-                                        require_manifest=require_manifest)
+    """Read an artifact through the one validated consume path.
+
+    `consume_validated` downloads when the local file is absent, so there
+    is no separate `download_file` here -- a raw download followed by a
+    validation is two ways of getting bytes, and the second one only helps
+    if nobody ever takes the first.
+
+    The baseline predates the manifest contract, so its call passes the
+    named opt-out rather than weakening the check for everything."""
+    os.makedirs(os.path.dirname(local_path), exist_ok=True)
+    had_local = os.path.exists(local_path)
+    manifest, downloaded = gcs.consume_validated(
+        object_name, local_path, bucket=bucket, require_manifest=require_manifest)
+    print(f"  {'downloaded' if downloaded else 'using local copy'}: {local_path}"
+          f"{'' if had_local or downloaded else ' (unchanged)'}")
     print(f"  manifest: {'present' if manifest else 'ABSENT (pre-contract opt-out)'}")
     return load_npz(local_path), manifest
 

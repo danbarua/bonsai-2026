@@ -80,6 +80,57 @@ def stage(kmnist_dir=DEFAULT_KMNIST_DIR, bucket_name=None, credentials=None,
     return results
 
 
+def publish_manifests(kmnist_dir=DEFAULT_KMNIST_DIR, bucket_name=None,
+                      credentials=None):
+    """Bring the four already-staged objects under the manifest contract.
+
+    Sidecars only: the payloads are the same IDX bytes that were uploaded
+    once and have not changed, so re-uploading 47MB to attach provenance
+    would move bytes to record a fact about bytes that already moved. It
+    would also mean a forced overwrite, and force is the one path where
+    getting the manifest wrong replaces a good artifact.
+
+    The order matters. `build_manifest` digests the LOCAL file, so a
+    manifest published without checking would record a digest for bytes the
+    bucket does not necessarily hold. Each object is therefore verified
+    against its local copy FIRST (`verify_object`, on crc32c, the digest
+    GCS records for every object it stores), and only then described.
+
+    Idempotent: re-running republishes identical sidecars."""
+    import stage2b_fingerprint as fingerprint                      # noqa: E402
+
+    bucket = gcs.get_bucket(name=bucket_name, credentials=credentials)
+    fp = fingerprint.compute(
+        entrypoint=os.path.abspath(__file__), repo_root=_REPO_ROOT,
+        require_clean=False,
+        config={"role": "official KMNIST IDX inputs, staged once",
+                "files": sorted(KMNIST_FILES),
+                "split_token": SPLIT, "stage": LADDER_STAGE,
+                "note": "payload bytes are the distributed IDX files, unmodified"})
+    print(f"bucket: {bucket.name}")
+    print(f"closure: {len(fp['source_manifest'])} files, commit {fp['git']['commit']}")
+
+    published = {}
+    for filename, kind in sorted(KMNIST_FILES.items()):
+        local = os.path.join(kmnist_dir, filename)
+        name = gcs.object_path(stage=LADDER_STAGE, condition=None, kind=kind,
+                               ext=KMNIST_EXT, split=SPLIT)
+        if not os.path.isfile(local):
+            raise FileNotFoundError(f"{local} is missing; cannot describe what is "
+                                    f"in the bucket without the bytes to digest")
+        if not gcs.object_exists(name, bucket=bucket):
+            raise FileNotFoundError(f"{name} is not staged yet -- run without "
+                                    f"--publish-manifests first")
+        # Refuses if the local copy and the object disagree, so a manifest
+        # never describes bytes the bucket does not hold.
+        gcs.verify_object(name, local, bucket=bucket)
+        manifest = gcs.publish_manifest(local, name, bucket=bucket, fingerprint=fp)
+        published[filename] = manifest
+        print(f"  {filename:<28} -> {gcs.manifest_object_name(name)}")
+        print(f"     verified against the bucket; sha256 {manifest['payload_sha256']}")
+    return published
+
+
 def main(argv=None):
     parser = argparse.ArgumentParser(description=__doc__.splitlines()[0])
     parser.add_argument("--kmnist-dir", default=DEFAULT_KMNIST_DIR)
@@ -87,7 +138,15 @@ def main(argv=None):
     parser.add_argument("--credentials", default=None)
     parser.add_argument("--force", action="store_true",
                         help="re-upload even if the object already exists")
+    parser.add_argument("--publish-manifests", action="store_true",
+                        help="attach manifests to the already-staged objects "
+                             "(sidecars only; uploads no payload bytes)")
     args = parser.parse_args(argv)
+    if args.publish_manifests:
+        publish_manifests(kmnist_dir=args.kmnist_dir, bucket_name=args.bucket,
+                          credentials=args.credentials)
+        print("manifests published.")
+        return 0
     stage(kmnist_dir=args.kmnist_dir, bucket_name=args.bucket,
           credentials=args.credentials, force=args.force)
     print("staged.")
