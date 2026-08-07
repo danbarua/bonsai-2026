@@ -670,19 +670,92 @@ def object_exists(name, *, bucket, allow_test_split=False):
     return bool(bucket.blob(name).exists())
 
 
-def upload_file(local_path, name, *, bucket, allow_test_split=False, verify_content=True):
+class GenerationPreconditionError(OSError):
+    """A write was refused because the object was not in the generation the
+    writer expected -- someone else wrote it in between."""
+
+
+def _precondition(generation_match):
+    """Keyword arguments carrying a generation precondition, or none.
+
+    `0` means "only if this object does not exist"; a positive integer
+    means "only if it is still exactly this generation". Both are
+    server-side compare-and-set: the service refuses the write rather than
+    the client checking first and racing between the check and the write.
+    """
+    if generation_match is None:
+        return {}
+    return {"if_generation_match": int(generation_match)}
+
+
+def _precondition_failed_types():
+    """The exception a precondition violation raises, looked up lazily.
+
+    `google.api_core` is a cloud-only import, like `google.cloud.storage`
+    itself -- this module must stay importable on a machine that has
+    neither. Returns an empty tuple when it is absent, in which case
+    nothing is translated and the underlying error propagates unchanged."""
+    try:
+        from google.api_core import exceptions as api_exceptions
+    except ImportError:
+        return ()
+    return (api_exceptions.PreconditionFailed,)
+
+
+def current_generation(name, *, bucket, allow_test_split=False):
+    """The object's current generation, or 0 if it does not exist.
+
+    0 is the value a precondition uses to mean "must not exist", so an
+    absent object and the precondition that requires absence share a
+    representation deliberately."""
+    _check_object_path_allowed(name, allow_test_split)
+    blob = bucket.blob(name)
+    if not blob.exists():
+        return 0
+    blob.reload()
+    return int(getattr(blob, "generation", 0) or 0)
+
+
+def _write_guarded(name, generation_match, action):
+    """Runs `action()`, translating a service-side precondition failure
+    into this module's own named error.
+
+    The message says what the guard is FOR, because a bare 412 from the
+    client library reads as a transient fault and this is not one: it means
+    a second writer reached the same object, which for an artifact bucket
+    is a correctness problem rather than something to retry."""
+    try:
+        return action()
+    except _precondition_failed_types() as exc:
+        raise GenerationPreconditionError(
+            f"refusing to write {name!r}: the object is not in the generation this "
+            f"writer expected (required generation {generation_match}). Another "
+            f"writer changed it in between -- most likely a second session that "
+            f"was presumed dead. The write did NOT happen, which is the intended "
+            f"outcome: an artifact silently replaced mid-run is worse than one "
+            f"that failed loudly.") from exc
+
+
+def upload_file(local_path, name, *, bucket, allow_test_split=False, verify_content=True,
+                generation_match=None):
     """Uploads a local file to an object path. Returns the object path.
 
     `verify_content` (on by default) compares the object's own `crc32c`
     against the local file's once the upload returns, and deletes the
     object if they disagree rather than leaving a known-wrong artifact in
     the bucket for the next run to skip past. It costs one more read of
-    the local file, which is disk against a transfer that is network."""
+    the local file, which is disk against a transfer that is network.
+
+    `generation_match` is the no-overwrite-race guard Freeze 4 requires --
+    `0` to create only, an integer to replace exactly that generation. It
+    is a compare-and-set at the service, not a check here followed by a
+    write: the gap between checking and writing is the race."""
     name = _check_object_path_allowed(name, allow_test_split)
     local_path = str(local_path)
     if not os.path.isfile(local_path):
         raise FileNotFoundError(f"nothing to upload: {local_path} is not a file")
-    bucket.blob(name).upload_from_filename(local_path)
+    _write_guarded(name, generation_match, lambda: bucket.blob(name).upload_from_filename(
+        local_path, **_precondition(generation_match)))
     if verify_content:
         _verify_uploaded(bucket, name, crc32c_of_file(local_path))
     return name
@@ -921,11 +994,22 @@ def _reconcile_confirmed(confirmed, *, bucket, name, handle, chunk_size, size_by
     return kept
 
 
-def _compose(bucket, dest, sources):
-    bucket.blob(dest).compose([bucket.blob(source) for source in sources])
+def _compose(bucket, dest, sources, generation_match=None):
+    """Server-side concatenation.
+
+    `generation_match` applies to the DESTINATION only, and only the final
+    one -- the intermediate merge targets under the part prefix are
+    transient scratch this function owns end to end. The parts themselves
+    deliberately carry no precondition either: a resumed upload rewrites a
+    part it found damaged, which is an overwrite by design, and guarding it
+    would break exactly the resume the chunked route exists for. The race
+    Freeze 4 names is two writers replacing each other's ARTIFACT, and the
+    artifact is the destination."""
+    bucket.blob(dest).compose([bucket.blob(source) for source in sources],
+                              **_precondition(generation_match))
 
 
-def _compose_parts(bucket, name, sources):
+def _compose_parts(bucket, name, sources, generation_match=None):
     """Concatenates the parts into the object, server-side.
 
     GCS composes at most `COMPOSE_MAX_SOURCES` sources per request, so
@@ -943,7 +1027,8 @@ def _compose_parts(bucket, name, sources):
             merged.append(target)
         current = merged
         level += 1
-    _compose(bucket, name, current)
+    _write_guarded(name, generation_match,
+                   lambda: _compose(bucket, name, current, generation_match))
 
 
 def _delete_parts(bucket, name, allow_test_split):
@@ -963,7 +1048,7 @@ def _delete_parts(bucket, name, allow_test_split):
 
 def upload_file_chunked(local_path, name, *, bucket, allow_test_split=False,
                         chunk_size=CHUNK_SIZE_DEFAULT, verify_digests=False,
-                        verify_content=True):
+                        verify_content=True, generation_match=None):
     """Uploads a local file in chunks, resuming where a previous run died.
     Returns the object path.
 
@@ -1080,7 +1165,8 @@ def upload_file_chunked(local_path, name, *, bucket, allow_test_split=False,
             _write_checkpoint(checkpoint, _checkpoint_state(
                 name, local_path, identity, chunk_size, n_chunks, confirmed))
 
-    _compose_parts(bucket, name, [part_name(name, i) for i in range(n_chunks)])
+    _compose_parts(bucket, name, [part_name(name, i) for i in range(n_chunks)],
+                   generation_match=generation_match)
     if verify_content:
         _verify_uploaded(bucket, name, crc32c_of_file(local_path))
     _delete_parts(bucket, name, allow_test_split)
@@ -1365,13 +1451,21 @@ def ensure_artifact(name, local_path, *, produce, bucket, allow_test_split=False
             f"produce() returned without writing {local_path!r}; nothing to upload to "
             f"{name!r}. A step whose artifact is missing must fail here rather than record "
             f"itself as complete -- otherwise the next run would skip it.")
+    # Freeze 4's no-overwrite-race guard, computed here rather than asked
+    # of the caller. A fresh step must CREATE (generation 0); a forced
+    # overwrite must replace exactly the generation it read. Reading the
+    # generation and then requiring it is not a check-then-write race: the
+    # requirement travels to the service, which refuses if anything moved
+    # in between.
+    gen = current_generation(name, bucket=bucket,
+                             allow_test_split=allow_test_split) if force else 0
     if should_chunk(os.path.getsize(local_path), chunked=chunked, chunk_size=chunk_size):
         upload_file_chunked(local_path, name, bucket=bucket,
                             allow_test_split=allow_test_split, chunk_size=chunk_size,
-                            verify_content=verify_content)
+                            verify_content=verify_content, generation_match=gen)
     else:
         upload_file(local_path, name, bucket=bucket, allow_test_split=allow_test_split,
-                    verify_content=verify_content)
+                    verify_content=verify_content, generation_match=gen)
 
     # After the payload verifies, never before: a sidecar that exists is a
     # sidecar describing a complete object.
@@ -1485,7 +1579,7 @@ def build_manifest(local_path, *, object_name, fingerprint, parents=None,
 
 
 def publish_manifest(local_path, object_name, *, bucket, fingerprint,
-                     parents=None, allow_test_split=False):
+                     parents=None, allow_test_split=False, generation_match=None):
     """Write the manifest sidecar for an already-uploaded payload.
 
     Reads the payload's generation from the bucket first, so the manifest
@@ -1505,8 +1599,10 @@ def publish_manifest(local_path, object_name, *, bucket, fingerprint,
     payload = json.dumps(manifest, indent=2, sort_keys=True, default=str)
     name = manifest_object_name(object_name)
     _check_object_path_allowed(name, allow_test_split)
-    bucket.blob(name).upload_from_string(payload.encode("utf-8"),
-                                         content_type="application/json")
+    _write_guarded(name, generation_match,
+                   lambda: bucket.blob(name).upload_from_string(
+                       payload.encode("utf-8"), content_type="application/json",
+                       **_precondition(generation_match)))
     return manifest
 
 

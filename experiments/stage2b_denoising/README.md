@@ -149,6 +149,16 @@ existed; nothing in them may change once a result has been seen):
   halt condition.
 - **`STAGE3_PLAN.md`** — the stage-3 plan of record and its five freezes.
 
+**Plans** (revisable, unlike the frozen protocols above):
+
+- **`PHASE_B_PLAN.md`** — Phase B's step structure and the four decisions
+  that shaped it: Freeze 4 resolved as generation preconditions plus
+  semantic naming declared satisfied in substance; the 60,000-image
+  equivalence check framed as a new prudential extension rather than the
+  locked gate; the encoder gate discharged with its reasoning recorded;
+  and the amendment audit sequenced after Phase B against Phase B's own
+  persisted artifacts.
+
 **Evidence documents:**
 
 - **`NEGATIVE_PATH_EVIDENCE.md`** — the citation table for the pre-Stage-4

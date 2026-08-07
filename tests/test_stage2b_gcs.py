@@ -46,6 +46,7 @@ class FakeBlob:
         # `Blob`: `bucket.blob(name)` is a handle, not a read.
         self.size = None
         self.crc32c = None
+        self.generation = None
 
     def exists(self):
         return self.name in self.bucket.objects
@@ -56,21 +57,60 @@ class FakeBlob:
         data = self.bucket.objects.get(self.name, b"")
         self.size = len(data)
         self.crc32c = self.bucket._checksum(data)
+        self.generation = self.bucket.generations.get(self.name)
 
     def reload(self):
         if self.name not in self.bucket.objects:
             raise FileNotFoundError(f"no such object: {self.name}")
         self._populate()
 
-    def upload_from_filename(self, path):
+    def _check_precondition(self, if_generation_match):
+        """Compare-and-set, as the service does it.
+
+        `0` means the object must not exist; a positive integer means it
+        must still be exactly that generation. Enforced HERE rather than in
+        the code under test, because a precondition the client checks
+        itself is not a precondition -- it is a check with a race after it,
+        which is the whole thing the guard exists to close.
+
+        Raises the module's own error rather than `google.api_core`'s
+        `PreconditionFailed`. Against the real service that exception is
+        translated to this one by `_write_guarded`, so callers see the same
+        type either way; what these tests cannot exercise is the
+        translation itself, and `test_stage2b_gcs_roundtrip.py` is where
+        that would have to live."""
+        if if_generation_match is None:
+            return
+        # An ABSENT object is generation 0 for precondition purposes, even
+        # if it existed earlier in this test -- that is the real semantic,
+        # and getting it wrong would make the ordinary retry-after-a-failed-
+        # verify path fail here while succeeding against GCS. The
+        # `generations` counter still never rewinds, so a recreated object
+        # gets a new number rather than its old one back.
+        current = (self.bucket.generations.get(self.name, 0)
+                   if self.name in self.bucket.objects else 0)
+        if int(if_generation_match) != current:
+            raise gcs.GenerationPreconditionError(
+                f"precondition failed on {self.name!r}: required generation "
+                f"{if_generation_match}, object is at generation {current}")
+
+    def _bump(self):
+        self.bucket.generations[self.name] = (
+            self.bucket.generations.get(self.name, 0) + 1)
+
+    def upload_from_filename(self, path, if_generation_match=None):
+        self._check_precondition(if_generation_match)
         self.bucket._store_upload(self.name, Path(path).read_bytes())
+        self._bump()
         self._populate()
 
-    def upload_from_string(self, data, content_type=None):
+    def upload_from_string(self, data, content_type=None, if_generation_match=None):
+        self._check_precondition(if_generation_match)
         self.bucket._store_upload(self.name, bytes(data))
+        self._bump()
         self._populate()
 
-    def compose(self, sources):
+    def compose(self, sources, if_generation_match=None):
         """Server-side concatenation, with the API's own source limit
         enforced -- a composition tree that exceeded it would be a real
         failure against the real bucket, so it must be one here."""
@@ -79,10 +119,12 @@ class FakeBlob:
         missing = [s.name for s in sources if s.name not in self.bucket.objects]
         if missing:
             raise FileNotFoundError(f"no such object(s): {missing}")
+        self._check_precondition(if_generation_match)
         ordered = self.bucket._compose_order(sources)
         self.bucket.objects[self.name] = b"".join(
             self.bucket.objects[s.name] for s in ordered)
         self.bucket.composes.append((self.name, [s.name for s in sources]))
+        self._bump()
         self._populate()
 
     def download_to_filename(self, path):
@@ -104,6 +146,10 @@ class FakeBucket:
     def __init__(self, name=gcs.DEFAULT_GCS_BUCKET):
         self.name = name
         self.objects = {}
+        # Monotonic per object, as GCS generations are. A deleted-and-
+        # rewritten object gets a NEW generation, never its old one back,
+        # which is what makes a stale precondition detectable.
+        self.generations = {}
         self.uploads = []
         self.downloads = []
         self.deletes = []
@@ -2141,3 +2187,112 @@ def test_the_manifest_is_published_only_after_the_payload_verifies(tmp_path):
                             fingerprint=_fingerprint())
     assert gcs.manifest_object_name(name) not in bucket.objects
     assert name not in bucket.objects
+
+
+# ---- Freeze 4's no-overwrite-race guard ----
+#
+# Two writers reaching the same artifact is not hypothetical here: the
+# resumability story explicitly contemplates a second session resuming
+# after the first is PRESUMED dead, and "presumed dead but still
+# uploading" is precisely the failure `stop`'s checked exit status exists
+# for. The guard is a compare-and-set at the service, not a check here
+# followed by a write -- the gap between those two is the race.
+
+def test_a_second_writer_cannot_silently_replace_a_finished_artifact(bucket, tmp_path):
+    """The case the guard exists for. The first session's artifact is
+    complete; a second session that believes the step is unfinished must be
+    refused rather than overwriting it."""
+    name = gcs.object_path(**TRAIN_ARGS)
+    gcs.ensure_artifact(name, tmp_path / "a.npz", produce=_producer("session one"),
+                        bucket=bucket, fingerprint=_fingerprint())
+    local = tmp_path / "b.npz"
+    local.write_text("session two")
+    with pytest.raises(gcs.GenerationPreconditionError, match="generation"):
+        gcs.upload_file(local, name, bucket=bucket, generation_match=0)
+    assert bucket.objects[name] == b"session one", "the finished artifact was replaced"
+
+
+def test_a_forced_overwrite_requires_the_generation_it_read(bucket, tmp_path):
+    """Force is a deliberate replacement, so it carries the generation it
+    saw -- and is refused if anything moved in between."""
+    name = gcs.object_path(**TRAIN_ARGS)
+    local = tmp_path / "features.npz"
+    gcs.ensure_artifact(name, local, produce=_producer("first"), bucket=bucket)
+    stale = gcs.current_generation(name, bucket=bucket)
+
+    # Someone else writes. The generation moves on.
+    other = tmp_path / "other.npz"
+    other.write_text("interloper")
+    gcs.upload_file(other, name, bucket=bucket, generation_match=stale)
+
+    with pytest.raises(gcs.GenerationPreconditionError):
+        gcs.upload_file(local, name, bucket=bucket, generation_match=stale)
+    assert bucket.objects[name] == b"interloper"
+
+
+def test_ensure_artifact_creates_under_a_must_not_exist_precondition(bucket, tmp_path):
+    """A fresh step must CREATE. Nothing about the happy path changes, but
+    the write now says so to the service rather than assuming it."""
+    name = gcs.object_path(**TRAIN_ARGS)
+    assert gcs.current_generation(name, bucket=bucket) == 0
+    r = gcs.ensure_artifact(name, tmp_path / "a.npz", produce=_producer(),
+                            bucket=bucket, fingerprint=_fingerprint())
+    assert r.uploaded
+    assert gcs.current_generation(name, bucket=bucket) > 0
+
+
+def test_a_forced_overwrite_through_ensure_artifact_still_succeeds(bucket, tmp_path):
+    """The positive control the guard must not break: `force=True` reads the
+    current generation and requires exactly it, so the ordinary
+    single-writer regeneration goes through untouched."""
+    name = gcs.object_path(**TRAIN_ARGS)
+    local = tmp_path / "features.npz"
+    gcs.ensure_artifact(name, local, produce=_producer("first"), bucket=bucket,
+                        fingerprint=_fingerprint())
+    r = gcs.ensure_artifact(name, local, produce=_producer("second"), bucket=bucket,
+                            force=True, fingerprint=_fingerprint())
+    assert r.uploaded and bucket.objects[name] == b"second"
+
+
+def test_a_retry_after_a_failed_upload_can_still_create(tmp_path):
+    """A verify failure deletes the object, so the next run's CREATE
+    precondition must match again. Real GCS treats an absent object as
+    generation 0 regardless of history; a fake that remembered the old
+    generation would make this pass here and fail in production."""
+    name = gcs.object_path(**TRAIN_ARGS)
+    bucket = TruncatingBucket(truncate_from=0)
+    with pytest.raises(gcs.ChecksumMismatchError):
+        gcs.ensure_artifact(name, tmp_path / "a" / "features.npz",
+                            produce=_producer("computed" * 100), bucket=bucket)
+    assert name not in bucket.objects
+    bucket.truncate_from = None          # the transient fault clears
+    r = gcs.ensure_artifact(name, tmp_path / "b" / "features.npz",
+                            produce=_producer("computed" * 100), bucket=bucket)
+    assert r.uploaded
+
+
+def test_the_chunked_route_guards_the_destination_but_not_its_parts(bucket, tmp_path):
+    """Scoping, stated as a test. The artifact is the composed destination;
+    the parts are transient scratch the upload owns end to end, and a
+    resumed upload rewriting a damaged part is an overwrite BY DESIGN --
+    guarding those would break the resume the route exists for."""
+    name = gcs.object_path(**TRAIN_ARGS)
+    local = tmp_path / "big.npz"
+    local.write_text("x" * (CHUNK * 3))
+    gcs.ensure_artifact(name, local, produce=lambda p: None, bucket=bucket,
+                        chunked=True, chunk_size=CHUNK, fingerprint=_fingerprint())
+    assert gcs.current_generation(name, bucket=bucket) > 0
+    # A second writer cannot replace the composed artifact.
+    with pytest.raises(gcs.GenerationPreconditionError):
+        gcs.upload_file(local, name, bucket=bucket, generation_match=0)
+
+
+def test_the_manifest_sidecar_is_written_under_a_precondition_too(bucket, tmp_path):
+    """A sidecar replaced behind a payload's back is the mismatch that reads
+    as corruption. It gets the same guard."""
+    obj, local, _ = _published(bucket, tmp_path)
+    sidecar = gcs.manifest_object_name(obj)
+    assert sidecar in bucket.objects
+    with pytest.raises(gcs.GenerationPreconditionError):
+        gcs.publish_manifest(local, obj, bucket=bucket, fingerprint=_fingerprint(),
+                             generation_match=0)
