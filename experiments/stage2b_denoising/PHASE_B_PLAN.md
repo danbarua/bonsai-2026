@@ -520,6 +520,41 @@ protocol's. It belongs to the audit driver, not to Phase B.
 
 ---
 
+## Disclosed deviations from stage 2's behaviour
+
+Recorded retroactively rather than repaired quietly, which is this
+project's standard remedy for a non-disclosure.
+
+### The stats-smoke budget guard was dropped, and the dropping was not recorded
+
+Stage 2 gated its stats smoke on projected cost: `STATS_SMOKE_BUDGET_S =
+60.0`, with the step skipped and a reason written into the run record
+when a linear projection from stage 1's measured 10.86s at n=1,000
+exceeded it. Its stated justification for skipping was that the
+ridge-to-stats glue was already proven by stage 1's run.
+
+`run_ladder_stage3.py` has no such guard: `step9_stats_smoke` runs
+unconditionally. At n=60,000 it took **776.6 s — 18% of the run's
+4,297.2 s total** — on a step that is by construction in-sample,
+training-side and non-inferential, and whose own artifact carries a
+banner saying so.
+
+**The deviation and the non-disclosure are separate, and only one is the
+defect.** Running the smoke at production scale is defensible: it
+exercises the machinery at the scale it will actually be used, which is
+worth something the stage-1 proof does not provide. Its result stands and
+no scientific claim is affected. What was wrong is that a driver silently
+stopped doing what the previous rung did, with the change recorded in
+neither this plan nor the commit that introduced it — so nobody reviewing
+either would have known to look. It was self-caught reading the timings
+at teardown, which is later than it should have been found and is not a
+substitute for having disclosed it.
+
+**Forward rule: smoke-or-skip is an explicit decision per session.** Any
+later driver — the audit session included — states which it does and why,
+rather than inheriting either behaviour silently from whichever rung it
+was copied from.
+
 ## Verification
 
 - Every new guard confirmed by breaking what it watches. Specifically: the

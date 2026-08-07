@@ -134,6 +134,36 @@ commit.** Not "will write it up at the end" — there may be no end. This
 project's own convention: write the findings section for a completed unit
 of work *before* moving to the next one.
 
+### 7b. Teardown must not live in a process that can be killed
+
+The one-layer-out corollary of 7, and it cost a leaked A100 to learn.
+
+Phase B was launched through a Makefile target whose recipe ends with an
+unconditional `stop` plus a leak check — the discipline in 8, correctly
+written. Two hours in, `make` took SIGTERM. The recipe's teardown died
+with it while the remote kernel carried on computing, so the VM billed on
+with nothing watching it.
+
+The rule in 8 had been satisfied **in letter, inside a container that
+could vanish**. That is the same lesson as 7 one level up: *nothing
+survives a killed local client except what is already in the bucket, and
+teardown is not in the bucket.*
+
+**Arm a teardown watchdog independent of the launcher**, with a hard
+deadline, that reads and reports the stop status. It stops the session
+when the work signals completion and stops it anyway when the deadline
+expires. A teardown that only runs if the happy path completes is not
+unconditional.
+
+One honest footnote, because the scarier version of this story is the
+memorable one: the billing consequence here was **nil**. The kernel was
+productively computing for the whole window the launcher was dead, and
+the watchdog stopped it within seconds of the run finishing. An initial
+report of an hour of idle billing was a timezone artifact — the session
+log printed UTC, the shell printed BST — retracted with its reasoning
+rather than quietly deleted. The process error was real and the loss was
+not, and both belong in the record.
+
 ### 8. A metered VM makes silence expensive
 
 The cost asymmetry is the thing to internalise. A refusal costs a round
@@ -317,6 +347,38 @@ them could see from inside.
 
 **When a human offers a different instrument, use it before defending the
 measurement.**
+
+### 22. Make the loop impossible before the first new fit exists
+
+When a result reveals that a parameter's search range was wrong, the
+tempting next move is to widen it and re-run. The danger is not widening
+it once — it is the *loop*: widen, look, still at the boundary, widen
+again. Each step is individually defensible and the sequence is
+alpha-hacking-shaped, because the stopping rule is being chosen while
+looking at the results.
+
+Stage 3 hit this exactly. Six of seven ridge conditions selected the
+grid-minimum alpha, asymmetrically across the treatment/control line, so
+the optimum was unbracketed for precisely the conditions being compared.
+
+**The decision rule gets frozen before any computation on the new range**:
+the extension size pre-committed, the success criterion named in advance
+(here: an interior argmin), and the answer decided ahead of time for what
+happens if something pins at the *new* boundary too. Freezing it
+afterwards is worthless — the whole value is that the rule could not have
+been chosen to suit what was seen.
+
+Generalises past alpha grids to any parameter whose range is revised
+after seeing results. The reason to do it early is not suspicion of
+anyone's honesty; it is that **the way never to face the accusation is to
+make the loop structurally impossible before the first new fit exists.**
+
+An adjacent discipline that made this one easier to hold: the situation
+was not improvised. The reviewer had pre-registered the rule *"if several
+conditions select the grid-minimum alpha, that is a reported fact
+requiring scrutiny before the confirmatory stage — not a halt, but a
+named review item."* When it fired, nobody had to decide in the moment
+whether it mattered.
 
 ---
 
