@@ -203,7 +203,8 @@ experiments/stage2a_dynamics_classification/scratch/
 
 
 # Claude Code: personal/local tool permissions and settings -- kept on
-# disk, not tracked (this project has no shared .claude/settings.json).
+# disk, not tracked. The SHARED .claude/settings.json (project-wide hook
+# registrations) is tracked; only this per-machine overlay is ignored.
 .claude/settings.local.json
 
 
