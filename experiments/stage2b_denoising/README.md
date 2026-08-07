@@ -98,14 +98,21 @@ mention here, in the same commit that creates it.
 - **`stage_kmnist_inputs.py`** — stages the four KMNIST IDX files into the
   bucket, once, from here. Local → GCS, because `datasets/` is gitignored
   and so absent from the driver's clone.
-- **`encode_stage3_local.py`** — stage 3, Phase A: corrupts and encodes the
-  54,000-image fit side on this machine's CPU cores and writes only the
-  encoded 505-dim array to GCS, for the GPU phase to read. Split out from
-  the GPU phase because encoding is the pipeline's one CPU-bound step, and
-  running it inside a provisioned session would leave a metered A100 idle
-  for most of the run. Composes `corrupt_corpus` and
+- **`encode_stage3_local.py`** — stage 3, Phase A: corrupts and encodes all
+  60,000 official training images on this machine's CPU cores and writes
+  only the encoded 505-dim array to GCS, for the GPU phase to read. Split
+  out from the GPU phase because encoding is the pipeline's one CPU-bound
+  step, and running it inside a provisioned session would leave a metered
+  A100 idle for most of the run. Composes `corrupt_corpus` and
   `encode_with_final_delta_batch` unchanged — same numerics as both prior
-  rungs, different machine.
+  rungs, different machine. Rows are in ascending official index order,
+  and the artifact is published with a fingerprint manifest.
+- **`compare_stage3_regeneration.py`** — the regeneration's acceptance
+  test: the 54,000 images the previous Phase A run encoded must come back
+  bit-exact, matched **by official index** rather than by positional
+  prefix, while the 6,000 validation images are reported as new evidence
+  with their own final-Delta tail and no expected-agreement criterion.
+  Reads only; writes nothing to the bucket.
 - **`run_ladder_stage2.py`** — the stage-2 driver (n=5,000 development
   subset). Same architecture as stage 1: pinned-commit fetch, every
   artifact via `ensure_artifact`. Reuses stage 1's topologies and staged
@@ -370,6 +377,8 @@ make test                      # the whole repository suite
 | `test_stage2b_gcs.py` | transport, guards, chunked resumable upload, content verification, the sidecar manifest and validated consume path |
 | `test_stage2b_fingerprint.py` | static ∪ runtime import closure, dirty-tree and revalidation refusals, per-kind consume policies, per-array payload manifests |
 | `test_stage2b_negative_path_evidence.py` | that every test `NEGATIVE_PATH_EVIDENCE.md` cites still exists under that name |
+| `test_stage2b_encode_stage3_local.py` | chunk-invariance of the encode, index-keyed corruption, the exact-binomial tail report, population roles |
+| `test_stage2b_compare_stage3.py` | the regeneration join: by official index, never a positional prefix |
 | `test_stage2b_cnn.py` | architecture, shared masking, training loop |
 | `test_stage2b_stats.py` | sign-flip, Holm families, winner rule |
 | `test_stage2b_ridge.py` | SVD ridge vs sklearn oracle, alpha selection, the n-dependent centering tolerance |

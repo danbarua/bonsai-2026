@@ -302,15 +302,68 @@ def source_manifest(paths, repo_root):
 
 # ------------------------------------------------------------ git identity
 
-def git_identity(repo_root, require_clean=True):
+def closure_dirty_paths(paths, repo_root):
+    """Which of `paths` differ from their committed content at HEAD.
+
+    A path absent from HEAD (untracked, or newly added and uncommitted) is
+    dirty, which is the correct answer: there is no committed version to
+    reproduce it from."""
+    dirty = []
+    for path in sorted(paths):
+        full = os.path.join(repo_root, path)
+        try:
+            committed = subprocess.run(
+                ["git", "rev-parse", f"HEAD:{path}"], cwd=repo_root,
+                capture_output=True, text=True, check=True).stdout.strip()
+        except (subprocess.CalledProcessError, FileNotFoundError):
+            dirty.append(path)
+            continue
+        try:
+            working = subprocess.run(
+                ["git", "hash-object", full], cwd=repo_root,
+                capture_output=True, text=True, check=True).stdout.strip()
+        except (subprocess.CalledProcessError, FileNotFoundError):
+            dirty.append(path)
+            continue
+        if committed != working:
+            dirty.append(path)
+    return dirty
+
+
+def git_identity(repo_root, require_clean=True, paths=None):
     """The commit an artifact-generating run is pinned to.
 
-    `require_clean` refuses a dirty tree outright rather than recording a
-    dirty flag. A commit plus "there were also some uncommitted changes" is
-    not an identity -- it does not say WHICH changes, so it cannot support
-    the comparison this fingerprint exists to make. Stage 3's Phase A was
-    run from a dirty tree and that is precisely why its provenance had to be
-    reconstructed rather than read."""
+    `require_clean` refuses rather than recording a dirty flag. A commit
+    plus "there were also some uncommitted changes" is not an identity --
+    it does not say WHICH changes, so it cannot support the comparison this
+    fingerprint exists to make. Stage 3's Phase A was run from a dirty tree
+    and that is precisely why its provenance had to be reconstructed rather
+    than read.
+
+    ## Two cleanliness claims, and which one the refusal keys on
+
+    `clean` is the whole working tree, `git status --porcelain` empty. It
+    is recorded always.
+
+    `closure_clean`, present when `paths` is given, is the narrower and
+    stronger claim: every file in the run's own source closure matches its
+    committed content at HEAD. When `paths` is supplied that is what the
+    refusal keys on.
+
+    The narrower check is not a relaxation of the broader one, and the
+    distinction is not cosmetic. `git status` reports the whole repository,
+    including work belonging to efforts that cannot reach this artifact --
+    a scratch file, a second concurrent branch of work, an editor's
+    leftovers. None of those can change what the encoder computes. What
+    CAN is a closure file differing from HEAD, and the whole-tree check
+    detects that only as one entry among many, with no way to tell it
+    apart. `closure_dirty_paths` compares blob for blob and names the file.
+
+    A run whose closure is clean inside a dirty tree therefore proceeds,
+    with `clean=False`, `closure_clean=True` and the offending paths
+    recorded -- more information than the coarse check carried, not less.
+    Pass no `paths` and the old whole-tree behaviour is exactly what
+    happens."""
     def git(*args):
         return subprocess.run(["git", *args], cwd=repo_root, capture_output=True,
                               text=True, check=True).stdout.strip()
@@ -319,13 +372,31 @@ def git_identity(repo_root, require_clean=True):
         porcelain = git("status", "--porcelain")
     except (subprocess.CalledProcessError, FileNotFoundError) as exc:
         raise FingerprintError(f"could not read git state at {repo_root!r}: {exc}") from exc
-    if porcelain and require_clean:
+
+    identity = {"commit": commit, "clean": not porcelain}
+    if paths is None:
+        if porcelain and require_clean:
+            raise DirtyTreeError(
+                f"refusing to fingerprint an artifact from a dirty tree at "
+                f"{repo_root!r}. A commit plus unrecorded local edits is not a code "
+                f"identity, so the artifact could not later be shown to have come "
+                f"from known source. Commit or stash first.\n{porcelain}")
+        return identity
+
+    dirty = closure_dirty_paths(paths, repo_root)
+    identity["closure_clean"] = not dirty
+    identity["closure_dirty_paths"] = dirty
+    identity["tree_dirty_porcelain"] = porcelain if porcelain else None
+    if dirty and require_clean:
         raise DirtyTreeError(
-            f"refusing to fingerprint an artifact from a dirty tree at {repo_root!r}. "
-            f"A commit plus unrecorded local edits is not a code identity, so the "
-            f"artifact could not later be shown to have come from known source. "
-            f"Commit or stash first.\n{porcelain}")
-    return {"commit": commit, "clean": not porcelain}
+            f"refusing to fingerprint an artifact whose own source closure is not "
+            f"committed at {repo_root!r}. These files differ from HEAD (or are "
+            f"untracked), so the artifact could not later be shown to have come "
+            f"from known source:\n"
+            + "\n".join(f"  {path}" for path in dirty)
+            + "\nCommit them first. Other uncommitted work elsewhere in the tree "
+              "is recorded but does not block, since it cannot reach this artifact.")
+    return identity
 
 
 # ------------------------------------------------------------- fingerprint
@@ -346,7 +417,10 @@ def compute(*, entrypoint, config, repo_root, parents=None, require_clean=True):
     fingerprint = {
         "format": FINGERPRINT_FORMAT,
         "entrypoint": repo_relative(entrypoint, repo_root),
-        "git": git_identity(repo_root, require_clean=require_clean),
+        # The closure is passed in, so the refusal keys on this run's own
+        # source files rather than on the whole repository's tidiness.
+        "git": git_identity(repo_root, require_clean=require_clean,
+                            paths=sorted(manifest)),
         "source_manifest": manifest,
         "source_manifest_digest": canonical_digest(manifest),
         "config": dict(config),

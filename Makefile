@@ -285,7 +285,9 @@ STAGE2B_TEST_FILES := tests/test_stage2b_corruption.py tests/test_stage2b_encode
                       tests/test_stage2b_ladder_stage1.py \
                       tests/test_stage2b_ladder_stage2.py \
                       tests/test_stage2b_fingerprint.py \
-                      tests/test_stage2b_negative_path_evidence.py
+                      tests/test_stage2b_negative_path_evidence.py \
+                      tests/test_stage2b_encode_stage3_local.py \
+                      tests/test_stage2b_compare_stage3.py
 
 .PHONY: stage2b-test
 stage2b-test:  ## Run the Stage 2B test suite (fast only; the Colab round trip is excluded)
@@ -516,9 +518,19 @@ SESSION_2B_LADDER2 ?= stage2b-ladder2
 # limit, which a direct Mac->GCS write never touches. `stage2b-stage-inputs`
 # already writes to the bucket from here on exactly the same transport.
 .PHONY: stage2b-encode-stage3-local
-stage2b-encode-stage3-local:  ## Stage 3 Phase A: encode the fit side locally on CPU, push to GCS (free, no session)
+stage2b-encode-stage3-local:  ## Stage 3 Phase A: encode all 60,000 training images locally on CPU, push to GCS (free, no session)
 	cd $(REPO_ROOT) && $(GCS_ENV) \
 		uv run --group gpu python $(STAGE2B_DIR)/encode_stage3_local.py
+
+# The acceptance test for the regeneration above, and a separate target
+# because it is a separate claim: that the 54,000 images the previous
+# Phase A run encoded come back bit-exact, joined by official index. Reads
+# only -- it downloads two artifacts and writes nothing to the bucket.
+.PHONY: stage2b-compare-stage3
+stage2b-compare-stage3:  ## Verify the stage-3 regeneration against the 54,000-image baseline (read-only)
+	cd $(REPO_ROOT) && $(GCS_ENV) \
+		uv run --group gpu python $(STAGE2B_DIR)/compare_stage3_regeneration.py \
+			--json-out $(STAGE2B_DIR)/results/stage3_regeneration_acceptance.json
 
 .PHONY: stage2b-ladder-stage2
 stage2b-ladder-stage2:  ## Run Stage 2B ladder stage 2 (n=5,000, CNN development) on a Colab GPU -- bills while running

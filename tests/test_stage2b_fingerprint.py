@@ -161,6 +161,83 @@ def test_a_dirty_tree_is_recorded_rather_than_refused_when_explicitly_allowed(tm
     assert identity["clean"] is False
 
 
+# ---- closure-scoped cleanliness ----
+#
+# The whole-tree check answers "is this repository tidy"; the artifact's
+# reproducibility depends on "are THESE files committed". The two come
+# apart the moment a second effort has uncommitted work in the same
+# checkout, which is not hypothetical -- it is what happens here whenever
+# two branches of work share a clone.
+
+def _repo_with_two_efforts(tmp_path, mine_dirty):
+    """A repo where an unrelated file is uncommitted, and the closure file
+    is dirty or not depending on `mine_dirty`."""
+    run = lambda *a: subprocess.run(a, cwd=tmp_path, check=True, capture_output=True)
+    run("git", "init", "-q")
+    run("git", "config", "user.email", "t@example.com")
+    run("git", "config", "user.name", "t")
+    (tmp_path / "mine.py").write_text("x = 1\n")
+    run("git", "add", "mine.py")
+    run("git", "commit", "-qm", "initial")
+    (tmp_path / "someone_elses_scratch.md").write_text("not my work\n")   # untracked
+    if mine_dirty:
+        (tmp_path / "mine.py").write_text("x = 2\n")
+    return tmp_path
+
+
+def test_unrelated_uncommitted_work_does_not_block_a_committed_closure(tmp_path):
+    """The motivating case. A scratch file belonging to another effort
+    cannot change what this run computes, and blocking on it would make
+    the guard unusable in a shared checkout -- which is how guards get
+    switched off."""
+    repo = _repo_with_two_efforts(tmp_path, mine_dirty=False)
+    identity = fp.git_identity(str(repo), require_clean=True, paths=["mine.py"])
+    assert identity["closure_clean"] is True
+    assert identity["closure_dirty_paths"] == []
+    assert identity["clean"] is False, "the tree really is dirty"
+    assert "someone_elses_scratch" in identity["tree_dirty_porcelain"], (
+        "the broader state must still be RECORDED, not discarded")
+
+
+def test_a_dirty_closure_file_is_refused_and_named(tmp_path):
+    """The narrowing must not cost detection: an uncommitted edit to a file
+    this run actually imports still halts, and the message names it rather
+    than dumping the whole porcelain."""
+    repo = _repo_with_two_efforts(tmp_path, mine_dirty=True)
+    with pytest.raises(fp.DirtyTreeError, match="mine.py"):
+        fp.git_identity(str(repo), require_clean=True, paths=["mine.py"])
+
+
+def test_an_untracked_closure_file_is_dirty_rather_than_silently_clean(tmp_path):
+    """`git rev-parse HEAD:path` fails for a file that was never committed.
+    Treating that failure as "no difference found" would make brand-new,
+    uncommitted source the easiest thing in the world to fingerprint."""
+    repo = _repo_with_two_efforts(tmp_path, mine_dirty=False)
+    (repo / "brand_new.py").write_text("y = 3\n")
+    dirty = fp.closure_dirty_paths(["mine.py", "brand_new.py"], str(repo))
+    assert dirty == ["brand_new.py"]
+    with pytest.raises(fp.DirtyTreeError, match="brand_new.py"):
+        fp.git_identity(str(repo), require_clean=True,
+                        paths=["mine.py", "brand_new.py"])
+
+
+def test_a_staged_but_uncommitted_closure_edit_is_still_dirty(tmp_path):
+    """Staging is not committing. The comparison is against HEAD, so `git
+    add` alone must not make a file look reproducible."""
+    repo = _repo_with_two_efforts(tmp_path, mine_dirty=True)
+    subprocess.run(["git", "add", "mine.py"], cwd=repo, check=True,
+                   capture_output=True)
+    assert fp.closure_dirty_paths(["mine.py"], str(repo)) == ["mine.py"]
+
+
+def test_omitting_paths_keeps_the_whole_tree_behaviour(tmp_path):
+    """The narrowing is opt-in at the call site. A caller that passes no
+    closure gets exactly the old, coarser refusal."""
+    repo = _repo_with_two_efforts(tmp_path, mine_dirty=False)
+    with pytest.raises(fp.DirtyTreeError):
+        fp.git_identity(str(repo), require_clean=True)
+
+
 # ---- revalidation after execution ----
 
 def _fingerprint(**over):
