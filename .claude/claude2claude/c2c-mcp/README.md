@@ -14,6 +14,12 @@ first ordering) match the existing protocol documented in
 `.claude/skills/c2c/SKILL.md` -- this server is a second
 implementation of the same mailbox convention, not a different one.
 
+Read `DEVELOPMENT_PRACTICES.md` before making changes here -- the
+version-bump-before-restart discipline referenced throughout this
+README, and several other hard-won rules about the multiple ways this
+server gets reached, are explained there with the incidents that
+produced them.
+
 ## Tools
 
 Each channel has an internal ("code-side") set of roles and one
