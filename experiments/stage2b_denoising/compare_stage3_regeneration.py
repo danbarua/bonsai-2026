@@ -54,6 +54,7 @@ import encode_stage3_local as enc                # noqa: E402
 import stage2b_encoder_gate as encoder_gate      # noqa: E402
 import stage2b_fingerprint as fingerprint        # noqa: E402
 import stage2b_gcs as gcs                        # noqa: E402
+import stage2b_partition as partition            # noqa: E402
 
 LADDER_STAGE = 3
 SPLIT = "train"
@@ -105,38 +106,23 @@ def align(old, new):
     """Rows of `new` corresponding to `old`'s images, in `old`'s order.
 
     Returns (row_positions, report). Raises if the overlap is not exactly
-    `old`'s index set."""
-    old_idx = np.asarray(old["fit_indices"])
-    new_idx = np.asarray(new["train_indices"])
+    `old`'s index set.
 
-    if new_idx.size != np.unique(new_idx).size:
-        raise ValueError("the new artifact's train_indices contain duplicates")
-    position = {int(v): i for i, v in enumerate(new_idx)}
-    missing = [int(v) for v in old_idx if int(v) not in position]
-    if missing:
-        raise ValueError(
-            f"{len(missing)} of the baseline's images are absent from the new "
-            f"artifact (first few: {missing[:5]}). The regeneration does not "
-            f"cover the population it is being compared against.")
-    rows = np.array([position[int(v)] for v in old_idx], dtype=np.int64)
+    The join itself is `stage2b_partition.index_join` -- shared with the
+    ladder drivers rather than written twice, since an official-index join
+    written fresh per call site is principle 16's exact failure shape. What
+    stays here is the part specific to THIS comparison: the expected
+    overlap size, and the refusal of a prefix alignment."""
+    rows, report = partition.index_join(
+        np.asarray(old["fit_indices"]), np.asarray(new["train_indices"]),
+        source_name="the baseline", target_name="the new artifact")
 
     # Vacuity guards. Without these a passing comparison could mean
     # "compared the right rows" or "compared a prefix that happened to
     # line up", and the two are indistinguishable from a green result.
     if rows.size != BASELINE_TAIL_N:
         raise ValueError(f"expected an overlap of {BASELINE_TAIL_N}, got {rows.size}")
-    if np.unique(rows).size != rows.size:
-        raise ValueError("the alignment maps two baseline images to one new row")
-    is_prefix = bool(np.array_equal(rows, np.arange(rows.size)))
-    report = {
-        "n_overlap": int(rows.size),
-        "n_new_total": int(new_idx.size),
-        "alignment_is_a_prefix": is_prefix,
-        "n_rows_moved": int(np.count_nonzero(rows != np.arange(rows.size))),
-        "first_five_baseline_indices": [int(v) for v in old_idx[:5]],
-        "their_rows_in_the_new_artifact": [int(v) for v in rows[:5]],
-    }
-    if is_prefix:
+    if report["alignment_is_a_prefix"]:
         raise ValueError(
             "the baseline's images map onto the new artifact's first 54,000 rows "
             "in order. Expected them scattered through ascending official order. "

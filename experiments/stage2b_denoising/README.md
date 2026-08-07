@@ -134,6 +134,16 @@ mention here, in the same commit that creates it.
   ridge-grid behaviour, the ladder's second real-data ridge equivalence
   gate, and the first CNN training against real data (early-stopped on
   the locked 6,000-image validation partition, best of three seeds).
+- **`run_ladder_stage3.py`** — the stage-3 Phase B driver (the full
+  60,000-image training corpus). Has no encode step: Phase A encoded the
+  corpus locally and this consumes `encoded_train_s1200.npz` through the
+  validated path, checking its manifest identity and spot-checking one
+  re-encode at ULP tolerance rather than exact equality. First driver to
+  write under the fingerprint contract, so every artifact it creates
+  carries provenance and a parent lineage. A step-2b sizing probe measures
+  the JAX and sklearn cost legs separately and halts against budgets fixed
+  before it ran; thetas and features are persisted per graph and per
+  condition because the amendment audit consumes those exact objects.
 
 **Frozen protocols** (each committed before any of its own numbers
 existed; nothing in them may change once a result has been seen):
@@ -416,6 +426,7 @@ make test                      # the whole repository suite
 | `test_stage2b_gcs_makefile.py` | Makefile and module agree on the bucket; every GCS-touching script has a target |
 | `test_stage2b_ladder_stage1.py` | the stage-1 driver's constants, call sites and Makefile agreement |
 | `test_stage2b_ladder_stage2.py` | the stage-2 driver's constants, call sites (including the CNN closure) and Makefile agreement |
+| `test_stage2b_ladder_stage3.py` | the stage-3 driver's constants, the sizing probe's projections and halt paths, the pinned pre-contract consumes, and Makefile agreement |
 
 This table is the whole of what `make stage2b-test` runs, and the one
 exclusion is the slow round trip. It carries no test counts, deliberately:

@@ -444,3 +444,55 @@ class Stage2BTrainingPartition:
             "index_space": "official KMNIST training split (0-based)",
             "is_official_size": bool(self._n == N_OFFICIAL_TRAIN),
         }
+
+
+# ---- joining two artifacts by official image index ----
+
+def index_join(source_indices, target_indices, *, source_name="source",
+               target_name="target"):
+    """Rows of `target` holding `source`'s images, in `source`'s order.
+
+    Returns `(rows, report)` such that `target_array[rows]` lines up with
+    `source_array`, image for image.
+
+    AUDIT_PROTOCOL.md requires that all cross-artifact comparison happen
+    **by official KMNIST image index, never by positional prefix**. This is
+    that join, in one tested place, because writing it fresh at each call
+    site is CLAUDE.md principle 16's exact failure shape: two artifacts
+    built from differently-ordered index lists align row-for-row, agree on
+    shape, and compare entirely wrong numbers with no error raised
+    anywhere.
+
+    The report records `alignment_is_a_prefix` and `n_rows_moved` rather
+    than deciding what they mean. A prefix alignment is legitimate for some
+    pairs and evidence of a degenerated join for others, so the caller
+    holds that judgement -- `compare_stage3_regeneration.align` refuses one,
+    and a caller joining a subset drawn in ascending order should expect
+    one."""
+    source = np.asarray(source_indices)
+    target = np.asarray(target_indices)
+    if target.size != np.unique(target).size:
+        raise ValueError(f"{target_name} indices contain duplicates, so a join "
+                         f"against them is ambiguous")
+    if source.size != np.unique(source).size:
+        raise ValueError(f"{source_name} indices contain duplicates")
+
+    position = {int(v): i for i, v in enumerate(target)}
+    missing = [int(v) for v in source if int(v) not in position]
+    if missing:
+        raise ValueError(
+            f"{len(missing)} of {source_name}'s images are absent from "
+            f"{target_name} (first few: {missing[:5]}). The two artifacts do not "
+            f"cover the populations this comparison assumes.")
+    rows = np.array([position[int(v)] for v in source], dtype=np.int64)
+    if np.unique(rows).size != rows.size:
+        raise ValueError(f"the alignment maps two {source_name} images to one "
+                         f"{target_name} row")
+    return rows, {
+        "n_overlap": int(rows.size),
+        "n_target_total": int(target.size),
+        "alignment_is_a_prefix": bool(np.array_equal(rows, np.arange(rows.size))),
+        "n_rows_moved": int(np.count_nonzero(rows != np.arange(rows.size))),
+        "first_five_source_indices": [int(v) for v in source[:5]],
+        "their_rows_in_the_target": [int(v) for v in rows[:5]],
+    }

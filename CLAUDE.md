@@ -457,6 +457,23 @@ without reading that document's full findings history first.
     value and well above observed numerical dust, the gate passes on that
     basis, and the ordinary ratio test applies everywhere else. Near a
     floor, a ratio is the wrong statistic; switch to an absolute one.
+24. **A number that anchors a decision is either reproducible from
+    committed code, or it is not a decision anchor.** Load-bearing
+    scratch — an ephemeral script (heredoc, python -c, tmp file, inline
+    colab exec) whose output enters a durable record while the script
+    itself dies — is class0_constructions.pkl at smaller grain: a cached
+    conclusion whose generator is a chat transcript. Paid instances: the
+    MEAN_X_TOL anchors (A100 spike, exec-transmitted); the n=500
+    column-std numbers (demoted from a docstring precisely because the
+    script was one-off); the retention probe (reasoning that could not
+    be re-audited from code and turned out to be wrong). IN scope:
+    empirical measurement of the system under study whose quantitative
+    output enters durable records or anchors frozen parameters. OUT of
+    scope, deliberately: discarded exploration (must stay cheap) and
+    inline analytic derivations (the derivation is its own provenance).
+    The remedy for a captured scratch that turns out to matter is
+    promotion to committed code — never citing the capture. Mechanics:
+    see the provenance contract (capture-at-birth, citation-at-use).
 
 # IntelliJ MCP Server Companion
 This project is open in Pycharm IDE (IntelliJ IDEA platform). 

@@ -1840,6 +1840,77 @@ def verify_lineage(object_name, manifest, *, bucket, allow_test_split=False,
     return seen
 
 
+def discard_uncommitted(object_name, *, bucket, allow_test_split=False):
+    """Delete a payload that was written but never committed, so a halted
+    run has a forward path. Returns True if it deleted something.
+
+    ## The state this exists for
+
+    A session that dies between the payload write and the sidecar write
+    leaves an orphan: bytes under a LINEAGE name with no manifest. Every
+    ordinary route out is closed, by design and correctly --
+    `consume_validated` refuses it (no recorded provenance), the create
+    path's `if_generation_match=0` fails against an existing object, and
+    `force=True` raises `WriteOnceViolation`. Confirmed by constructing the
+    state, not reasoned about: without this function the run cannot proceed
+    unattended.
+
+    ## Why this does not weaken write-once
+
+    The invariant protects the COMMIT, not the byte-write. A lineage
+    artifact is immutable because its generation is pinned -- by its own
+    manifest, and possibly by another manifest naming it as a parent. An
+    orphan has neither: no manifest committed it, so nothing can hold a
+    reference to it. Deleting it removes bytes no consumer was ever
+    permitted to read.
+
+    That is exactly why the refusal below is the whole safety property, and
+    why it re-reads the manifest at call time rather than trusting a
+    listing taken earlier: between that listing and this call, the write
+    that commits the payload may have landed.
+
+    ## Why this is not automatic
+
+    `ensure_artifact` does not call this on its own, and the driver halts
+    and names it rather than invoking it. An orphan means a session died
+    mid-step, which is a signal worth a human seeing. More concretely, the
+    resumability story explicitly contemplates a second session resuming
+    after the first is only PRESUMED dead: if that first session is alive
+    and slow, auto-discarding its payload lets it commit a manifest
+    pinning a generation that no longer exists, converting a clean halt
+    into a lineage that must be diagnosed. A human deciding costs one
+    command; the automatic version costs a confusing failure.
+
+    ## The exact name, never a prefix
+
+    `manifest_object_name` is the payload name plus a suffix, so
+    `delete_prefix(payload_name, ...)` matches the manifest too and would
+    strip a COMMITTED artifact's provenance while leaving its bytes.
+    This deletes the one object it was given."""
+    object_name = _check_object_path_allowed(object_name, allow_test_split)
+    if is_manifest_name(object_name):
+        raise ValueError(
+            f"refusing to discard {object_name!r}: it is a manifest, not a payload. "
+            f"Deleting a manifest uncommits an artifact whose bytes remain, which is "
+            f"the corrupt state this function exists to clear, not to create.")
+    manifest = read_manifest(object_name, bucket=bucket,
+                             allow_test_split=allow_test_split)
+    if manifest is not None:
+        raise WriteOnceViolation(
+            f"refusing to discard {object_name!r}: it carries a manifest at "
+            f"{manifest_object_name(object_name)!r} and is therefore COMMITTED. This "
+            f"function clears the orphan state -- a payload with no manifest, which "
+            f"no consumer may accept -- and a committed artifact is create-once with "
+            f"no supported delete. If these bytes are genuinely wrong, the answer is "
+            f"a new name, as Phase A used when it wrote encoded_train_s1200 rather "
+            f"than overwriting encoded_fit_s1200.")
+    blob = bucket.blob(object_name)
+    if not blob.exists():
+        return False
+    blob.delete()
+    return True
+
+
 def consume_validated(object_name, local_path, *, bucket, expected_fingerprint=None,
                       policy=None, allow_test_split=False, verify_content=True,
                       require_manifest=True):
