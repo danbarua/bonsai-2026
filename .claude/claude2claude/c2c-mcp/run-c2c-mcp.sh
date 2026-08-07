@@ -43,10 +43,18 @@ fi
 # 1. Catch Ctrl+C (SIGINT) and exit (SIGTERM) signals to clean up
 trap 'echo -e "\n🛑 Stopping services..."; kill $DEV_PID 2>/dev/null; exit 0' SIGINT SIGTERM
 
+# 2. Build once and run the compiled output (not tsx) -- this is the
+#    public-facing deployment, so a standard build+run is preferable to
+#    per-request TS transpilation. `npm run dist/index.js` is not a real
+#    npm script (there's no script by that name in package.json); the
+#    correct invocation is `node dist/index.js` directly, matching
+#    package.json's own "start" script.
+echo "🔨 Building..."
+npm run build || { echo "❌ Build failed -- check the tsc output above."; exit 1; }
+
 echo "🚀 Starting local server on port $C2C_MCP_PORT..."
-# 2. Run npm dev in the background and save its process ID (PID)
 mkdir -p ./logs
-npm run dev >./logs/stdout.log 2>./logs/err.log &
+node dist/index.js >./logs/stdout.log 2>./logs/err.log &
 DEV_PID=$!
 
 # 3. Poll /health instead of a blind sleep -- a fixed sleep either wastes
