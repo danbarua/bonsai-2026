@@ -403,10 +403,27 @@ A **citation** satisfying it is a backticked repo-relative path that
 exists, or a backticked identifier resolvable by AST walk to a definition
 in committed code. A capture ID is explicitly **not** a citation (§1.1).
 
-This will over-trigger — version numbers, dates, counts of things. That is
-what the exemption table is for, in the exact `NOT_CITATIONS` shape:
-each entry carries a reason, and a test asserts each exemption still refers
-to something that genuinely is not a claim.
+**Attribution is section-scoped, not line-scoped.** A citation satisfies
+every triggering line from its own heading down to the next heading of the
+same or higher level. Without this rule the check is unusable, and the
+proof is this document: §2 states `30,000`, `200,095`, `1,000,015` and
+`10,040` in prose under a heading that names
+`tools/provenance/run_truncation_probe.py` as their generator once. Under a
+line-scoped rule every one of those is an uncited empirical claim in a
+fail-closed target, and the first thing anyone implementing the verifier
+would do is exempt the document that specifies it. A measurement table
+belongs under one attribution, not repeated per cell.
+
+The corollary is that a section heading is a scope boundary the author is
+responsible for: putting an unrelated number under a heading whose citation
+does not generate it defeats the check. That is a real weakness of
+section-scoping and it is accepted deliberately, because the line-scoped
+alternative is not adopted — it is exempted into uselessness.
+
+This will over-trigger anyway — version numbers, dates, counts of things.
+That is what the exemption table is for, in the exact `NOT_CITATIONS`
+shape: each entry carries a reason, and a test asserts each exemption still
+refers to something that genuinely is not a claim.
 
 ### 5.3 Fail-closed vs flag-only
 

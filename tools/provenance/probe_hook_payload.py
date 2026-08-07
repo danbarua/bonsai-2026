@@ -18,7 +18,7 @@ matches ONLY the probe command, so registering it cannot affect any other
 session's tool calls:
 
     {"matcher": "Bash", "hooks": [{"type": "command",
-      "if": "Bash(* tools/provenance/emit_bytes.py *)",
+      "if": "Bash(*tools/provenance/emit_bytes.py*)",
       "command": "<abs path to this file>"}]}
 
 Log location: `$BONSAI_PROBE_LOG`, else `<repo>/.provenance/probe_payload.jsonl`.
