@@ -94,6 +94,22 @@ The transport is stateless Streamable HTTP: each request gets its own
 server/transport pair, since every tool call here is a self-contained
 filesystem read or write with nothing to keep alive between calls.
 
+**Bump `package.json`'s `version` before restarting with fresh
+changes.** `/health` and the MCP `initialize` handshake's
+`serverInfo.version` both report it live (`PKG_VERSION` in
+`mailbox.ts`, read from `package.json` at startup, not hardcoded --
+see git history for why: an earlier hardcoded version string meant a
+restart with new code silently kept reporting the old number). A
+version bump is the fast, unambiguous way to tell "this process is
+actually running what I just built" from "this process didn't
+actually restart" or "this connection is going through a stale cached
+route" -- exactly the ambiguity that once led to a real mis-consumed
+message on a different Claude Code session's mailbox: an MCP
+connection routed through a stale deployment silently lacked a
+parameter (`as`) that a fresh build already had, and there was no
+version-number tell to catch it before the mistake happened, only
+after.
+
 ## Registering with a client
 
 The server must already be running (`npm start` in a terminal, or

@@ -101,6 +101,29 @@ unblock its own Stop hook could consume a message meant for a
 different session's task, making it invisible to the intended
 recipient.
 
+**Incident #1 (closed by this feature), reconstructed from the
+session transcript, not assumed:** a spawned smoke-test session (a
+separate `claude -p` background process, job `bpc9kd5qv`, launched
+because a session cannot reliably test its own live hook wiring)
+independently read and archived one of two genuinely-unread mailbox
+files while the primary session's own hook cycle was still in
+progress. Exact bounds, both confirmed against transcript timestamps:
+the primary session's own Stop hook still saw *both* files unread at
+16:44:19.566Z; the smoke-test session's archiving action is bounded to
+(16:44:52.486Z, 16:45:29.617Z) by its own process-lifecycle logging.
+Claude Desktop's stale-count report followed at 16:48:54Z. The
+archiving window falls strictly inside the interval between the last
+confirmed-accurate notification and the stale-count report -- fully
+consistent with a TOCTOU race (notification accurate when generated,
+another session archived the file before the discrepancy was noticed)
+and NOT a counting bug in the hook itself, which was independently
+re-verified in isolation at the time. One honest caveat, kept rather
+than smoothed over: the transcript never captures the *specific*
+notification instance later described as stale -- every notification
+actually logged was accurate at generation time -- so this is
+established by bounding independently-verified timestamps, not by a
+single logged "notification X, later found wrong" event.
+
 Fixed with an optional `to: <name>` field in the message header
 comment (`<!-- from: <sender> · <timestamp> · to: <name> -->`,
 matching the exact convention the c2c-mcp server's mailbox.ts
@@ -129,6 +152,15 @@ identity is unknown. Covered by `test/break-tests.sh` section (f),
 including the fail-open case and a negative proving the filter isn't
 vacuous (mail addressed only to a different session must not block
 Stop at all, not just "block less").
+
+**`outbox/` doesn't have this gap and doesn't need addressing**
+(observation from `stage2b-lead`, a disinterested third party who
+wasn't building this feature): Claude Desktop is the sole reader of
+`claude2claude/outbox/` on this channel, so there's no multi-reader
+race for a `to:` field to resolve there. A `to:` toward Desktop on an
+outbox message is cosmetic at most -- don't read its absence from this
+document as implying outbox shares the inbox-side gap; it never had
+it.
 
 ## Testing
 

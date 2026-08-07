@@ -9,6 +9,10 @@
       "env": {
         "UV_WORKING_DIR": "/Users/dan/Code/pycharm/bonsai-2026"
       }
+    },
+    "c2c-mcp": {
+      "type": "http",
+      "url": "http://127.0.0.1:8765/mcp"
     }
   }
 }
