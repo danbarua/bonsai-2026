@@ -71,6 +71,8 @@ SEND_OUT="$(call c2c-send '{"sender":"claude-code","content":"for a specific rea
 check "-send response mentions the addressee" "$(echo "$SEND_OUT" | grep -c 'addressed to reader-b')" "1"
 check "header on disk contains to: reader-b" \
   "$(grep -l 'to: reader-b' "$TMP_ROOT/.claude/claude2claude/outbox"/*.md | wc -l | tr -d ' ')" "1"
+check "filename also carries the --to-reader-b tag (glob-able, no file read needed)" \
+  "$(ls "$TMP_ROOT/.claude/claude2claude/outbox" | grep -cE -- '--to-reader-b\.md$')" "1"
 
 echo "== 3. peek (archive:false) shows an addressed message regardless of who's asking =="
 PEEK_AS_WRONG="$(call c2c-inbox '{"reader":"claude-desktop","archive":false,"as":"reader-a"}' | text_of)"
@@ -103,6 +105,38 @@ call c2c-send '{"sender":"claude-code","content":"another addressed one","to":"r
 NO_AS_READ="$(call c2c-inbox '{"reader":"claude-desktop"}' | text_of)"
 check "consuming read with NO as consumes an addressed message anyway (back-compat)" \
   "$(echo "$NO_AS_READ" | grep -c 'another addressed one')" "1"
+
+echo "== 7. combined instance + to: filename carries both tags, unambiguously (single-hyphen instance suffix, double-hyphen --to- marker) =="
+call c2c-send '{"sender":"claude-code","content":"from a specific instance, to a specific reader","instance":"c2c-implementation","to":"reader-d"}' > /dev/null
+FILE7="$(ls "$TMP_ROOT/.claude/claude2claude/outbox" | grep 'reader-d')"
+check "combined filename shape: <timestamp>-<instance-slug>--to-<to-slug>.md" \
+  "$(echo "$FILE7" | grep -cE '^[0-9T:Z-]+-c2c-implementation--to-reader-d\.md$')" "1"
+
+echo "== 8. parseToSlugFromFilename extracts the --to- tag directly from a filename, no file read =="
+UNIT_CHECK="$(node -e "
+const { parseToSlugFromFilename, slugify } = require('$PKG_DIR/dist/mailbox.js');
+const cases = [
+  ['2026-08-07T21-30-00Z--to-reader-b.md', 'reader-b'],
+  ['2026-08-07T21-30-00Z-c2c-implementation--to-reader-d.md', 'reader-d'],
+  ['2026-08-07T21-30-00Z.md', undefined],
+  ['2026-08-07T21-30-00Z-c2c-implementation.md', undefined],
+];
+let ok = true;
+for (const [name, want] of cases) {
+  const got = parseToSlugFromFilename(name);
+  if (got !== want) { ok = false; console.error('mismatch', name, 'got', got, 'want', want); }
+}
+console.log(ok && slugify('Reader B') === 'reader-b' ? 'PASS' : 'FAIL');
+")"
+check "parseToSlugFromFilename matches tagged filenames and returns undefined for untagged ones" "$UNIT_CHECK" "PASS"
+
+echo "== 9. pre-existing (untagged) real messages stay correct via the header fallback -- no migration needed =="
+UNTAGGED="$TMP_ROOT/.claude/claude2claude/outbox/2020-01-01T00-00-00Z.md"
+printf '%s\n' '<!-- from: claude-desktop · 2020-01-01T00:00:00Z · to: legacy-reader -->' > "$UNTAGGED"
+printf '\nlegacy addressed message, sent before the filename tag existed\n' >> "$UNTAGGED"
+LEGACY_READ="$(call c2c-inbox '{"reader":"claude-code","as":"someone-else"}' | text_of)"
+check "untagged legacy message addressed to someone else is still correctly skipped (header fallback works)" \
+  "$(echo "$LEGACY_READ" | grep -c 'legacy addressed message')" "0"
 
 echo
 echo "== $PASS_COUNT passed, $FAILURES failed =="

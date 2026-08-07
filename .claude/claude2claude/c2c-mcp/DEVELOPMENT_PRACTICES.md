@@ -59,6 +59,28 @@ Left open here rather than resolved unilaterally, since the current
 default exists specifically so old callers who don't know their own
 name keep working unaffected.
 
+**Closed further, still later the same overall effort**: the header-comment
+regex that decides addressing (`parseAddressee`/`parseInstance` in
+`mailbox.ts`, `c2c_message_addressee` in the hooks' `c2c_mail.sh`) was
+already anchored and tested, but every consuming call still had to open
+and read each candidate file's content just to answer "is this mine" --
+real complexity that kept growing edge cases as more fields got added to
+the header. `sendMessage` now also writes the `to` addressee into the
+FILENAME itself, as a `--to-<slug>` tag (double-hyphen, deliberately
+distinct from the single-hyphen `instance` suffix, so the two can't
+collide even combined on one message). Both `readMailbox` and the hooks'
+`c2c_list_unread_for` check the filename tag FIRST -- a directory listing
+already in hand, no file open needed -- and only fall back to the
+original header-content parse for a message whose filename carries no
+tag (broadcast, or sent before this convention existed; this project's
+own real mailbox had two such messages as of 2026-08-07, left as-is
+rather than migrated, since the fallback exists precisely to keep them
+correct without migration). The header field itself is unchanged and
+still written for every addressed message -- it's the source of truth
+for display and the correctness backstop, not replaced, just no longer
+the only way to answer the filtering question for anything sent through
+`sendMessage` going forward.
+
 ## Every restart with fresh changes gets a version bump, no exceptions
 
 `package.json`'s `version` is read live (`PKG_VERSION` in

@@ -212,6 +212,37 @@ UNKNOWN_OUT="$(echo "$UNKNOWN_STDIN" | "$HOOKS_DIR/user-prompt-submit.sh")"
 check "unresolvable session still sees mail addressed to someone else (fails open)" \
   "$(echo "$UNKNOWN_OUT" | grep -c '2026-01-05T00-03-00Z.md')" "1"
 
+echo "== (f2) filename fast path: --to-<slug> tag decides addressing with NO header to: field at all =="
+# Mirrors what mailbox.ts's sendMessage now writes for a `to`-addressed
+# message: the filename alone carries the addressee, no header to: needed
+# for c2c_list_unread_for to get it right via the fast path (no file open).
+cat > "$C2C_MAIL_SESSIONS_DIR/424242.json" <<'EOF'
+{"pid":424242,"sessionId":"test","name":"me-session","status":"idle"}
+EOF
+reset_mailboxes
+printf '<!-- from: claude-code · 2026-01-06T00-00-00Z -->\n\nfast-path: not for me\n' \
+  > "$INBOX_C2C/2026-01-06T00-00-00Z--to-someone-else.md"
+printf '<!-- from: claude-code · 2026-01-06T00-01-00Z -->\n\nfast-path: addressed to me\n' \
+  > "$INBOX_C2C/2026-01-06T00-01-00Z--to-me-session.md"
+printf '<!-- from: claude-code · 2026-01-06T00-02-00Z -->\n\nfast-path: broadcast, no tag at all\n' \
+  > "$INBOX_C2C/2026-01-06T00-02-00Z.md"
+
+FASTPATH_OUT="$(echo "$UPS_STDIN" | "$HOOKS_DIR/user-prompt-submit.sh")"
+check "filename-tagged addressed-to-someone-else NOT surfaced (no header to: needed to know that)" \
+  "$(echo "$FASTPATH_OUT" | grep -c '2026-01-06T00-00-00Z--to-someone-else.md')" "0"
+check "filename-tagged addressed-to-me IS surfaced" \
+  "$(echo "$FASTPATH_OUT" | grep -c '2026-01-06T00-01-00Z--to-me-session.md')" "1"
+check "untagged broadcast IS surfaced" \
+  "$(echo "$FASTPATH_OUT" | grep -c '2026-01-06T00-02-00Z.md')" "1"
+
+echo "== (f2-continued) a slugified name with mixed case/spaces still matches via c2c_slugify, same as the filename tag =="
+cat > "$C2C_MAIL_SESSIONS_DIR/424242.json" <<'EOF'
+{"pid":424242,"sessionId":"test","name":"Me Session","status":"idle"}
+EOF
+SLUG_OUT="$(echo "$UPS_STDIN" | "$HOOKS_DIR/user-prompt-submit.sh")"
+check "session named 'Me Session' still matches the --to-me-session filename tag via slugify" \
+  "$(echo "$SLUG_OUT" | grep -c '2026-01-06T00-01-00Z--to-me-session.md')" "1"
+
 rm -f "$C2C_MAIL_SESSIONS_DIR/424242.json"
 
 echo

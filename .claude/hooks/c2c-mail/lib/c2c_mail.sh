@@ -162,6 +162,33 @@ for path in glob.glob(os.path.join(d, "*.json")):
 ' "$session_id" "$dir"
 }
 
+# Mirrors mailbox.ts's slugify() exactly: lowercase, non-alphanumeric runs
+# collapsed to a single hyphen, leading/trailing hyphens stripped. Needed
+# because the filename fast path below compares against a SLUGIFIED
+# addressee (the `--to-<slug>` filename tag), not the exact header name --
+# the two slugifiers must agree, or a name with spaces/mixed case would
+# match in the header-parsing fallback but not the filename fast path.
+c2c_slugify() {
+  printf '%s' "$1" | tr '[:upper:]' '[:lower:]' | sed -E 's/[^a-z0-9]+/-/g; s/^-+//; s/-+$//'
+}
+
+# Extracts the slugified `to` addressee directly from a FILENAME's
+# `--to-<slug>` tag (written by mailbox.ts's sendMessage for any message
+# sent through the MCP tools), with no file open at all. Prints nothing if
+# the filename carries no such tag -- either a broadcast message, or one
+# sent before this convention existed (this project's own real mailbox had
+# two such messages as of 2026-08-07; c2c_message_addressee below, not this
+# function, is what still gets those right).
+c2c_message_to_slug_from_filename() {
+  local base="${1##*/}"
+  case "$base" in
+    *--to-*.md)
+      local rest="${base##*--to-}"
+      printf '%s\n' "${rest%.md}"
+      ;;
+  esac
+}
+
 # Extracts the optional "to: <name>" addressee from a message file's header
 # comment (its first line). Prints nothing if absent (broadcast) -- mirrors
 # mailbox.ts's parseAddressee exactly (same tolerance: stops at the first
@@ -172,7 +199,9 @@ for path in glob.glob(os.path.join(d, "*.json")):
 # "to:" -- e.g. "auto-import-photo:staging" -- can't get misparsed as the
 # addressee. Confirmed live as a real, not hypothetical, failure mode
 # before this anchoring existed -- see mailbox.ts's parseAddressee comment
-# for the exact adversarial case).
+# for the exact adversarial case). This is the FALLBACK path now -- see
+# c2c_list_unread_for, which only opens a file at all when its filename
+# carries no `--to-` tag for the fast path to check instead.
 c2c_message_addressee() {
   local file="$1"
   head -n1 "$file" 2>/dev/null | python3 -c '
@@ -192,19 +221,36 @@ if m:
 # it's still sitting in the filesystem, untouched, for its actual
 # addressee to pick up later.
 #
+# Two-tier check, fast path first: a message whose FILENAME carries a
+# `--to-<slug>` tag is decided from the filename alone -- no file open, no
+# content regex, just a directory listing already in hand from
+# c2c_list_unread. Only a file with no such tag (broadcast, or sent before
+# this filename convention existed) falls through to opening it and
+# checking the header via c2c_message_addressee, which is unchanged and
+# still the correctness backstop for exactly that case.
+#
 # If session_id can't be resolved to a name at all (registry missing, or
 # this session isn't in it for some reason), every message is treated as
 # broadcast -- fails open to the exact pre-addressing behavior rather than
 # silently hiding all mail from a session whose identity is unknown.
 c2c_list_unread_for() {
-  local session_id="$1" my_name file addressee
+  local session_id="$1" my_name my_slug file to_slug addressee
   my_name="$(c2c_session_name_for_id "$session_id")"
+  [ -n "$my_name" ] && my_slug="$(c2c_slugify "$my_name")"
   while IFS= read -r file; do
     [ -z "$file" ] && continue
     if [ -z "$my_name" ]; then
       printf '%s\n' "$file" # can't resolve who I am -- fail open, show everything
       continue
     fi
+    to_slug="$(c2c_message_to_slug_from_filename "$file")"
+    if [ -n "$to_slug" ]; then
+      # Fast path: filename already says who this is addressed to.
+      [ "$to_slug" = "$my_slug" ] && printf '%s\n' "$file"
+      continue
+    fi
+    # Slow path: no filename tag -- open the file and check its header,
+    # exactly as before the filename tag existed.
     addressee="$(c2c_message_addressee "$file")"
     if [ -z "$addressee" ] || [ "$addressee" = "$my_name" ]; then
       printf '%s\n' "$file"

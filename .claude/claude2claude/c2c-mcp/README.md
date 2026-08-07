@@ -70,6 +70,30 @@ by sender with a plain `ls`/glob without opening any files, and in
 field existed -- no `instance:` in the header, no slug in the
 filename.
 
+Pass `to` on `-send` to address a message to one specific reader (e.g.
+a `/rename`-set Claude Code session name from `code-sessions`). It's
+written to the header as `· to: <name>` (exact, unslugified) AND,
+slugified, to the filename as a `--to-<slug>` tag -- a DOUBLE hyphen,
+distinct from `instance`'s single-hyphen suffix, so the two can never
+collide even when both are present on the same message
+(`2026-08-07T21-30-00Z-c2c-implementation--to-reader-b.md`). Omitted
+(the default), a message is a broadcast any reader may consume,
+matching the exact behavior before addressing existed.
+
+Pass `as` on `-inbox` to say who's reading (again, the reader's own
+`/rename`-set name). It only changes behavior on a *consuming* read
+(`archive: true`, the default): a message addressed to a DIFFERENT
+name is skipped entirely -- left in place, unarchived, for its real
+addressee -- rather than being silently consumed by whoever happened
+to call `-inbox` first. Filtering checks the filename's `--to-<slug>`
+tag first (no file read needed); a message with no such tag (broadcast,
+or sent before this filename convention existed) falls back to the
+header's `to:` field, so nothing already in a mailbox needs migrating.
+A peek (`archive: false`) always returns everything regardless of
+addressing, since peeking doesn't consume anything. Omitting `as`
+entirely preserves the exact pre-addressing behavior: every message
+visible and archivable, including ones addressed to someone else.
+
 `-inbox`'s `archive` (default `true`) moves each returned message to
 `archive/` after reading, matching the existing c2c protocol (both
 sides archive what they read, since Desktop's filesystem connector can

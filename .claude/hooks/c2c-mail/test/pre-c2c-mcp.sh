@@ -79,7 +79,9 @@ check "no updatedInput for claude-desktop sender" "$(echo "$OUT4" | grep -c 'upd
 echo "== 5. NEGATIVE: a non-send tool call (code-sessions) -> no auto-injection, normal additionalContext =="
 OUT5="$(run '{"session_id":"test-session-id","cwd":"/tmp","tool_name":"mcp__claude_ai_c2c__code-sessions","tool_input":{}}')"
 check "no updatedInput for a non-send tool" "$(echo "$OUT5" | grep -c 'updatedInput')" "0"
-check "still gets additionalContext (cwd/branch/name reminder)" "$(echo "$OUT5" | grep -c 'additionalContext')" "1"
+check "still gets additionalContext (session-name reminder)" "$(echo "$OUT5" | grep -c 'additionalContext')" "1"
+check "additionalContext carries the session name only, no cwd/branch" \
+  "$(echo "$OUT5" | grep -c 'session name.*test-instance-name')" "1"
 
 echo "== 6. fail-open: an unresolvable session_id never auto-injects (would inject an empty/wrong name otherwise) =="
 OUT6="$(run '{"session_id":"totally-unknown-session-id","cwd":"/tmp","tool_name":"mcp__claude_ai_c2c__c2c-send","tool_input":{"sender":"claude-code","content":"hello"}}')"

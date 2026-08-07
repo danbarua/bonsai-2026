@@ -88,7 +88,7 @@ function timestampIso(date: Date): string {
 // single hyphen, leading/trailing hyphens stripped. Returns "" (not a
 // bare "-") if nothing alphanumeric survives, so the caller can tell
 // "no usable slug" apart from "a slug that happens to be a hyphen."
-function slugify(name: string): string {
+export function slugify(name: string): string {
   return name
     .toLowerCase()
     .replace(/[^a-z0-9]+/g, "-")
@@ -141,7 +141,18 @@ export async function sendMessage(
   await ensureDir(dir);
   const now = new Date();
   const instanceSlug = instance ? slugify(instance) : "";
-  const base = timestampFilename(now) + (instanceSlug ? `-${instanceSlug}` : "");
+  const toSlug = to ? slugify(to) : "";
+  // `--to-<slug>` uses a DOUBLE hyphen deliberately, unlike the single-hyphen
+  // instance suffix above -- slugify() collapses runs of non-alnum chars to
+  // a single hyphen and strips leading/trailing ones, so a slug can never
+  // itself contain "--". That makes "--to-" an unambiguous marker a reader
+  // can search for in a bare filename (parseToSlugFromFilename below), with
+  // no risk of it colliding with slug content the way an earlier unanchored
+  // header-comment regex once did (see parseAddressee's comment). This is
+  // purely additive to the existing instance-slug convention -- a filename
+  // with only an instance slug (no `to`) is unchanged from before.
+  const base =
+    timestampFilename(now) + (instanceSlug ? `-${instanceSlug}` : "") + (toSlug ? `--to-${toSlug}` : "");
   const instancePart = instance ? ` · instance: ${instance}` : "";
   const toPart = to ? ` · to: ${to}` : "";
   const header = `<!-- from: ${sender} · ${timestampIso(now)}${instancePart}${toPart} -->\n\n`;
@@ -206,6 +217,31 @@ export function parseInstance(content: string): string | undefined {
   const firstLine = content.split("\n", 1)[0];
   const beforeClose = firstLine.split("-->", 1)[0];
   const match = /(?:^|·)\s*instance:\s*(\S+)/i.exec(beforeClose);
+  return match ? match[1] : undefined;
+}
+
+// Extracts the slugified `to` addressee directly from a FILENAME (the
+// `--to-<slug>` marker sendMessage now writes), with no file read at all --
+// the point of this function existing separately from parseAddressee. A
+// caller that only needs "is this addressed to someone other than me" can
+// answer it from a directory listing alone for any message sent after this
+// convention existed; parseAddressee (content-based) remains the correct,
+// tested fallback for messages sent before it (this project's own real
+// mailbox has two such messages as of 2026-08-07 -- not migrated, since a
+// filename-less-tagged message is exactly the case this fallback exists
+// for). Returns the SLUGIFIED form, not the exact name -- comparing against
+// a caller's own name requires slugifying that name the same way
+// (slugify() above) before comparing, never a case-sensitive/exact match
+// against this return value.
+//
+// The greedy capture can swallow a same-second collision counter (e.g.
+// "--to-someone-2.md" from sendMessage's `-2` suffix) into the slug --
+// accepted, not fixed, because it only misfires on the rare double
+// coincidence of (a) two sends to the same directory in the same second AND
+// (b) one of them addressed -- and parseAddressee's header-based check
+// (which has no counter suffix) still catches it correctly as a fallback.
+export function parseToSlugFromFilename(filename: string): string | undefined {
+  const match = /--to-([a-z0-9-]+)\.md$/.exec(filename);
   return match ? match[1] : undefined;
 }
 
