@@ -42,6 +42,37 @@
             "command": "\"$CLAUDE_PROJECT_DIR\"/.claude/hooks/c2c-mail/pre-c2c-mcp.sh"
           }
         ]
+      },
+      {
+        "matcher": "Bash|mcp__mighty-colab__.*",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "\"$CLAUDE_PROJECT_DIR\"/.claude/hooks/provenance-capture/capture.sh"
+          }
+        ]
+      }
+    ],
+    "PostToolUse": [
+      {
+        "matcher": "Bash|mcp__mighty-colab__.*",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "\"$CLAUDE_PROJECT_DIR\"/.claude/hooks/provenance-capture/capture.sh"
+          }
+        ]
+      }
+    ],
+    "PostToolUseFailure": [
+      {
+        "matcher": "Bash|mcp__mighty-colab__.*",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "\"$CLAUDE_PROJECT_DIR\"/.claude/hooks/provenance-capture/capture.sh"
+          }
+        ]
       }
     ]
   }
