@@ -1174,7 +1174,8 @@ def upload_file_chunked(local_path, name, *, bucket, allow_test_split=False,
     return name
 
 
-def download_file(name, local_path, *, bucket, allow_test_split=False, verify_content=True):
+def download_file(name, local_path, *, bucket, allow_test_split=False,
+                  verify_content=True, generation=None):
     """Downloads an object to a local path, creating the parent directory.
 
     The download goes to a `.part` sidecar and is renamed into place only
@@ -1189,13 +1190,22 @@ def download_file(name, local_path, *, bucket, allow_test_split=False, verify_co
     finished with the wrong contents. The sidecar is removed on failure
     too: nothing that failed verification is left lying next to the
     destination to be renamed by hand. An existing good file at
-    `local_path` is untouched by a failed download."""
+    `local_path` is untouched by a failed download.
+
+    `generation` pins the read to one exact object version rather than
+    "whatever this name points at now". A semantic name is a mutable
+    pointer; a generation is not. Reading latest-by-name and then checking
+    a digest catches a mismatch after the fact; reading the version the
+    manifest COMMITTED means there is nothing to mismatch -- and if that
+    version is gone, the read fails loudly instead of quietly succeeding
+    against a replacement."""
     name = _check_object_path_allowed(name, allow_test_split)
     local_path = str(local_path)
     parent = os.path.dirname(os.path.abspath(local_path))
     os.makedirs(parent, exist_ok=True)
     partial = local_path + ".part"
-    blob = bucket.blob(name)
+    blob = (bucket.blob(name) if generation is None
+            else bucket.blob(name, generation=generation))
     blob.download_to_filename(partial)
     if verify_content:
         try:
@@ -1467,12 +1477,34 @@ def ensure_artifact(name, local_path, *, produce, bucket, allow_test_split=False
         upload_file(local_path, name, bucket=bucket, allow_test_split=allow_test_split,
                     verify_content=verify_content, generation_match=gen)
 
+    # The generation THIS write produced, captured before the sidecar is
+    # written, so the manifest commits that exact version. Reading it back
+    # is safe only because every writer here is precondition-guarded: no
+    # one else can move the object between our successful write and this
+    # read without violating a precondition of their own. And if the
+    # capture were wrong anyway, it is detected rather than silent -- the
+    # consumer pins to this number and a pinned fetch of a version that is
+    # not there fails loudly.
+    written_generation = current_generation(name, bucket=bucket,
+                                            allow_test_split=allow_test_split)
+
     # After the payload verifies, never before: a sidecar that exists is a
     # sidecar describing a complete object.
     published = False
     if fingerprint is not None:
+        # The sidecar is written under its own precondition: create when
+        # there is none, replace exactly the one we found when forcing.
+        # Until it lands the payload is UNCOMMITTED and no consumer may
+        # accept it -- that is the crash-window semantic, and it is what
+        # makes the gap between these two writes safe rather than
+        # ambiguous.
+        sidecar = manifest_object_name(name)
         publish_manifest(local_path, name, bucket=bucket, fingerprint=fingerprint,
-                         parents=parents, allow_test_split=allow_test_split)
+                         parents=parents, allow_test_split=allow_test_split,
+                         payload_generation=written_generation,
+                         generation_match=current_generation(
+                             sidecar, bucket=bucket,
+                             allow_test_split=allow_test_split))
         published = True
     else:
         stale = manifest_object_name(name)
@@ -1579,20 +1611,33 @@ def build_manifest(local_path, *, object_name, fingerprint, parents=None,
 
 
 def publish_manifest(local_path, object_name, *, bucket, fingerprint,
-                     parents=None, allow_test_split=False, generation_match=None):
-    """Write the manifest sidecar for an already-uploaded payload.
+                     parents=None, allow_test_split=False, generation_match=None,
+                     payload_generation=None):
+    """Write the manifest sidecar, COMMITTING one exact payload version.
 
-    Reads the payload's generation from the bucket first, so the manifest
-    records the exact object version it describes."""
-    blob = bucket.blob(object_name)
-    generation = None
-    reload_ = getattr(blob, "reload", None)
-    if callable(reload_):
-        try:
-            reload_()
-            generation = getattr(blob, "generation", None)
-        except Exception:                      # noqa: BLE001 - generation is optional
-            generation = None
+    The manifest is the commit point, not a description. Write order is
+    load-bearing: payload first under its own precondition, then the
+    generation that write produced is captured, then this sidecar records
+    that generation and is itself written under a precondition. Until the
+    sidecar lands the payload is UNCOMMITTED, and no consumer may accept
+    it -- which is what makes the crash window between the two writes safe
+    rather than ambiguous.
+
+    `payload_generation` is that captured generation. When omitted it is
+    read back from the bucket, which is correct only for the backfill path
+    (describing an object staged before this contract existed); the write
+    path always passes it, so the manifest commits the version its own
+    upload produced rather than whatever the name points at now."""
+    generation = payload_generation
+    if generation is None:
+        blob = bucket.blob(object_name)
+        reload_ = getattr(blob, "reload", None)
+        if callable(reload_):
+            try:
+                reload_()
+                generation = getattr(blob, "generation", None)
+            except Exception:                  # noqa: BLE001 - generation is optional
+                generation = None
     manifest = build_manifest(local_path, object_name=object_name,
                               fingerprint=fingerprint, parents=parents,
                               generation=generation)
@@ -1707,10 +1752,25 @@ def consume_validated(object_name, local_path, *, bucket, expected_fingerprint=N
             downloaded = True
         return None, downloaded
 
+    # Order is the contract, not a style choice.
+    #
+    #   1. the manifest has already been read, above;
+    #   2. the PRODUCER is verified against what this consumer expects --
+    #      before any payload bytes move, so a run consuming the wrong
+    #      artifact pays nothing to find out;
+    #   3. the payload is fetched AT THE COMMITTED GENERATION, not
+    #      latest-by-name. A semantic name is a mutable pointer; the
+    #      manifest committed one exact version, and that is the one read;
+    #   4. the digest is recomputed on the fetched bytes.
+    if expected_fingerprint is not None:
+        _fp.require_match(manifest.get("fingerprint") or {}, expected_fingerprint,
+                          name=object_name, policy=policy or _fp.STRICT)
+
     downloaded = False
     if not os.path.isfile(local_path):
         download_file(object_name, local_path, bucket=bucket,
-                      allow_test_split=allow_test_split, verify_content=verify_content)
+                      allow_test_split=allow_test_split, verify_content=verify_content,
+                      generation=manifest.get("payload_generation"))
         downloaded = True
     validate_against_manifest(local_path, object_name, manifest=manifest,
                               expected_fingerprint=expected_fingerprint, policy=policy)

@@ -151,13 +151,17 @@ existed; nothing in them may change once a result has been seen):
 
 **Plans** (revisable, unlike the frozen protocols above):
 
-- **`PHASE_B_PLAN.md`** — Phase B's step structure and the four decisions
-  that shaped it: Freeze 4 resolved as generation preconditions plus
-  semantic naming declared satisfied in substance; the 60,000-image
-  equivalence check framed as a new prudential extension rather than the
-  locked gate; the encoder gate discharged with its reasoning recorded;
+- **`PHASE_B_PLAN.md`** — Phase B's step structure and the decisions that
+  shaped it: **the manifest as commit point** (payload written under a
+  precondition, its generation captured, sidecar written second recording
+  that generation; consumers verify the producer before fetching and then
+  read that exact generation, never latest-by-name); the 60,000-image
+  equivalence check as a new prudential extension whose failure is
+  nonetheless a hard stop; the encoder gate discharged as a stage-1 device;
   and the amendment audit sequenced after Phase B against Phase B's own
-  persisted artifacts.
+  persisted artifacts. Carries the measured retention finding — versioning
+  is off on the bucket, so artifacts are immutable by policy and a
+  superseded generation is a halt-worthy anomaly.
 
 **Evidence documents:**
 

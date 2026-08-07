@@ -67,14 +67,59 @@ explicitly contemplates a second session resuming after the first is
 *presumed* dead, and "presumed dead but still uploading" is exactly what
 `stop`'s checked exit status exists for.
 
-**(c) Content-addressed naming — declared satisfied in substance, and the
-deviation recorded.** Semantic names plus digest-pinning manifests plus
-precondition-guarded objects achieve the clause's purpose: an object
-cannot be silently replaced, and no consumer trusts a name over a digest.
-Full content-addressing was rejected because it churns every object path
-and orphans the stage-1/2 history the pre-contract opt-out exists to keep
-readable — buying nothing the manifest does not already provide. This
-deviation is carried into the pre-test package.
+**(c) Content-addressed naming — NOT satisfied by (a) alone.** The
+satisfied-in-substance claim was rejected on review and replaced by a
+stronger requirement: **the manifest is the commit point.** Implemented as
+such.
+
+**Write order** — payload first under its own precondition; the generation
+that write produced is captured; the sidecar is written second, under its
+own precondition, recording that exact generation.
+
+**Consume order** — manifest read first; the producer verified against the
+consumer's expected fingerprint *before any payload bytes move*; then the
+payload fetched **at the committed generation**, never latest-by-semantic-
+name; then the digest recomputed on the fetched bytes.
+
+**Crash window** — a payload with no manifest is **UNCOMMITTED**. Not
+merely "fails a validity rule": a session that died between the two writes
+leaves bytes no consumer may accept, and the next run must not read them
+as a completed step.
+
+**Competing writer** — loses on a precondition, never silently replaces a
+committed artifact. Both writes are guarded, payload and sidecar alike.
+
+Pinning is not redundant with the digest, and there is a test that shows
+why: a replacement carrying the **same bytes** at a new generation
+satisfies `payload_sha256` and fails the pin. The digest answers "are
+these the right bytes"; the generation answers "is this the object that
+was committed", and only the second is structural.
+
+### Retention, measured rather than assumed
+
+Generation-pinning protects against races but not against later
+re-fetchability unless the bucket retains superseded generations. Probed
+directly against `bonsai-2026-stage2b-cache` on 2026-08-07, on a scratch
+object deleted afterwards:
+
+| question | finding |
+|---|---|
+| can a current generation be pinned and read? | **yes** — 5,366 bytes fetched at an explicit generation |
+| is a superseded generation retrievable? | **no** — `NotFound`. Object versioning is OFF |
+| does the service actually refuse a stale precondition? | **yes** — `PreconditionFailed` |
+| is `versioning_enabled` readable directly? | **no** — the pipeline's service account lacks `storage.buckets.get` (403), so the finding rests on behaviour rather than on the bucket's declared config |
+
+Exact-generation reads **are** guaranteed, so the reviewer's fallback —
+content-addressed names becoming mandatory — is **not** triggered. The
+honest declaration, adopted:
+
+> Artifacts are **immutable by policy**, enforced by preconditions. A
+> superseded generation is a **halt-worthy anomaly** detected by a failed
+> pinned read or a digest mismatch, not a supported operation. Durable
+> re-fetch of superseded payloads is **out of scope**.
+
+This deviation and its supporting measurements are carried into the
+pre-test package.
 
 ---
 
@@ -94,11 +139,17 @@ only**. That preserves the gate's literal quantities (clipped validation
 predictions, identical alpha selection, both fold-level concepts) without
 seven full-corpus oracle fits on a metered A100.
 
-**Consequence of the framing, stated in advance so it cannot be chosen
-afterwards:** a failure at 60,000 is a halt-and-review event reported as
-*"the extension found something at new scale"* — never as *"the locked
-gate failed."* The measured oracle-side CPU cost is reported; whether it
-overlaps GPU work or runs serially is implementation detail.
+**The framing describes what the check IS. It does not soften what a
+failure MEANS**, and the halt rule is verbatim:
+
+> Disagreement beyond the frozen tolerance on any fold or condition —
+> predictions or alpha selection — **halts everything before Stage 4**,
+> full diagnosis required. *"The locked gate still passed"* is **not an
+> available reading** of an extension failure at production scale.
+
+Stated in advance so neither the framing nor the verdict can be chosen
+after a number exists. The measured oracle-side CPU cost is reported;
+whether it overlaps GPU work or runs serially is implementation detail.
 
 ---
 
@@ -114,10 +165,19 @@ discharge rather than an omission:
 2. The quantity it guards — noisy-input convergence — is **independently
    evidenced at 60,000** by Phase A's recorded tail: median and p95 both
    exactly 0.0, max 2.468e-10, four orders below the solver's `rtol=1e-6`.
-3. Under the amended absolute-convergence clause the measured values pass
-   **trivially** — both medians are literally zero — so a clean 60,000
-   encode would compute a ratio whose verdict is already determined by
-   data already on the record. Ceremony, not evidence.
+**Struck, and the correction recorded rather than edited away.** An
+earlier draft of this section carried a third reason: *"under the amended
+absolute-convergence clause the measured values pass trivially — both
+medians are literally zero."* That claimed a gate-pass from data never
+collected under the gate's rule. Only the **noisy** median was measured at
+60,000; Phase A encodes corrupted images, no clean 60,000 encode exists,
+and therefore no clean median exists to form the ratio the gate is defined
+on. The discharge stands without it, on (1) and (2) alone.
+
+The standing language, everywhere this is referred to: **"discharged as a
+stage-1 device; Phase A's noisy final-Delta distribution is reported as
+independent convergence evidence."** Never "passes the amended gate at
+60k" — that sentence describes a computation nobody ran.
 
 ---
 
@@ -134,6 +194,14 @@ on — rather than against a recomputation that merely ought to match them.
 **Requirement this places on this plan, made explicit:** evolved thetas
 and features are persisted per graph, with fingerprints. Resumability
 requires it anyway; the audit's design makes it load-bearing.
+
+**The 150 side must differ from Phase A in `encoder_steps` ONLY** — same
+official indices, same corruption realizations, same folds, gauges,
+preprocessing and fingerprint contract. The audit driver **asserts** this
+by comparing the two artifacts' recorded fingerprint configs field by
+field rather than assuming it; the config already carries `encoder_steps`,
+so the artifacts self-describe and the assertion is over recorded data,
+not over intent.
 
 **The 150-step encode is a named, authorized addition.**
 `encode_stage3_local.py` becomes parameterized by step count — the

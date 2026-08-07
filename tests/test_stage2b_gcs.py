@@ -39,16 +39,33 @@ import stage2b_gcs as gcs  # noqa: E402
 # ---- an in-memory stand-in for a GCS bucket ----
 
 class FakeBlob:
-    def __init__(self, bucket, name):
+    def __init__(self, bucket, name, generation=None):
         self.bucket = bucket
         self.name = name
+        self.pinned_generation = generation
         # Unpopulated until the object is fetched or written, as on a real
         # `Blob`: `bucket.blob(name)` is a handle, not a read.
         self.size = None
         self.crc32c = None
         self.generation = None
 
+    def _check_pin(self):
+        """A pinned handle reads that version or nothing. With versioning
+        off, "that version" is only ever the current one."""
+        if self.pinned_generation is None:
+            return
+        current = self.bucket.generations.get(self.name)
+        if self.name not in self.bucket.objects or current != self.pinned_generation:
+            raise FileNotFoundError(
+                f"no such object generation: {self.name}#{self.pinned_generation} "
+                f"(current generation {current}). Superseded generations are not "
+                f"retained on this bucket.")
+
     def exists(self):
+        if self.pinned_generation is not None:
+            current = self.bucket.generations.get(self.name)
+            return (self.name in self.bucket.objects
+                    and current == self.pinned_generation)
         return self.name in self.bucket.objects
 
     def _populate(self):
@@ -128,6 +145,7 @@ class FakeBlob:
         self._populate()
 
     def download_to_filename(self, path):
+        self._check_pin()
         if self.name not in self.bucket.objects:
             raise FileNotFoundError(f"no such object: {self.name}")
         Path(path).write_bytes(self.bucket._deliver(self.bucket.objects[self.name]))
@@ -180,8 +198,12 @@ class FakeBucket:
         necessarily the bytes the object holds."""
         return data
 
-    def blob(self, name):
-        return FakeBlob(self, name)
+    def blob(self, name, generation=None):
+        """`generation` pins the handle to one exact version, as the real
+        API does. Versioning is OFF on the production bucket (measured),
+        so only the CURRENT generation is retrievable -- a pinned read of
+        a superseded one is a 404 there and a FileNotFoundError here."""
+        return FakeBlob(self, name, generation=generation)
 
     def list_blobs(self, prefix=""):
         return [FakeBlob(self, n) for n in sorted(self.objects) if n.startswith(prefix)]
@@ -2295,4 +2317,118 @@ def test_the_manifest_sidecar_is_written_under_a_precondition_too(bucket, tmp_pa
     assert sidecar in bucket.objects
     with pytest.raises(gcs.GenerationPreconditionError):
         gcs.publish_manifest(local, obj, bucket=bucket, fingerprint=_fingerprint(),
+                             generation_match=0)
+
+
+# ---- The manifest is the COMMIT POINT (Freeze 1, as tightened) ----
+#
+# Not "a description of an object" but "the record that one exact version
+# is committed". Three consequences, each tested: the manifest records the
+# generation the payload write produced; a consumer reads that exact
+# generation rather than latest-by-name; and a payload with no manifest is
+# UNCOMMITTED, which is the crash-window semantic rather than merely a
+# validity rule.
+#
+# Measured on the production bucket 2026-08-07: generation-pinned reads
+# work, object versioning is OFF (a superseded generation returns 404),
+# and a stale precondition really is refused (`PreconditionFailed`). So
+# artifacts are immutable-by-policy and a superseded generation is a
+# halt-worthy anomaly, not a supported read.
+
+def test_the_manifest_records_the_generation_the_payload_write_produced(bucket, tmp_path):
+    name = gcs.object_path(**TRAIN_ARGS)
+    gcs.ensure_artifact(name, tmp_path / "a.npz", produce=_producer("committed"),
+                        bucket=bucket, fingerprint=_fingerprint())
+    manifest = gcs.read_manifest(name, bucket=bucket)
+    assert manifest["payload_generation"] == gcs.current_generation(name, bucket=bucket)
+    assert manifest["payload_generation"] is not None
+
+
+def test_a_consumer_reads_the_committed_generation_not_latest_by_name(bucket, tmp_path):
+    """The point of pinning. The manifest commits generation N; if the
+    object is later replaced, a consumer holding that manifest must fail
+    loudly rather than quietly reading the replacement.
+
+    A digest check alone would also catch this -- but only after moving the
+    bytes, and only because the replacement happened to differ. Pinning
+    makes it structural."""
+    name = gcs.object_path(**TRAIN_ARGS)
+    gcs.ensure_artifact(name, tmp_path / "a.npz", produce=_producer("committed"),
+                        bucket=bucket, fingerprint=_fingerprint())
+    stale_manifest = gcs.read_manifest(name, bucket=bucket)
+
+    # Something replaces the payload, carrying the correct precondition.
+    replacement = tmp_path / "replacement.npz"
+    replacement.write_text("committed")          # SAME BYTES, new generation
+    gcs.upload_file(replacement, name, bucket=bucket,
+                    generation_match=gcs.current_generation(name, bucket=bucket))
+
+    # THROUGH consume_validated, not download_file directly. Asserting on
+    # download_file would have tested the parameter rather than the policy:
+    # dropping the pin inside consume_validated left such a test passing,
+    # which is how this one was found vacuous on its first breakage.
+    assert stale_manifest["payload_generation"] == gcs.read_manifest(
+        name, bucket=bucket)["payload_generation"], "the sidecar was not touched"
+    with pytest.raises(FileNotFoundError, match="generation"):
+        gcs.consume_validated(name, tmp_path / "fetched.npz", bucket=bucket)
+
+
+def test_identical_bytes_at_a_new_generation_still_fail_the_pin(bucket, tmp_path):
+    """Why pinning is not redundant with the digest: the replacement above
+    has the SAME payload sha256, so `validate_against_manifest` would pass
+    it. Only the generation distinguishes the committed object from an
+    identical-looking successor."""
+    name = gcs.object_path(**TRAIN_ARGS)
+    local = tmp_path / "a.npz"
+    gcs.ensure_artifact(name, local, produce=_producer("committed"), bucket=bucket,
+                        fingerprint=_fingerprint())
+    manifest = gcs.read_manifest(name, bucket=bucket)
+    gcs.upload_file(local, name, bucket=bucket,
+                    generation_match=gcs.current_generation(name, bucket=bucket))
+    # The digest check is satisfied...
+    assert manifest["payload_sha256"] == fp.sha256_of_file(local)
+    # ...and the pin is not.
+    assert gcs.current_generation(name, bucket=bucket) != manifest["payload_generation"]
+
+
+def test_a_payload_whose_manifest_never_landed_is_uncommitted(bucket, tmp_path):
+    """The crash window, stated as a semantic rather than a validity rule.
+    A session that died between the payload write and the sidecar write
+    leaves bytes in the bucket that no consumer may accept -- and the next
+    run must not read them as a completed step."""
+    name = gcs.object_path(**TRAIN_ARGS)
+    local = tmp_path / "a.npz"
+    local.write_text("uncommitted")
+    gcs.upload_file(local, name, bucket=bucket, generation_match=0)   # payload only
+    assert gcs.object_exists(name, bucket=bucket)
+    with pytest.raises(gcs.ManifestMissingError):
+        gcs.consume_validated(name, tmp_path / "b.npz", bucket=bucket)
+
+
+def test_the_producer_is_verified_before_any_payload_bytes_move(bucket, tmp_path):
+    """Order matters for cost as well as correctness: a run consuming the
+    wrong artifact should pay nothing to discover it."""
+    obj, local, _ = _published(bucket, tmp_path)
+    fresh = tmp_path / "not_yet_here.npz"
+    before = len(bucket.downloads)
+    with pytest.raises(fp.FingerprintMismatch):
+        gcs.consume_validated(obj, fresh, bucket=bucket,
+                              expected_fingerprint=_fingerprint(config_digest="x" * 64))
+    assert not fresh.exists()
+    payload_fetches = [n for n in bucket.downloads[before:] if not gcs.is_manifest_name(n)]
+    assert payload_fetches == [], (
+        f"payload bytes moved before the producer was checked: {payload_fetches}")
+
+
+def test_the_sidecar_write_is_guarded_against_a_competing_writer(bucket, tmp_path):
+    """The second half of the commit. If two sessions both reach the
+    sidecar, one loses on a precondition rather than silently replacing the
+    other's commit record."""
+    name = gcs.object_path(**TRAIN_ARGS)
+    local = tmp_path / "a.npz"
+    gcs.ensure_artifact(name, local, produce=_producer("first"), bucket=bucket,
+                        fingerprint=_fingerprint())
+    with pytest.raises(gcs.GenerationPreconditionError):
+        gcs.publish_manifest(local, name, bucket=bucket, fingerprint=_fingerprint(),
+                             payload_generation=gcs.current_generation(name, bucket=bucket),
                              generation_match=0)
