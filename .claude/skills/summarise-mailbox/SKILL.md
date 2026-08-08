@@ -46,6 +46,12 @@ C2C="$ROOT/.claude/code2code"
 - `$C2C/mailbox-summaries/` — this task's only output directory.
 - `$C2C/mailbox-summaries/checkpoint.txt` — see below.
 
+A session isolated in a worktree cannot write into the main checkout with
+the file tools, so the digest has to be staged elsewhere and moved into
+place with a shell copy. Ordinary sessions running at the repo root are
+unaffected — this only bites background jobs under
+`.claude/worktrees/`.
+
 Message filenames are
 `YYYY-MM-DDTHH-MM-SSZ-<sender>--from-<sender>[--to-<recipient>].md`
 and are lexicographically sortable, so `sort` gives chronological order.
