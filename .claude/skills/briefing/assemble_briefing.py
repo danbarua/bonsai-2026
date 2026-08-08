@@ -86,6 +86,23 @@ _COMMANDLIKE_RE = re.compile(r"^[\w./#-]+(?: [\w./#-]+){0,3}$")
 # "no candidate found" would state the exact opposite of what it records.
 _CLOSED_RE = re.compile(r"~~|\*\*CLOSED\*\*", re.IGNORECASE)
 
+# Session names are never join evidence. A commit and a loop both mentioning
+# a session is not evidence the commit closed the loop -- peers name each
+# other constantly, in commit bodies and in digests alike.
+#
+# Rarity alone cannot catch this. On a long window a session name is common
+# and gets suppressed; on a SHORT window it hits once, looks rare, and is
+# promoted. Found by a cold consumer within an hour of the tool shipping:
+# in a 3-commit window `stage2b-lead` matched a commit whose message merely
+# mentioned them, and was offered as a candidate on two unrelated loops --
+# "the join only matched it by name coincidence, not by tracing the fix".
+#
+# The names are DERIVED from the archive's own filenames, never hand-listed
+# (CLAUDE.md principle 21): a list would miss the next session to join the
+# mesh, and miss it silently.
+_FROM_RE = re.compile(r"--from-([a-z0-9][a-z0-9-]*?)(?=--to-|\.md$)")
+_TO_RE = re.compile(r"--to-([a-z0-9][a-z0-9-]*)\.md$")
+
 
 def run_git(args: list[str], cwd: Path) -> str:
     """Run git, returning stdout. Raises on failure -- a silent git error
@@ -263,10 +280,15 @@ class Loop:
     matches: list[tuple[str, Commit]] = field(default_factory=list)
     low_signal: list[str] = field(default_factory=list)
     present: list[tuple[str, str]] = field(default_factory=list)
+    name_tokens: list[str] = field(default_factory=list)
 
     @property
     def checked(self) -> bool:
-        return bool(self.tokens)
+        # A loop whose only identifiers were session names was not searched
+        # for anything, so it belongs under NOT CHECKED rather than under
+        # "searched, nothing matched" -- the same distinction this tool keeps
+        # everywhere else.
+        return len(self.tokens) > len(self.name_tokens)
 
     @property
     def one_line(self) -> str:
@@ -331,7 +353,31 @@ def tokens_of(text: str) -> list[str]:
     return [t for t in found if not (t.lower() in seen or seen.add(t.lower()))]
 
 
-def join_loops(loops: list[Loop], commits: list[Commit]) -> None:
+def session_names(root: Path) -> set[str]:
+    """Every session name the mesh has ever used, derived from filenames.
+
+    Message filenames carry `--from-<name>` and optionally `--to-<name>`, so
+    the roster is a property of the corpus rather than a list somebody has to
+    remember to update when a session joins.
+    """
+    names: set[str] = set()
+    for channel in CHANNEL_DIRS:
+        base = root / ".claude" / channel
+        for sub in ("archive", "mailbox"):
+            d = base / sub
+            if not d.is_dir():
+                continue
+            for p in d.glob("*.md"):
+                for rx in (_FROM_RE, _TO_RE):
+                    m = rx.search(p.name)
+                    if m:
+                        names.add(m.group(1).lower())
+    return names
+
+
+def join_loops(
+    loops: list[Loop], commits: list[Commit], names: set[str] | None = None
+) -> None:
     """Attach candidate closing commits to each loop. ADVISORY ONLY.
 
     Matching a commit to a loop is a judgement, not a derivation. A commit
@@ -339,8 +385,13 @@ def join_loops(loops: list[Loop], commits: list[Commit]) -> None:
     mentions it. This narrows a reader's search; it does not decide anything.
     """
     n = len(commits) or 1
+    names = names or set()
     for loop in loops:
         for tok in loop.tokens:
+            # A session name is never evidence, at any window size.
+            if tok.lower() in names:
+                loop.name_tokens.append(tok)
+                continue
             hits = [c for c in commits if tok.lower() in c.haystack]
             if not hits:
                 continue
@@ -513,6 +564,18 @@ def fmt_loops(loops: list[Loop], src: str | None, window_desc: str) -> str:
 
     out.append(f"Carried from `{src}`, each checked against git. ")
     out.append("")
+    # A cold reader adopted a role it saw named here and reported another
+    # session's blocker as its own. The briefing is not addressed to anyone,
+    # and has no way to know who is reading it -- so it says so, rather than
+    # guessing ownership from a name it happens to match. Deriving "yours"
+    # from a mention would be the same weak inference just removed from the
+    # join: a loop naming two sessions names neither as its owner.
+    out.append(
+        "> **Addressed to nobody.** These loops name sessions; a name is not "
+        "an assignment to you. If a loop does not say who owns it, it does "
+        "not say."
+    )
+    out.append("")
     out.append(
         "> **The join is ADVISORY.** Matching a commit to a loop is a judgement, not a "
         "derivation: a commit mentioning an identifier may be unrelated to the loop that "
@@ -548,6 +611,11 @@ def fmt_loops(loops: list[Loop], src: str | None, window_desc: str) -> str:
                 out.append(
                     f"  - <sub>ignored as non-discriminating: "
                     f"{', '.join('`' + t + '`' for t in l.low_signal)}</sub>"
+                )
+            if l.name_tokens:
+                out.append(
+                    f"  - <sub>ignored as session names: "
+                    f"{', '.join('`' + t + '`' for t in l.name_tokens)}</sub>"
                 )
         out.append("")
 
@@ -674,7 +742,7 @@ def main() -> int:
             if _CLOSED_RE.search(b):
                 continue
             loops.append(Loop(text=b, tokens=tokens_of(b)))
-        join_loops(loops, commits)
+        join_loops(loops, commits, session_names(root))
         for l in loops:
             tree_evidence(root, l)
 
