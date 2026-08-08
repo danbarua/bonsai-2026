@@ -61,6 +61,22 @@ freeze, once from the c2c track. A local `git log -1` cannot see that; only
 `git fetch` can. The evidence-backed rule is therefore **fetch before
 pushing to a shared branch**, and the commit-time check is the weaker half.
 
+Review added incidents from the other two tracks: `c2c-implementation` hit
+the same rejection twice in one session, and `stage2b-lead` once with origin
+having moved **three** commits underneath. So this is at least five
+occurrences in a night, spanning all three tracks — not one track's
+clumsiness.
+
+Both other tracks resolved it with `git merge origin/stage2b`, which works
+but leaves merge commits on a shared release branch. Rebase is safe here for
+a specific reason worth stating rather than asserting: **a rejected push
+means those commits were never visible on origin**, so rewriting them cannot
+invalidate anyone's view of the remote. One honest caveat, `c2c-implementation`'s:
+worktrees share a single local object store, so another *local* session
+could in principle have inspected those commits before the rebase rewrites
+them. Below the bar for mechanising, above the bar for a half-sentence — so
+the rule should not read "always safe, full stop."
+
 ### 2c. Tying the mail check to "before committing" is arbitrary
 
 Commits are private until pushed. The moment that matters to other sessions
@@ -80,20 +96,61 @@ work overlaps?" — is the highest-value item, and the record supports it
 directly.
 
 The provenance capture hooks shipped with two defects that a green test
-suite did not catch. They were found within the hour, in the field, because
-the hooks were deployed into another session's real work *and that session
-had been told, explicitly, how to report a failure*: "if `.provenance/runs/`
-populates from `make`, `pytest`, or a committed driver, that is a bug in my
-predicate — send me the command rather than working around it."
+suite did not catch. Both were found within the hour, in the field, by the
+session they had been deployed into.
 
-That instruction is what converted a silent defect into a bug report. Both
-defects were then fixed and merged in a single iteration, and the peer was
-never blocked. The lesson is not "testing is futile" — it is that **a tool
-that changes behaviour inside someone else's session needs a deliberate
-reporting channel, opened before it lands, or its failures are absorbed as
-that session's problem instead of returning as evidence.**
+**The mechanism is not what the first draft of this section claimed.** That
+draft said the reporting instruction "converted a silent defect into a bug
+report." `stage2b-lead` reviewed it and cut the claim, reconstructing what
+actually happened: they ran a canary because *they* wanted capture working
+before their amendment audit — their own stake, not an invitation — and
+would very likely have found and reported both defects regardless.
 
-Note also what the notification bought that a commit message could not:
+The true mechanism is better, and more transferable:
+
+> Announcing did not open a channel so much as **publish a specification**.
+> The announcement said what should and should not be captured — `git`
+> excluded, heredocs-to-interpreters targeted. Without it, a commit message
+> sitting in a provenance blob looks like the tool working as designed.
+> There is no baseline against which to call it a defect. **The return on
+> announcing is that a peer can recognise a deviation; a peer who only
+> knows a tool exists can only recognise noise.**
+
+That mechanism survives the case the incident did not test — a peer with no
+independent motive. And the reviewer noted the direction of their own bias:
+they were an unusually motivated reporter, so the channel's value is
+probably *higher* for uninvested peers than this incident demonstrates.
+
+So: **a tool that changes behaviour inside someone else's session must
+publish what it is supposed to do, before it lands.** Not so the peer knows
+it exists — so the peer can tell correct behaviour from a defect.
+
+### 3a. Two kinds of shared surface, and only one propagates by itself
+
+`c2c-implementation`'s refinement, from living it the same night: **some
+shared-surface changes reach a reader automatically and some cannot.**
+
+A git-tracked file — `CLAUDE.md`, `.claude/settings.json`, a hook script —
+reaches every session the next time it reads that file. Announcing there
+speeds things up but is not structurally required.
+
+An MCP server's tool schema is not like that. A session's attached schema is
+fixed at connection time and does not update on its own, confirmed
+independently by two sessions on 2026-08-07/08 via different methods.
+Deprecating `c2c-send`/`c2c-inbox` in the server source was a shared-surface
+change that reached **nobody** until each peer reconnected; the code2code
+mail announcing it was not a courtesy on top of a self-propagating change,
+it was the only channel by which anyone would learn.
+
+The same holds for hook registrations, which load once per session (see the
+provenance capture README).
+
+So distinguish **announcing because it is considerate** from **announcing
+because there is no other channel by which the reader learns this.** In the
+second case, skipping the announcement is not impolite — it is silently
+wrong.
+
+### 3b. What the notification bought that a commit message could not
 `stage2b-lead` answered with a *better sequencing argument* than the one it
 was given (their critical path was idle and the next compute was queued, so
 waiting would have landed the change nearer a run, not further from it), and
@@ -117,12 +174,20 @@ this repository at the same time. Two rules, both of which have been paid
 for:
 
 - **`git fetch` before pushing to a shared branch**, and rebase rather than
-  merge. `stage2b` moved under an in-flight branch twice in one night.
+  merge. `stage2b` moved under in-flight branches at least five times in one
+  night, across all three tracks. Rebasing is safe because a rejected push
+  means those commits were never on origin — though worktrees share a local
+  object store, so another local session could in principle have seen them.
 - **Announce before you change shared surface** — a config file another
   track writes, a shared branch, or anything that alters behaviour inside
-  another session — and say how to report it going wrong. This is not
-  courtesy: it is how defects come back as bug reports instead of being
-  absorbed silently by whoever they hit.
+  another session — and publish what the change is *supposed* to do. Not so
+  peers know it exists: so they can tell correct behaviour from a defect. A
+  peer who only knows a tool exists can only recognise noise.
+- **Some shared surface does not propagate.** A git-tracked file reaches
+  readers when they next read it; an MCP tool schema and a hook registration
+  are fixed at connection or session start and reach nobody until they
+  reconnect or restart. For those, announcing is not courtesy — it is the
+  only channel, and skipping it is silently wrong.
 
 Full rationale and the incidents behind each: `docs/MULTI_AGENT_PRACTICE.md`
 Part 1.
@@ -181,6 +246,52 @@ Broadcast on every commit is noise. The trigger is shared surface.
     and say how to report it going wrong.
 ```
 
+## 4d. `docs/MULTI_AGENT_PRACTICE.md` — second new pattern, authorized separately
+
+Authorized by `claude-desktop-orchestrator` on 2026-08-08 as a standard step
+for infrastructure deliverables.
+
+```markdown
+### 6c. A peer-use round before an infra deliverable is called done
+
+Have a second instance use the tool on its own real work before declaring
+it finished. Not review of the code — use of the tool.
+
+The provenance capture hooks passed a suite of 967 tests and shipped with
+four defects. Three were found by `stage2b-lead` using the hooks on real
+work within an hour of them landing; the fourth (a version probe whose
+command was never valid) was found by running it against the real binary
+for the first time. None were found by testing.
+
+This is not a testing-effort failure, and treating it as one predicts the
+wrong fix. Every one of the four sat in the gap between "component correct"
+and "wired correctly" — the same gap as principle 16, and now taxonomy
+entry G in `docs/VACUOUS_TESTS.md`. **The builder cannot see wiring gaps
+from inside the build**, for the same reason this project already runs
+external review on its scientific claims: the author's model of what the
+artifact does is the thing under test, and it cannot audit itself.
+
+The peer-use round is that discipline applied to tooling rather than to
+findings. It requires the peer to be told what the tool is *supposed* to
+do (see 6b), or they can only report noise.
+```
+
+## 4e. The pattern behind two of the night's incidents
+
+Proposed for `docs/VACUOUS_TESTS.md`, alongside taxonomy G, on
+`stage2b-lead`'s observation:
+
+> **The artifact is correct and never loaded.** A hook registration is
+> invisible until session start; a rule that lives in a skill is invisible
+> until the skill is invoked. Both are cases of the thing existing, being
+> correct, and not reaching the moment it had to fire — and neither is
+> detectable by testing the artifact, because the artifact is fine.
+>
+> Two independent instances in one night, from different mechanisms, is a
+> pattern rather than a coincidence, and it predicts a third somewhere
+> nobody has looked yet. The counter is the same in both cases: make the
+> system emit positive evidence that it loaded, so absence is diagnostic.
+
 ## 5. What this does not propose
 
 No hook enforcing any of it, and no `git add -A` rule (§1).
@@ -191,10 +302,22 @@ practice is safe, and a guard that is wrong in the common case trains
 route-around — the argument that also keeps the provenance capture hooks
 non-blocking.
 
-The two rules that remain are both enforceable in principle — a pre-push
-check could require a recent fetch — and neither is proposed for
-enforcement yet, for the reason this repository applies to guards
-generally: a guard whose failure mode has not been observed is a guess
-about what will go wrong. Both rules were written from incidents that
-*did* happen; if they are broken again after being documented, that
-recurrence is the evidence that would justify mechanising them.
+Neither remaining rule is proposed for enforcement yet, for the reason this
+repository applies to guards generally: a guard whose failure mode has not
+been observed is a guess about what will go wrong.
+
+But the two rules do not have the same future, and `stage2b-lead`'s
+asymmetry is worth stating because it changes what "if broken again,
+mechanise" means for each:
+
+- **Rule 1's failure is loud.** A rejected push announces itself, and a
+  pre-push check requiring a recent fetch would be cheap. Mechanising it is
+  a live path if the rule keeps getting broken.
+- **Rule 2's failure is silent, and cannot be mechanised at all.** Nothing
+  can detect an announcement that was never made. There is no artifact whose
+  absence is checkable, because the absent thing is a message nobody sent.
+
+So rule 2 will always rest on practice. That is an argument for stating its
+rationale well rather than tersely — a rule that can only be followed
+voluntarily has to earn compliance by being understood, which is why §3's
+mechanism was worth getting right rather than merely stated.

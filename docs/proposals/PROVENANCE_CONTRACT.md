@@ -185,6 +185,21 @@ work.
 
 ### 3.2 What counts as scratch
 
+**The governing rule, and it generalises well past capture:** classify on
+what CONSUMES the payload, never on how the payload arrives. `-c` flags,
+heredocs and pipes describe *delivery*; the program that receives the text
+decides whether any code is being run at all.
+
+`stage2b-lead` derived this from two field-reported defects that were the
+same mistake seen from opposite sides — `uv run python -c` invisible because
+it was not the first token, and `git commit -F - <<EOF` captured because a
+heredoc was present at all. Keying on delivery produced both; keying on the
+consumer fixed both.
+
+It is not a capture-local note. The c2c mail hooks filter on *addressee*
+rather than on transport for the same reason, and the same error is
+available anywhere a system decides what something is by how it showed up.
+
 A single committed predicate — `is_scratch(tool_name, tool_input) ->
 (bool, reason)` — is the sole authority. Not a regex scattered across
 settings, and not a hand-maintained list in prose.
@@ -480,6 +495,25 @@ refers to something that genuinely is not a claim.
 The asymmetry is deliberate and is the behavioural core of the whole
 design: hard where a wrong number is expensive and the author is already in
 "writing it down" mode, soft everywhere else.
+
+### 5.3a Acceptance criteria — binding
+
+Set by `claude-desktop-orchestrator` on 2026-08-08, after the capture hooks
+shipped four defects past a green suite. Recorded as requirements rather
+than intentions, because the verifier's own glue will be configuration and
+taxonomy G therefore applies to it with full force.
+
+1. **It runs against the LIVE repository, with violations seeded in situ.**
+   Synthetic corpora may supplement, never substitute. A verifier tested
+   only against synthetic inputs has demonstrated nothing about whether it
+   runs where it matters.
+2. **Its own wiring is proven the `session_open` way** — some marker whose
+   absence is DIAGNOSTIC, distinguishing "the verifier ran and found
+   nothing" from "the verifier never ran." These are the two readings that
+   silently collapsed for the capture hooks, and the failure was invisible
+   precisely because a clean result and an absent result look identical.
+3. **Its first named test case is the shape this project produced three
+   times in one night: component correct, wiring absent.**
 
 ### 5.4 Break-tests are part of the definition
 
