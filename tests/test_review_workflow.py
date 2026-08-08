@@ -213,6 +213,28 @@ def test_the_prompt_still_points_at_the_catalogue(text):
         "specification and the count check above passes for the wrong reason")
 
 
+def _allowlist(text: str) -> str:
+    """The quoted tool allowlist, under either flag spelling.
+
+    The action's examples write `--allowedTools`; this workflow writes
+    `--allowed-tools`, which is the spelling with EVIDENCE behind it here --
+    it is what took permission denials from twelve to four on run
+    31255640813. Accepting only one spelling would make this helper return
+    nothing the day someone adopts the other, and a test that cannot find
+    the allowlist reports "no allowlist" rather than "the allowlist is
+    wrong". Those need different fixes.
+
+    A missing allowlist is a REAL failure and still fails here -- but as
+    itself, not disguised as a content problem.
+    """
+    match = re.search(r"--allowed-?[Tt]ools\s+'([^']*)'", text)
+    assert match, (
+        "no tool allowlist found under either spelling. On a runner there is "
+        "nobody to approve, so 'requires approval' means denied silently, "
+        "and the review cannot read the PR at all")
+    return match.group(1)
+
+
 def test_the_review_is_pre_approved_to_read_its_own_diff(text):
     """A runner has nobody to approve, so "requires approval" means denied.
 
@@ -224,16 +246,27 @@ def test_the_review_is_pre_approved_to_read_its_own_diff(text):
     publisher would have failed the build for a reason that was really this
     config.
     """
-    assert "--allowed-tools" in text, (
-        "no tool allowlist: the review will be denied Bash on a runner and "
-        "cannot read its own diff")
-    allowed = re.search(r"--allowed-tools\s+'([^']*)'", text)
-    assert allowed, "--allowed-tools is present but not readable as a quoted list"
-    listed = allowed.group(1)
-    for needed in ("git diff", "git log", "gh pr diff"):
+    listed = _allowlist(text)
+    for needed in ("gh pr diff", "gh pr view"):
         assert needed in listed, (
-            f"`{needed}` is not pre-approved; it was denied on the first real "
-            f"run and is how the review sees what changed")
+            f"`{needed}` is not pre-approved. It is how the review reads the "
+            f"PR, and on a runner there is nobody to approve it")
+
+
+def test_the_review_does_not_reach_for_git(text):
+    """The context is already in GitHub.
+
+    Every commit-range design here failed by reconstructing, with git
+    plumbing, what the platform already knows -- a PR's base, head and file
+    list. An allowlist granting git invites that back, and the prompt now
+    says not to. Both directions matter: the allowlist must not offer it and
+    the prompt must not need it.
+    """
+    listed = _allowlist(text)
+    assert "git " not in listed and "git)" not in listed, (
+        f"git is pre-approved again: {listed!r}. A PR's diff comes from "
+        f"`gh pr diff`; reaching for git inside a GitHub Action is the "
+        f"reinvention that produced three broken range designs")
 
 
 def test_the_review_is_not_granted_write_access(text):
@@ -244,9 +277,7 @@ def test_the_review_is_not_granted_write_access(text):
     choosing to obey -- the same request-instead-of-mechanism error that put
     a path where JSON belonged earlier today.
     """
-    allowed = re.search(r"--allowed-tools\s+'([^']*)'", text)
-    assert allowed, "no allowlist to check"
-    listed = allowed.group(1)
+    listed = _allowlist(text)
     for forbidden in ("Write", "Edit", "git push", "git commit"):
         assert forbidden not in listed, (
             f"`{forbidden}` is pre-approved for a review that must only "

@@ -116,20 +116,20 @@ fi
 # retrieve the diff and proceeds on what it could reach. Nothing in the
 # report distinguishes that from a thorough pass.
 #
-# Computed here with git rather than passed in from the workflow, on purpose:
-# the workflow file is hand-synced to two branches, and a check that costs a
-# sync to add is a check that does not get added.
+# The changed-file list comes from GitHub, via `gh pr diff --name-only`, not
+# from git. The context is already in GitHub: a PR has a base, a head and a
+# file list, and reaching for git plumbing inside a GitHub Action to
+# reconstruct what the platform already knows is how the range-based design
+# this replaced went wrong three separate times.
 #
 # It REPORTS and does not fail. Partial coverage on a large diff is often
 # legitimate, and failing it would train route-around -- the one outcome
 # worse than not measuring. Absence still fails, above; this quantifies.
 coverage_note=""
-if [ "$no_tests" != "true" ] && [ -n "${GITHUB_BASE_REF:-}" ] \
-   && command -v git >/dev/null 2>&1; then
-  base="origin/$GITHUB_BASE_REF"
-  if git rev-parse --verify --quiet "$base" >/dev/null 2>&1; then
-    changed=$(git diff --name-only "$base...HEAD" -- 'tests/*' 2>/dev/null \
-              | sort -u)
+if [ "$no_tests" != "true" ] && [ -n "${PR_NUMBER:-}" ] \
+   && command -v gh >/dev/null 2>&1; then
+  if changed_all=$(gh pr diff "$PR_NUMBER" --name-only 2>/dev/null); then
+    changed=$(printf '%s\n' "$changed_all" | grep -E '(^|/)tests?/' | sort -u)
     n_changed=$(printf '%s' "$changed" | grep -c . || true)
     # A zero here means the computation failed or the path filter missed,
     # NOT that the diff is clean -- `no_tests_changed` is the claim for
@@ -142,7 +142,12 @@ if [ "$no_tests" != "true" ] && [ -n "${GITHUB_BASE_REF:-}" ] \
                        <(printf '%s\n' "$examined") 2>/dev/null | grep . || true)
       n_missed=$(printf '%s' "$missed" | grep -c . || true)
       if [ "${n_missed:-0}" -gt 0 ]; then
-        coverage_note="PARTIAL: $n_examined of $n_changed changed test files examined; ${n_missed} not looked at."
+        # Count the CHANGED test files that were examined, not every entry
+        # in files_examined -- the review legitimately reads the catalogue
+        # and the workflow too, and counting those here would overstate
+        # coverage in the one place that exists to measure it honestly.
+        n_covered=$((n_changed - n_missed))
+        coverage_note="PARTIAL: $n_covered of $n_changed changed test files examined; ${n_missed} not looked at."
       else
         coverage_note="Complete: every one of the $n_changed changed test files was examined."
       fi

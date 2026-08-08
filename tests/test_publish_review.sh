@@ -171,31 +171,33 @@ check "honours GITHUB_STEP_SUMMARY" "tests/test_a.py"
 # "no vacuous tests found in this diff" -- a subset described as the whole.
 # Structural, not lazy: `gh pr diff` returns HTTP 406 above 20,000 lines.
 #
-# Exercised against a REAL git repository rather than a stubbed `git`,
-# because the check's whole substance is which refs and paths git resolves,
-# and a stub would assert that the stub works.
+# The changed-file list comes from `gh pr diff --name-only`, so `gh` is
+# stubbed on PATH here. Worth being explicit about what that does and does
+# not establish: it tests the SET COMPARISON -- which changed test files went
+# unexamined -- and says nothing about whether the gh invocation is right.
+# The earlier git-based version was tested against a real repository for the
+# opposite reason: there the substance WAS ref resolution. The substance
+# moved, so the fixture moved with it.
 
 echo
 echo "publish_review.sh -- coverage"
 
-REPO="$TMP/repo"
-mkdir -p "$REPO/tests"
-(
-  cd "$REPO" || exit 1
-  git init -q -b main .
-  git config user.email t@t; git config user.name t
-  echo x > README; git add -A; git commit -qm base
-  # a fake "origin/main" so GITHUB_BASE_REF resolves the way CI's would
-  git update-ref refs/remotes/origin/main HEAD
-  echo a > tests/test_a.py; echo b > tests/test_b.py
-  git add -A; git commit -qm "two test files"
-) || { echo "  FAIL  could not build the fixture repo"; fails=$((fails + 1)); }
+STUB="$TMP/bin"
+mkdir -p "$STUB"
+cat > "$STUB/gh" <<'STUBEOF'
+#!/bin/bash
+# Stands in for `gh pr diff <n> --name-only`. Emits a fixed changed-file
+# list, including a non-test path, because the real thing does too and the
+# filter has to drop it.
+printf 'tests/test_a.py\ntests/test_b.py\nsrc/thing.py\n'
+STUBEOF
+chmod +x "$STUB/gh"
 
-run_cov() {  # run_cov <json> -> OUT/RC, executed inside the fixture repo
+run_cov() {  # run_cov <json> -> OUT/RC, with the gh stub first on PATH
   n=$((n + 1))
   OUT="$TMP/cov_$n"
   : > "$OUT"
-  ( cd "$REPO" && GITHUB_BASE_REF=main bash "$SCRIPT" "$1" "$OUT" )
+  PATH="$STUB:$PATH" PR_NUMBER=99 bash "$SCRIPT" "$1" "$OUT"
   RC=$?
 }
 
@@ -210,6 +212,15 @@ expect_rc "partial coverage does NOT fail the build" 0
 check "reports the shortfall"        "PARTIAL: 1 of 2"
 check "names what was not examined"  "tests/test_b.py"
 check "warns a clean result is scoped" "covers what was examined"
+# src/thing.py changed too, and is not a test. Counting it would inflate the
+# denominator and understate coverage -- the mirror of the bug that let a
+# catalogue entry count as a test file.
+if grep -qF "of 3 changed test files" "$OUT"; then
+  echo "  FAIL  a non-test path was counted as a changed test file"
+  fails=$((fails + 1))
+else
+  echo "  ok    non-test changed paths are not counted"
+fi
 
 # The guard seen passing, not only failing -- otherwise it could be a
 # routine that always cries partial.
@@ -223,14 +234,15 @@ else
   echo "  ok    a fully-covered review is not reported as partial"
 fi
 
-# Outside a pull request there is no base ref, so no coverage claim is made.
-# Silence is correct here; a fabricated "complete" would not be.
+# With no PR number there is nothing to ask GitHub about, so no coverage
+# claim is made. Silence is correct here; a fabricated "complete" would not
+# be, and that is the direction this whole file guards.
 run "$CLEAN"
 if grep -qE "PARTIAL|Complete: every one" "$OUT"; then
-  echo "  FAIL  coverage was claimed with no base ref to compute it from"
+  echo "  FAIL  coverage was claimed with no PR to compute it from"
   fails=$((fails + 1))
 else
-  echo "  ok    no coverage claim without a base ref"
+  echo "  ok    no coverage claim without a PR number"
 fi
 
 echo
