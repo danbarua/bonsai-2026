@@ -19,8 +19,11 @@ otherwise live in a Makefile comment nobody re-checks. Tier 1 throughout
 -- parses two files, touches no network and provisions nothing.
 """
 import ast
+import re
 import sys
 from pathlib import Path
+
+import pytest
 
 from _makefile import REPO_ROOT, make_var as _make_var, recipes as _recipes
 
@@ -40,6 +43,62 @@ def test_the_makefile_declares_the_same_default_bucket_as_the_module():
         f"the Makefile exports {declared!r} but the module defaults to "
         f"{gcs.DEFAULT_GCS_BUCKET!r}. A script run through a target and the same script "
         f"run directly would use different buckets.")
+
+
+def test_the_makefile_declares_the_same_project_as_the_module():
+    """Two INDEPENDENT sources, which the project id did not have.
+
+    It was pinned by `test_infrastructure_constants` as
+    `gcs.GCS_PROJECT == "bonsai-504422"` -- the constant against a copy of
+    itself in the test. That can only fail if someone edits the module and
+    forgets the test, and anyone changing a project id greps for the old
+    value and fixes both. `tools/gates/gate_inventory.py` names this exact
+    shape in `break_demonstrated`: causal evidence the test fails when the
+    PRODUCTION value changes, "not merely when the constant literal is
+    edited, which tests that the literal equals itself".
+
+    Now the same comparison the bucket has had all along.
+    """
+    declared = _make_var("BONSAI_GCP_PROJECT")
+    print(f"\n[project] Makefile BONSAI_GCP_PROJECT = {declared!r}")
+    print(f"[project] stage2b_gcs.GCS_PROJECT      = {gcs.GCS_PROJECT!r}")
+    assert declared is not None, (
+        "the Makefile no longer declares BONSAI_GCP_PROJECT; infra/ and the "
+        "science module would have no common source to agree with")
+    assert declared == gcs.GCS_PROJECT, (
+        f"the Makefile declares {declared!r} but the module uses "
+        f"{gcs.GCS_PROJECT!r}. A client constructed through a make target "
+        f"and the same client constructed directly would address different "
+        f"projects.")
+
+
+def test_terraform_targets_the_same_project_as_the_makefile():
+    """The third source. `infra/` provisions CI into a project, and the
+    science module reads and writes buckets in one; if those ever differ,
+    CI would be guarding infrastructure nobody uses.
+
+    Reads the default out of `infra/variables.tf` rather than a tfvars file,
+    because the default is what applies when nobody passes `-var`.
+    """
+    variables = REPO_ROOT / "infra" / "variables.tf"
+    if not variables.exists():
+        pytest.skip("infra/ is not present in this checkout")
+
+    text = variables.read_text()
+    block = re.search(r'variable\s+"project_id"\s*\{(.*?)\n\}', text, re.S)
+    assert block, "infra/variables.tf no longer declares a project_id variable"
+    default = re.search(r'default\s*=\s*"([^"]+)"', block.group(1))
+    assert default, (
+        "the project_id variable has no default, so `terraform apply` with "
+        "no -var would prompt -- and nothing pins which project CI targets")
+
+    declared = _make_var("BONSAI_GCP_PROJECT")
+    print(f"\n[project] infra/variables.tf default = {default.group(1)!r}")
+    print(f"[project] Makefile BONSAI_GCP_PROJECT = {declared!r}")
+    assert default.group(1) == declared, (
+        f"Terraform defaults to project {default.group(1)!r} but the "
+        f"Makefile declares {declared!r}. CI would be provisioned into a "
+        f"different project from the one the science code uses.")
 
 
 def test_the_declared_bucket_is_a_name_the_resolver_accepts():

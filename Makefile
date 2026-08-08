@@ -346,6 +346,22 @@ BONSAI_GCS_CREDENTIALS ?= $(HOME)/.config/colab-cli/bonsai-colab-storage-key.jso
 #
 BONSAI_GCS_BUCKET ?= bonsai-2026-stage2b-cache
 
+# The GCP project, declared here for the same reason the bucket is.
+#
+# It was a bare literal in `stage2b_gcs.py`, and the test that "pinned" it
+# asserted `gcs.GCS_PROJECT == "bonsai-504422"` -- a literal against a copy
+# of itself, which can only fail if someone edits the module and forgets the
+# test. Anyone changing a project id would grep for the old value and fix
+# both. That is exactly what `tools/gates/gate_inventory.py`'s
+# `break_demonstrated` field forbids: evidence the test fails when the
+# PRODUCTION value changes, "not merely when the constant literal is edited,
+# which tests that the literal equals itself".
+#
+# Declaring it here makes the check a comparison of two INDEPENDENT sources,
+# the same shape that has worked for the bucket, and gives `infra/` a third
+# source to agree with rather than a fifth copy to drift from.
+BONSAI_GCP_PROJECT ?= bonsai-504422
+
 # Every target below that reaches GCS passes both of these explicitly.
 # Exporting them from a single place is the point of the rename that
 # created them: the bucket name lived in three files and a test pinned the

@@ -266,3 +266,20 @@ node_modules/
 # Provenance probe scratch: generated settings + observation logs from
 # tools/provenance/run_truncation_probe.py. Regenerable by running it.
 .provenance/
+
+# Terraform (infra/). State is in GCS, so a local .tfstate here means the
+# backend was not initialised -- ignored so it cannot be committed by
+# accident, since it enumerates every service account and IAM binding.
+**/.terraform/*
+*.tfstate
+*.tfstate.*
+crash.log
+crash.*.log
+override.tf
+override.tf.json
+*_override.tf
+.terraformrc
+terraform.rc
+# .terraform.lock.hcl is NOT ignored, deliberately: it is a lockfile, not
+# state, and it is what actually pins the provider build. `~> 7.0` in
+# versions.tf is the policy; the lockfile is the fact.

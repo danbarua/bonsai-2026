@@ -315,7 +315,23 @@ REPORT_ARGS = dict(stage=2, condition=None, kind="stage2_report", ext="json",
 # ---- infrastructure constants ----
 
 def test_infrastructure_constants():
-    assert gcs.GCS_PROJECT == "bonsai-504422"
+    # NOT `GCS_PROJECT == "bonsai-504422"`. That asserted the constant
+    # against a copy of itself in this file, so it could only fail if
+    # someone edited the module and forgot the test -- and anyone changing a
+    # project id greps for the old value and fixes both. It is the shape
+    # `tools/gates/gate_inventory.py` names in `break_demonstrated`: not
+    # merely that the literal equals itself.
+    #
+    # The real check is a comparison of INDEPENDENT sources, in
+    # tests/test_stage2b_gcs_makefile.py: the Makefile's BONSAI_GCP_PROJECT
+    # against this constant, and infra/variables.tf against the Makefile.
+    # Both directions are break-confirmed there.
+    #
+    # What remains here is what this file can honestly assert alone: that
+    # the constant exists and is shaped like a project id.
+    assert isinstance(gcs.GCS_PROJECT, str) and gcs.GCS_PROJECT, (
+        "GCS_PROJECT is missing or empty; every client would be constructed "
+        "against the caller's default project")
     assert gcs.DEFAULT_GCS_BUCKET == "bonsai-2026-stage2b-cache"
     assert gcs.BUCKET_ENV_VAR == "BONSAI_GCS_BUCKET"
     assert not hasattr(gcs, "GCS_BUCKET"), (
