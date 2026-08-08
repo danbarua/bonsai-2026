@@ -103,6 +103,99 @@ the message changes from 'refusing to touch a Stage 2B TEST-side object' to
 fired."""
 trigger = "ci-fast"
 
+[binding_gate.7e0f91ff9d81]
+# "JAX and sklearn must produce (a) max abs difference in clipped validation
+#  predictions <= 1e-8 and (b) identical alpha selection. Any exceedance
+#  halts pending investigation."
+enforcement = "experiments/stage2b_denoising/stage2b_ridge.py::ridge_equivalence_check"
+production_reachability = """
+run_ladder_stage3.py::step7_ridge calls it once per condition and appends to
+out["halt_reasons"] when `passed` is false; main() raises Stage3Halt on a
+non-empty list. Reached via the sole production entry point `make
+stage2b-ladder-stage3`. An AssertionError from the centering guard INSIDE
+the equivalence path is caught separately and also becomes a halt reason, so
+neither the gate failing nor the gate erroring can pass silently."""
+input_wiring = """
+`X`, `Y`, `y_strat` are the same arrays the production CV consumed for that
+condition; `alphas` defaults to ALPHA_GRID and `tol` to EQUIVALENCE_TOL=1e-8.
+Both paths share one StratifiedKFold(5, shuffle=True, random_state=42), one
+per-fold StandardScaler and one `select_alpha` -- deliberately, since a
+separately written argmin would test the selection rule against a
+reimplementation of itself (principle 16). Provenance: the per-condition
+`equivalence` block is recorded in ridge_cv_g13_88edf9ac.json, whose manifest
+carries the producing commit."""
+decision_consequence = """
+`passed` false -> a halt reason naming pred_diff, tol and both selected
+alphas -> Stage3Halt in main() -> verdict STAGE3_FAIL, the FAIL sentinel,
+non-zero exit. Max abs COEFFICIENT difference is recorded at whatever value
+it takes and is explicitly NOT a second halt rule, per DESIGN.md."""
+test = "tests/test_stage2b_ridge.py::test_the_equivalence_gate_fails_when_predictions_exceed_the_tolerance"
+break_demonstrated = """
+This row is why the inventory was worth doing. Before it, all three tests of
+this gate were PASS-side: replacing the `passed` expression with a literal
+`True` left every test in test_stage2b_ridge.py AND
+test_stage2b_ladder_stage3.py green -- 142 of them. The gate was implemented,
+reachable, and had no test that it could fail. One step milder than the
+incident this inventory exists for, where the halt was documented and never
+implemented at all.
+
+`test_ridge_equivalence_check_reports_coefficient_diff_as_diagnostic_only`
+looks like it should have caught that -- it asserts
+`passed == (pred_agrees and alpha_agrees)` -- and did not, because the
+identity holds trivially when both operands are True, which they are on any
+fixture the gate passes. An identity checked only where both sides are true
+tests nothing about the operator between them.
+
+Two negative-path tests added and confirmed against two deliberate breaks:
+(a) `passed` -> True fails BOTH new tests; (b) `pred_agrees` -> True fails
+the prediction test alone, leaving the alpha test green -- which is the
+evidence they isolate the two gate conditions rather than both tripping on
+any perturbation. The prediction test asserts the measured difference is
+non-zero BEFORE tightening the tolerance, so it cannot pass vacuously on a
+fixture where the two solvers happen to agree exactly."""
+trigger = "ci-fast"
+
+[binding_gate.eaa2db103093]
+# "The per-fold guard on the standardized training features halts when
+#  ||mean(X_train_scaled)|| >= 1e-9 * (n / 1000) ** 0.5."
+enforcement = "experiments/stage2b_denoising/stage2b_ridge.py::assert_scaler_centered"
+production_reachability = """
+Called inside `svd_ridge_fit` before any solve, so every production fit
+passes through it: `cross_validate_alpha` per (fold, condition), and the
+final refit. `check_centered=False` is the opt-out and is not used by
+run_ladder_stage3.py. The driver additionally catches the AssertionError at
+the call site and turns it into a halt reason rather than letting it abort
+mid-condition, so a fired guard is reported per condition."""
+input_wiring = """
+`X_scaled` is the per-fold standardized training matrix; `tol` defaults to
+`mean_x_tol_for(X_scaled.shape[0])` -- derived from the matrix passed in,
+which is the point: the tolerance is n-dependent and a default argument
+cannot be. n is the FOLD's training row count, not the rung's nominal corpus
+size (pinned by test_guard_tolerance_is_the_folds_row_count_not_the_corpus).
+Constants: MEAN_X_TOL_ANCHOR=1e-9 at MEAN_X_TOL_ANCHOR_N=1000,
+MEAN_X_TOL_EXPONENT=0.5. Provenance of use: `mean_x_tol` and `mean_x_norm`
+are recorded per fold in the run's ridge_cv artifact, so the tolerance each
+fit was actually checked against is in the record rather than inferred."""
+decision_consequence = """
+AssertionError before the solve, naming the measured norm, the tolerance,
+the row count it was derived from, and the worst offending column. At the
+driver it becomes a halt reason -> Stage3Halt -> STAGE3_FAIL. The guard is
+what makes the intercept formula `b = mean(Y) - mean(X) @ W` benign; without
+it a misconfigured scaler invents intercept structure silently, since the
+ridge still fits and still predicts."""
+test = "tests/test_stage2b_ridge.py::test_svd_ridge_fit_raises_on_uncentered_input_by_default"
+break_demonstrated = """
+Two directions, both observed. (a) `assert norm < tol` -> `assert True`
+(the guard never fires): 13 tests FAIL, including the caller-side
+svd_ridge_fit test -- so the break is caught at the production entry point
+and not only at the predicate. (b) MEAN_X_TOL_EXPONENT 0.5 -> 0.66 (the
+CPU-evolved value that, paired with the GPU-measured anchor, described
+neither pipeline -- principle 22's named anti-precedent): 6 tests FAIL
+across the scaling family. The second is the one that matters for a
+tolerance: it is causal evidence on the PRODUCTION constant's propagation,
+not a check that a literal equals itself."""
+trigger = "ci-fast"
+
 # -- deliberately FAILING rows: the gate is documented and unenforced --------
 #
 # These are the anti-gaming clause in practice. Each is a real runtime
