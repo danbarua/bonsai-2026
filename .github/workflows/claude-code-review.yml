@@ -22,20 +22,9 @@ on:
   workflow_dispatch:
     inputs:
       target:
-        # NOT `HEAD~1..HEAD`, which was the original default and is actively
-        # misleading on a shared branch. Measured on run 31256572529: after a
-        # merge, HEAD and HEAD~1 point at the identical tree, so the range is
-        # EMPTY and the review correctly reports nothing to review. A default
-        # that reviews nothing whenever the last commit was a merge trains
-        # exactly the wrong conclusion -- that the review is working and the
-        # code is clean.
-        #
-        # `origin/main...HEAD` (three dots) is everything on this branch since
-        # it diverged, which is what a reader means by "the changes here". It
-        # can be large; narrow it by hand when that matters.
-        description: 'Commit range or ref to review, e.g. origin/main...HEAD, or a..b'
+        description: 'What to review: a ref, a commit range (a..b), or a path'
         required: true
-        default: 'origin/main...HEAD'
+        default: 'HEAD~1..HEAD'
   pull_request:
     types: [opened, ready_for_review, reopened]
 
