@@ -29,6 +29,7 @@ sys.path.insert(0, str(Path(__file__).parent))
 from assemble_briefing import (  # noqa: E402
     Commit,
     Loop,
+    branch_names,
     bullets,
     digest_ts_to_iso,
     fmt_loops,
@@ -164,6 +165,30 @@ def test_fraction_bound_guards_a_short_window() -> None:
     assert "zeta.py" in loop.low_signal
 
 
+@pytest.mark.parametrize("token,text,should_match", [
+    # The measured false positive: `reconcile` matched "a reconciler this
+    # file does not own", offering an unrelated commit as closing a loop
+    # about pointer resolution.
+    ("reconcile", "a reconciler this file does not own", False),
+    ("reconcile", "reconcile the inventory", True),
+    ("infra", "infrastructure notes", False),
+    ("infra", "infra owns this", True),
+    # Tokens here carry `.` and `/`, where \b asserts in the wrong places.
+    ("ci_targets.py", "fix ci_targets.py coverage", True),
+    ("tools/ci/publish_review.sh", "edit tools/ci/publish_review.sh", True),
+    ("gates.toml", "gates.tomlx", False),
+])
+def test_a_token_must_be_mentioned_whole(
+    token: str, text: str, should_match: bool
+) -> None:
+    """A token embedded in a longer word is not a mention of that token."""
+    commits = [_commit(f"c{i}", f"filler {i}") for i in range(4)]
+    commits.append(_commit("hit", text))
+    loop = Loop(text="x", tokens=[token])
+    join_loops([loop], commits)
+    assert bool(loop.matches) is should_match
+
+
 def test_the_join_searches_changed_paths_not_just_messages() -> None:
     """A commit that touches a file without naming it in the message is still
     the best candidate for a loop about that file."""
@@ -185,6 +210,29 @@ def _mesh(root: Path, names: list[str]) -> None:
     for n in names:
         (d / f"2026-08-08T10-00-00Z-{n}--from-{n}.md").write_text("x")
     (d / "2026-08-08T10-00-01Z-a--from-a--to-b.md").write_text("x")
+
+
+def test_branch_names_are_derived_from_git(tiny_repo: Path) -> None:
+    """Derived, not listed — and `origin/x` must also yield bare `x`, since
+    prose says "stage2b" where git says "origin/stage2b"."""
+    names = branch_names(tiny_repo)
+    assert "main" in names
+
+
+def test_a_branch_name_is_never_a_candidate() -> None:
+    """Three auto-generated merge subjects — "Merge remote-tracking branch
+    'origin/stage2b' into infra-tooling" — were offered as candidates for
+    closing a loop about a failing test. A merge subject names two places
+    and describes no change."""
+    commits = [
+        _commit(f"m{i}", "Merge remote-tracking branch 'origin/stage2b' into infra-tooling")
+        for i in range(3)
+    ]
+    commits.append(_commit("zzz", "unrelated"))
+    loop = Loop(text="x `infra-tooling` y", tokens=["infra-tooling"])
+    join_loops([loop], commits, {"infra-tooling"})
+    assert loop.matches == []
+    assert loop.name_tokens == ["infra-tooling"]
 
 
 def test_session_names_are_derived_from_filenames(tmp_path: Path) -> None:

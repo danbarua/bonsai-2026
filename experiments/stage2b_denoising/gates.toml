@@ -558,6 +558,151 @@ coverage. The two documents that DO exist are the ones this row must sweep
 when the package lands; recording that scope now, before the writing, is
 what stops the sweep being defined afterwards to match what was written."""
 
+[binding_value.649bb190a18e]
+# DESIGN.md: "9,857 trainable parameters (computed: (1*32*9+32) +
+#  (32*32*9+32) + (32*1*9+1)) ... full-image MSE NEVER reported for this
+#  model ... CNN input receives no normalization beyond the locked clipping."
+value = """
+DESIGN.md's locked CNN architecture: 9,857 trainable parameters, biases
+enabled on every convolution, zero padding at k=3/p=1, linear final layer
+(no sigmoid), scope-matched masked active-support MSE for training and
+evaluation."""
+production_consumers = """
+stage2b_cnn.py::CONV_CHANNELS and EXPECTED_PARAM_COUNT, consumed by the
+Denoiser constructor's three Conv2d layers and by
+count_trainable_parameters. The single propagation point is CONV_CHANNELS
+-- all three layers derive their widths from it, so there is no second
+place a width could drift independently."""
+status = "enforced"
+enforcement = "tests/test_stage2b_cnn.py::test_parameter_count_is_exactly_9857"
+break_demonstrated = """
+CONV_CHANNELS 32 -> 33 with EXPECTED_PARAM_COUNT LEFT AT 9857 -- the
+propagation broken while the constant is untouched, which is the form this
+field asks for. FOUR tests fail, and the message is the evidence:
+"architecture has 10462 trainable parameters, DESIGN.md locks ...". The
+count is computed from the constructed model, so the test compares the
+frozen number against the thing built, not against itself.
+
+Note which tests fell: test_biases_are_enabled_on_every_convolution and
+test_per_layer_parameter_counts_match_the_design_arithmetic both fail too,
+because the arithmetic they check is per-layer and the widths moved. A
+single width change is visible in three independent readings of the
+architecture."""
+provenance_of_use = """
+Stage 2 trained the CNN against real data for the first time and reported
+best-of-three-seeds clipped validation MSE (0.0637 vs the identity
+baseline's 0.1998), recorded in FINDINGS.md; the model that produced it is
+the same constructor these constants govern, and the parameter-count
+assertion runs at construction."""
+trigger = "ci-fast"
+
+[binding_value.5908ac408624]
+# DESIGN.md: "ABS_CONV_EPS = 1e-12 ... 5+ orders below the smallest
+#  meaningful measured Delta (2.177e-07) and well above observed float64
+#  dust (1e-14 to 1e-16) ... It requires BOTH medians below it, not either."
+value = "ABS_CONV_EPS = 1e-12 (stage2b_encoder_gate.py:110)"
+production_consumers = """
+stage2b_encoder_gate.py::evaluate_rho_gate's `abs_conv_eps` parameter,
+defaulting to the module constant; run_encoder_gate passes no override, and
+the ladder drivers call run_encoder_gate. One propagation point, and the
+default is what production uses -- which is exactly what made the gap below
+possible."""
+status = "enforced"
+enforcement = "tests/test_stage2b_encoder_gate.py::test_the_module_default_abs_conv_eps_decides_a_real_verdict"
+break_demonstrated = """
+This row is the fourth defect the inventory has turned up, and the break is
+what found it.
+
+BEFORE: moving the assignment 1e-12 -> 1e-9 -- three orders, out of the
+observed dust band (1e-14..1e-16) and up toward the smallest meaningful
+measured final-Delta in the project (2.177e-07) -- failed EXACTLY ONE test,
+`test_gate_locked_constants`, which asserts the literal equals itself. No
+gate verdict changed anywhere. The escape WAS exercised by existing tests,
+but they pass `abs_conv_eps` explicitly, so they pin the mechanism and say
+nothing about the value production uses. That is precisely the distinction
+this schema's `break_demonstrated` names, and the pin failed it.
+
+AFTER: `test_the_module_default_abs_conv_eps_decides_a_real_verdict` puts
+medians at 1e-11 -- above 1e-12, below 1e-9 -- with rho far over threshold
+so the escape is the only thing that could pass the gate. At the locked
+value the escape must not fire and the gate must FAIL; at a loosened one it
+fires and the verdict flips. Confirmed: the same 1e-12 -> 1e-9 edit now
+fails two tests, and the behavioural one reports "at the locked 1e-12 a
+1e-11 median is NOT numerical dust".
+
+An error of my own worth recording, since it nearly hid the finding: the
+first break edited the DOCSTRING occurrence, because `replace(..., 1)` took
+the first match and the module docstring quotes the constant in backticks
+above the assignment. It reported 29 passed and I almost read that as the
+value being unpinned in a different way. First-match-is-not-the-one-you-
+want, in a break test, while hunting first-match bugs."""
+provenance_of_use = """
+The stage-1 re-run's gate PASSED at rho=0.0 exact, so the escape did not
+decide that verdict -- the ratio test did. The escape's own decisive case
+is the diagnosed S=600 point (FAIL at rho=17.76 with noisy's median at
+1.776e-14), recorded in DESIGN.md's amendment and
+diagnose_encoder_gate_failure.py. Stated plainly because it matters for
+what this row claims: the frozen value is pinned and reachable, and it has
+not yet been the thing that decided a production run."""
+trigger = "ci-fast"
+
+[binding_value.7946f9f0ccc3]
+# AUDIT_PROTOCOL: "Ridge MSE at both budgets is computed from out-of-fold
+#  per-image predictions under the frozen five-fold partition."
+value = """
+The prediction basis for the amendment audit: out-of-fold per-image
+predictions under StratifiedKFold(n_splits=5, shuffle=True,
+random_state=42), for pre_evolution and all four evolved conditions."""
+production_consumers = ""   # the audit driver is unwritten
+status = "pending_consumer"
+pending_reason = """
+`stage2b_ridge` HAS out-of-fold support and it is tested -- but the audit
+driver that would consume it under this protocol does not exist, so nothing
+production consumes this value yet. Naming the existing OOF code here would
+be discharge by adjacent evidence: the module having the capability is not
+the audit using it, and this clause is about the audit."""
+enforcement = ""
+break_demonstrated = ""
+trigger = "manual"
+
+[binding_value.1148ede15761]
+# AUDIT_PROTOCOL Freeze 3: fixed alpha vs reselected alpha, defined.
+value = """
+Fixed alpha := selected from the PRODUCTION 1,200-step representation, per
+condition, via the frozen five-fold procedure, then applied identically to
+both budgets' OOF fits. Reselected alpha := independent selection per
+budget by the same procedure."""
+production_consumers = ""   # the audit driver is unwritten
+status = "pending_consumer"
+pending_reason = """
+Frozen for the unwritten audit driver. Deliberately NOT merged with
+1837113c184a, which is STAGE3_PLAN's statement of the same freeze: they are
+separate sentences in separate documents with separate ids, and one
+disposition covering two is the collision check_ids_unique refuses."""
+enforcement = ""
+break_demonstrated = ""
+trigger = "manual"
+
+[binding_value.259d3b7f30fb]
+# AUDIT_PROTOCOL: "both regimes consume the THIRTEEN-decade grid."
+value = """
+Conforming amendment, disclosed: both alpha regimes search the amended
+thirteen-decade grid {1e-6 .. 1e6}. The protocol's own logic is unchanged --
+"the same frozen procedure" still means the frozen procedure -- what changed
+is which grid that procedure searches, at both budgets and for the
+production alpha alike."""
+production_consumers = ""   # the audit driver is unwritten
+status = "pending_consumer"
+pending_reason = """
+The grid itself IS in production (stage2b_ridge.ALPHA_GRID, thirteen values,
+and the Phase B re-run used it). What has no consumer is this clause's
+specific requirement -- that BOTH AUDIT REGIMES consume it -- because
+neither regime exists until the audit driver does. The distinction matters:
+the value is live, the obligation about how the audit uses it is not."""
+enforcement = ""
+break_demonstrated = ""
+trigger = "manual"
+
 # =============================================================================
 # binding_claim -- obligations on what may be CLAIMED
 # =============================================================================
@@ -1081,6 +1226,60 @@ consequence binds where it was actually implemented rather than here: the
 STAGE3_PLAN.md:285 (37ae915f8e61), the corrected docstring in the script
 itself, and the tail counts in the acceptance report. Listing adopted
 consequences is not a second statement of them."""
+
+[not_binding.df1784828365]
+reason = """
+NARRATION: "Role labels, frozen (Freeze 2):" -- a section lead-in
+introducing the list that follows. The paragraph scanner takes it as its own
+candidate because the list beneath is separately formatted. The labels it
+introduces bind at STAGE3_PLAN.md:354 (8bf414d720f2), which states the
+populations in full and is dispositioned as a substantiated binding_value.
+
+Worth recording rather than silently skipping: a heading whose content lives
+in an unscanned list is a real under-coverage shape, and the reason this one
+is safe is that the content is dispositioned elsewhere -- not that headings
+do not matter."""
+
+[not_binding.9724445a8125]
+reason = """
+RATIONALE: why the propagation halt threshold is borrowed rather than
+invented -- it is already frozen, already derived analytically from the
+metric's algebra and a recorded `d`, and already the line below which a
+difference is called implementation dust. The argument for reusing a number;
+the halt condition it justifies binds at COMPANION_PROTOCOLS.md:191
+(5354bdafe541)."""
+
+[not_binding.a69baac252b1]
+reason = """
+NARRATION: records that AUDIT_PROTOCOL requires four justification axes,
+that three already existed, and that the fourth was dropped in consolidation
+and reinstated here. A statement about the document's own repair history.
+The requirement binds in AUDIT_PROTOCOL.md; the axes themselves are at
+COMPANION_PROTOCOLS.md:161 (16b4ff3b7017)."""
+
+[not_binding.16b4ff3b7017]
+reason = """
+RATIONALE: the four axes justifying ABS_CONV_EPS = 1e-12, each with its
+measured numbers -- float64 dust at 1e-14..1e-16, the smallest meaningful
+measured final-Delta at 2.177e-07, the encoder's contraction residuals, and
+downstream sensitivity against the solver's rtol=1e-6. The argument for the
+value, not the value: it binds at DESIGN.md:192 (5908ac408624), which is
+dispositioned as a substantiated binding_value.
+
+Two of its four axes are written as work still to do ("the axis to write up
+is..."), which makes those forward-looking notes rather than obligations on
+the system -- and the obligation to write them up binds at
+COMPANION_PROTOCOLS.md's sensitivity-table section, not here."""
+
+[not_binding.beb0ab7095d2]
+reason = """
+RATIONALE: why the first ARM/x86 comparison applies identical already-fitted
+ridge coefficients to both architectures' features -- a refit on ARM
+features would produce different coefficients and confound numerical
+propagation with refit variation, with no way to separate them afterwards.
+The argument for the construction. The construction itself is required at
+AUDIT_PROTOCOL.md:219 (8296ec49b5fa), where the companion protocol is
+specified."""
 
 [not_binding.1aa42e6ea102]
 reason = """
