@@ -66,6 +66,43 @@ the frozen text, quote it, and let the gap be visible. Both agents
 involved in the worst instance were trying to be careful. Quoting is what
 caught it.
 
+### 2b. Relaying a peer's STATE is the same failure, aimed at Dan
+
+Rule 2 is about summarising a peer's *content*. This is the same
+mechanism applied to their situation, and it reaches the one reader who
+cannot check it against the source.
+
+**The incident.** INFRA wrote that they had escalated a merge decision to
+Dan with the mechanics pre-checked. I relayed that to Dan as *"INFRA has
+escalated and is blocked waiting on you."* Dan authorized it in chat
+minutes later, so by the time my summary was read it described a world
+that no longer existed — and it had put a status on INFRA that was theirs
+to assert and mine to have quoted.
+
+**Why this variant is worse than ordinary rule-2 drift.** Two reasons,
+and both are about who carries the claim:
+
+- **A stale quote is visibly stale; a stale characterisation is not.**
+  "INFRA wrote at 12:57: *escalated to Dan*" carries its own timestamp
+  and invites a check. "INFRA is blocked" reads as a present-tense fact
+  about the world.
+- **The summary arrives under MY authority, not theirs.** Dan reads
+  "INFRA is blocked" as something I verified. I hadn't — I inferred it
+  from a message that never claimed it. A peer's own words, relayed
+  intact, carry the peer's confidence; my paraphrase silently upgrades it
+  to mine.
+
+**The rule**: when relaying a peer's state to Dan, quote or link rather
+than characterise. A peer's status is theirs to assert. If a
+characterisation is genuinely needed, timestamp it and say what it was
+inferred from — *"as of 12:57 INFRA said they'd escalated; I don't know
+if that's still live"* — so the reader knows what they are being handed.
+
+Related: working rule 12 in `VACUOUS_TESTS.md`, where reading a mesh field's
+semantics wrongly produced a confident, cited, wrong conclusion. Same
+family. Checking the artifact is necessary and not sufficient — and
+relaying it is not the same as checking it.
+
 ### 3. Trust an agent's retrieval, verify its arithmetic
 
 An exploration subagent reported a message ordering that was
