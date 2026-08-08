@@ -54,6 +54,39 @@ describing the result as covering the pull request. Incremental
 `stage2b-ci` → `main` PRs stay under that cap. The FIRST one will not — it
 inherits whatever backlog existed when `stage2b-ci` was branched.
 
+### What each branch is protected against
+
+| | force-push | delete | direct push | required check |
+|---|---|---|---|---|
+| `main` | blocked | blocked | PR only | CI green |
+| `stage2b-ci` | blocked | blocked | PR only | **CI green** |
+| `stage2b` | blocked | blocked | **allowed** | none |
+| agent worktree branches | free | free | free | none |
+
+**Nothing gates `stage2b`, and everything gates the branches above it.**
+It takes ~46 pushes a day from agents who have already run the suite
+locally; gating it would block the working branch for a result its author
+already has. `stage2b-ci` exists for no other purpose than to check a
+batch, so requiring a green build to merge into it is what the branch IS —
+a checkpoint you may merge into while red is not a checkpoint.
+
+What every branch gets is protection against the irrecoverable: force-push
+and deletion. `stage2b` carries months of research and moves under
+concurrent sessions; a bad rebase is the one failure the repository cannot
+recover from itself.
+
+Two things deliberately absent. **No required approvals** — one human
+approving his own pull requests is a click, not a review. **No admin
+bypass** — agents act through the same credentials as the maintainer, so a
+bypass for him is a bypass for every agent, and the rule evaporates. These
+are guardrails against mistakes, not authorization boundaries, because no
+branch rule can tell the two apart here.
+
+**Order matters when adding the required check.** A required context that
+has never reported blocks merges permanently. Open the first PR into
+`stage2b-ci`, read the real context string off the checks list, and only
+then require it — a guessed name produces a branch nobody can merge to.
+
 Path filtering was measured and rejected. The intuitive ignore set
 (`.claude`, `.github`, `docs`, `*.md`) would skip 39% of pushes, but twelve
 test files read those paths and `docs/` is directly tested. The set no test
