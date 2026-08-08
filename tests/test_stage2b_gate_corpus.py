@@ -104,11 +104,18 @@ def test_each_exemption_still_contributes_the_candidate_count_it_did():
     sys.path.insert(0, str(REPO_ROOT / "tools" / "gates"))
     from gate_inventory import derive_clauses
 
+    # README.md moved 21 -> 20 at `8ad0ddd`, which removed the status
+    # restatement from its header. Re-read before the number was changed,
+    # which is the whole protocol here: the exemption reads "orientation
+    # for a reader arriving cold ... restates none of their obligations
+    # bindingly", and that is MORE true after the edit, not less. The
+    # count fell because a candidate-generating paragraph left, not
+    # because the judgement changed.
     at_exemption_time = {
         "FINDINGS.md": 37,
         "NEGATIVE_PATH_EVIDENCE.md": 19,
         "PHASE_B_PLAN.md": 38,
-        "README.md": 21,
+        "README.md": 20,
     }
     assert set(at_exemption_time) == set(gate_corpus.EXEMPT), (
         "an exemption was added or removed without a candidate count")
