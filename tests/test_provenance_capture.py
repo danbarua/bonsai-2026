@@ -204,6 +204,45 @@ NOT_SCRATCH = [
     ),
 ]
 
+# A DOCUMENTED BLIND SPOT, pinned so it stays known rather than becoming an
+# accident. Every GPU target in this repo launches through a Makefile, so the
+# tool call is `make <target>` and the `mighty-colab exec -f` runs in a
+# subprocess make spawns. The predicate never sees the exec, and `make` is
+# correctly classified as ordinary work.
+#
+# Found by stage2b-lead testing before a paid run rather than after. Not
+# fixed here, deliberately -- see the README's "Known blind spot" section for
+# what covers it and why the obvious fix is worse than the gap. If someone
+# later makes these captured, this test failing is the intended signal to
+# read that section, not a regression to paper over.
+MAKE_WRAPPED_BLIND_SPOT = [
+    (
+        "make stage2b-ladder-stage3",
+        "the exec is real but happens inside a subprocess make spawns",
+    ),
+    (
+        "make stage2a-evolve-train-gpu",
+        "same shape on the Stage 2A targets",
+    ),
+]
+
+
+@pytest.mark.parametrize(
+    "command,why", MAKE_WRAPPED_BLIND_SPOT,
+    ids=[c[:44] for c, _ in MAKE_WRAPPED_BLIND_SPOT])
+def test_make_wrapped_remote_exec_is_a_known_blind_spot(command, why):
+    """Pins current behaviour AND its reason, so the gap stays visible.
+
+    An undocumented gap and a documented one look identical in a passing
+    suite. This is the difference: the limitation is asserted, named, and
+    pointed at the section explaining what covers it.
+    """
+    verdict = bash(command)
+    assert not verdict.capture, (
+        f"{command} is now captured. If that was deliberate, delete this "
+        f"case and the README's blind-spot section together; if not, the "
+        f"predicate has started matching make targets by accident.")
+
 
 @pytest.mark.parametrize(
     "command,why", NOT_SCRATCH, ids=[c[:44] for c, _ in NOT_SCRATCH])

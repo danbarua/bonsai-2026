@@ -137,6 +137,34 @@ one twist that matters for how it is caught: here the glue is
 The derive-don't-list trick that works elsewhere in this repo has nothing
 to enumerate when the property is "a process read this file at startup."
 
+**Three instances in one night, and the third widens the category.** The
+entry above was written from two — a hook registration correct but not
+loaded until session start, and a commit-skill rule correct but not loaded
+because `/commit` was never invoked — with the prediction that a third sat
+somewhere nobody had looked. It did:
+
+> The scratch predicate handles `mighty-colab exec -f` correctly. But every
+> GPU target in this repository launches through a Makefile, so the tool
+> call is `make <target>` and the exec runs in a subprocess make spawns.
+> Nothing ever hands the predicate that string.
+
+Found by `stage2b-lead` testing before a paid run rather than after. It
+sharpens G rather than merely confirming it: **the wiring failure is not
+always configuration.** Here everything is loaded and firing correctly, and
+the argument simply never arrives. The general form is wider than "a file
+that was not read":
+
+> **The component is correct and the path to it is wrong.** Not loaded, not
+> invoked, or never handed the input — three different mechanisms with one
+> signature, and none of them detectable by testing the component, because
+> the component is fine.
+
+The counter differs by mechanism. For the not-loaded cases, emit positive
+evidence at runtime so absence is diagnostic. For the never-handed-the-input
+case there is no such marker to write, because nothing malfunctioned — the
+only defence is a peer using the tool on real work, which is how this one
+was found.
+
 Two fixes, and the second is the better one. A live test spawning a real
 headless session (`tests/test_provenance_live_registration.py`) samples the
 wiring mechanically. But the deeper fix — `stage2b-lead`'s — is to make the

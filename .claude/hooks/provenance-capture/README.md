@@ -125,6 +125,45 @@ needs a session by construction. Slow and CLI-dependent, so it is
 change to `.claude/settings.json` or to the scripts it names**, which is
 exactly when the wiring can break without a single unit test noticing.
 
+## Known blind spot: remote execs launched through `make`
+
+**A GPU run started by `make stage2b-ladder-stage3` is not captured**, and
+that is a known limitation rather than an oversight.
+
+Every GPU target in this repository launches through a Makefile recipe, so
+the tool call the hook sees is `Bash("make <target>")` and the
+`mighty-colab exec -f` runs in a subprocess make spawns. The predicate
+handles `exec -f` correctly — verified directly — but nothing ever hands it
+that string. `make` is correctly classified as ordinary work, and the exec
+behind it is invisible.
+
+**What still covers the load-bearing claim.** The Stage 2B drivers verify
+`BONSAI_DRIVER_SHA256` against the commit's copy on the remote, and the
+closure check refuses to launch when any file in the driver's import closure
+differs from HEAD. So "which revision reached the GPU" is answerable from the
+run report without these hooks. What capture would have added is an
+*independent* witness — the script text as sent, and the `git.dirty` flag,
+recorded by something other than the driver vouching for itself. Defence in
+depth, not the only evidence.
+
+**Why the obvious fix is not taken.** Expanding make targets in the
+predicate would mean either reimplementing make's variable expansion — the
+reimplement-instead-of-call failure CLAUDE.md principle 16 exists for — or
+shelling out to `make -n`. The second is worse than it looks: `$(shell ...)`
+expansions execute at parse time even under `-n`, so a hook classifying a
+command would run arbitrary shell as a side effect. In a hook that must
+never block and must never surprise, that is disqualifying.
+
+Bypassing make to invoke the exec directly also loses the target's closure
+check, its refusal to run a commit absent from a remote, and its
+unconditional teardown — strictly worse than the gap.
+
+The right eventual fix is capture at the `mighty-colab` layer, which knows
+it is shipping a local file regardless of who invoked it.
+
+Pinned by `test_make_wrapped_remote_exec_is_a_known_blind_spot`, so the
+limitation stays visible in the suite rather than becoming folklore.
+
 ## Testing
 
 ```bash
