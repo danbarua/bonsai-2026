@@ -213,6 +213,54 @@ definitions rather than assumed from familiarity:
   exclusions and `FINDINGS.md`'s "not settled" list; tracked as GitHub
   issue #10. Not yet implemented -- unlike `evolved_X` above, this is a
   planned comparison, not a completed one.
+- **binding clause** *[Stage 2B]*: a sentence in one of Stage 2B's four
+  frozen protocol documents (`DESIGN.md`, `AUDIT_PROTOCOL.md`,
+  `COMPANION_PROTOCOLS.md`, `STAGE3_PLAN.md`) that commits the project to
+  something — as opposed to narrating an incident, arguing for a decision,
+  or reporting a result, which those documents also do at length. The
+  distinction is not lexical: candidate sentences are nominated by
+  over-inclusive markers and a **human disposes of each one**, because
+  "does this sentence bind?" has no derivation available. The set of
+  candidates is derived from the documents; which of them bind, and what
+  enforces each, is the judgement the inventory exists to record.
+- **the (binding-clause) inventory** *[Stage 2B]*: `gates.toml`, plus the
+  reconciler `tools/gates/gate_inventory.py` that checks it. Every
+  candidate clause carries an explicit disposition; a documented gate with
+  no executable mapping **fails readiness rather than passing quietly**.
+  The incident it exists for: `DESIGN.md` froze "HALT for review if any
+  production condition selects 1e-6", the driver never implemented it, and
+  a run reported `STAGE3_OK` — a verdict meaning *no such gate existed*,
+  not *the gate cleared*. Run it with `make stage2b-gate-inventory`; it
+  exits non-zero while any clause is undispositioned, which is the normal
+  state until the work is finished.
+- **binding_gate / binding_value / binding_claim** *[Stage 2B]*: the three
+  kinds a binding clause can be, split by **what is bound and on whom** —
+  which is why one schema does not fit them.
+  - **`binding_gate`** binds *the running program*: a runtime decision
+    obligation, where something is evaluated and something else halts or
+    branches on the result. The scaler-centering guard, the write-once
+    refusal, the ridge equivalence check. These are the only kind whose
+    enforcement a machine can check.
+  - **`binding_value`** binds *a number*: a constant frozen in advance so
+    it cannot be chosen later to suit a result. `M = 100`, the 60,000
+    population, the analytic tolerances. Nothing rejects anything, so
+    demanding a "decision consequence" of one would be demanding fiction.
+  - **`binding_claim`** binds *what may be written*: an obligation on the
+    write-up rather than on the program — "must never be reported as a
+    random sample", "no metric may be added or dropped after results
+    exist". **No code path can enforce these**, and pretending one could
+    is the failure the inventory exists to prevent. A person discharges
+    them, and the row records where.
+  A clause **cannot be moved between kinds because enforcement is absent**
+  — that is the anti-gaming clause, and it is enforced by a reviewer
+  reading the classifications, not by any check in the file.
+- **negative attestation** *[Stage 2B]*: what a `binding_claim` needs when
+  its obligation is *never*-shaped. Pointing at one compliant paragraph
+  cannot establish that a prohibited claim is absent from everywhere else,
+  so the row states the **output set it ranges over** and how absence
+  across that set was established. The reason it is a separate field: a
+  positive obligation is discharged by showing something; a negative one
+  is violated by an absence, and absences do not announce themselves.
 
 ## Glossary (plain English)
 

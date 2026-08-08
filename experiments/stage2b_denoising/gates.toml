@@ -5,20 +5,55 @@
 #
 #     make stage2b-gate-inventory
 #
-# THREE KINDS, because a frozen protocol contains three kinds of promise and
-# forcing them into one shape produces either a false `not_binding` or an
-# invented field. See the tool's module docstring.
+# WHAT THE TERMS MEAN -- "binding clause", the three kinds, and what each
+# binds and on whom -- is in `docs/GLOSSARY.md`, not here. That vocabulary
+# is used in tasks, in mail, and by a reconciler this file does not own, so
+# it belongs where terms are defined rather than in one of its consumers.
+#
+# WHAT EACH KIND REQUIRES is at that kind's own section divider below, not
+# in this header. A reader filling a `binding_claim` row is already at the
+# binding_claim section; a contract at the top of the file is read once at
+# orientation and needed later, which is exactly when it is furthest away.
 #
 # ANTI-GAMING, quoted from the ruling and enforced by a reviewer rather than
 # by any check in this file: "a clause cannot be moved from binding_gate to
 # another kind merely because enforcement is absent." Several rows below are
-# deliberately failing for exactly that reason.
+# deliberately failing for exactly that reason. It is stated here rather
+# than per-kind because it is the one rule that governs all of them.
 
 reviewed = false   # set true only when a human has read every row
 
 # =============================================================================
 # binding_gate -- runtime decision obligations
 # =============================================================================
+#
+# Binds THE RUNNING PROGRAM. Something is evaluated, and something halts or
+# branches on the result. The only kind whose enforcement a machine can
+# check -- which is why it carries the most fields, and why an empty one
+# fails readiness rather than being reclassified.
+#
+# Every field required. Six dimensions plus scheduling:
+#
+#   enforcement              the executable predicate, `path/to/file.py::name`
+#   production_reachability  the production path(s) that reach it, INCLUDING
+#                            wrappers and orchestration. A correct predicate
+#                            production never invokes is not a gate.
+#   input_wiring             the concrete runtime values supplied, and their
+#                            provenance
+#   decision_consequence     the observable halt or branch on rejection.
+#                            Logging a failed predicate without preventing
+#                            continuation does not qualify unless the design
+#                            defines the gate as advisory.
+#   test                     the test, `path::name`
+#   break_demonstrated       evidence the test flips RED under a deliberate
+#                            local disable. A source grep, a symbol
+#                            reference, or a test that merely names the
+#                            predicate does not qualify -- see VACUOUS_TESTS
+#                            #17 and #20, both of which were exactly that.
+#   trigger                  what SCHEDULES the test (`ci-fast`, `manual`).
+#                            A separate axis from reachability: "somebody
+#                            runs it by hand" is reported, not failed;
+#                            "production never calls it" is a failure.
 
 [binding_gate.9d4b9ec0ba99]
 # "HALT for review if any production condition selects 1e-6."
@@ -355,6 +390,29 @@ trigger = "manual"
 # =============================================================================
 # binding_value -- frozen configuration obligations
 # =============================================================================
+#
+# Binds A NUMBER, frozen in advance so it cannot be chosen later to suit a
+# result. Nothing rejects anything, so `decision_consequence` is not asked
+# for -- demanding one would be demanding fiction.
+#
+#   value                the authoritative source and the frozen value
+#   production_consumers EVERY consumer, or a proved common propagation
+#                        point. One consumer cited for a value read in four
+#                        places is a row covering a quarter of what it claims.
+#   enforcement          the pinning/identity test
+#   break_demonstrated   causal evidence the test fails when the PRODUCTION
+#                        value or its propagation is altered -- not when the
+#                        literal is edited, which tests that a constant
+#                        equals itself
+#   provenance_of_use    evidence the run actually USED the frozen value,
+#                        rather than that the value was frozen somewhere
+#   trigger              what schedules that test
+#   status               enforced | pending_consumer | unresolved
+#
+# `pending_consumer` is for a value frozen for code that does not exist yet
+# -- several here are frozen for the unwritten audit driver. It needs
+# `pending_reason` and it FAILS readiness. "Nothing consumes it yet" is a
+# true and useful statement; it is not a pass.
 
 [binding_value.b682b6af449a]
 # AUDIT_PROTOCOL: "Safety factor M = 100, frozen here, before any audit result."
@@ -463,6 +521,33 @@ what stops the sweep being defined afterwards to match what was written."""
 # =============================================================================
 # binding_claim -- obligations on what may be CLAIMED
 # =============================================================================
+#
+# Binds WHAT MAY BE WRITTEN, not what the program does. No code path can
+# enforce these and pretending one could is the failure this inventory
+# exists to prevent. A person discharges them; the row records where.
+#
+#   locator      source document plus a STABLE locator -- a line number
+#                moves, a section or anchor does not
+#   obligation   the normalized obligation: what must or must not be
+#                claimed or done
+#   status       discharged | pending_package | not_applicable | unresolved
+#   discharged_in / evidence   required only when status = discharged. The
+#                evidence must point at an ARTIFACT, never at who checked
+#                it: an agent attribution is not reviewer-checkable, and a
+#                mesh `instance:` tag names a ROLE rather than a session.
+#
+# `pending_package` -- reviewed, binding, and not dischargeable because the
+# readiness package it discharges into does not exist. Needs
+# `pending_reason`; fails readiness. Distinct from `unresolved` on purpose:
+# unresolved wants a reviewer, pending_package wants an artifact, and a
+# reader who cannot tell which cannot triage the list.
+#
+# NEGATIVE ATTESTATION, required when the obligation is never/must-not
+# shaped. Pointing at one compliant paragraph cannot establish the
+# prohibited claim is absent from everywhere else, so the row states the
+# OUTPUT SET it ranges over. A positive obligation is discharged by showing
+# something; a negative one is violated by an absence, and absences do not
+# announce themselves.
 #
 # No code path can enforce these, and pretending one could is the failure the
 # whole requirement exists to prevent. They are discharged by a person reading
