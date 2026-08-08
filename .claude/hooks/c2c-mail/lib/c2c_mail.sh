@@ -329,8 +329,13 @@ c2c_list_unread_for() {
     fi
     # Slow path: no filename tag -- open the file and check its header,
     # exactly as before the filename tag existed.
+    # Slugified on both sides, matching mailbox.ts's readMailbox. An exact
+    # compare here made case decide whether mail was seen, and the folded
+    # form is the one agents actually learn -- it is what the filenames
+    # carry, and a directory listing is cheaper to read than a
+    # code-sessions call.
     addressee="$(c2c_message_addressee "$file")"
-    if [ -z "$addressee" ] || [ "$addressee" = "$my_name" ]; then
+    if [ -z "$addressee" ] || [ "$(c2c_slugify "$addressee")" = "$my_slug" ]; then
       printf '%s\n' "$file"
     fi
   done < <(c2c_list_unread)

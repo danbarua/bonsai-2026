@@ -144,9 +144,36 @@ echo "== 9. pre-existing (untagged) real messages stay correct via the header fa
 UNTAGGED="$TMP_ROOT/.claude/claude2claude/outbox/2020-01-01T00-00-00Z.md"
 printf '%s\n' '<!-- from: claude-desktop · 2020-01-01T00:00:00Z · to: legacy-reader -->' > "$UNTAGGED"
 printf '\nlegacy addressed message, sent before the filename tag existed\n' >> "$UNTAGGED"
-LEGACY_READ="$(call c2c-inbox '{"reader":"claude-code","as":"someone-else"}' | text_of)"
+LEGACY_READ="$(call c2c-inbox '{"reader":"claude-desktop","as":"someone-else"}' | text_of)"
 check "untagged legacy message addressed to someone else is still correctly skipped (header fallback works)" \
   "$(echo "$LEGACY_READ" | grep -c 'legacy addressed message')" "0"
+
+echo "== 10. case never decides whether mail arrives -- to: and as are matched as slugs =="
+# The incident: a message addressed `to: INFRA` was skipped by a reader
+# calling with as="infra", silently -- no error to the sender, nothing
+# returned to the reader, the file left sitting in the mailbox looking
+# delivered. slugify() folds case for filename safety, so that message is
+# written as `--to-infra`, and the filename is the cheapest thing an agent
+# reads to learn who is around. Names get learned in the folded form and
+# read back in it, and an exact compare turned that into lost mail.
+#
+# Both directions, because a matcher that accepts everything would pass the
+# first check alone.
+MIXED="$TMP_ROOT/.claude/claude2claude/outbox/2020-02-02T00-00-00Z.md"
+printf '%s\n' '<!-- from: claude-desktop · 2020-02-02T00:00:00Z · to: INFRA -->' > "$MIXED"
+printf '\nmixed case addressee\n' >> "$MIXED"
+
+MIXED_READ="$(call c2c-inbox '{"reader":"claude-desktop","as":"infra","archive":false}' | text_of)"
+check "to: INFRA IS delivered to a reader calling as infra" \
+  "$(echo "$MIXED_READ" | grep -c 'mixed case addressee')" "1"
+
+WRONG_READ="$(call c2c-inbox '{"reader":"claude-desktop","as":"someone-else"}' | text_of)"
+check "to: INFRA is still NOT delivered to an unrelated reader (match has teeth)" \
+  "$(echo "$WRONG_READ" | grep -c 'mixed case addressee')" "0"
+
+CONSUMED="$(call c2c-inbox '{"reader":"claude-desktop","as":"InFrA"}' | text_of)"
+check "any casing consumes it -- InFrA reads a message addressed to INFRA" \
+  "$(echo "$CONSUMED" | grep -c 'mixed case addressee')" "1"
 
 echo
 echo "== $PASS_COUNT passed, $FAILURES failed =="

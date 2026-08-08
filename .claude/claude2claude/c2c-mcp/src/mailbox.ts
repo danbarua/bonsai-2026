@@ -359,7 +359,16 @@ export async function readMailbox(
     const to = parseAddressee(content);
     const instance = parseInstance(content);
 
-    if (archive && asName && to && to !== asName) {
+    // Slugified on both sides, never an exact compare. `slugify` folds case
+    // for filename safety, so a message to "INFRA" is written as
+    // `--to-infra` -- and that filename is the cheapest thing an agent
+    // reads to learn who is around, cheaper than a `code-sessions` call.
+    // Names therefore get learned in the folded form and read back in it,
+    // and an exact compare here turned that into silently skipped mail:
+    // no error to the sender, nothing returned to the reader, the file
+    // sitting in the mailbox looking delivered. Comparing slugs means the
+    // form a name is written in stops deciding whether mail arrives.
+    if (archive && asName && to && slugify(to) !== slugify(asName)) {
       skipped.push(filename); // addressed to someone else: leave it in place, unconsumed
       continue;
     }
