@@ -58,9 +58,19 @@ HOOK_VERSION = "1.1.0"
 
 # Version lookups shell out, so they are cached per session and time-boxed.
 # A hook that hangs is a hook that gets removed.
-VERSION_TIMEOUT_S = 2
+# 5s, not 2: `mighty-colab version` measured ~0.9-1.0s cold on this machine,
+# and a timeout set close to the measured cost turns an ordinary slow start
+# into a permanently unresolved version field.
+VERSION_TIMEOUT_S = 5
 _VERSION_COMMANDS = {
-    "mighty-colab": ["mighty-colab", "--version"],
+    # `version` is a SUBCOMMAND. `mighty-colab --version` is not a valid
+    # flag -- it exits non-zero with a usage error, which this probe would
+    # have recorded as `probe_failed` forever without ever saying why.
+    # Written from the docs and never run until `tests/test_provenance_
+    # executor_version.py` ran it; the test exists because a version probe
+    # that silently never resolves is worse than no version field, since
+    # the record still carries the key.
+    "mighty-colab": ["mighty-colab", "version"],
 }
 
 
