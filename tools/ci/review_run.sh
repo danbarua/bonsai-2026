@@ -86,7 +86,11 @@ else
   tmp=$(mktemp -d)
   trap 'rm -rf "$tmp"' EXIT
   if gh run download "$RUN_ID" --repo "$REPO" --name "$ARTIFACT" --dir "$tmp" >/dev/null 2>&1; then
-    exec_file=$(find "$tmp" -name '*.json' -type f | head -1)
+    # `-print -quit` rather than `| head -1`: under `pipefail`, head closing
+    # the pipe early sends find a SIGPIPE, the pipeline reports non-zero, and
+    # `set -e` kills the script with no message. That is invisible while the
+    # artifact holds exactly one JSON file and fires the day it holds two.
+    exec_file=$(find "$tmp" -name '*.json' -type f -print -quit)
     if [ -n "$exec_file" ]; then
       # The transcript is an array of entries; exactly one is the `result`.
       telemetry=$(jq '[.[] | select(.type == "result")] | .[0] // null' "$exec_file")

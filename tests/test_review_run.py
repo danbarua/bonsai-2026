@@ -212,5 +212,91 @@ def test_a_failed_review_run_is_reported_as_an_error(tmp_path: Path) -> None:
     assert "(ERROR)" in human.stdout
 
 
+def test_an_artifact_holding_several_files_does_not_kill_the_script(
+    tmp_path: Path,
+) -> None:
+    """A multi-file artifact must still yield a usable transcript.
+
+    HONEST SCOPE, because the obvious reading of this test is wrong: it does
+    NOT reproduce the SIGPIPE hazard that `-print -quit` removes. That was
+    checked, not assumed -- reinstating `find ... | head -1` and running this
+    with ten files still PASSES, because ten short paths fit inside the 64KB
+    pipe buffer, so `find` finishes writing before `head` exits and no signal
+    is ever sent. Forcing the failure needs enough output to block `find` mid
+    write, which is a slow and machine-dependent thing to build into a unit
+    test.
+
+    So the hazard is pinned structurally instead, by
+    `test_the_transcript_is_not_picked_out_of_a_pipe` below, which HAS been
+    seen to fail. This test covers the ordinary property that is worth having
+    either way: more than one file in the download does not confuse the pick.
+    """
+    bin_dir = tmp_path / "bin"
+    bin_dir.mkdir(exist_ok=True)
+    _write_stub(bin_dir, artifacts=[_artifact()], execution=EXECUTION)
+
+    # Make `gh run download` drop several JSON files, as a multi-file
+    # artifact would.
+    stub = bin_dir / "gh"
+    stub.write_text(
+        stub.read_text().replace(
+            'cp {} "$a/claude-execution-output.json"'.format(bin_dir / "execution.json"),
+            'for n in a b c d e f g h i j; do cp {} "$a/$n.json"; done'.format(
+                bin_dir / "execution.json"
+            ),
+        )
+    )
+
+    env = dict(os.environ)
+    env["PATH"] = f"{bin_dir}{os.pathsep}{env['PATH']}"
+    env["REVIEW_REPO"] = "danbarua/bonsai-2026"
+    proc = subprocess.run(
+        ["bash", str(SCRIPT), "--json"],
+        capture_output=True,
+        text=True,
+        env=env,
+        cwd=REPO_ROOT,
+    )
+
+    assert proc.returncode == 0, (
+        f"the script died on a multi-file artifact.\nstderr:\n{proc.stderr}"
+    )
+    assert json.loads(proc.stdout)["telemetry"]["num_turns"] == 26
+
+
+def test_the_transcript_is_not_picked_out_of_a_pipe() -> None:
+    """`set -euo pipefail` plus `| head` is a latent kill, so forbid the shape.
+
+    Under `pipefail`, a reader that closes the pipe early signals the writer,
+    the pipeline reports non-zero, and `set -e` terminates the script before
+    any `die` can explain why. It stays invisible for as long as the output
+    is small enough to fit the pipe buffer -- which is to say, until the day
+    it is not.
+
+    A behavioural test cannot reach that cheaply (see the note above), so the
+    guard is on the shape rather than the symptom. This one has been seen to
+    fail: reinstating `find ... | head -1` trips it.
+    """
+    source = SCRIPT.read_text()
+    code = "\n".join(
+        line for line in source.splitlines() if not line.lstrip().startswith("#")
+    )
+
+    assert "set -euo pipefail" in code, (
+        "this guard assumes the script runs under pipefail; if that changed, "
+        "the reasoning below needs revisiting rather than the assertion deleting"
+    )
+    offenders = [
+        line.strip()
+        for line in code.splitlines()
+        if "| head" in line or "|head" in line
+    ]
+    assert not offenders, (
+        "a pipeline into `head` under `pipefail` can kill the script silently "
+        f"once its output outgrows the pipe buffer; use `-print -quit` or an "
+        f"equivalent that does not close a pipe early: {offenders}"
+    )
+
+
 def test_the_script_is_executable() -> None:
     assert os.access(SCRIPT, os.X_OK), "review_run.sh must be executable"
