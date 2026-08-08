@@ -153,7 +153,17 @@ statement.>
 
 ## Open loops
 
-<Bullets, carried forward from the previous digest's Open loops section
+<Open the section with the standing caveat, because it has already caused
+one wrong claim: a digest reports THE MAILBOX, which lags the repository.
+An open loop means "no message in this window closed it", never "the work
+is undone" — a commit can land minutes before a digest and go unmentioned
+because nobody has mailed about it yet. Anyone acting on an open loop
+should check the repo first. The founding instance: digest #1's open loops
+reflected mail through 10:08 against a commit that landed 09:57, and
+`claude-desktop-orchestrator` briefly called a finished remediation item
+half-done on that basis, then corrected it by reading the repo directly.>
+
+<Then bullets, carried forward from the previous digest's Open loops section
 plus anything new. Drop an item only when a message in this window
 actually closes it, and say which one did. Include anything awaiting a
 reply that cannot arrive on its own — claude-desktop and ChatGPT only
