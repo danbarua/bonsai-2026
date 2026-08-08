@@ -138,6 +138,36 @@ export function commentAuthorIsTrusted(login: string | undefined): boolean {
 const COMMENT_EVENTS = new Set(["issue_comment", "pull_request_review_comment", "pull_request_review"]);
 
 /**
+ * Is this delivery worth waking anyone for?
+ *
+ * A gate against VOLUME, not against hostility -- the author and signature
+ * gates handle that. Every delivered event is a mailbox file that bumps the
+ * unread counter and rings every agent's doorbell, and a broadcast is
+ * consumed by whichever session polls first, so noise does not merely annoy:
+ * it displaces signal.
+ *
+ * `workflow_run` is the one that matters. GitHub sends it three times per
+ * run -- `requested`, `in_progress`, `completed` -- and `conclusion` is null
+ * until the last. Without this, subscribing produces three messages per run,
+ * two of them reporting "conclusion: ?" about a run that has not finished.
+ *
+ * A DENYLIST of the two noisy actions, not an allowlist of `completed`.
+ * Requiring `completed` asserts that every deliverable payload carries that
+ * exact field, and an allowlist is wrong the moment that assumption is --
+ * caught immediately, by dropping a fixture with no `action` at all. Denying
+ * what is measurably noise leaves an unrecognised shape delivered rather
+ * than silently swallowed, which is the safer direction for a notifier.
+ */
+const NON_TERMINAL_ACTIONS = new Set(["requested", "in_progress"]);
+
+export function isWorthDelivering(event: string, action: unknown): boolean {
+  if (event === "workflow_run" && typeof action === "string") {
+    return !NON_TERMINAL_ACTIONS.has(action);
+  }
+  return true;
+}
+
+/**
  * A short summary of a GitHub delivery, plus the command that acts on it.
  *
  * Deliberately a SUMMARY, not the payload: this becomes a mailbox message
@@ -275,6 +305,12 @@ app.post("/webhook", async (req, res) => {
   const event = typeof req.headers["x-github-event"] === "string" ? req.headers["x-github-event"] : "unknown";
   const delivery = typeof req.headers["x-github-delivery"] === "string" ? req.headers["x-github-delivery"] : "";
   const body = (req.body ?? {}) as Record<string, unknown>;
+
+  if (!isWorthDelivering(event, body.action)) {
+    console.log(`[c2c-mcp] webhook ${event} dropped: action=${String(body.action)} is not worth delivering`);
+    res.status(202).json({ ok: true, dropped: "not-worth-delivering" });
+    return;
+  }
 
   // Comment events are gated on author BEFORE a file is written. This
   // repository is public, so an unfiltered comment feed is both a volume
