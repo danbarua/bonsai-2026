@@ -31,6 +31,7 @@ from assemble_briefing import (  # noqa: E402
     Loop,
     bullets,
     digest_ts_to_iso,
+    fmt_loops,
     join_loops,
     read_commits,
     section,
@@ -332,6 +333,32 @@ def test_absent_path_is_not_claimed_present(tmp_path: Path) -> None:
     loop = Loop(text="x", tokens=["tools/gone.py"])
     tree_evidence(tmp_path, loop)
     assert loop.present == []
+
+
+# --------------------------------------------------------------------------
+# The briefing is addressed to nobody, and must say so.
+# --------------------------------------------------------------------------
+
+
+def test_open_loops_state_that_a_name_is_not_an_assignment() -> None:
+    """A cold reader adopted a role it merely saw named here and reported
+    another session's blocker as its own. The briefing cannot know who is
+    reading it, so it must not let the reader infer that from a mention.
+    """
+    out = fmt_loops(
+        [Loop(text="`infra` is holding a push", tokens=[])],
+        "MAILBOX_SUMMARY_2026-08-08T10-00-00Z.md",
+        "a window",
+    )
+    assert "Addressed to nobody" in out
+    assert "a name is not an assignment to you" in out
+
+
+def test_the_advisory_warning_survives_an_empty_loop_list() -> None:
+    """No loops is not a reason to drop the caveats -- a reader arriving at a
+    quiet window should still learn what the section does and does not mean."""
+    out = fmt_loops([], "MAILBOX_SUMMARY_2026-08-08T10-00-00Z.md", "a window")
+    assert "ADVISORY" in out
 
 
 # --------------------------------------------------------------------------

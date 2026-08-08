@@ -48,6 +48,12 @@ The join is **advisory everywhere**. A commit mentioning an identifier may be
 unrelated to the loop that also mentions it. Candidates narrow your search;
 they close nothing.
 
+**The briefing is addressed to nobody.** It does not know who is reading it.
+Loops name sessions; a name is not an assignment to you. Check your own
+`/rename` name against a loop before treating it as yours — a cold reader has
+already adopted a role it merely saw mentioned and reported another session's
+blocker as its own.
+
 Two bounds worth knowing:
 
 - The git join only sees the window. A loop closed by an older commit shows as

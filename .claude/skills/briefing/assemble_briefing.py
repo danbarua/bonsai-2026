@@ -564,6 +564,18 @@ def fmt_loops(loops: list[Loop], src: str | None, window_desc: str) -> str:
 
     out.append(f"Carried from `{src}`, each checked against git. ")
     out.append("")
+    # A cold reader adopted a role it saw named here and reported another
+    # session's blocker as its own. The briefing is not addressed to anyone,
+    # and has no way to know who is reading it -- so it says so, rather than
+    # guessing ownership from a name it happens to match. Deriving "yours"
+    # from a mention would be the same weak inference just removed from the
+    # join: a loop naming two sessions names neither as its owner.
+    out.append(
+        "> **Addressed to nobody.** These loops name sessions; a name is not "
+        "an assignment to you. If a loop does not say who owns it, it does "
+        "not say."
+    )
+    out.append("")
     out.append(
         "> **The join is ADVISORY.** Matching a commit to a loop is a judgement, not a "
         "derivation: a commit mentioning an identifier may be unrelated to the loop that "
