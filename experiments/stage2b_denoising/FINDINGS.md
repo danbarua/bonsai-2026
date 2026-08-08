@@ -887,7 +887,9 @@ than left implied.
 Phase B: a GPU-session driver that reads this artifact, regenerates
 corruption and clean targets in-session, and runs evolution, ridge (with
 the ladder's third real-data equivalence gate) and CNN training at full
-scale. Not yet written. It should carry a spot-check that one image's
+scale. **Written and run since -- see "Phase B, the alpha floor, and the
+amended grid" below; this paragraph is preserved as the state at the time
+Phase A landed.** It should carry a spot-check that one image's
 encoding re-derived in-session matches the stored array, with the
 tolerance stated as ULP-level rather than exact, for the
 cross-architecture reason recorded above.
@@ -911,3 +913,188 @@ recipe should gate on the closure and say so in the recipe comment,
 rather than inheriting the porcelain check by copying the stage-1 target.
 Noted here rather than changed unilaterally, because it alters the
 pre-flight on targets that spend money.
+
+---
+
+# Phase B, the alpha floor, and the amended grid
+
+Phase B ran on 2026-08-07 (`STAGE3_OK`, 71.6 min, A100): the full 60,000
+corpus through evolution, features, ridge and CNN. Zero solver failures
+across 240,000 graph evolutions. The re-encode spot-check came in at 2.0
+ULP against a 16.0 tolerance, consistent with the 3 ULP cross-architecture
+maximum recorded above. Decision 2's equivalence extension passed on all
+seven conditions at 12x the largest previously verified scale, worst
+clipped-prediction difference 2.185e-12 against the frozen 1e-8.
+
+What follows is the finding that came out of it, which is not about any of
+that.
+
+## Six of seven conditions selected the smallest alpha on the grid
+
+At feasibility stage 2 (n=5,000) no condition sat at a grid edge. At
+n=60,000, six of seven selected `ALPHA_GRID`'s minimum:
+
+| condition | n=5,000 | n=60,000 (nine decades) |
+|---|---|---|
+| raw_505 | 1000.0 | **0.01 (floor)** |
+| raw_784 | 1000.0 | **0.01 (floor)** |
+| pre_evolution | 1000.0 | 1000.0 |
+| T | 1.0 | **0.01 (floor)** |
+| lattice | 1.0 | **0.01 (floor)** |
+| rewired | 10.0 | **0.01 (floor)** |
+| curr_random | 100.0 | **0.01 (floor)** |
+
+Less regularization with more data is expected. A selection AT the
+boundary is a different statement: the grid no longer brackets the
+optimum, so those six values are a boundary, not a minimum.
+
+This did not halt the run, correctly -- grid-edge selections are recorded
+fact under the frozen plan, and no gate may be invented mid-ladder in
+either direction. It fired a **pre-registered review item**: *"if several
+conditions select the grid-minimum alpha, that is a reported fact
+requiring scrutiny before Stage 4 -- not a halt, but a named review
+item."* Nobody had to decide in the moment whether it mattered.
+
+### The scrutiny step cost nothing, and split the conditions
+
+The validation curves were already in the committed artifact. Relative
+rise from the floor:
+
+| condition | 0.01 -> 0.1 | 0.01 -> 1.0 | reading |
+|---|---|---|---|
+| raw_505 | 1.167e-07 | 1.284e-06 | plateaued |
+| raw_784 | 1.060e-07 | 1.166e-06 | plateaued |
+| pre_evolution | -6.227e-07 | -6.845e-06 | not pinned |
+| **T** | **8.431e-03** | 2.043e-02 | still moving at the floor |
+| **lattice** | **4.151e-03** | 1.145e-02 | still moving at the floor |
+| **rewired** | **7.663e-03** | 1.749e-02 | still moving at the floor |
+| **curr_random** | **6.195e-03** | 1.351e-02 | still moving at the floor |
+
+The split fell along the treatment/control line: both raw baselines flat
+to ~1e-7, all four evolved conditions moving four to five orders of
+magnitude faster. The constraint bound asymmetrically across exactly the
+comparison the readout exists to support.
+
+## The amendment, frozen before any fitting
+
+The reviewer ruling extended the grid four decades downward to
+`{1e-6 .. 1e6}` -- thirteen values, exact decade spacing, all seven
+conditions -- with a full re-run, no splicing, the equivalence check
+re-run at production scale, and a halt for review if any condition
+selected the new floor. Recorded with its provenance in `DESIGN.md`'s
+Review history; it arrived by manual copy-paste from a ChatGPT session
+rather than the audited channel, and a ruling's route is part of its
+evidence.
+
+**The procedure is one-shot by construction.** The exact-spacing clause
+forbids interpolation or densification around an observed minimum, and a
+pin at the new floor is named an anomaly rather than a trigger for
+further extension. There is no second widening this procedure can
+authorise -- which matters because a stopping rule chosen after seeing
+results is not a stopping rule.
+
+Two consequences neither the ruling nor the plan anticipated, both found
+while implementing it:
+
+**The write-once invariant enforces "do not splice" structurally.**
+`ridge_cv.json` and `ridge_final.npz` are create-once LINEAGE artifacts;
+`force=True` raises before `produce` runs. The re-run could not overwrite
+the nine-decade tables and had to write new names.
+
+**And that same invariant does nothing about silent REUSE.** The
+nine-decade artifacts sat in the bucket with valid manifests, and
+`ensure_json` passes no `expected_fingerprint` -- so the thirteen-decade
+re-run would have hit `ensure_artifact`'s skip branch, accepted the
+superseded results, recomputed nothing, and reported `STAGE3_OK`. That
+failure satisfies "do not splice" **by accident**: nothing is spliced when
+nothing is computed. Fixed by deriving the artifact name from the grid
+itself (`ridge_cv_g13_88edf9ac`), so any grid change moves the name
+automatically. Never-overwrite protects against clobbering history;
+nothing about it protects against reading the wrong history.
+
+## The amended-grid result
+
+Re-run 2026-08-08, 48.5 min, thirteen decades, all seven conditions,
+evolution/features/CNN consumed from cache and only the ridge recomputed.
+
+| condition | selected | argmin | status |
+|---|---|---|---|
+| raw_505 | 1e-03 | 1e-06 | flat to 1e-10 over four decades; tie-break takes the largest |
+| raw_784 | 1e-03 | 1e-06 | same |
+| pre_evolution | 1e+03 | 1e+03 | interior |
+| **rewired** | **1e-05** | 1e-05 | **interior minimum -- resolved** |
+| **curr_random** | **1e-05** | 1e-05 | **interior minimum -- resolved** |
+| **T** | **1e-06** | 1e-06 | **at the floor** |
+| **lattice** | **1e-06** | 1e-06 | **at the floor** |
+
+Equivalence passed on all seven at thirteen decades, worst difference
+**5.421e-11** against the frozen 1e-8.
+
+The extension resolved five of seven. `rewired` and `curr_random` have
+genuinely higher MSE at 1e-6 than at 1e-5 (by 2.685e-04 and 3.805e-04) --
+interior minima, not tie-breaks.
+
+### What is established, and what is not
+
+Stated in the reviewer's licensed formulations, because the distinctions
+are load-bearing and each is easy to overstate in the direction that
+flatters the hypothesis:
+
+- For **T and lattice**, `1e-6` is the best **observed candidate on the
+  frozen discrete grid**. Their continuous-domain ridge optima are **not
+  bracketed**, and are not established to equal, lie below, or lie near
+  `1e-6`. The grid also says nothing about locations **between** sampled
+  decades.
+- For **rewired and curr_random**, the frozen-grid selections are genuine
+  interior minima at `1e-5`.
+- The monotonically shrinking per-decade increments for T and lattice are
+  legitimate descriptive evidence that the validation curve is
+  **flattening** over the sampled low-alpha range. For T the 1e-6 -> 1e-5
+  increment is **5.292e-05**, against **8.431e-03** at the old floor.
+  This supports **deceleration**, **not localization** of the optimum.
+- That flattening is **not** translated into a quantitative bound on the
+  unseen optimum, nor into a claim that residual regularization bias is
+  negligible.
+- Any statement about direction of constraint is **training-side
+  validation only**. Nothing here establishes the sign or magnitude of the
+  official-test effect.
+- Graph rankings involving T or lattice are explicitly
+  **protocol-bounded**: they compare pipelines selected under the frozen
+  finite alpha grid, not continuously optimally regularized graph
+  conditions. A control beating a floor-pinned T is not a mechanistic
+  superiority claim.
+
+**The floor condition is a disclosure and a qualification on optimization
+scope -- not a protocol defect.** The alpha -> 0, denser-grid and
+continuous-optimum questions are post-confirmatory work.
+
+## The gate that was frozen and never implemented
+
+`DESIGN.md`'s amended procedure says, verbatim: *"HALT for review if any
+production condition selects 1e-6."* That sentence was frozen hours before
+the grid extension was implemented, **and the halt was never written into
+the driver.** The re-run selected the floor on T and lattice and reported
+`STAGE3_OK`.
+
+That verdict records that **no such gate existed** -- not that one was
+evaluated and cleared. It is preserved as such: the run report carries a
+machine-readable annotation, and `read_run_report()` refuses to yield the
+verdict without surfacing it.
+
+The numerical artifacts from that run **remain admissible**. The defect
+was in the readiness verdict and its enforcement, not in the reported
+ridge computation.
+
+The halt now exists (`floor_halt_reason()`), extracted as a pure function
+so a test exercises the decision rather than the spelling of the code, and
+confirmed to fail against `817ac08` -- the exact driver that produced the
+report, which imports cleanly with `step7_ridge` intact, so the failure is
+the absent gate rather than a broken module.
+
+Recorded here rather than only in the process log because it is the
+sharpest instance this project has of a class it has now hit six times in
+a day: **the requirement exists in the document and not in the code.** The
+document and the driver had the same author, in the same session, hours
+apart. There was no handoff to blame, which is what rules out "be more
+careful" as the remedy and motivated the binding-gate inventory now
+required before the package.
