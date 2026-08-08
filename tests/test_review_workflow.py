@@ -441,11 +441,72 @@ def test_losing_track_progress_is_caught(text, mutate, expected, why):
         test_track_progress_is_on(mutate(text))
 
 
+def test_the_review_keeps_one_comment_and_names_its_template(text):
+    """Two halves, and they fail differently.
+
+    `use_sticky_comment` is a MECHANISM: the action delivers one comment
+    however the model behaves. The template is CONTENT: the prompt asks the
+    model to maintain a defined structure inside it. Without the mechanism a
+    perfectly-obedient model still appends a fresh comment every run; without
+    the template the single comment has no state to carry forward.
+
+    The template is a repository file rather than prompt text on purpose --
+    this workflow is hand-synced to two branches, so anything inline costs a
+    sync to change, and a structure nobody can cheaply improve does not get
+    improved.
+    """
+    review = [s for s in _steps(text)
+              if "claude-code-action" in str(s.get("uses") or "")]
+    assert review and review[0].get("with", {}).get("use_sticky_comment") is True, (
+        "use_sticky_comment is off, so each run appends a new comment. The "
+        "newest review becomes the hardest to find, and every prior one is "
+        "injected back into the next run's context")
+    assert "docs/REVIEW_COMMENT_TEMPLATE.md" in text, (
+        "the prompt no longer names the comment template, so the single "
+        "comment has no defined structure to maintain")
+    assert (REPO_ROOT / "docs" / "REVIEW_COMMENT_TEMPLATE.md").exists(), (
+        "the prompt cites a template that is not in the repository")
+
+
+def test_the_prompt_forbids_dropping_a_live_finding(text):
+    """The risk the de-duplication introduces, pinned.
+
+    Telling a reviewer not to repeat itself invites it to drop a finding it
+    has already reported -- converting a defect into a silence, which is
+    strictly worse than the repetition being removed. The instruction must
+    survive any future trimming of this prompt.
+    """
+    lowered = text.lower()
+    assert "only when it is fixed" in lowered, (
+        "the prompt no longer states that a finding leaves the comment only "
+        "when FIXED. Without it, 'do not repeat yourself' reads as "
+        "permission to drop still-open findings")
+
+
 def test_the_review_is_advisory_and_says_so(text):
     """The line that keeps an LLM verdict from gating a build. It has been
     the design's fixed point all day and is worth pinning."""
     lowered = text.lower()
-    assert "comment only" in lowered or "advis" in lowered, (
-        "the prompt no longer states the review is advisory")
-    assert "do not modify files" in lowered or "do not push" in lowered, (
-        "the prompt no longer forbids the review from changing the tree")
+    assert "advis" in lowered or "what gate" in lowered, (
+        "the prompt no longer states that findings advise rather than gate. "
+        "That line is the one keeping an LLM verdict off a build badge")
+
+    # The tree prohibition is NOT asserted as prose here, deliberately.
+    #
+    # It used to be: the prompt said "do not modify files, do not push".
+    # That is a request, and a request is the weakest form this repository
+    # has a name for. It is now a MECHANISM -- the allowlist grants Read,
+    # Grep, Glob, two comment tools and `gh pr comment`, so there is no
+    # tool to modify a file with. `test_the_review_is_not_granted_write_access`
+    # pins that, and pins it in both directions.
+    #
+    # Worth stating plainly because the prompt got shorter here and shorter
+    # normally means weaker: the guarantee did not move into prose that was
+    # then deleted, it moved OUT of prose into something that cannot be
+    # disobeyed.
+    listed = _allowlist(text)
+    for forbidden in ("Write", "Edit", "git push"):
+        assert forbidden not in listed, (
+            f"`{forbidden}` is pre-approved. The prompt no longer forbids "
+            f"modifying the tree in words, because the allowlist forbids it "
+            f"in fact -- so this list is now the only thing standing there")

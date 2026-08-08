@@ -71,6 +71,24 @@ SPEND_MARKERS = ("MIGHTY_COLAB", "GCS_ENV", "GCS_EXEC_ENV")
 # `$(PYTHON)` driver invocation, a dependency group that pulls in the
 # cloud CLIs -- means the target stopped being a test runner.
 _ALLOWED_RECIPE_REQUIRES = "uv run pytest"
+
+# What makes a target a TEST SUITE, which is a different question from
+# whether CI may invoke it, and conflating them under-covered exactly the
+# way principle 21 warns.
+#
+# `_ALLOWED_RECIPE_REQUIRES` is the literal `uv run pytest`, so a recipe
+# reading `uv run --group gpu pytest` did not match it -- and since the
+# runner derivation used that same constant, a capability-requiring suite
+# was INVISIBLE to the completeness check. Not excused, not dispositioned:
+# never seen. The check that exists to ensure a new suite is either invoked
+# by CI or explicitly declined could not see the one kind of suite CI is
+# guaranteed not to run.
+#
+# So the two questions get two predicates. This one asks "is this a test
+# suite whose coverage must be accounted for", and answers yes regardless of
+# dependency group. `_ALLOWED_RECIPE_FORBIDS` still governs the separate
+# question of what CI may be allowed to invoke.
+_RUNS_PYTEST = re.compile(r"\buv run\b[^\n]*\bpytest\b")
 _ALLOWED_RECIPE_FORBIDS = ("$(PYTHON)", "--group gpu", *(f"$({m})" for m in SPEND_MARKERS),
                            *SPEND_MARKERS)
 
@@ -92,6 +110,19 @@ NOT_RUN_IN_CI: dict[str, str] = {
                     "running both would double the build for no coverage",
     "stage2b-test": "subsumed by `test` in the full tier, and invoked "
                     "directly as the fast tier",
+    "stage2b-test-roundtrip": "provisions a real Colab runtime and writes to "
+                              "the science bucket -- it BILLS while running "
+                              "and needs the service-account key. Human-gated "
+                              "throughout Stage 2B and must stay so; it is "
+                              "also `slow`-marked and excluded from every "
+                              "other target",
+    "test-capabilities": "runs the same files as `test` with the optional "
+                         "cloud group installed. CI must NOT invoke it: "
+                         "`--group gpu` installs google-cloud-storage, which "
+                         "assert_no_cloud_credentials.py fails the build for. "
+                         "It exists for a machine that already has the "
+                         "capability, and for the mighty-colab contract and "
+                         "GCS-credentialed tests that skip without it",
 }
 
 
@@ -118,9 +149,7 @@ def test_runner_targets(recipes: dict[str, str] | None = None) -> set[str]:
     unclassified -- never silently absent.
     """
     recipes = _makefile.recipes() if recipes is None else recipes
-    return {name for name, body in recipes.items()
-            if _ALLOWED_RECIPE_REQUIRES in body
-            and not any(token in body for token in _ALLOWED_RECIPE_FORBIDS)}
+    return {name for name, body in recipes.items() if _RUNS_PYTEST.search(body)}
 
 
 def make_invocations(text: str) -> set[str]:
