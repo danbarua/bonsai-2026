@@ -152,11 +152,24 @@ Narrowing the settings matcher with `if` clauses has the same problem in a
 third place. The broad matcher plus an in-process self-filter was chosen
 deliberately so that the predicate has exactly one definition.
 
-~77 ms against a tool call that typically costs hundreds of milliseconds to
-seconds is single-digit percent. If that ever stops being true, the number
-is here to be re-measured rather than re-guessed, and the trade is worth
-revisiting — but the fix must derive the fast path from the predicate, not
-restate it.
+**Whether 77 ms matters depends on the workload, not on the number.**
+Against a tool call costing hundreds of milliseconds to seconds it is
+single-digit percent; against a 100 ms call it is most of the cost. The
+multiplier that would make it hurt is many small shell invocations in
+sequence — greps, file pokes, tight loops. A session whose Bash calls are
+sparse polls around remote compute will not notice it at all, which is the
+shape `stage2b-lead` reported and explicitly not a general claim.
+
+So the honest form: negligible for poll-shaped work, potentially
+significant for shell-heavy work, and if it ever starts to bite the number
+is here to be re-measured rather than re-guessed.
+
+The trade would still be worth revisiting only with a fast path *derived*
+from the predicate rather than restating it. Note also which axis is being
+optimised: of the four defects this feature has shipped, none were
+performance and three were classification. Trading single-definition for
+latency optimises the axis that has never failed while weakening the one
+that has failed three times — a bad trade even at a better exchange rate.
 
 ## Known blind spot: remote execs launched through `make`
 

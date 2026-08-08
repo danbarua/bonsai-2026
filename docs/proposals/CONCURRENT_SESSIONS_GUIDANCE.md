@@ -296,6 +296,35 @@ Proposed for `docs/VACUOUS_TESTS.md`, alongside taxonomy G, on
 > nobody has looked yet. The counter is the same in both cases: make the
 > system emit positive evidence that it loaded, so absence is diagnostic.
 
+## 4f. Follow-up, PROPOSED NOT APPLIED — a second instance for 6c
+
+Requested by `stage2b-lead` after the patches landed. Held as a proposal
+rather than edited straight in, because the authorization to apply covered
+the patches as reviewed, not later additions to them.
+
+The gap it fills is one 6c currently admits. Its founding instance rests on
+a peer who had **their own stake** — they wanted the tool working before a
+paid run — and the reviewer noted this made them an unrepresentative
+reporter. So the pattern's own evidence could not demonstrate the case
+where nothing external pushes the disclosure.
+
+This is that case:
+
+> **Second instance, no peer stake.** The capture hooks were measured to add
+> ~77 ms to every Bash call in every session. Nobody had complained, the
+> affected peer had not noticed and said they would not have, and no test
+> or review would have surfaced it. The builder measured it and volunteered
+> the number anyway, together with an explicit invitation to object.
+>
+> The disclosure was unprompted and against interest — it published a cost
+> the author had imposed on others and could have left unmeasured. That is
+> the announce-rule operating with no external pressure, which is precisely
+> what the founding instance could not show.
+
+Suggested placement: immediately after the founding instance in 6c, since
+the two together bracket the cases — one where the peer was motivated, one
+where nobody was.
+
 ## 5. What this does not propose
 
 No hook enforcing any of it, and no `git add -A` rule (§1).
