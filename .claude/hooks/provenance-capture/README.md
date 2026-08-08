@@ -171,6 +171,27 @@ performance and three were classification. Trading single-definition for
 latency optimises the axis that has never failed while weakening the one
 that has failed three times — a bad trade even at a better exchange rate.
 
+## Reading logs written before `c6e0312`
+
+Records from before that commit can contain a **false positive**: a
+`piped_into_remote_exec` verdict on a command where nothing was shipped and
+`referenced_files` is empty. The cause was splitting a command on `|`
+without respecting quotes, so a fragment of a quoted `grep` alternation —
+the literal word `colab` — matched the remote-exec binary list.
+
+Flagged here because a reader of an old log hits the same trap the author
+did: the record's `trigger_reason` asserts a remote execution was captured,
+and that assertion is what makes it dangerous. It was read as evidence that
+the make-wrapped blind spot was narrower than documented. It was not; the
+record sat inside the gap rather than outside it.
+
+**The tell is `referenced_files: []` alongside a remote-exec reason.** Since
+`c6e0312` that combination cannot be written — a verdict attesting to
+neither script text nor a referenced file no longer captures at all — so it
+identifies a pre-fix record specifically. Logs are append-only and forensic;
+the bad record is left in place rather than rewritten, which is why this
+note exists instead.
+
 ## Known blind spot: remote execs launched through `make`
 
 **A GPU run started by `make stage2b-ladder-stage3` is not captured**, and
