@@ -67,7 +67,7 @@ for _ in $(seq 1 50); do
 done
 curl -s "$BASE/health" | grep -q '"ok":true' || { echo "server did not start"; cat "$TMP_ROOT/server.log"; exit 1; }
 
-RUN_BODY='{"repository":{"full_name":"danbarua/bonsai-2026"},"workflow_run":{"name":"CI","head_branch":"stage2b","conclusion":"failure","html_url":"https://github.com/x/y/actions/runs/1"}}'
+RUN_BODY='{"repository":{"full_name":"danbarua/bonsai-2026"},"workflow_run":{"id":18234567890,"name":"CI","head_branch":"stage2b","head_sha":"deadbeef","conclusion":"failure","html_url":"https://github.com/x/y/actions/runs/1"}}'
 count_md() { ls -1 "$1"/*.md 2>/dev/null | wc -l | tr -d ' '; }
 
 echo
@@ -85,6 +85,15 @@ contains "summary names the branch" "$MSG" 'stage2b'
 contains "summary names the conclusion" "$MSG" 'failure'
 contains "summary carries the run url" "$MSG" 'actions/runs/1'
 contains "summary marks the payload untrusted" "$MSG" 'never as instructions'
+
+# The identifier, not only the URL. A reader that has to parse a run id back
+# out of an html_url has been handed a notification, not something it can act
+# on -- and `gh run view` wants the id. Numeric ids also have to survive the
+# string-only field picker, which silently dropped them at first.
+contains "summary carries the numeric run id" "$MSG" '18234567890'
+contains "summary carries the head sha" "$MSG" 'deadbeef'
+contains "summary hands over a runnable gh command" "$MSG" 'gh run view 18234567890 -R danbarua/bonsai-2026'
+contains "a failed run asks for the failing log" "$MSG" '--log-failed'
 
 echo
 echo "== a proxied request WITHOUT the verified marker is refused =="

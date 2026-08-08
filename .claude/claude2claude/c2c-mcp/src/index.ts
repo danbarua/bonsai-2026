@@ -111,34 +111,75 @@ app.get("/health", (_req, res) => {
 const VERIFIED_HEADER = "x-c2c-verified";
 
 /**
- * One short line describing a GitHub delivery. Deliberately a SUMMARY, not
- * the payload: this becomes a mailbox message that an agent reads, and a
- * webhook body is full of text strangers choose -- PR titles, branch names,
- * issue bodies. Copying it wholesale would put attacker-influenced prose in
- * front of every reader. Known fields only, and a link for the detail.
+ * A short summary of a GitHub delivery, plus the command that acts on it.
+ *
+ * Deliberately a SUMMARY, not the payload: this becomes a mailbox message
+ * that an agent reads, and a webhook body is full of text strangers choose
+ * -- PR titles, branch names, issue bodies. Copying it wholesale would put
+ * attacker-influenced prose in front of every reader.
+ *
+ * It carries the IDENTIFIER, not only the URL. A reader that has to parse a
+ * run id back out of an html_url before it can do anything has been handed a
+ * notification rather than something actionable, and `gh run view` wants the
+ * id. Each summary therefore ends with a ready-to-run `gh` line, `-R`
+ * qualified because the receiving session may be in a worktree or another
+ * repository entirely.
  */
 function summariseGithub(event: string, body: Record<string, unknown>): string {
   const repo = (body.repository as { full_name?: string } | undefined)?.full_name ?? "unknown repo";
   const pick = (v: unknown): string | undefined => (typeof v === "string" ? v : undefined);
+  // Ids arrive as JSON numbers, so a string-only picker silently drops them.
+  const id = (v: unknown): string | undefined =>
+    typeof v === "number" ? String(v) : typeof v === "string" ? v : undefined;
 
   if (event === "workflow_run") {
     const run = (body.workflow_run ?? {}) as Record<string, unknown>;
+    const runId = id(run.id);
+    const conclusion = pick(run.conclusion) ?? pick(run.status) ?? "?";
+    const failed = conclusion === "failure" || conclusion === "timed_out";
     return [
       `**GitHub \`workflow_run\`** on \`${repo}\``,
       `- workflow: ${pick(run.name) ?? "?"}`,
       `- branch: \`${pick(run.head_branch) ?? "?"}\``,
-      `- conclusion: **${pick(run.conclusion) ?? pick(run.status) ?? "?"}**`,
-      `- ${pick(run.html_url) ?? "(no url)"}`,
+      `- head sha: \`${pick(run.head_sha) ?? "?"}\``,
+      `- conclusion: **${conclusion}**`,
+      `- run id: \`${runId ?? "?"}\` · ${pick(run.html_url) ?? "(no url)"}`,
+      runId
+        ? `- next: \`gh run view ${runId} -R ${repo}${failed ? " --log-failed" : ""}\``
+        : `- next: no run id in the payload`,
     ].join("\n");
   }
   if (event === "push") {
+    const before = pick(body.before);
+    const after = pick(body.after);
     return [
       `**GitHub \`push\`** on \`${repo}\``,
       `- ref: \`${pick(body.ref) ?? "?"}\``,
+      `- range: \`${before ?? "?"}..${after ?? "?"}\``,
       `- ${pick(body.compare) ?? "(no url)"}`,
+      before && after
+        ? `- next: \`git log --oneline ${before}..${after}\` (fetch first)`
+        : `- next: no before/after range in the payload`,
     ].join("\n");
   }
-  return `**GitHub \`${event}\`** on \`${repo}\` — no summariser for this event type yet.`;
+  if (event === "pull_request") {
+    const pr = (body.pull_request ?? {}) as Record<string, unknown>;
+    const num = id(body.number) ?? id(pr.number);
+    return [
+      `**GitHub \`pull_request\`** on \`${repo}\``,
+      `- action: ${pick(body.action) ?? "?"}`,
+      `- number: \`${num ?? "?"}\` · ${pick(pr.html_url) ?? "(no url)"}`,
+      num ? `- next: \`gh pr view ${num} -R ${repo}\`` : `- next: no pr number in the payload`,
+    ].join("\n");
+  }
+  // An unhandled event still names itself and the repo, so a reader can go
+  // look rather than being told nothing. Adding a summariser is the fix; a
+  // generic dump of the payload is not.
+  return [
+    `**GitHub \`${event}\`** on \`${repo}\``,
+    `- no summariser for this event type yet`,
+    `- next: \`gh api repos/${repo}/events\` or add a case to summariseGithub`,
+  ].join("\n");
 }
 
 /**
