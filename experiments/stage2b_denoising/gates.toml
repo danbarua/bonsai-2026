@@ -427,6 +427,57 @@ test = ""
 break_demonstrated = ""
 trigger = "manual"
 
+[binding_gate.5d8386004c11]
+# DESIGN: "Automatic failures, REGARDLESS of rho or the absolute-convergence
+#  escape below: any non-finite encoded phase; any non-finite final-Delta.
+#  ... Exceedance halts the stage pending investigation."
+enforcement = "experiments/stage2b_denoising/stage2b_encoder_gate.py::evaluate_rho_gate"
+production_reachability = """
+run_ladder_stage1.py::step4_encoder_gate calls run_encoder_gate, which calls
+evaluate_rho_gate and attaches the encoded phases. Reached via the sole
+production entry point `make stage2b-ladder-stage1`. The verdict is cached
+as an artifact whose object name carries the step count
+(`encoder_gate_s{ENCODER_STEPS}`), so a step-count change cannot serve a
+stale verdict past the amendment that changed it.
+
+Note that the check is inside the module, not the driver: the driver reads
+`summary["passed"]` and `summary["failure_reasons"]`, so a caller cannot
+reach the gate without reaching the automatic failures."""
+input_wiring = """
+`delta_clean` / `delta_noisy` -- each image's final-iteration maximum
+absolute phase update, from the encoder at ENCODER_STEPS -- and
+`thetas_clean` / `thetas_noisy`, the encoded phases themselves, which the
+non-finite-PHASE check needs and which run_encoder_gate passes in. Both
+computed on the same 1,000 images, clean and noisy versions separately.
+
+SCOPE LIMITATION, from the module's own docstring and repeated here because
+it narrows what the row may be cited for: the non-finite-PHASE check sees
+only the coordinates the caller supplies. A non-finite phase OUTSIDE the
+active support is still caught, but by the non-finite final-Delta check
+rather than this one."""
+decision_consequence = """
+`automatic_failure` forces `passed = False` regardless of rho and regardless
+of the absolute-convergence escape, and run_ladder_stage1.py raises
+Stage1Halt("encoder gate: " + reasons). The verdict is written into the run
+report on BOTH branches, before the halt -- so a failing gate produces a
+record rather than only an exception."""
+test = "tests/test_stage2b_encoder_gate.py::test_absolute_convergence_escape_does_not_override_automatic_failure"
+break_demonstrated = """
+Both automatic failures disabled independently, each `if ... :` -> `if
+False:` in production:
+
+  non-finite final-Delta   test_gate_automatic_failure_on_non_finite_final_delta_despite_small_rho
+                           and test_gate_automatic_failure_on_infinite_final_delta FAIL.
+  non-finite encoded phase test_absolute_convergence_escape_does_not_override_automatic_failure
+                           and test_gate_automatic_failure_on_non_finite_encoded_phase_with_healthy_rho FAIL.
+
+Disjoint failure sets, which is what shows the two automatic failures are
+separately enforced rather than one standing in for both. The test named in
+`enforcement` is the one that pins the word REGARDLESS: it constructs a case
+where the absolute-convergence escape would otherwise pass the gate, and
+requires the automatic failure to win."""
+trigger = "ci-fast"
+
 [binding_gate.b6e8be29a571]
 # AUDIT_PROTOCOL: "Either alpha regime triggers review. The alpha mechanism
 #  determines the INTERPRETATION of a reversal ... but it does not determine
@@ -847,6 +898,107 @@ the comparison in the run's report under `clip_rate_agreement`, with
 out-of-tolerance entries routed to `diagnostics.clip_rate_outside_tolerance`
 -- so the artifact records the confirmation direction the clause requires,
 not merely that a level was set."""
+trigger = "ci-fast"
+
+[binding_value.30b820786974]
+# DESIGN: the encoding pipeline. "Gauge: reference-node, theta_ref = node 363
+#  (T's median-weighted-degree node; Stage 2A's final locked choice).
+#  Features: circular embedding, 1008-dim, the two trivially-constant
+#  reference-node columns dropped deterministically ... Encoder RNG: seed 0
+#  per image, primary."
+value = """
+The gauge node, 363, and the feature dimension it implies: 2 x 505 - 2 =
+1008, the two dropped columns being the reference node's own cos/sin, which
+are constant by construction under a reference-node gauge. Encoder RNG seed
+0 per image.
+
+SCOPE. This row covers the three values above. The clause's remaining
+items are dispositioned elsewhere rather than bundled here, because one
+citation covering four values covers a quarter of what it claims: the
+per-training-fold StandardScaler regime binds at ccd85c56816e with the rest
+of the ridge configuration, and the inherited canonical-graph constants
+(fold seed 42; rewire seed 0; matched-sparsity seed 0) are Stage 2A's,
+consumed as data through stage 1's cached topologies rather than set here."""
+production_consumers = """
+run_ladder_stage3.py::EXPECTED_REF_IDX and EXPECTED_FEATURE_DIM, and the
+same pair in run_ladder_stage1.py and run_ladder_stage2.py -- three rungs,
+three declarations, deliberately not shared, since a driver that agreed with
+the others by import could not detect a rung encoded under a different
+gauge. EXPECTED_FEATURE_DIM is written as `2 * EXPECTED_N_ACTIVE - 2` in all
+three, so the support size is the single propagation point.
+
+The gauge is not set by the driver: it ARRIVES as data, in stage 1's cached
+topologies (`meta["nodes_T"]["median"]`), and the driver's role is to refuse
+an artifact that disagrees. stage2b_encoder_gate.py::ENCODER_SEED is the
+seed's single point, consumed by run_ladder_stage1.py::step4_encoder_gate."""
+status = "enforced"
+enforcement = "tests/test_stage2b_ladder_stage3.py::test_topology_reuse_halts_when_the_gauge_node_is_not_the_locked_one"
+break_demonstrated = """
+`if ref_idx != EXPECTED_REF_IDX:` -> `if False:` in the production driver:
+test_topology_reuse_halts_when_the_gauge_node_is_not_the_locked_one FAILS.
+Its partner test_topology_reuse_accepts_the_locked_gauge_node still passes,
+so the halt is shown conditional rather than unconditional.
+
+WHAT DID NOT FAIL is the finding. test_corpus_constants -- `assert
+driver.EXPECTED_REF_IDX == 363` -- passed on the broken driver, because the
+literal was untouched and the halt consuming it was gone. Until the test
+named in `enforcement` was written for this row, that pin was the only thing
+watching the gauge, and it watches the constant rather than the decision.
+Same stream as the FOLD_SEED finding recorded at ccd85c56816e, different
+mechanism: this one fails when the literal moves, and is blind to the halt
+being deleted."""
+provenance_of_use = """
+Phase A's encoded artifact (`encoded_train_s1200`) was produced against
+stage 1's topologies object, whose summary_json carries median=363; the
+stage-3 driver re-reads that same object under a pinned digest, so the
+gauge in the artifact and the gauge the driver checks are the same bytes."""
+trigger = "ci-fast"
+
+[binding_value.15648e761c31]
+# DESIGN post-lock amendment (2026-08-06): "ENCODER_STEPS raised 150 -> 1200,
+#  and the gate formula gains an absolute-convergence escape."
+value = """
+ENCODER_STEPS = 1200, replacing the pre-lock 150. The amendment's own
+disclosure is the reason the value binds rather than merely being a
+default: the gate's first execution on real majority-censored KMNIST FAILED
+honestly at rho=169.851 against a threshold of 10, and 1200 is the step
+count the investigation settled on. A run encoded at any other count is not
+the run the design describes."""
+production_consumers = """
+Two independent declarations, and the duplication is load-bearing:
+
+  stage2b_encoder_gate.py::ENCODER_STEPS   what the encoder RUNS at,
+      consumed by run_ladder_stage1.py::step4_encoder_gate, which also
+      interpolates it into the gate artifact's OBJECT NAME
+      (`encoder_gate_s{steps}`) so a step-count change mints a new object
+      rather than reusing a cached verdict computed at the old count.
+  run_ladder_stage3.py::ENCODER_STEPS      what Phase B EXPECTS its input to
+      have been encoded at, consumed by step3_encoded_input against the
+      artifact's recorded fingerprint config, and by _obj to name the object
+      it fetches.
+
+A shared constant would make the second check tautological. The producer and
+the consumer assert the same number independently, which is what lets the
+consumer detect a producer that changed."""
+status = "enforced"
+enforcement = "tests/test_stage2b_ladder_stage3.py::test_encoded_input_halts_on_a_different_encoder_step_count"
+break_demonstrated = """
+`if int(config.get("encoder_steps", -1)) != ENCODER_STEPS:` -> `if False:`
+in the production driver: test_encoded_input_halts_on_a_different_encoder_step_count
+FAILS. Its partner, test_the_step_count_check_passes_before_the_image_count_check,
+still passes -- and it is the reason this pair is a verdict rather than a
+raise: the step cannot complete locally, so the healthy direction is shown
+by breaking the NEXT check and observing that the message names images,
+which is only reachable if the step-count check was evaluated and accepted.
+
+test_corpus_constants passed on the broken driver, same as at 30b820786974."""
+provenance_of_use = """
+The Phase A artifact is named `encoded_train_s1200` and its manifest's
+fingerprint config records `encoder_steps: 1200`; the stage-3 driver reads
+that config and compares. The step-1 gate artifact for the superseded count
+(`encoder_gate_s150`) survives in the bucket as the historical record of the
+FAIL that produced the amendment -- so both counts are attested, and which
+one produced which result is answerable from object names alone."""
 trigger = "ci-fast"
 
 [binding_value.ccd85c56816e]
