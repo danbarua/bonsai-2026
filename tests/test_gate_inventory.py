@@ -107,7 +107,7 @@ def test_clause_id_survives_reflowing_but_not_rewording(tmp_path):
 def test_an_unmapped_clause_is_a_finding(tmp_path):
     """The incident this exists for: a frozen HALT with no implementation."""
     clauses = derive_clauses([write_doc(tmp_path)], tmp_path)
-    findings = reconcile(clauses, {"reviewed": True, "binding": {}}, tmp_path)
+    findings = reconcile(clauses, {"reviewed": True, "binding_gate": {}}, tmp_path)
     assert kinds(findings) == ["undispositioned_candidate", "undispositioned_candidate"]
 
 
@@ -115,11 +115,11 @@ def test_a_mapping_for_a_clause_that_no_longer_exists_is_a_finding(tmp_path):
     """The other direction. Without it, editing a requirement leaves a
     mapping that describes nothing and nothing reports it."""
     clauses = derive_clauses([write_doc(tmp_path)], tmp_path)
-    inventory = {"binding": {c.clause_id: {"enforcement": "x.py::f",
+    inventory = {"binding_gate": {c.clause_id: {"enforcement": "x.py::f",
                                         "test": "t.py::t",
                                         "break_demonstrated": "yes"}
                           for c in clauses}}
-    inventory["binding"]["deadbeef1234"] = {"enforcement": "x.py::f",
+    inventory["binding_gate"]["deadbeef1234"] = {"enforcement": "x.py::f",
                                          "test": "t.py::t",
                                          "break_demonstrated": "yes"}
     findings = reconcile(clauses, inventory, tmp_path)
@@ -150,7 +150,7 @@ def test_a_fully_dispositioned_document_produces_no_findings(tmp_path):
     (tmp_path / "test_gate.py").write_text("def test_digest():\n    pass\n")
     clauses = derive_clauses([doc], tmp_path)
     inventory = {"reviewed": True,
-                 "binding": {c.clause_id: complete_row() for c in clauses}}
+                 "binding_gate": {c.clause_id: complete_row() for c in clauses}}
     assert reconcile(clauses, inventory, tmp_path) == []
 
 
@@ -169,7 +169,7 @@ def test_each_reviewer_dimension_is_required(tmp_path, dimension):
     clauses = derive_clauses([doc], tmp_path)
     row = complete_row()
     del row[dimension]
-    inventory = {"binding": {clauses[0].clause_id: row}}
+    inventory = {"binding_gate": {clauses[0].clause_id: row}}
     assert f"missing_{dimension}" in kinds(reconcile(clauses, inventory, tmp_path))
 
 
@@ -185,7 +185,7 @@ def test_two_identical_sentences_in_different_documents_collide_loudly(tmp_path)
     clauses = derive_clauses([a, b], tmp_path)
     assert len(clauses) == 2
     assert clauses[0].clause_id == clauses[1].clause_id, "fixture is wrong"
-    assert "id_collision" in kinds(reconcile(clauses, {"binding": {}}, tmp_path))
+    assert "id_collision" in kinds(reconcile(clauses, {"binding_gate": {}}, tmp_path))
 
 
 def test_a_narrow_marker_list_would_have_certified_two_percent(tmp_path):
@@ -212,7 +212,7 @@ def test_a_narrow_marker_list_would_have_certified_two_percent(tmp_path):
 
 def test_an_enforcement_site_that_does_not_exist_is_a_finding(tmp_path):
     clauses = derive_clauses([write_doc(tmp_path)], tmp_path)[:1]
-    inventory = {"binding": {clauses[0].clause_id: {
+    inventory = {"binding_gate": {clauses[0].clause_id: {
         "enforcement": "nonexistent.py::f", "test": "also_missing.py::t",
         "break_demonstrated": "yes"}}}
     assert "unresolved_enforcement" in kinds(reconcile(clauses, inventory, tmp_path))
@@ -223,7 +223,7 @@ def test_a_name_only_mentioned_in_a_comment_does_not_satisfy_a_citation(tmp_path
     comment is the `endswith` failure from the vacuous-test catalogue."""
     clauses = derive_clauses([write_doc(tmp_path)], tmp_path)[:1]
     (tmp_path / "gate.py").write_text("# verify_digest is not defined here\n")
-    inventory = {"binding": {clauses[0].clause_id: {
+    inventory = {"binding_gate": {clauses[0].clause_id: {
         "enforcement": "gate.py::verify_digest", "test": "gate.py::verify_digest",
         "break_demonstrated": "yes"}}}
     assert "unresolved_enforcement" in kinds(reconcile(clauses, inventory, tmp_path))
@@ -239,7 +239,7 @@ def test_a_mapping_without_break_evidence_is_a_finding(tmp_path):
     """
     clauses = derive_clauses([write_doc(tmp_path)], tmp_path)[:1]
     (tmp_path / "g.py").write_text("def f():\n    pass\n")
-    inventory = {"binding": {clauses[0].clause_id: {
+    inventory = {"binding_gate": {clauses[0].clause_id: {
         "enforcement": "g.py::f", "test": "g.py::f"}}}
     assert "missing_break_demonstrated" in kinds(reconcile(clauses, inventory, tmp_path))
 
@@ -255,7 +255,7 @@ def test_a_mapping_must_record_what_runs_its_test(tmp_path):
     """
     clauses = derive_clauses([write_doc(tmp_path)], tmp_path)[:1]
     (tmp_path / "g.py").write_text("def f():\n    pass\n")
-    inventory = {"binding": {clauses[0].clause_id: {
+    inventory = {"binding_gate": {clauses[0].clause_id: {
         "enforcement": "g.py::f", "test": "g.py::f",
         "break_demonstrated": "yes"}}}
     assert "missing_trigger" in kinds(reconcile(clauses, inventory, tmp_path))
@@ -270,12 +270,85 @@ def test_a_manual_only_trigger_is_reported_but_not_treated_as_absent(tmp_path):
     """
     clauses = derive_clauses([write_doc(tmp_path)], tmp_path)[:1]
     (tmp_path / "g.py").write_text("def f():\n    pass\n")
-    inventory = {"binding": {clauses[0].clause_id: {
+    inventory = {"binding_gate": {clauses[0].clause_id: {
         "enforcement": "g.py::f", "test": "g.py::f",
         "break_demonstrated": "yes", "trigger": "manual"}}}
     found = kinds(reconcile(clauses, inventory, tmp_path))
     assert "manual_trigger_only" in found
     assert "missing_trigger" not in found
+
+
+def test_a_frozen_value_is_not_asked_for_a_decision_consequence(tmp_path):
+    """A constant has no runtime decision and no production path to reach.
+
+    Measured over the real record, 21 of 89 candidates are frozen values.
+    Demanding `decision_consequence` for them would demand fiction, and the
+    only ways to satisfy a seven-field schema would be to call them
+    not-binding (false -- they are among the most binding things there) or
+    to invent the field, which is the confabulation a model was refused for.
+    """
+    doc = write_doc(tmp_path, "# P\n\nALPHA_BAR is frozen at 0.5.\n")
+    (tmp_path / "t.py").write_text("def test_alpha():\n    pass\n")
+    clauses = derive_clauses([doc], tmp_path)
+    inventory = {"reviewed": True, "binding_value": {clauses[0].clause_id: {
+        "value": "0.5",
+        "enforcement": "t.py::test_alpha",
+        "break_demonstrated": "changed the constant, test failed",
+        "trigger": "ci-fast"}}}
+    assert reconcile(clauses, inventory, tmp_path) == []
+
+
+def test_a_process_promise_needs_no_code_fields_at_all(tmp_path):
+    """54 of 89 candidates bind what may be CLAIMED, not what code does.
+
+    "Must never be reported as a random sample" has no enforcement point,
+    because the binding is on a human writing a paragraph. Forcing it into
+    a code schema fabricates a mapping.
+    """
+    doc = write_doc(
+        tmp_path, "# P\n\nThe control must never be reported as random.\n")
+    clauses = derive_clauses([doc], tmp_path)
+    inventory = {"reviewed": True, "binding_claim": {clauses[0].clause_id: {
+        "discharged_in": "FINDINGS.md, scope paragraph"}}}
+    assert reconcile(clauses, inventory, tmp_path) == []
+
+
+def test_unenforceable_promises_are_listed_not_netted_into_coverage(tmp_path):
+    """The part that matters most.
+
+    A reconciler reporting "89/89 covered" while 54 of those are human
+    promises has produced exactly the green-that-means-nothing this
+    requirement exists to prevent. Their value is that somebody READS them
+    before release, so they must survive as a list.
+    """
+    doc = write_doc(
+        tmp_path, "# P\n\nThe control must never be reported as random.\n")
+    clauses = derive_clauses([doc], tmp_path)
+    inventory = {"reviewed": True, "binding_claim": {clauses[0].clause_id: {
+        "discharged_in": "FINDINGS.md"}}}
+    listed = gate_inventory.unenforceable(clauses, inventory)
+    assert [c.clause_id for c in listed] == [clauses[0].clause_id]
+    # And it still counts as dispositioned -- the point is that it is
+    # visible, not that it is excluded from review.
+    assert gate_inventory.coverage(clauses, inventory) == (1, 1)
+
+
+def test_a_gate_row_is_not_listed_as_unenforceable(tmp_path):
+    """Non-vacuity for the case above: it would pass on an `unenforceable`
+    that returned every clause."""
+    doc = write_doc(tmp_path, "# P\n\nThe driver MUST verify the digest.\n")
+    clauses = derive_clauses([doc], tmp_path)
+    inventory = {"reviewed": True,
+                 "binding_gate": {clauses[0].clause_id: complete_row()}}
+    assert gate_inventory.unenforceable(clauses, inventory) == []
+
+
+def test_relative_document_paths_work(tmp_path, monkeypatch):
+    """The first thing anyone types is the relative form, and it crashed."""
+    write_doc(tmp_path, "# P\n\nThe driver MUST verify the digest.\n")
+    clauses = derive_clauses([Path("DESIGN.md")], tmp_path)
+    assert len(clauses) == 1
+    assert clauses[0].doc == "DESIGN.md"
 
 
 def test_an_unreviewed_inventory_cannot_pass_however_complete_it_looks(tmp_path):
@@ -291,14 +364,14 @@ def test_an_unreviewed_inventory_cannot_pass_however_complete_it_looks(tmp_path)
     (tmp_path / "test_gate.py").write_text("def test_digest():\n    pass\n")
     clauses = derive_clauses([doc], tmp_path)
     complete_but_undeclared = {
-        "binding": {c.clause_id: complete_row() for c in clauses}}
+        "binding_gate": {c.clause_id: complete_row() for c in clauses}}
     assert "unreviewed_inventory" in kinds(
         reconcile(clauses, complete_but_undeclared, tmp_path))
 
 
 def test_an_exemption_needs_a_reason(tmp_path):
     clauses = derive_clauses([write_doc(tmp_path)], tmp_path)[:1]
-    inventory = {"binding": {}, "not_binding": {clauses[0].clause_id: {}}}
+    inventory = {"binding_gate": {}, "not_binding": {clauses[0].clause_id: {}}}
     assert "unreasoned_disposition" in kinds(reconcile(clauses, inventory, tmp_path))
 
 
@@ -338,7 +411,7 @@ def test_a_clean_reconciliation_exits_zero(tmp_path):
     inventory = tmp_path / "gates.toml"
     inventory.write_text(
         'reviewed = true\n'
-        f'[binding."{clause.clause_id}"]\n'
+        f'[binding_gate."{clause.clause_id}"]\n'
         f'enforcement = "g.py::f"\n'
         f'production_reachability = "called by the stage3 driver"\n'
         f'input_wiring = "digest from BONSAI_DRIVER_SHA256"\n'

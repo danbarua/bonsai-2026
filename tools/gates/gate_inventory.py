@@ -116,9 +116,15 @@ def derive_clauses(docs: list[Path], repo_root: Path = REPO_ROOT) -> list[Clause
     """
     clauses: list[Clause] = []
     for doc in docs:
+        # Resolved against the root before use: the first thing anyone types
+        # is the relative form, and `relative_to` raises on it.
+        doc = doc if doc.is_absolute() else (repo_root / doc)
         if not doc.exists():
             continue
-        rel = doc.relative_to(repo_root).as_posix()
+        try:
+            rel = doc.resolve().relative_to(repo_root.resolve()).as_posix()
+        except ValueError:
+            rel = doc.as_posix()  # a document outside the tree still scans
         paragraph: list[str] = []
         start = 0
         in_fence = False
@@ -201,6 +207,18 @@ def _resolve(reference: str, repo_root: Path) -> tuple[bool, str]:
 # predicate that production never invokes is not an implemented gate, and
 # that is a failure. Collapsing the two would let "somebody runs it by hand"
 # stand in for "production actually calls it".
+# **Three kinds of binding, because a frozen protocol contains three kinds
+# of promise.** Measured over this project's record: of 89 candidates, 14
+# are runtime gates, 21 are frozen values, and 54 bind what may be CLAIMED
+# rather than what the program does. A single seven-field schema forces the
+# latter 75 into one of two lies -- `not_binding`, which is false since they
+# are among the most binding things in the record, or `binding` with
+# invented `decision_consequence` prose for clauses that have no runtime
+# decision at all. The second is the confabulation this design refused a
+# model for; writing it by hand is not better.
+_REQUIRED_BY_KIND: dict[str, dict[str, str]] = {}
+
+
 _REQUIRED_DIMENSIONS = {
     "enforcement": "(1) the executable predicate",
     "production_reachability": "(2) the production path(s) that reach it, "
@@ -217,6 +235,28 @@ _REQUIRED_DIMENSIONS = {
                           "reference, or test that merely names the predicate "
                           "does not qualify",
     "trigger": "what schedules the test (separate axis from reachability)",
+}
+
+_REQUIRED_BY_KIND["binding_gate"] = _REQUIRED_DIMENSIONS
+
+# A frozen constant has no runtime decision and no production path to
+# reach: nothing rejects anything. Its enforcement is a test asserting the
+# value, and demanding `decision_consequence` for it would be demanding
+# fiction.
+_REQUIRED_BY_KIND["binding_value"] = {
+    "value": "the frozen value itself, as written in the document",
+    "enforcement": "the test that asserts it",
+    "break_demonstrated": "evidence that test fails when the value drifts",
+    "trigger": "what schedules that test",
+}
+
+# Binding on what may be CLAIMED, not on what the program does -- "must
+# never be reported as a random sample", "no metric may be added or dropped
+# after results exist". No code path can enforce these, and pretending one
+# could is the failure this whole requirement exists to prevent.
+_REQUIRED_BY_KIND["binding_claim"] = {
+    "discharged_in": "where in the write-up this promise is kept, so a "
+                     "reader can check it before the package goes out",
 }
 
 
@@ -267,8 +307,12 @@ def reconcile(clauses: list[Clause], inventory: dict,
             "machine-generated or half-finished -- cannot produce a clean "
             "run no matter what its rows contain"))
 
-    binding = inventory.get("binding", {})
+    dispositions: dict[str, tuple[str, dict]] = {}
+    for kind in _REQUIRED_BY_KIND:
+        for clause_id, entry in inventory.get(kind, {}).items():
+            dispositions[clause_id] = (kind, entry)
     not_binding = inventory.get("not_binding", {})
+    binding = {cid: entry for cid, (_, entry) in dispositions.items()}
     by_id = {clause.clause_id: clause for clause in clauses}
 
     # Direction 1: every candidate carries an explicit DISPOSITION.
@@ -297,12 +341,12 @@ def reconcile(clauses: list[Clause], inventory: dict,
                 f"documents -- the sentence was reworded or removed, and its "
                 f"disposition no longer describes anything"))
 
-    for clause_id, entry in binding.items():
-        for dimension, description in _REQUIRED_DIMENSIONS.items():
+    for clause_id, (kind, entry) in dispositions.items():
+        for dimension, description in _REQUIRED_BY_KIND[kind].items():
             if not entry.get(dimension):
                 findings.append(Finding(
                     f"missing_{dimension}",
-                    f"{clause_id} has no `{dimension}` -- {description}"))
+                    f"{clause_id} [{kind}] has no `{dimension}` -- {description}"))
         # Only the two code references are machine-checkable; the rest are
         # prose claims a human makes and a reviewer reads. Checking what can
         # be checked is not the same as validating the row, and this tool
@@ -335,10 +379,24 @@ def reconcile(clauses: list[Clause], inventory: dict,
 
 def coverage(clauses: list[Clause], inventory: dict) -> tuple[int, int]:
     """(dispositioned, total candidates). The floor a readiness run asserts."""
-    dispositioned = set(inventory.get("binding", {})) | set(
-        inventory.get("not_binding", {}))
+    dispositioned = set(inventory.get("not_binding", {}))
+    for kind in _REQUIRED_BY_KIND:
+        dispositioned |= set(inventory.get(kind, {}))
     ids = {clause.clause_id for clause in clauses}
     return len(ids & dispositioned), len(ids)
+
+
+def unenforceable(clauses: list[Clause], inventory: dict) -> list[Clause]:
+    """Clauses dispositioned as promises no code can keep.
+
+    Surfaced rather than netted out, and this is the point rather than a
+    presentation choice. A reconciler reporting "89/89 covered" while 54 of
+    those are human promises has produced exactly the green-that-means-
+    nothing the requirement exists to prevent. Their value is that somebody
+    READS the list before a package goes out, not that a tool blessed them.
+    """
+    claims = set(inventory.get("binding_claim", {}))
+    return [clause for clause in clauses if clause.clause_id in claims]
 
 
 def main(argv=None) -> int:
@@ -354,10 +412,21 @@ def main(argv=None) -> int:
     findings = reconcile(clauses, inventory, args.root)
     done, total = coverage(clauses, inventory)
 
+    claims = unenforceable(clauses, inventory)
     print(f"candidates derived : {total}")
     print(f"dispositioned      : {done}")
-    print(f"  binding          : {len(inventory.get('binding', {}))}")
-    print(f"  not binding      : {len(inventory.get('not_binding', {}))}")
+    for kind in _REQUIRED_BY_KIND:
+        print(f"  {kind:<16} : {len(inventory.get(kind, {}))}")
+    print(f"  not_binding      : {len(inventory.get('not_binding', {}))}")
+
+    if claims:
+        # Printed in full, every time, and never folded into the coverage
+        # figure above. These are promises a person keeps.
+        print(f"\nUNENFORCEABLE BY CONSTRUCTION -- {len(claims)} clause(s) "
+              f"bind what may be claimed, not what the program does. No code "
+              f"gates these; a reader must check them before release:")
+        for clause in claims:
+            print(f"  {clause.doc}:{clause.line}  {clause.text[:100]}")
 
     if not clauses:
         # A run over zero candidates reports zero findings and looks clean.
