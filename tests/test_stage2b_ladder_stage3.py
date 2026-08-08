@@ -489,3 +489,82 @@ def test_probe_publication_failure_never_masks_the_halt(driver, tree):
         assert not raises_inside, (
             "the halt is raised inside the try/except that guards publication, "
             "so a publish failure would swallow it")
+
+
+# ---- the amended grid, and the silent-reuse trap it would otherwise spring ----
+
+def test_alpha_grid_is_the_amended_thirteen_decades(driver):
+    import stage2b_ridge as ridge
+    assert len(ridge.ALPHA_GRID) == 13
+    assert min(ridge.ALPHA_GRID) == 1e-6 and max(ridge.ALPHA_GRID) == 1e6
+
+
+def test_sklearn_multiplier_follows_the_grid(driver):
+    """455 = 7 x 5 x 13. A multiplier left at 315 would under-project the
+    dominant cost leg by 44% on the very run the probe exists to size."""
+    import stage2b_conditions as conditions
+    import stage2b_ridge as ridge
+    n_conditions = len(conditions.ALL_CONDITIONS) + len(driver.RAW_CONDITIONS)
+    assert driver.PROBE_SKLEARN_FIT_COUNT == (
+        n_conditions * ridge.N_SPLITS * len(ridge.ALPHA_GRID)) == 455
+
+
+def test_grid_tag_changes_when_the_grid_changes(driver):
+    """The guard against a silent no-op re-run.
+
+    `ridge_cv.json` from the nine-decade run is already in the bucket WITH
+    a valid manifest, and `ensure_json` passes no `expected_fingerprint` --
+    so an untagged name would hit `ensure_artifact`'s skip branch, hand
+    back the SUPERSEDED results, recompute nothing and report STAGE3_OK.
+
+    Derived, not hand-set: any change to the grid must move the name."""
+    nine = (1e-2, 1e-1, 1.0, 10.0, 1e2, 1e3, 1e4, 1e5, 1e6)
+    thirteen = (1e-6, 1e-5, 1e-4, 1e-3, *nine)
+    assert driver.grid_tag(nine) != driver.grid_tag(thirteen)
+    # stable for the same grid, and order-sensitive
+    assert driver.grid_tag(thirteen) == driver.grid_tag(list(thirteen))
+    assert driver.grid_tag(thirteen) != driver.grid_tag(tuple(reversed(thirteen)))
+    # a single changed value moves it too
+    almost = (1e-6, 1e-5, 1e-4, 1e-3, 1e-2, 1e-1, 1.0, 10.0, 1e2, 1e3,
+              1e4, 1e5, 1e7)
+    assert driver.grid_tag(almost) != driver.grid_tag(thirteen)
+    assert driver.grid_tag(thirteen).startswith("g13_")
+
+
+def test_ridge_artifact_names_carry_the_grid_tag(tree):
+    """Both ridge artifacts, not just one: a tagged cv table beside an
+    untagged final would leave the final silently reused."""
+    source = DRIVER_PATH.read_text()
+    assert 'f"ridge_cv_{tag}"' in source
+    assert 'f"ridge_final_{tag}"' in source
+    # Only OBJECT-NAME construction may not use the untagged kind. The bare
+    # strings still appear as record keys (`record["ridge_final"]`), which
+    # are internal and carry no reuse risk -- an earlier version of this
+    # assertion banned the substring outright and failed on exactly that.
+    assert '_obj(mods, "ridge_cv"' not in source
+    assert '_obj(mods, "ridge_final"' not in source
+
+
+def test_the_nine_decade_artifacts_are_not_reachable_by_the_new_names(driver):
+    """Concretely: the name this run will write differs from the name Phase
+    B wrote, so the old tables survive as history untouched."""
+    import stage2b_gcs as gcs
+    import stage2b_ridge as ridge
+    tag = driver.grid_tag(ridge.ALPHA_GRID)
+    new = gcs.object_path(stage=3, condition=None, kind=f"ridge_cv_{tag}",
+                          ext="json", split="train")
+    old = "stage2b/train/stage3/common/ridge_cv.json"
+    assert new != old
+    assert gcs.artifact_class(new) == gcs.LINEAGE
+
+
+# ---- the smoke-or-skip decision is explicit and recorded ----
+
+def test_stats_smoke_decision_is_explicit_and_carries_its_reason(driver):
+    """PHASE_B_PLAN.md's forward rule. Phase B's own deviation was
+    invisible precisely because nothing recorded that a choice was made."""
+    assert driver.STATS_SMOKE in ("run", "skip")
+    assert driver.STATS_SMOKE == "skip"
+    reason = driver.STATS_SMOKE_REASON
+    assert "776.6" in reason and "non-inferential" in reason
+    assert len(reason) > 100, "a decision without a reason is an omission"

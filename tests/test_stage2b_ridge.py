@@ -508,8 +508,23 @@ def test_select_alpha_tie_across_three_picks_largest_of_the_tied_set():
 
 
 def test_select_alpha_uses_locked_grid_and_tolerance():
-    assert ridge.ALPHA_GRID == (1e-2, 1e-1, 1.0, 10.0, 1e2, 1e3, 1e4, 1e5, 1e6)
+    """The grid as AMENDED post-lock after feasibility stage 3 Phase B --
+    see DESIGN.md's Review history for the ruling and its provenance. The
+    original nine-decade grid is superseded, not merely widened: six of
+    seven conditions selected its minimum at n=60,000.
+
+    Spacing is asserted as exactly one value per decade, because the
+    no-interpolation clause is what makes the extension one-shot rather
+    than the first step of a widen-look-widen loop."""
+    assert ridge.ALPHA_GRID == (1e-6, 1e-5, 1e-4, 1e-3, 1e-2, 1e-1, 1.0,
+                                10.0, 1e2, 1e3, 1e4, 1e5, 1e6)
     assert ridge.ALPHA_TIE_TOL == 1e-10
+
+    exponents = [np.log10(a) for a in ridge.ALPHA_GRID]
+    steps = np.diff(exponents)
+    np.testing.assert_allclose(steps, 1.0, atol=1e-12,
+                               err_msg="grid spacing is no longer one per decade")
+    assert len(ridge.ALPHA_GRID) == 13
 
 
 def test_select_alpha_rejects_non_finite_mse():
@@ -525,7 +540,7 @@ def test_cross_validate_alpha_reproducible_and_shapes():
     r2 = ridge.cross_validate_alpha(X, Y, y)
     assert r1["alpha"] == r2["alpha"]
     np.testing.assert_array_equal(r1["mean_clipped_val_mse"], r2["mean_clipped_val_mse"])
-    assert r1["fold_clipped_val_mse"].shape == (5, 9)
+    assert r1["fold_clipped_val_mse"].shape == (5, len(ridge.ALPHA_GRID))
     assert r1["fold_cond"].shape == (5,)
     assert np.all(r1["fold_mean_x_norm"] < r1["fold_mean_x_tol"])
 

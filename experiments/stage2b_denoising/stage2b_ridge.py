@@ -9,7 +9,7 @@ production path, sklearn as oracle" section exactly.
     b_alpha  = mean(Y_train) - mean(X_train) @ W_alpha
 
 One thin SVD per (fold, condition) of the standardized training
-features; all nine alphas evaluated from that single decomposition. The
+features; all thirteen alphas evaluated from that single decomposition. The
 general intercept expression is what is implemented -- not the
 `b_alpha = mean(Y_train)` shortcut that it normally reduces to after
 standardization, which would silently stop being correct if the scaler
@@ -66,7 +66,19 @@ if jnp.zeros(1, dtype=jnp.float64).dtype != jnp.float64:  # pragma: no cover
         "float32, which DESIGN.md's dtype table explicitly rules out.")
 
 # ---- Locked constants (DESIGN.md, "Readout") ----
-ALPHA_GRID = (1e-2, 1e-1, 1.0, 10.0, 1e2, 1e3, 1e4, 1e5, 1e6)
+# Thirteen decades, exact spacing, amended post-lock after feasibility
+# stage 3 Phase B -- see DESIGN.md's Review history for the ruling, its
+# provenance and the frozen one-shot procedure. The original grid was
+# {1e-2 .. 1e6}; six of seven conditions selected its MINIMUM at n=60,000,
+# asymmetrically across the treatment/control line, leaving the optimum
+# unbracketed for exactly the conditions being compared.
+#
+# No interpolation, no densification around an observed minimum, ever.
+# That clause is what makes the extension one-shot rather than the first
+# step of a widen-look-widen loop whose stopping rule gets chosen after
+# seeing results.
+ALPHA_GRID = (1e-6, 1e-5, 1e-4, 1e-3, 1e-2, 1e-1, 1.0, 10.0, 1e2, 1e3,
+              1e4, 1e5, 1e6)
 ALPHA_TIE_TOL = 1e-10      # "mean validation MSE within 1e-10 absolute"
 N_SPLITS = 5
 FOLD_SEED = 42
@@ -525,7 +537,7 @@ def oof_per_image_mse(X, Y, y_strat, alphas=ALPHA_GRID, n_splits=N_SPLITS,
     per budget) -- are then served from a single pass of five SVDs, and
     the reselected regime's own alpha is not known until
     `cross_validate_alpha` has run. The cost is nil: per-image error for
-    all nine alphas is `(n, 9)` float64, 4.3 MB at n=60,000.
+    all thirteen alphas is `(n, 13)` float64, 6.2 MB at n=60,000.
 
     Predictions themselves are not returned, and per-image error is not
     reconstructible from them afterwards without keeping them: one

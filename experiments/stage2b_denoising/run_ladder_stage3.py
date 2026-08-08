@@ -153,7 +153,7 @@ PINNED_SHA256 = {
 # `sklearn_ridge_predict`, which fits `Ridge(solver="svd")` once per alpha
 # on the CPU -- 315 oracle SVDs against 35 production ones.
 PROBE_JAX_SVD_COUNT = 42       # DESIGN.md's accounting: 35 fold-level + 7 refits
-PROBE_SKLEARN_FIT_COUNT = 315  # 7 conditions x 5 folds x 9 alphas
+PROBE_SKLEARN_FIT_COUNT = 455  # 7 conditions x 5 folds x 13 alphas
 PROBE_RIDGE_BUDGET_S = 7_200.0
 PROBE_RUN_BUDGET_S = 9_000.0
 PROBE_DEVICE_PEAK_BUDGET_BYTES = 12 * 1024**3
@@ -412,6 +412,40 @@ def ensure_text(mods, bucket, object_name, compute, *, fingerprint=None, parents
 def _obj(mods, kind, ext, condition=None, stage=LADDER_STAGE):
     return mods.gcs.object_path(stage=stage, condition=condition, kind=kind,
                                 ext=ext, split=SPLIT)
+
+
+def grid_tag(alphas):
+    """A short, stable identity for an alpha grid, e.g. `g13_4f2a9c01`.
+
+    ## Why the ridge artifacts are named by their grid
+
+    Without this the amended-grid re-run is a silent no-op, and that is not
+    hypothetical -- it is what this code did before the tag existed.
+    `ridge_cv.json` and `ridge_final.npz` from the nine-decade run are
+    already in the bucket WITH valid manifests, and `ensure_json` does not
+    pass `expected_fingerprint`, so `ensure_artifact`'s skip branch would
+    validate them happily and hand back the superseded results. The re-run
+    would recompute nothing, splice nothing, and report `STAGE3_OK`.
+
+    That failure satisfies the ruling's "do not splice" clause by accident
+    -- nothing was spliced because nothing was computed -- which is exactly
+    the shape of a result that looks clean and means nothing.
+
+    ## Why it is DERIVED rather than a constant
+
+    A hand-set `_g13` suffix would be a list standing in for a derivable
+    set: correct today, silently wrong at the next grid change, and wrong
+    in the direction of reusing stale numbers. The tag is a digest of the
+    grid itself, so any change to `ALPHA_GRID` -- adding a decade, changing
+    one value, reordering -- produces a different object name automatically
+    and the old artifact is left untouched as history. The write-once
+    invariant then holds by construction rather than by remembering.
+
+    The length is included in the readable prefix because `g13` is the part
+    a human scanning a bucket listing will actually use."""
+    canonical = ",".join(repr(float(a)) for a in alphas)
+    digest = hashlib.sha256(canonical.encode("utf-8")).hexdigest()[:8]
+    return f"g{len(tuple(alphas))}_{digest}"
 
 
 def consume_pinned(mods, bucket, object_name, pin_key, local_path=None):
@@ -976,7 +1010,7 @@ def step6_features(mods, bucket, theta0_505, evolved, topo, corr, corpus, ref_id
 
 
 def step7_ridge(mods, bucket, features, Y, y_strat, record, fp, parents_by_condition):
-    """5-fold CV over the nine-alpha grid, seven conditions, plus Decision
+    """5-fold CV over the thirteen-alpha grid, seven conditions, plus Decision
     2's equivalence extension.
 
     ## What the equivalence check is at this scale, stated before it runs
@@ -1009,7 +1043,7 @@ def step7_ridge(mods, bucket, features, Y, y_strat, record, fp, parents_by_condi
                "alpha_column_convention": (
                    "fold_kappa_alpha / fold_coef_norm are indexed at the SELECTED "
                    "alpha_index under the fixed-alpha regime; the *_by_alpha arrays "
-                   "carry all nine columns for the reselected regime.")}
+                   "carry all thirteen columns for the reselected regime.")}
         for condition in conditions:
             entry = {}
             X = features[condition]
@@ -1052,8 +1086,10 @@ def step7_ridge(mods, bucket, features, Y, y_strat, record, fp, parents_by_condi
             out["conditions"][condition] = entry
         return out
 
-    cv_json, _ = ensure_json(mods, bucket, _obj(mods, "ridge_cv", "json"), compute_cv,
-                             fingerprint=fp, parents=parents_by_condition.get("all"))
+    tag = grid_tag(mods.ridge.ALPHA_GRID)
+    cv_json, _ = ensure_json(mods, bucket, _obj(mods, f"ridge_cv_{tag}", "json"),
+                             compute_cv, fingerprint=fp,
+                             parents=parents_by_condition.get("all"))
     record["gates"]["ridge"] = cv_json
     if cv_json["halt_reasons"]:
         raise Stage3Halt("ridge: " + "; ".join(cv_json["halt_reasons"]))
@@ -1071,8 +1107,9 @@ def step7_ridge(mods, bucket, features, Y, y_strat, record, fp, parents_by_condi
         arrays["summary_json"] = np.array(_dumps(meta))
         return arrays
 
-    final, _ = ensure_npz(mods, bucket, _obj(mods, "ridge_final", "npz"), compute_final,
-                          fingerprint=fp, parents=parents_by_condition.get("all"))
+    final, _ = ensure_npz(mods, bucket, _obj(mods, f"ridge_final_{tag}", "npz"),
+                          compute_final, fingerprint=fp,
+                          parents=parents_by_condition.get("all"))
     record["ridge_final"] = json.loads(final["summary_json"].item())
     return cv_json, final
 
@@ -1162,10 +1199,45 @@ def step8_cnn(mods, bucket, corpus, topo, corr, record, fp, parents):
     return cnn_npz, summary
 
 
+# The smoke-or-skip decision for THIS session, stated rather than
+# inherited -- PHASE_B_PLAN.md's forward rule, added after Phase B ran it
+# unconditionally without recording that stage 2 had skipped it.
+#
+# SKIP, for the amended-grid re-run. Ruled by Dan ("unanimous SKIP") and
+# endorsed by the orchestrator on the reasoning below: the smoke is
+# in-sample, training-side and non-inferential by construction; it was
+# already exercised end to end at exactly this scale during Phase B; and it
+# cost 776.6 s there, 18% of that run, on a metered A100. Re-running it
+# would re-prove machinery that is already proven at n=60,000 and buy
+# nothing the re-run is for.
+#
+# A later session flips this by changing the constant AND saying why in its
+# own plan -- never by inheriting whichever value it was copied from.
+STATS_SMOKE = "skip"
+STATS_SMOKE_REASON = (
+    "SKIP: in-sample, non-inferential machinery already exercised end to end "
+    "at n=60,000 during Phase B (776.6 s, 18% of that run). The amended-grid "
+    "re-run recomputes the ridge only; the smoke would re-prove proven "
+    "machinery on a metered A100. Explicit per-session decision under "
+    "PHASE_B_PLAN.md's forward rule; ruled by Dan, endorsed by the "
+    "orchestrator.")
+
+
 def step9_stats_smoke(mods, bucket, final, corr, corpus, topo, record, fp, parents):
     """The stats machinery exercised end to end, in-sample and
     non-inferential, exactly as at stages 1 and 2. Not a result, and the
-    banner says so in the artifact itself."""
+    banner says so in the artifact itself.
+
+    Runs or skips according to `STATS_SMOKE`, and RECORDS the decision
+    either way. A skip that leaves no trace is indistinguishable from a
+    step that was forgotten, which is the failure the forward rule exists
+    to prevent -- Phase B's own deviation was invisible precisely because
+    nothing recorded that a choice had been made."""
+    if STATS_SMOKE == "skip":
+        record["stats_smoke"] = {"skipped": True, "decision": STATS_SMOKE,
+                                 "reason": STATS_SMOKE_REASON}
+        say(f"stats smoke SKIPPED by explicit decision -- {STATS_SMOKE_REASON}")
+        return None
     n = corpus["images_01"].shape[0]
     active_indices = np.asarray(topo["active_indices"])
     diag = mods.corruption.corruption_diagnostics(
@@ -1352,8 +1424,9 @@ def main():
                       parent_map(mods, bucket, (corpus_name, corr_name)))
         with timed_step("9_stats_smoke", record["timings"]):
             step9_stats_smoke(mods, bucket, final, corr, corpus, topo, record, fp,
-                              parent_map(mods, bucket,
-                                         (_obj(mods, "ridge_final", "npz"),)))
+                              parent_map(mods, bucket, (_obj(
+                                  mods, f"ridge_final_{grid_tag(mods.ridge.ALPHA_GRID)}",
+                                  "npz"),)))
 
         record["verdict"] = OK_SENTINEL
     except Stage3Halt as halt:
