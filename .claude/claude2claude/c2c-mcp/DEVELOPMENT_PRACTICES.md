@@ -355,3 +355,105 @@ clause while the result still reads complete. Knowing who wrote something
 tells you nothing about whether it arrived whole — which is why the
 mitigation is `.claude/claude2claude/mailbox-tools/check_transit_integrity.py` rather than a
 provenance field.
+
+## A trust header set CONDITIONALLY must be deleted unconditionally first
+
+`src/proxy.ts` forwards every client header that isn't hop-by-hop. Two
+headers it adds are the backend's only way to tell where a request came
+from, and they need opposite handling for the same reason.
+
+`x-c2c-via-proxy` is safe because it is overwritten on **every** request,
+always to `"1"`. A client sending its own copy cannot change the outcome.
+
+`x-c2c-verified` is set **only when a signature verified**. Overwriting
+does not apply — on the failure path there is nothing to write. So without
+an explicit `delete headers[VERIFIED_HEADER]` before the conditional set, a
+caller can simply send `x-c2c-verified: github` themselves, and it rides
+through `filteredHeaders` untouched into a backend that treats it as proof
+the proxy vouched for the request.
+
+The rule generalises past this file: **an unconditional overwrite is
+self-protecting, a conditional set is not.** Any header that means "this
+component checked something" belongs in the second category and needs the
+delete.
+
+Confirmed by removing the one line and watching `test/webhook-proxy.sh`'s
+forgery case report `expected [ABSENT], got [github]` — not by reading it.
+
+## The only component that can verify a signature is the one without a parser
+
+GitHub signs the raw request bytes. The natural place to check that looks
+like the backend route that handles the webhook, and that place cannot do
+it: `createMcpExpressApp` applies `express.json()` at app creation, so
+`req.body` is parsed before any route we add ever runs, and re-serialising a
+parsed body does not reproduce the signed bytes — key order, whitespace and
+unicode escaping all differ.
+
+`src/proxy.ts` is a pure `node:http` pipe with no body parser anywhere, so
+it still holds them. Verification lives there, and the backend consumes a
+verdict rather than re-deriving one.
+
+Two constraints follow, both non-obvious:
+
+- **Buffer only what you must.** Computing an HMAC needs the whole body, but
+  buffering everything breaks SSE and the MCP transport, whose correctness
+  on the far leg depends on unbuffered piping. Only requests carrying a
+  known signature header are buffered.
+- **Cap the buffer.** Reading an arbitrary body into memory to verify it is a
+  denial-of-service primitive. The cap defaults to GitHub's own 25 MB
+  delivery limit.
+
+And an implementation detail that cost a test cycle: rejecting an oversized
+body with `req.destroy()` tears down the socket before the 413 can be
+written, so the client sees no status at all (curl reports HTTP 000). Pause,
+answer, then close.
+
+## A same-second collision counter lands inside the `--from-` slug
+
+`sendMessage` resolves same-second filename collisions with a `-2`, `-3`
+suffix at the **end of the whole filename**. When a message has no `--to-`
+segment — every broadcast — that counter sits immediately after the sender
+slug, so `--from-no-reply-2.md` parses as the sender `no-reply-2`.
+
+Any exact-match test on the parsed sender therefore misses every message
+after the first within a given second. Measured: three webhook deliveries in
+one second, two of which archived themselves instead of being deleted. CI
+sends bursts, so this was the common case, not an edge one.
+
+`isFromNoReply` strips a trailing counter, and only when no `--to-` is
+present, because with an addressee the counter attaches to the to-slug and
+the from-slug is already clean. The accepted trade is documented at the call
+site: a real session named `no-reply-<digits>` would be treated as the
+reserved sender.
+
+The same hazard is latent in `excludeSelfSent`, which compares the parsed
+from-slug against the reader's own name — a session's own broadcast, if it
+collided, would not be recognised as its own.
+
+**Related, still unfixed:** that collision loop checks the mailbox only,
+never `archive/`. A same-second re-send from the same sender, after the
+first was archived, produces an identical filename and `fs.rename`
+overwrites the archived copy without complaint. Rare, but it is silent loss
+from the digest corpus.
+
+## Two files that must agree on a string literal need a test, not a comment
+
+`x-c2c-via-proxy` and `x-c2c-verified` are each defined as a bare literal in
+more than one file. That is deliberate: `src/proxy.ts` must keep its
+zero-dependency standalone build, so it cannot import a constant from
+`oauth.ts` or `index.ts` without dragging express's types onto a VM that has
+nothing but `node:http`.
+
+Renaming one copy and not the other fails **closed and silently** — the
+backend looks for a header the proxy no longer sets, every verified webhook
+401s, and it presents as a signing problem. `test/header-constants.sh`
+derives every definition from the sources and asserts each constant resolves
+to exactly one value, that it is still defined in at least two files (so the
+check cannot pass by agreeing with itself after a deletion), and that no
+source file inlines an `x-c2c-*` literal outside those definitions.
+
+That last assertion was written wrong the first time: it filtered grep
+output on the header VALUE, which excluded every hit and made the check
+vacuous. It passed against a deliberately inlined literal. Only
+break-testing surfaced it — a guard written to enforce principle 21, failing
+principle 10.

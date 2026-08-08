@@ -252,8 +252,10 @@ Everything else forwards through unbuffered (no request/response
 buffering, hop-by-hop headers stripped per RFC 7230), which is what
 lets Streamable HTTP's SSE-framed responses come through intact.
 
-**The proxy itself is still a dumb, unauthenticated pipe.** Anyone who
-can reach the VM can reach c2c-mcp's HTTP surface. What sits behind
+**The proxy is a dumb pipe everywhere except signed webhooks.** Anyone
+who can reach the VM can reach c2c-mcp's HTTP surface. The one thing
+the proxy inspects is a provider signature header (see Webhooks
+below); everything else it forwards unread and unbuffered. What sits behind
 that surface is real auth now (see below) -- `/mcp` itself rejects
 public traffic with no valid token -- but the `/authorize`,
 `/register`, and `/token` endpoints are necessarily reachable by
@@ -262,6 +264,119 @@ attacker can still burn cycles hitting those, just not read or write
 either mailbox without completing consent. A firewall allowlist or a
 reverse-proxy IP restriction in front of the VM is still worth doing
 if you want to shrink that surface further.
+
+## Webhooks: `POST /webhook`
+
+An external event (a CI run finishing, a push) becomes an ordinary
+`code2code` message from the sender **`no-reply`**. Nothing new
+delivers it: addressing, same-second collision suffixing, consumption
+and the existing doorbells (the statusline counter, the `PostToolUse`
+mail hook) all apply as they do to any other message.
+
+```
+GitHub -> https://<public>/webhook -> [proxy: verify HMAC] -> /webhook
+                                                                 |
+                                              code2code/mailbox/...--from-no-reply.md
+                                                                 |
+                                                  code2code-inbox (any session)
+```
+
+**`no-reply` mail is deleted when read, not archived.** `archive/` is
+the corpus the mailbox digests derive from, and the digest checkpoint
+is a manifest diffed against it -- so anything landing there counts as
+undigested until a digest covers it. Archiving CI traffic would pad
+every digest and hold the unsummarised counter permanently above zero.
+The rule lives in `retireMessage` (`src/mailbox.ts`) and applies to
+both retirement paths.
+
+`no-reply` is a convention, not a credential: `instance` is
+caller-supplied, so any session could claim the name.
+
+### Verification happens in the proxy
+
+GitHub signs the **raw request bytes**. The backend cannot check that
+-- `createMcpExpressApp` applies `express.json()` at app creation, so
+`req.body` is parsed before any route runs, and re-serialising it does
+not reproduce what was signed. `src/proxy.ts` is a pure `node:http`
+pipe with no parser, so it is the only place those bytes still exist.
+
+The proxy buffers **only** requests carrying a known signature header;
+everything else keeps streaming, which is what makes SSE and MCP
+transport come out correct on the far leg. On success it stamps
+`x-c2c-verified: github`. A bad signature is rejected 401 at the edge
+and never reaches the backend.
+
+Per provider, not generic: each signs differently, so each gets its own
+verifier rather than one abstraction fitting none of them.
+
+Backend trust rule: a request marked `x-c2c-via-proxy` must also carry
+`x-c2c-verified`. A same-machine caller stays authless, like every
+other route -- the `127.0.0.1` binding is already that boundary.
+
+### Setting it up
+
+```bash
+# on the VM, alongside the other C2C_PROXY_* vars
+export C2C_GITHUB_WEBHOOK_SECRET='<the same secret GitHub is given>'
+npm run build-proxy && scp dist-proxy/proxy.cjs <user>@<vm>:
+```
+
+The proxy logs `GitHub webhook verification ENABLED` or `DISABLED` at
+startup. With no secret it **fails closed**: every signed delivery is
+rejected 401.
+
+In GitHub repo settings → Webhooks: payload URL `https://<public>/webhook`,
+content type `application/json`, and the same secret.
+
+`C2C_WEBHOOK_MAX_BYTES` caps the buffer; a larger body is rejected 413
+unread. **In bytes, as a plain integer** — default `26214400`
+(25 MiB, matching GitHub's own 25 MB delivery limit). A value that is
+not a positive integer (`25MB`, `0`, anything unparseable) is refused
+with a startup line and the default used: `Number("25MB")` is `NaN`,
+and every comparison against `NaN` is false, so accepting it would
+silently switch the cap off rather than change it.
+
+### Comment events are gated on the author
+
+This repository is **public**, so anyone with a GitHub account can
+comment on a PR or issue. Unfiltered, that is two problems at once: a
+volume one (any stranger can make the unread counter climb and ping
+every agent's doorbell) and the worst injection surface here, since a
+comment body is chosen in full by whoever wrote it.
+
+`issue_comment`, `pull_request_review_comment` and
+`pull_request_review` therefore produce mail **only** when the author
+is in `TRUSTED_COMMENT_AUTHORS` — currently just
+`github-actions[bot]`, the login the repo's own CI posts under via
+`GITHUB_TOKEN`. An outside contributor cannot post under it, which is
+what makes it verifiable rather than merely plausible.
+
+`author_association` (`OWNER`, `MEMBER`, `COLLABORATOR`) is
+deliberately **not** accepted. It names a relationship, not an identity
+GitHub vouches for on our behalf.
+
+**The comment body is never copied.** The message carries the PR
+number, the author and `gh pr view <n> -R <repo> --comments`; the
+reader fetches the text itself, deliberately, over HTTP. That is the
+same doorbell-not-letter split the mailbox uses everywhere else.
+
+A dropped delivery answers `202`, not an error — GitHub retries
+failures, and there is nothing here to retry. The reason is logged.
+
+### Adding an event type
+
+`summariseGithub` in `src/index.ts` writes a short summary and a
+ready-to-run command -- the run id, not only the `html_url`, because a
+reader that must parse an id back out of a URL has been handed a
+notification rather than something actionable.
+
+The summary is deliberately not the payload. A webhook body carries
+text strangers choose (PR titles, branch names, issue bodies), and it
+reaches an agent's context, so only known fields are copied and the
+message says outright that the content is data rather than
+instructions.
+
+Add a case for a new event; do not fall back to dumping the payload.
 
 ## OAuth for Claude Desktop/iOS: `src/oauth.ts`
 

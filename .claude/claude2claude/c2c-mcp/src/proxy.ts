@@ -43,10 +43,35 @@ const VERIFIED_HEADER = "x-c2c-verified";
 const GITHUB_SIG_HEADER = "x-hub-signature-256";
 const GITHUB_SECRET = process.env.C2C_GITHUB_WEBHOOK_SECRET ?? "";
 
+/**
+ * Reads a positive integer from the environment, falling back loudly.
+ *
+ * `Number("25MB")` is NaN, and `size > NaN` is ALWAYS FALSE -- so a
+ * plausible human value silently switches off the very guard it was meant
+ * to configure. Fail-open, on a memory-DoS bound, from a typo. `Number("")`
+ * and `Number("0")` are 0, which rejects every request instead: safe, but
+ * equally not what anyone meant.
+ *
+ * Anything that is not a finite positive integer is refused and the default
+ * used, with a line saying so.
+ */
+function positiveIntEnv(name: string, fallback: number): number {
+  const raw = process.env[name];
+  if (raw === undefined || raw === "") return fallback;
+  const value = Number(raw);
+  if (!Number.isFinite(value) || !Number.isInteger(value) || value <= 0) {
+    console.error(
+      `[c2c-proxy] ${name}="${raw}" is not a positive integer number of bytes; using ${fallback}`,
+    );
+    return fallback;
+  }
+  return value;
+}
+
 // Verifying means buffering, and buffering an arbitrary body is a memory
-// DoS. GitHub's own delivery limit is 25 MB; anything larger is rejected
-// without being read into memory.
-const MAX_WEBHOOK_BYTES = Number(process.env.C2C_WEBHOOK_MAX_BYTES ?? 25 * 1024 * 1024);
+// DoS. Measured in BYTES. GitHub's own delivery limit is 25 MB; anything
+// larger is rejected without being read into memory.
+const MAX_WEBHOOK_BYTES = positiveIntEnv("C2C_WEBHOOK_MAX_BYTES", 25 * 1024 * 1024);
 
 /**
  * GitHub signs the RAW request bytes with HMAC-SHA256 and sends the hex

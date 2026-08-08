@@ -110,35 +110,143 @@ app.get("/health", (_req, res) => {
 // case).
 const VERIFIED_HEADER = "x-c2c-verified";
 
+// This repository is PUBLIC, so anyone with a GitHub account can comment on
+// a PR or issue. Comment bodies are wholly attacker-authored -- unlike a
+// branch or workflow name -- and they reach an agent's context, so comment
+// events are gated on WHO wrote them before any message is written.
+//
+// The ONLY comment authors that produce mail. Not a convenience list of
+// trusted people: a login in this set is one GitHub itself controls, written
+// only by the repository's own CI through GITHUB_TOKEN. An outside
+// contributor cannot post under it, which is what makes it verifiable at
+// all.
+//
+// `author_association` was considered and rejected as an additional gate.
+// OWNER/MEMBER/COLLABORATOR identifies a *relationship*, not an identity
+// GitHub vouches for on our behalf, and widening to humans reopens the
+// volume problem this closes.
+//
+// Any addition needs the same property, not merely a trustworthy person.
+const TRUSTED_COMMENT_AUTHORS = new Set(["github-actions[bot]"]);
+
+export function commentAuthorIsTrusted(login: string | undefined): boolean {
+  return login !== undefined && TRUSTED_COMMENT_AUTHORS.has(login);
+}
+
+// Events whose payload is dominated by free text somebody chose, and which
+// are therefore gated on author before anything is written.
+const COMMENT_EVENTS = new Set(["issue_comment", "pull_request_review_comment", "pull_request_review"]);
+
 /**
- * One short line describing a GitHub delivery. Deliberately a SUMMARY, not
- * the payload: this becomes a mailbox message that an agent reads, and a
- * webhook body is full of text strangers choose -- PR titles, branch names,
- * issue bodies. Copying it wholesale would put attacker-influenced prose in
- * front of every reader. Known fields only, and a link for the detail.
+ * A short summary of a GitHub delivery, plus the command that acts on it.
+ *
+ * Deliberately a SUMMARY, not the payload: this becomes a mailbox message
+ * that an agent reads, and a webhook body is full of text strangers choose
+ * -- PR titles, branch names, issue bodies. Copying it wholesale would put
+ * attacker-influenced prose in front of every reader.
+ *
+ * It carries the IDENTIFIER, not only the URL. A reader that has to parse a
+ * run id back out of an html_url before it can do anything has been handed a
+ * notification rather than something actionable, and `gh run view` wants the
+ * id. Each summary therefore ends with a ready-to-run `gh` line, `-R`
+ * qualified because the receiving session may be in a worktree or another
+ * repository entirely.
  */
 function summariseGithub(event: string, body: Record<string, unknown>): string {
   const repo = (body.repository as { full_name?: string } | undefined)?.full_name ?? "unknown repo";
   const pick = (v: unknown): string | undefined => (typeof v === "string" ? v : undefined);
+  // Ids arrive as JSON numbers, so a string-only picker silently drops them.
+  const id = (v: unknown): string | undefined =>
+    typeof v === "number" ? String(v) : typeof v === "string" ? v : undefined;
 
   if (event === "workflow_run") {
     const run = (body.workflow_run ?? {}) as Record<string, unknown>;
+    const runId = id(run.id);
+    const conclusion = pick(run.conclusion) ?? pick(run.status) ?? "?";
+    const failed = conclusion === "failure" || conclusion === "timed_out";
     return [
       `**GitHub \`workflow_run\`** on \`${repo}\``,
       `- workflow: ${pick(run.name) ?? "?"}`,
       `- branch: \`${pick(run.head_branch) ?? "?"}\``,
-      `- conclusion: **${pick(run.conclusion) ?? pick(run.status) ?? "?"}**`,
-      `- ${pick(run.html_url) ?? "(no url)"}`,
+      `- head sha: \`${pick(run.head_sha) ?? "?"}\``,
+      `- conclusion: **${conclusion}**`,
+      `- run id: \`${runId ?? "?"}\` · ${pick(run.html_url) ?? "(no url)"}`,
+      runId
+        ? `- next: \`gh run view ${runId} -R ${repo}${failed ? " --log-failed" : ""}\``
+        : `- next: no run id in the payload`,
     ].join("\n");
   }
   if (event === "push") {
+    const before = pick(body.before);
+    const after = pick(body.after);
     return [
       `**GitHub \`push\`** on \`${repo}\``,
       `- ref: \`${pick(body.ref) ?? "?"}\``,
+      `- range: \`${before ?? "?"}..${after ?? "?"}\``,
       `- ${pick(body.compare) ?? "(no url)"}`,
+      before && after
+        ? `- next: \`git log --oneline ${before}..${after}\` (fetch first)`
+        : `- next: no before/after range in the payload`,
     ].join("\n");
   }
-  return `**GitHub \`${event}\`** on \`${repo}\` — no summariser for this event type yet.`;
+  if (event === "pull_request") {
+    const pr = (body.pull_request ?? {}) as Record<string, unknown>;
+    const num = id(body.number) ?? id(pr.number);
+    return [
+      `**GitHub \`pull_request\`** on \`${repo}\``,
+      `- action: ${pick(body.action) ?? "?"}`,
+      `- number: \`${num ?? "?"}\` · ${pick(pr.html_url) ?? "(no url)"}`,
+      num ? `- next: \`gh pr view ${num} -R ${repo}\`` : `- next: no pr number in the payload`,
+    ].join("\n");
+  }
+  if (event === "issue_comment") {
+    const issue = (body.issue ?? {}) as Record<string, unknown>;
+    const comment = (body.comment ?? {}) as Record<string, unknown>;
+    const num = id(issue.number);
+    const isPr = issue.pull_request !== undefined;
+    const who = pick((comment.user as { login?: string } | undefined)?.login) ?? "?";
+    return [
+      `**GitHub comment** on ${isPr ? "PR" : "issue"} \`#${num ?? "?"}\` of \`${repo}\``,
+      `- by: ${who} (${pick(comment.author_association) ?? "?"})`,
+      `- ${pick(comment.html_url) ?? "(no url)"}`,
+      num
+        ? `- next: \`gh ${isPr ? "pr" : "issue"} view ${num} -R ${repo} --comments\``
+        : `- next: no number in the payload`,
+    ].join("\n");
+  }
+  if (event === "pull_request_review_comment") {
+    const pr = (body.pull_request ?? {}) as Record<string, unknown>;
+    const comment = (body.comment ?? {}) as Record<string, unknown>;
+    const num = id(pr.number);
+    const who = pick((comment.user as { login?: string } | undefined)?.login) ?? "?";
+    return [
+      `**GitHub review comment** on PR \`#${num ?? "?"}\` of \`${repo}\``,
+      `- by: ${who} (${pick(comment.author_association) ?? "?"})`,
+      `- file: \`${pick(comment.path) ?? "?"}\` line ${id(comment.line) ?? id(comment.original_line) ?? "?"}`,
+      `- ${pick(comment.html_url) ?? "(no url)"}`,
+      num ? `- next: \`gh pr view ${num} -R ${repo} --comments\`` : `- next: no pr number in the payload`,
+    ].join("\n");
+  }
+  if (event === "pull_request_review") {
+    const pr = (body.pull_request ?? {}) as Record<string, unknown>;
+    const review = (body.review ?? {}) as Record<string, unknown>;
+    const num = id(pr.number);
+    const who = pick((review.user as { login?: string } | undefined)?.login) ?? "?";
+    return [
+      `**GitHub review ${pick(review.state) ?? "?"}** on PR \`#${num ?? "?"}\` of \`${repo}\``,
+      `- by: ${who} (${pick(review.author_association) ?? "?"})`,
+      `- ${pick(review.html_url) ?? "(no url)"}`,
+      num ? `- next: \`gh pr view ${num} -R ${repo} --comments\`` : `- next: no pr number in the payload`,
+    ].join("\n");
+  }
+  // An unhandled event still names itself and the repo, so a reader can go
+  // look rather than being told nothing. Adding a summariser is the fix; a
+  // generic dump of the payload is not.
+  return [
+    `**GitHub \`${event}\`** on \`${repo}\``,
+    `- no summariser for this event type yet`,
+    `- next: \`gh api repos/${repo}/events\` or add a case to summariseGithub`,
+  ].join("\n");
 }
 
 /**
@@ -167,6 +275,24 @@ app.post("/webhook", async (req, res) => {
   const event = typeof req.headers["x-github-event"] === "string" ? req.headers["x-github-event"] : "unknown";
   const delivery = typeof req.headers["x-github-delivery"] === "string" ? req.headers["x-github-delivery"] : "";
   const body = (req.body ?? {}) as Record<string, unknown>;
+
+  // Comment events are gated on author BEFORE a file is written. This
+  // repository is public, so an unfiltered comment feed is both a volume
+  // problem -- anyone can make the unread counter climb and ping every
+  // agent's doorbell -- and the worst injection surface here, since a
+  // comment body is wholly chosen by whoever wrote it.
+  //
+  // Dropped deliveries answer 202, not an error: GitHub retries a failed
+  // delivery, and there is nothing to retry. The reason is logged.
+  if (COMMENT_EVENTS.has(event)) {
+    const source = (body.comment ?? body.review ?? {}) as Record<string, unknown>;
+    const login = (source.user as { login?: string } | undefined)?.login;
+    if (!commentAuthorIsTrusted(login)) {
+      console.log(`[c2c-mcp] webhook ${event} dropped: untrusted comment author ${login ?? "(unknown)"}`);
+      res.status(202).json({ ok: true, dropped: "untrusted-comment-author" });
+      return;
+    }
+  }
 
   const content = [
     summariseGithub(event, body),
