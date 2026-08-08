@@ -1,0 +1,54 @@
+# Tests that skip in the credential-free CI environment.
+#
+# Measured, not chosen. Regenerate with:
+#
+#     python3 tools/ci/check_suite_not_vacuous.py --junit junit.xml \
+#         --write-baseline
+#
+# Every entry is a capability CI deliberately does not have: no
+# `datasets/`, no gitignored `.pkl`/`.npz` caches, no `google-cloud-storage`,
+# no GCS credentials, no `mighty-colab`, no `claude` CLI. Adding an entry
+# is a statement that CI has lost coverage and that this was intended;
+# removing one is a statement that CI gained it. Neither should happen by
+# accident, which is why both directions fail the build.
+#
+# Format: `classname::name`, one per line, sorted. The trailing comment on
+# each line is the skip reason as pytest reported it, kept for the reader
+# and ignored by the checker.
+
+tests.test_bootstrap_stage1b2_and_stage1c::test_bootstrap_is_a_true_noop_and_never_touches_stage1b2s_frozen_file  # not all Stage 1B2/1C artifacts present locally -- bootstrap no-op check needs a fully-populated checkout
+tests.test_build_all_class_topologies::test_all_ten_classes_present_with_correct_structure  # build_all_class_topologies.py's output and/or the historical class0_constructions.pkl comparison artifact not present locally -- run experiments/stage0_simulato
+tests.test_build_all_class_topologies::test_class_0_T_matches_historical_artifact_byte_exact  # build_all_class_topologies.py's output and/or the historical class0_constructions.pkl comparison artifact not present locally -- run experiments/stage0_simulato
+tests.test_build_all_class_topologies::test_n_active_is_plausible_across_classes  # build_all_class_topologies.py's output and/or the historical class0_constructions.pkl comparison artifact not present locally -- run experiments/stage0_simulato
+tests.test_construction_driver::test_matches_historical_cached_bundle_except_random  # historical cached artifact and/or raw KMNIST data not present locally
+tests.test_historical_random_construction::test_historical_raw_random_support_is_within_eligible_pool  # historical random-control handoff and/or raw KMNIST data not present locally
+tests.test_historical_random_construction::test_historical_raw_random_values_are_from_T_pool  # historical random-control handoff and/or raw KMNIST data not present locally
+tests.test_historical_random_construction::test_reconstruction_does_not_reproduce_historical_artifact_byte_exact  # historical random-control handoff and/or raw KMNIST data not present locally
+tests.test_historical_random_construction::test_rescale_formula_reproduces_normalized_npz_byte_exact  # historical random-control handoff and/or raw KMNIST data not present locally
+tests.test_lattice_construction::test_matches_historical_cached_artifact_byte_exact  # historical cached artifacts not present locally (gitignored, not committed)
+tests.test_learned_topology_construction::test_matches_historical_cached_artifact_byte_exact  # historical cached artifacts and/or raw KMNIST data not present locally
+tests.test_mighty_colab_contract::test_exec_default_timeout_is_short_enough_to_need_overriding  # the `mighty-colab` CLI is not on PATH; it ships in this project's `gpu` dependency group (`uv run --group gpu pytest ...`)
+tests.test_mighty_colab_contract::test_status_of_unknown_session_exits_zero_on_stdout  # the `mighty-colab` CLI is not on PATH; it ships in this project's `gpu` dependency group (`uv run --group gpu pytest ...`)
+tests.test_provenance_executor_version::test_executor_version_resolves_and_caches[mighty-colab]  # mighty-colab not installed
+tests.test_provenance_executor_version::test_the_probe_command_is_real_and_succeeds[mighty-colab]  # mighty-colab not installed on this machine
+tests.test_stage0_simulator_calibration::test_equilibria_are_stable_with_small_spectral_gap  # KMNIST class-0 topology cache not found at /Users/dan/Code/pycharm/bonsai-2026/.claude/worktrees/infra-tooling/experiments/stage1b2_structured_transformation/re
+tests.test_stage0_simulator_calibration::test_five_seeds_give_five_distinct_equilibria  # KMNIST class-0 topology cache not found at /Users/dan/Code/pycharm/bonsai-2026/.claude/worktrees/infra-tooling/experiments/stage1b2_structured_transformation/re
+tests.test_stage0_simulator_calibration::test_rk45_and_dop853_agree_to_four_decimal_places  # KMNIST class-0 topology cache not found at /Users/dan/Code/pycharm/bonsai-2026/.claude/worktrees/infra-tooling/experiments/stage1b2_structured_transformation/re
+tests.test_stage0_simulator_calibration::test_topology_is_single_connected_component  # KMNIST class-0 topology cache not found at /Users/dan/Code/pycharm/bonsai-2026/.claude/worktrees/infra-tooling/experiments/stage1b2_structured_transformation/re
+tests.test_stage1a_log_scale::test_log_scale_analysis_covers_exactly_three_comparisons_no_lattice  # stage1a_log_scale_analysis.pkl not present locally (run analyze_stage1a_log_scale.py first)
+tests.test_stage1a_log_scale::test_log_scale_holm_correction_is_never_looser_than_raw_p  # stage1a_log_scale_analysis.pkl not present locally (run analyze_stage1a_log_scale.py first)
+tests.test_stage1a_re_verification::test_analysis_pkl_has_all_four_comparisons_with_holm_corrected_p  # stage1a_reverification_analysis.pkl not present locally (run analyze script first)
+tests.test_stage1a_re_verification::test_results_pkl_has_all_770_instances_and_finite_positive_aucs  # stage1a_reverification_results.pkl not present locally (full run not reproduced by default)
+tests.test_stage1b2_early_leader_decomposition::test_early_leader_decomposition_matches_documented_breakdown  # cached Stage 1B2/1C results not present locally (gitignored, not committed)
+tests.test_stage1c_trajectory_generalization::test_all_ten_trajectories_have_432_trials  # Stage 1C trajectory results and/or Stage 1B2's frozen results not present locally (full run not reproduced by default)
+tests.test_stage1c_trajectory_generalization::test_final_analysis_covers_exactly_the_ten_all_baseline_seeds  # stage1c_final_analysis.pkl not present locally (run analyze_stage1c.py first)
+tests.test_stage2a_core::test_reference_node_constant_columns_on_real_encoded_state  # datasets/kmnist not present locally
+tests.test_stage2a_stats::test_frozen_primary_effect_matches_findings_md  # stage4_confirmatory_results.pkl not present locally
+tests.test_stage2a_topologies::test_all_topologies_share_active_support  # datasets/kmnist not present locally
+tests.test_stage2a_topologies::test_all_topologies_symmetric  # datasets/kmnist not present locally
+tests.test_stage2a_topologies::test_from_scratch_reconstruction_matches_cache_backed_values  # class0_constructions.pkl not present locally -- this test specifically checks the from-scratch path against it, so it cannot run without it (the OTHER tests in 
+tests.test_stage2a_topologies::test_rewired_and_curr_random_match_t_edge_count  # datasets/kmnist not present locally
+tests.test_stage2a_topologies::test_rewired_preserves_t_degree_sequence  # datasets/kmnist not present locally
+tests.test_stage2b_cnn::test_real_class0_support_builds_the_expected_mask  # datasets/kmnist not present locally
+tests.test_stage2b_cnn::test_real_mask_restricts_identically_to_stage2a_encode_and_restrict  # datasets/kmnist not present locally
+tests.test_stage2b_gcs::test_crc32c_agrees_with_google_crc32c_where_it_is_installed  # could not import 'google_crc32c': No module named 'google_crc32c'

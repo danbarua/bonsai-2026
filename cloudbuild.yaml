@@ -1,0 +1,249 @@
+# Continuous integration for bonsai-2026.
+#
+# Runs the pytest suite on push to a shared branch, in an environment that
+# deliberately has no credentials, no datasets and no cloud CLIs. What it
+# covers, what it cannot cover, and the trigger configuration a human has
+# to create in GCP: docs/proposals/CI_CLOUDBUILD.md. Read that before
+# changing anything here.
+#
+# Two invariants this file is written to hold:
+#
+#   * It cannot spend. Only three Makefile targets may be invoked, all of
+#     them pytest runners; tools/ci/ci_targets.py derives the billable set
+#     from the Makefile and fails this build if the two ever intersect.
+#     That guard runs before any target does.
+#   * A green build cannot be vacuous. The suite skips cleanly when a
+#     capability is missing, so the exit code alone would rate a run where
+#     forty more tests skipped as a pass. tools/ci/check_suite_not_vacuous.py
+#     compares the skip SET against a measured, committed baseline and
+#     fails on any change in either direction.
+#
+# `_TIER` selects how much runs: `fast` on every push, `gated` from a
+# schedule under the idle-or-deadline rule, `full` unconditionally.
+
+substitutions:
+  # fast | full | gated. `gated` decides and dispatches; it never runs the
+  # suite itself, so a poll and a full run stay separable in build history.
+  _TIER: fast
+  # Minutes of quiet on the branch before a gated poll dispatches.
+  _IDLE_MINUTES: '10'
+  # Minutes since the last successful full run after which a poll
+  # dispatches regardless of activity. Bounds the worst case when pushes
+  # never stop for long enough to look idle.
+  _DEADLINE_MINUTES: '45'
+  # The trigger a gated poll dispatches to. Its builds carry _TIER=full,
+  # which is what makes "when did a full run last finish" answerable.
+  _FULL_TRIGGER: bonsai-ci-full
+  _TRIGGER_REGION: global
+  # Branch a poll dispatches on. Empty means "use BRANCH_NAME", which is
+  # populated on trigger-invoked builds; set it explicitly if the poll's
+  # invocation path leaves BRANCH_NAME empty.
+  _BRANCH: ''
+
+options:
+  # The default machine type is the one covered by the Cloud Build free
+  # tier. Faster types are available and are not free; the suite is a
+  # single pytest process and would gain little from more vCPUs.
+  logging: CLOUD_LOGGING_ONLY
+
+# The suite takes about 2.5 minutes on an M1 Max and has been measured on
+# no other hardware. The default build timeout is 10 minutes, which a
+# slower shared vCPU could plausibly exceed -- and a build killed by an
+# unset timeout reads as an infrastructure flake rather than as what it is.
+timeout: 3600s
+
+steps:
+
+  # ---------------------------------------------------------------- decide
+  # Cloud Build has no inactivity trigger and no debounce. This step is
+  # what implements one: a scheduled poll asks, here, whether the branch has
+  # been quiet long enough (idle) or waited long enough (deadline), and
+  # dispatches to the full trigger if so.
+  #
+  # It DISPATCHES rather than running the suite itself, and that is the
+  # load-bearing part. A poll that ran the suite would record the same
+  # `_TIER=gated` in build history whether it ran or declined, so
+  # "when did a full run last finish" -- the deadline's whole input --
+  # would be unanswerable. Two build kinds, two meanings, one query.
+  #
+  # A no-op on every other tier.
+  - id: decide
+    name: gcr.io/google.com/cloudsdktool/cloud-sdk:slim
+    entrypoint: bash
+    args:
+      - -c
+      - |
+        set -euo pipefail
+        if [ "$_TIER" != "gated" ]; then
+          echo "[decide] tier=$_TIER -- no gating decision needed"
+          exit 0
+        fi
+        command -v git >/dev/null || { apt-get update -qq && \
+            apt-get install -y -qq --no-install-recommends git >/dev/null; }
+
+        now=$$(date +%s)
+        idle_s=$$(( now - $$(git log -1 --format=%ct) ))
+
+        # Read-only, and the build history IS the state -- no marker object,
+        # no bucket, no write surface anywhere. See CI_CLOUDBUILD.md for the
+        # fallback if this filter expression turns out to be unsupported.
+        last_full=$$(gcloud builds list --limit=1 --sort-by=~finishTime \
+            --filter="status=SUCCESS AND substitutions._TIER=full" \
+            --format='value(finishTime)' || true)
+        if [ -z "$$last_full" ]; then
+          since_full_s=999999999
+        else
+          since_full_s=$$(( now - $$(date -d "$$last_full" +%s) ))
+        fi
+
+        idle_limit=$$(( ${_IDLE_MINUTES} * 60 ))
+        deadline_limit=$$(( ${_DEADLINE_MINUTES} * 60 ))
+        echo "[decide] $$idle_s s since last commit (idle threshold $$idle_limit s)"
+        echo "[decide] $$since_full_s s since last full run (deadline $$deadline_limit s)"
+
+        verdict=skip
+        if [ "$$since_full_s" -lt "$$idle_s" ]; then
+          echo "[decide] SKIP: nothing has been pushed since the last full run"
+        elif [ "$$idle_s" -ge "$$idle_limit" ]; then
+          echo "[decide] DISPATCH: the branch has been quiet long enough"
+          verdict=run
+        elif [ "$$since_full_s" -ge "$$deadline_limit" ]; then
+          echo "[decide] DISPATCH: deadline reached while the branch stayed busy"
+          verdict=run
+        else
+          echo "[decide] SKIP: branch still active, deadline not yet reached"
+        fi
+
+        if [ "$$verdict" != run ]; then
+          exit 0
+        fi
+
+        # `_FULL_TRIGGER` is set per-trigger in the console, outside this
+        # repository and outside every test here. Pointed at this trigger it
+        # would be a dispatch loop billing build minutes with nothing to
+        # stop it, so the one case worth refusing is refused. TRIGGER_NAME
+        # is empty on invocation paths that do not set it; an empty value
+        # cannot match and the refusal simply does not fire.
+        if [ -n "$TRIGGER_NAME" ] && [ "${_FULL_TRIGGER}" = "$TRIGGER_NAME" ]; then
+          echo "[decide] FAIL: _FULL_TRIGGER names this trigger. Dispatching would" >&2
+          echo "[decide]   loop indefinitely. Point it at the _TIER=full trigger." >&2
+          exit 1
+        fi
+
+        # BRANCH_NAME is a default substitution on trigger-invoked builds and
+        # may be empty depending on how the poll is wired. `_BRANCH` is the
+        # explicit override; without either there is no branch to dispatch.
+        branch="${_BRANCH}"
+        if [ -z "$$branch" ]; then branch="$BRANCH_NAME"; fi
+        if [ -z "$$branch" ]; then
+          echo "[decide] FAIL: no branch to dispatch. BRANCH_NAME is empty on this" >&2
+          echo "[decide]   invocation path -- set the _BRANCH substitution on the" >&2
+          echo "[decide]   poll trigger instead." >&2
+          exit 1
+        fi
+
+        gcloud builds triggers run "${_FULL_TRIGGER}" \
+            --region="${_TRIGGER_REGION}" --branch="$$branch"
+
+  # ------------------------------------------------------------ spend-guard
+  # Runs before anything invokes make. Derives the billable target set from
+  # the Makefile and fails if this file can reach one.
+  - id: spend-guard
+    name: ghcr.io/astral-sh/uv:python3.14-bookworm-slim
+    entrypoint: python3
+    args: ['tools/ci/ci_targets.py', '--check', 'cloudbuild.yaml']
+
+  # ---------------------------------------------------------------- verify
+  # One step, because `make` and `git` are apt installs that do not survive
+  # into the next container and the suite needs both.
+  - id: verify
+    name: ghcr.io/astral-sh/uv:python3.14-bookworm-slim
+    entrypoint: bash
+    timeout: 2700s
+    env:
+      # Adds reporting to whatever the Makefile already runs, without
+      # restating its pytest invocation here. `-rs` prints every skip
+      # reason on a passing run as well as a failing one.
+      - 'PYTEST_ADDOPTS=--junitxml=/workspace/junit.xml -rs'
+      - 'UV_PROJECT_ENVIRONMENT=/workspace/.venv'
+    args:
+      - -c
+      - |
+        set -euo pipefail
+
+        if [ "$_TIER" = "gated" ]; then
+          echo "[verify] a gated build only decides and dispatches -- nothing to run"
+          exit 0
+        fi
+
+        echo "=== preflight ==="
+        apt-get update -qq
+        apt-get install -y -qq --no-install-recommends git make >/dev/null
+
+        # The Makefile anchors every path on `git rev-parse --show-toplevel`.
+        # Some Cloud Build source types deliver an archive with no .git at
+        # all, in which case every target fails with an unreadable make
+        # error instead of this sentence.
+        if ! git rev-parse --show-toplevel >/dev/null 2>&1; then
+          echo "[verify] FAIL: no git repository in the build workspace." >&2
+          echo "[verify]   The Makefile resolves REPO_ROOT from git and cannot" >&2
+          echo "[verify]   run without it. Use a trigger whose source is a git" >&2
+          echo "[verify]   checkout rather than an uploaded archive." >&2
+          exit 1
+        fi
+        echo "[verify] repo root: $$(git rev-parse --show-toplevel)"
+        echo "[verify] HEAD:      $$(git rev-parse HEAD)"
+        echo "[verify] uv:        $$(uv --version)"
+
+        echo "=== install ==="
+        # --frozen: resolve nothing, use uv.lock exactly. The `gpu` group is
+        # not a default group and is therefore absent, which is what keeps
+        # the next section true.
+        uv sync --frozen
+
+        echo "=== capability absence (asserted, not assumed) ==="
+        # CI holds no credential that can write to the science bucket.
+        # Asserting the absence is worth more than intending it: this fails
+        # loudly on the day someone adds the library or mounts a key, rather
+        # than letting an unattended build quietly gain reach.
+        uv run python tools/ci/assert_no_cloud_credentials.py
+
+        echo "=== suite ==="
+        case "$_TIER" in
+          fast)
+            make stage2b-test
+            ;;
+          full)
+            make test
+            ;;
+          *)
+            echo "[verify] FAIL: unknown _TIER '$_TIER'" >&2
+            exit 1
+            ;;
+        esac
+
+  # ------------------------------------------------------- no-vacuous-green
+  # The suite passed. This decides whether the pass meant anything.
+  - id: no-vacuous-green
+    name: ghcr.io/astral-sh/uv:python3.14-bookworm-slim
+    entrypoint: bash
+    args:
+      - -c
+      - |
+        set -euo pipefail
+        if [ "$_TIER" = "gated" ]; then
+          echo "[vacuity] a gated build runs no suite -- nothing to check"
+          exit 0
+        fi
+        if [ ! -f /workspace/junit.xml ]; then
+          echo "[vacuity] FAIL: no JUnit report was written. Either the suite did" >&2
+          echo "[vacuity]   not run, or PYTEST_ADDOPTS stopped reaching pytest." >&2
+          exit 1
+        fi
+        # The full tier runs everything, so every module the baseline names
+        # must have been collected. The fast tier runs a subset and cannot
+        # make that assertion; `tests/test_stage2b_gcs_makefile.py` is what
+        # holds its file list complete instead.
+        extra=""
+        if [ "$_TIER" = "full" ]; then extra="--require-baseline-modules"; fi
+        python3 tools/ci/check_suite_not_vacuous.py --junit /workspace/junit.xml $$extra
