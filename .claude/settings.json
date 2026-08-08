@@ -44,7 +44,7 @@
     ],
     "PreToolUse": [
       {
-        "matcher": "mcp__claude_ai_c2c__*",
+        "matcher": "mcp__c2c-mcp__.*",
         "hooks": [
           {
             "type": "command",
