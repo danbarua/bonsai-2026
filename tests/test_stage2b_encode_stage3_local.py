@@ -17,6 +17,7 @@ instead. Three of them:
   counts are small and near zero, where a normal approximation is wrong
   in a direction that flatters agreement.
 """
+import inspect
 import os
 import sys
 
@@ -189,3 +190,44 @@ def test_the_declared_population_is_the_official_training_split():
     assert enc.N_OFFICIAL_TRAIN == 60_000
     # 54,000 + 6,000, the roles AUDIT_PROTOCOL.md Freeze 2 fixes.
     assert enc.N_OFFICIAL_TRAIN - 54_000 == 6_000
+
+
+# ---- step-count parameterization (PHASE_B_PLAN Decision 4) ----
+
+def test_steps_defaults_to_the_production_constant():
+    """Every existing caller and invocation must be unchanged by the new
+    parameter -- the default IS the production value, not a new one."""
+    import inspect
+    import stage2b_encoder_gate as encoder_gate
+    sig = inspect.signature(enc.encode_training_side)
+    assert sig.parameters["steps"].default is None
+    src = inspect.getsource(enc.encode_training_side)
+    assert "encoder_gate.ENCODER_STEPS if steps is None else steps" in src
+    assert encoder_gate.ENCODER_STEPS == 1200
+
+
+def test_the_cli_exposes_steps():
+    parser_src = inspect.getsource(enc.main)
+    assert '"--steps"' in parser_src
+    assert "steps=args.steps" in parser_src
+
+
+def test_the_artifact_name_and_fingerprint_both_carry_the_step_count():
+    """The two encodes must self-describe. A shared name would make the
+    audit's 'differs in encoder_steps ONLY' claim uncheckable, and a
+    fingerprint without the step count would let two different budgets
+    look like the same provenance."""
+    assert enc.object_name_for(150) != enc.object_name_for(1200)
+    assert "s150" in enc.object_name_for(150)
+    assert "s1200" in enc.object_name_for(1200)
+    assert enc.local_path_for(150) != enc.local_path_for(1200)
+
+    fp = enc.build_fingerprint({"steps": 150, "n_images": 60_000, "n_active": 505},
+                               require_clean=False)
+    assert fp["config"]["encoder_steps"] == 150
+
+
+def test_steps_must_be_positive():
+    import pytest as _pytest
+    with _pytest.raises(ValueError, match="steps"):
+        enc.encode_training_side(steps=0)

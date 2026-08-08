@@ -195,7 +195,7 @@ def encode_indices(x_train, indices, active_indices, steps, n_workers,
 
 
 def encode_training_side(kmnist_dir=KMNIST_DIR, n_workers=None, limit=None,
-                         chunk=CHUNK):
+                         chunk=CHUNK, steps=None):
     """Corrupt and encode the whole official training side, in ascending
     official index order.
 
@@ -208,7 +208,18 @@ def encode_training_side(kmnist_dir=KMNIST_DIR, n_workers=None, limit=None,
     `roles` maps `train_indices` / `fit_indices` / `validation_indices`
     to official index arrays."""
     n_workers = int(n_workers or max(1, mp.cpu_count() - 1))
-    steps = encoder_gate.ENCODER_STEPS
+    # Parameterized rather than pinned to the production constant, per
+    # AUDIT_PROTOCOL.md / PHASE_B_PLAN.md Decision 4: the audit compares a
+    # reduced-budget encode against the production one, and the artifact
+    # name and fingerprint config both carry the step count, so the two
+    # self-describe rather than relying on anyone remembering which is
+    # which.
+    #
+    # The default is the production value, so every existing caller and
+    # every existing invocation is unchanged.
+    steps = int(encoder_gate.ENCODER_STEPS if steps is None else steps)
+    if steps < 1:
+        raise ValueError(f"encoder steps must be >= 1, got {steps}")
 
     print(f"loading official KMNIST training split from {kmnist_dir}", flush=True)
     x_train, y_train, _x_test, _y_test = load_mnist(kmnist_dir, gz=False)
@@ -448,6 +459,14 @@ def main(argv=None):
     parser.add_argument("--workers", type=int, default=None,
                         help="default cpu_count()-1")
     parser.add_argument("--chunk", type=int, default=CHUNK)
+    parser.add_argument(
+        "--steps", type=int, default=None,
+        help="encoder step count; defaults to the production "
+             "ENCODER_STEPS. The audit's reduced budget is --steps 150, "
+             "which must differ from the production encode in THIS "
+             "PARAMETER ONLY -- same indices, corruption, roles and "
+             "contract. The artifact name and fingerprint both carry the "
+             "value, so the two encodes self-describe.")
     parser.add_argument("--limit", type=int, default=None,
                         help="encode only the first N training images (smoke runs)")
     parser.add_argument("--bucket", default=None)
@@ -473,7 +492,7 @@ def main(argv=None):
 
     thetas, deltas, roles, active_indices, summary = encode_training_side(
         kmnist_dir=args.kmnist_dir, n_workers=args.workers, limit=args.limit,
-        chunk=args.chunk)
+        chunk=args.chunk, steps=args.steps)
 
     print("\n" + "=" * 70)
     print("PHASE A -- measured, not projected")
