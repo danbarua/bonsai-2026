@@ -37,62 +37,26 @@ variable "github_repo" {
   default = "bonsai-2026"
 }
 
-variable "default_branch" {
-  description = "Branch the manual and poll triggers check out."
+variable "checkpoint_branch" {
+  description = <<-EOT
+    The branch a full run is declared on. Merge `stage2b` into it -- via a
+    PULL REQUEST, so the vacuous-test review sees the diff -- when the work
+    has reached a point worth checking on Linux/x86 from a clean checkout.
+
+    It also answers "what has not been checked", derived rather than
+    tracked: `git log stage2b-ci..stage2b`.
+  EOT
   type        = string
-  default     = "stage2b"
+  default     = "stage2b-ci"
 }
 
 variable "trigger_branch_regex" {
-  description = "Branches whose pushes fire the fast tier."
+  description = <<-EOT
+    Branches where a dependency change fires a build. Note this is ONLY
+    consulted by the deps trigger -- there is no per-push trigger, because a
+    cloud re-run of the suite an agent just ran locally differs only in
+    platform and checkout cleanliness, and neither changes push to push.
+  EOT
   type        = string
   default     = "^(stage2b|main)$"
-}
-
-variable "poll_schedule" {
-  description = <<-EOT
-    Cron for the idle-or-deadline poll.
-
-    Every poll is a build, and a build that decides to do nothing still pays
-    source fetch and container start. At 15 minutes that is 96 builds/day.
-    Measure the real per-build overhead before tightening this -- the free
-    tier is roughly 2,500 build-minutes/month and the poll alone can
-    plausibly consume most of it. `docs/proposals/CI_CLOUDBUILD.md` records
-    the arithmetic and is explicit that it IS arithmetic, not measurement.
-  EOT
-  type        = string
-  default     = "*/15 * * * *"
-}
-
-variable "poll_paused" {
-  description = <<-EOT
-    Ships PAUSED, and this is the one default that must not be flipped
-    casually.
-
-    The scheduler is the only resource here that causes spending, and it
-    does so unattended. `docs/proposals/CI_CLOUDBUILD.md`'s first-run
-    protocol requires a human to watch a full run succeed AND watch one
-    deliberate failure close before CI is trusted. Unpausing is the act that
-    asserts both happened, so it is a separate, deliberate apply.
-  EOT
-  type        = bool
-  default     = true
-}
-
-variable "enable_deps_trigger" {
-  description = <<-EOT
-    OFF, because the behaviour it would trigger does not exist yet.
-
-    `docs/proposals/CI_CLOUDBUILD.md` describes a dependency tier that
-    detects a `mighty-colab` version bump and FAILS WITH AN INSTRUCTION to
-    run the billing round trip by hand. No such step is implemented in
-    cloudbuild.yaml. A deps trigger today would fire `_TIER=fast` on a push
-    that `bonsai-ci-fast` already handles: a duplicate build, double the
-    minutes, and no signal that the fast tier did not already give.
-
-    The variable exists so the wiring is one flag away on the day the step
-    is written.
-  EOT
-  type        = bool
-  default     = false
 }

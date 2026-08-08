@@ -6,11 +6,40 @@ suite. `cloudbuild.yaml` at the repo root is what they execute;
 
 Nothing here has been applied yet.
 
+## Where and when CI runs, and why it is not every push
+
+Agents run `make stage2b-test` habitually and locally. On the same commit, a
+cloud run of the same suite differs in exactly three ways: **Linux/x86**
+instead of macOS/ARM, a **clean checkout**, and a **record**. None of those
+change between one push and the next, so a per-push trigger re-answers a
+question an agent already answered, minutes earlier, faster.
+
+Measured: 368 commits over 7 days on `stage2b`, ~46 pushes/day — roughly
+twice the free tier, spent on duplication.
+
+So there are three triggers and none of them is per-push:
+
+| trigger | fires on | why |
+|---|---|---|
+| `bonsai-ci-checkpoint` | push to `stage2b-ci` | the batch, on the other platform, from clean |
+| `bonsai-ci-deps` | `uv.lock` / `pyproject.toml` change | an undeclared dependency is invisible to every local run |
+| `bonsai-ci-manual` | you | when you want it |
+
+**Reach the checkpoint by pull request.** `gh pr create --base stage2b-ci
+--head stage2b`. A direct merge skips the vacuous-test review and produces a
+green CI that nothing reviewed. And `git log stage2b-ci..stage2b` is then
+exactly the work that has not had a full run — derived, not tracked.
+
+Path filtering was measured and rejected. The intuitive ignore set
+(`.claude`, `.github`, `docs`, `*.md`) would skip 39% of pushes, but twelve
+test files read those paths and `docs/` is directly tested. The set no test
+reads covers 2%.
+
 ## What this manages, and what it must never touch
 
-**Managed:** two service accounts and their IAM, three Cloud Build triggers
-(a fourth behind a flag), a Pub/Sub topic, a Cloud Scheduler job, and API
-enablement.
+**Managed:** one service account with one role, three Cloud Build triggers,
+and API enablement. No scheduler, no Pub/Sub, nothing that spends
+unattended.
 
 **Not managed, deliberately:** the science buckets
 (`bonsai-2026-*-cache`), `colab-gcs-sa`, and the state bucket. They are
@@ -34,6 +63,12 @@ github.com, and no API exists for it.
 > Cloud Console → Cloud Build → Repositories → Connect repository →
 > **1st gen** → GitHub (Cloud Build GitHub App) → authorise →
 > select `danbarua/bonsai-2026`.
+
+The **Google Cloud Build** GitHub App is already installed on the account
+(`github.com/danbarua/bonsai-2026/settings/installations`), so the GitHub
+half of this is done. What may still be missing is the GCP half — linking
+that repository to this project — which is the same wizard and is what
+`terraform plan` will fail on if it has not happened.
 
 Check the **1st gen** tab is offered before going further. If Google has
 retired it for new connections, stop: the 2nd-generation path is regional,
@@ -80,9 +115,12 @@ terraform -chdir=infra plan
 rather than a shell script. Three things to check by eye:
 
 - **No resource grants any role on a `bonsai-2026-*-cache` bucket.**
-- **`roles/cloudbuild.builds.editor` appears exactly once**, on
-  `bonsai-ci-poll`.
-- **`google_cloud_scheduler_job.poll` has `paused = true`.**
+- **`roles/cloudbuild.builds.editor` appears NOWHERE.** It existed only so a
+  poll could dispatch a full run; nothing dispatches anything now.
+- **Every trigger names `service_account`.** A trigger without one runs as
+  the legacy default Cloud Build account, which holds
+  `roles/cloudbuild.builds.builder` at project level — and that contains
+  `storage.objects.delete` on the science bucket.
 
 Then:
 
@@ -90,25 +128,23 @@ Then:
 terraform -chdir=infra apply
 ```
 
-Apply prints a `next_steps` output with the first-run sequence. Follow it in
-order; the last step is the one that starts spending.
+Apply prints a `next_steps` output with the first-run sequence.
 
 ## Cost
 
-Everything here is free to exist. The scheduler is the only resource that
-causes spending, which is why it ships paused: every poll is a build, and a
-build that decides to do nothing still pays source fetch and container
-start.
+Everything here is free to exist, and **nothing spends unattended** — there
+is no scheduler, so no build starts without a push or a person.
 
-At fifteen minutes that is 96 builds a day. `CI_CLOUDBUILD.md` estimates
-30–60s of overhead each, which is 1,440–2,880 build-minutes a month against
-a free tier of roughly 2,500 — so at the pessimistic end **the poll alone
-can exhaust the free tier before a single test runs.** That estimate is
-arithmetic on an assumed constant, not a measurement, and the document says
-so. Measure a week of real builds before tightening the interval. If it
-needs cutting, `"*/15 8-23 * * *"` removes a third at no practical cost —
-nobody pushes at 04:00, and the deadline rule catches up on the first
-morning poll.
+Measured rather than assumed: ~2 dependency changes a day, plus checkpoints
+and manual runs at whatever rate they are wanted. A handful of builds a day
+against a ~2,500 build-minute free tier.
+
+For contrast, the two designs this replaced: the 15-minute poll was 96
+builds/day, and per-push CI ~46/day. Either alone was roughly twice the free
+tier before a single useful build ran.
+
+The per-build DURATION on Cloud Build is still unmeasured, and every cost
+statement above is arithmetic on it. Read it off the first few builds.
 
 ## State
 
