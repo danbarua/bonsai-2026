@@ -311,6 +311,23 @@ BUG = "STRUCTURED_OUTPUT: ${{ steps.review.outputs.execution_file }}"
      "the env key renamed while `run:` still passes $STRUCTURED_OUTPUT. The "
      "shell expands it to empty and the publisher fails the build for a "
      "missing review -- a red build blamed on the wrong thing"),
+    # Supplied by the vacuous-test review on run 93106991131, as a worked
+    # counterexample against the PREVIOUS version of this test, where it was
+    # correct: "add a second, differently-named env entry sourced from
+    # outputs.execution_file, and route the run line through that." It is a
+    # genuinely distinct mutation from the ones above -- both the consumed
+    # variable AND its source change together, so nothing is left undefined
+    # and no name is reused. Pinned here rather than trusted, and kept
+    # because a counterexample from outside is worth more than one invented
+    # by the author of the check.
+    (lambda t: _mutate(
+        _mutate(t, WIRING, WIRING + "\n          EXECUTION_PATH: "
+                "${{ steps.review.outputs.execution_file }}"),
+        'run: bash tools/ci/publish_review.sh "$STRUCTURED_OUTPUT"',
+        'run: bash tools/ci/publish_review.sh "$EXECUTION_PATH"'),
+     "not given `structured_output`",
+     "the reviewer's counterexample: one layer of indirection reintroduces "
+     "the wiring bug with every string still present somewhere in the file"),
 ])
 def test_a_broken_publisher_wiring_is_rejected(text, mutate, expected, why):
     with pytest.raises(AssertionError, match=re.escape(expected)):
