@@ -1929,6 +1929,57 @@ class ReportVerdictSuperseded(ValueError):
     """A run report's verdict has been annotated and must not be read alone."""
 
 
+VERDICT_CURRENT = "current"
+VERDICT_SUPERSEDED = "superseded"
+VERDICT_ANNOTATED_UNDECIDABLE = "annotated_but_not_machine_decidable"
+
+
+def verdict_validity(report_object_name, *, bucket, allow_test_split=False):
+    """Is this report's verdict still valid? Returns `(status, evidence)`.
+
+    The machine-decidable half of the supersession contract. `read_run_report`
+    REFUSES an annotated verdict, which stops a consumer treating it as
+    current by accident; this lets a consumer that handles the refusal
+    decide validity from structured fields instead of parsing prose.
+
+    Three outcomes, and the third is the one that matters:
+
+    - `VERDICT_CURRENT` — no annotation exists.
+    - `VERDICT_SUPERSEDED` — an annotation carries a `supersession` block
+      with `verdict_superseded: true`. `evidence` is that block, so the
+      caller gets `current_validity`, `reason_code` and whether the
+      numerical artifacts remain admissible without reading English.
+    - `VERDICT_ANNOTATED_UNDECIDABLE` — an annotation exists but carries no
+      structured block. **This is deliberately not `current`.** An
+      annotation was written because somebody found the verdict misleading;
+      inferring "still valid" from the absence of a field they did not know
+      to write would resolve ambiguity in the least safe direction. It fails
+      toward the same refusal, and names why."""
+    annotations = annotation_names_for(report_object_name, bucket=bucket,
+                                       allow_test_split=allow_test_split)
+    if not annotations:
+        return VERDICT_CURRENT, None
+
+    import tempfile
+    found = []
+    for name in annotations:
+        with tempfile.TemporaryDirectory() as tmp:
+            path = os.path.join(tmp, "a.json")
+            try:
+                download_file(name, path, bucket=bucket,
+                              allow_test_split=allow_test_split,
+                              verify_content=False)
+                with open(path, "r", encoding="utf-8") as handle:
+                    block = (json.load(handle) or {}).get("supersession")
+            except Exception:                      # noqa: BLE001 - unreadable
+                block = None                       # counts as undecidable
+        if isinstance(block, dict) and block.get("verdict_superseded") is True:
+            found.append({"annotation": name, **block})
+    if found:
+        return VERDICT_SUPERSEDED, found
+    return VERDICT_ANNOTATED_UNDECIDABLE, {"annotations": annotations}
+
+
 def read_run_report(report_object_name, *, bucket, allow_test_split=False,
                     raise_on_annotation=True):
     """THE way to read a run report. Returns `(report, annotations)`.

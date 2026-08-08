@@ -2868,3 +2868,71 @@ def test_an_annotation_on_a_DIFFERENT_run_does_not_bleed_across(bucket, tmp_path
     report, annotations = gcs.read_run_report(good, bucket=bucket)
     assert annotations == []
     assert report["verdict"] == "STAGE3_OK"
+
+
+# ---- machine-decidable validity, the second half of the supersession contract ----
+
+def _annotate(bucket, tmp_path, report, payload, seq=None):
+    stem = report.rsplit(".", 1)[0]
+    name = f"{stem}_annotation.json" if seq is None else f"{stem}_annotation_{seq}.json"
+    gcs.upload_file(str(_write(tmp_path / f"a{seq or 0}.json", json.dumps(payload))),
+                    name, bucket=bucket)
+    return name
+
+
+SUPERSEDED = {"supersession": {"verdict_superseded": True,
+                               "current_validity": "invalid_as_gate_evidence",
+                               "reason_code": "gate_not_implemented",
+                               "numerical_artifacts_admissible": True}}
+
+
+def test_an_unannotated_verdict_is_current(bucket, tmp_path):
+    name = _report_with(bucket, tmp_path)
+    status, evidence = gcs.verdict_validity(name, bucket=bucket)
+    assert status == gcs.VERDICT_CURRENT
+    assert evidence is None
+
+
+def test_a_structured_annotation_decides_superseded_without_prose(bucket, tmp_path):
+    """The reviewer standard: current validity machine-decidable. A consumer
+    must reach reason_code and admissibility without reading English."""
+    name = _report_with(bucket, tmp_path)
+    _annotate(bucket, tmp_path, name, SUPERSEDED)
+    status, evidence = gcs.verdict_validity(name, bucket=bucket)
+    assert status == gcs.VERDICT_SUPERSEDED
+    assert evidence[0]["reason_code"] == "gate_not_implemented"
+    assert evidence[0]["numerical_artifacts_admissible"] is True
+
+
+def test_a_prose_only_annotation_is_UNDECIDABLE_not_current(bucket, tmp_path):
+    """The case that decides whether this contract is safe.
+
+    An annotation with no structured block was still written because
+    somebody found the verdict misleading. Inferring "still current" from
+    the absence of a field they did not know to write would resolve the
+    ambiguity in the least safe direction."""
+    name = _report_with(bucket, tmp_path)
+    _annotate(bucket, tmp_path, name, {"note": "see FINDINGS"})
+    status, _ = gcs.verdict_validity(name, bucket=bucket)
+    assert status == gcs.VERDICT_ANNOTATED_UNDECIDABLE
+    assert status != gcs.VERDICT_CURRENT
+
+
+def test_verdict_superseded_false_does_not_count_as_superseded(bucket, tmp_path):
+    """Only an explicit true supersedes. A block that says the verdict
+    stands must not read as a supersession."""
+    name = _report_with(bucket, tmp_path)
+    _annotate(bucket, tmp_path, name, {"supersession": {"verdict_superseded": False}})
+    status, _ = gcs.verdict_validity(name, bucket=bucket)
+    assert status == gcs.VERDICT_ANNOTATED_UNDECIDABLE
+
+
+def test_a_structured_annotation_among_prose_ones_still_decides(bucket, tmp_path):
+    """Append-only means a later structured correction sits beside an
+    earlier prose one; the structured block must still be found."""
+    name = _report_with(bucket, tmp_path)
+    _annotate(bucket, tmp_path, name, {"note": "prose first"})
+    _annotate(bucket, tmp_path, name, SUPERSEDED, seq=2)
+    status, evidence = gcs.verdict_validity(name, bucket=bucket)
+    assert status == gcs.VERDICT_SUPERSEDED
+    assert len(evidence) == 1
