@@ -43,6 +43,15 @@ dev = [
 gpu = [
     "mighty-colab>=0.2.2",
     "google-cloud-storage>=2.19.0",
+    # Arrives transitively via google-cloud-storage, and was relied on that
+    # way until a bare `uv sync` pruned it on its own -- which turned
+    # test_crc32c_agrees_with_google_crc32c_where_it_is_installed into a
+    # SKIP. `stage2b_gcs.py` falls back to a pure-Python CRC32C, so nothing
+    # failed; the test asserting the fallback computes the same digest as
+    # the library GCS actually uses simply stopped running, and a skip is
+    # not a failure. Declared so it lives and dies with its group instead
+    # of being pruned out from under the one test that checks it.
+    "google-crc32c>=1.5.0",
 ]
 
 [tool.pytest.ini_options]

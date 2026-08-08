@@ -448,6 +448,15 @@ nobody wrote a wrong number and the numbers became wrong anyway. Principle
 here (`tests/test_stage2b_ladder_stage1.py`) and the numbers are not
 duplicated.
 
+`make stage2b-test` runs under `--group gpu` and prints every skip with
+its reason. Both are there because a bare `uv sync` once pruned
+`google-crc32c` — which `stage2b_gcs.py` falls back away from by design —
+and the test checking that fallback against the real library became a
+skip. Nothing failed; the count moved by one and nobody diffs counts. The
+group makes the packages present for this target regardless of how the
+environment was last synced, and `-rs` means an absence has to announce
+itself rather than being inferred from a total.
+
 The round trip is the only test that leaves this machine. It provisions
 a CPU runtime, writes an object to GCS from it, and reads that object
 back here **twice** — once authenticated, once anonymously, because

@@ -325,7 +325,7 @@ STAGE2B_TEST_FILES := tests/test_stage2b_corruption.py tests/test_stage2b_encode
 
 .PHONY: stage2b-test
 stage2b-test:  ## Run the Stage 2B test suite (fast only; the Colab round trip is excluded)
-	cd $(REPO_ROOT) && uv run pytest $(STAGE2B_TEST_FILES) -m "not slow" -q
+	cd $(REPO_ROOT) && uv run --group gpu pytest $(STAGE2B_TEST_FILES) -m "not slow" -rs -q
 
 # The round trip is the only Stage 2B test that leaves this machine: it
 # provisions a real Colab CPU runtime, writes an object to GCS from it,
@@ -373,7 +373,7 @@ stage2b-test-roundtrip:  ## Real Colab+GCS round trip -- provisions a CPU runtim
 
 .PHONY: test
 test:  ## Run the whole default suite (every stage, slow reproduction checks excluded)
-	cd $(REPO_ROOT) && uv run pytest tests/ -m "not slow" -q
+	cd $(REPO_ROOT) && uv run pytest tests/ -m "not slow" -rs -q
 
 ##@ Stage 2B verification against real infrastructure
 
