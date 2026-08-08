@@ -361,6 +361,48 @@ looked for. That is an encouraging shape for a problem to have.
     verdict without its gate. Then a malfunction yields an absence, which
     everything above is already tuned to find.
 
+12. **Checking the artifact is necessary and not sufficient — know what its
+    fields MEAN before reasoning from them.** A verified field read under
+    the wrong semantics produces a confident, evidenced, wrong conclusion,
+    and it is *more* persuasive than an unchecked one because it arrives
+    with citations and a table.
+
+    The incident: a peer stated it had sent nothing in a given window. The
+    mailbox archive showed three messages carrying its `instance:` tag
+    inside that window, so its claim was contradicted — except `instance:`
+    names a **role**, not a session, and a different chat had written under
+    it. The peer was telling the truth. The artifact was real; the reading
+    was not. Committed by the author of category H, hours after writing
+    *"an absence invites suspicion; a presence invites belief"* — which is
+    not an irony at anyone's expense but the evidence that the class spares
+    nobody.
+
+    This indicts every derived guard in this repository, and that is the
+    point of recording it. The AST walk assumes it knows what a GCS client
+    looks like. The clause hash assumes it knows what a clause is. The
+    scratch predicate assumed it knew what a remote exec looks like — and
+    **that one already bit**, when `colab` inside a `grep` alternation was
+    read as a pipe target (#18). Same disease each time: the field was
+    real, the semantics assumed.
+
+    Corollary for anything that records provenance: **point at an artifact,
+    never at who checked it.** `verified by <agent>` rests on an identity
+    that can be truthfully denied, and is unreviewable besides.
+
+### Held, pending an incident that actually instantiates it
+
+*An agent is not a reliable witness to its own outbound history.* Proposed
+from the incident above and **withdrawn**: the founding incident dissolved
+once the tag semantics were understood — the peer's recall was accurate.
+The claim is plausible and probably true in general, since compaction and
+restarts are real. It is recorded here rather than adopted because this
+catalogue's rule is that patterns are incident-grounded, and this one's
+incident turned out to be about something else.
+
+Keeping a plausible-but-unfounded pattern visibly parked, rather than
+quietly adopting or quietly dropping it, is the same discipline as the rest
+of this document applied to its own contents.
+
 ## Related
 
 CLAUDE.md principles 10 (a permutation scheme must destroy the effect it
