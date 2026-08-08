@@ -14,7 +14,6 @@ not yet fail-open (CLAUDE.md principle 21's corollary).
 """
 import json
 import os
-import stat
 import subprocess
 import sys
 from pathlib import Path
@@ -87,17 +86,33 @@ def test_fail_open_on_malformed_input(tmp_path, script):
 @pytest.mark.parametrize("script", [CAPTURE_SH, CAPTURE_PY],
                          ids=["via-wrapper", "python-directly"])
 def test_fail_open_when_the_log_directory_cannot_be_created(tmp_path, script):
-    """An unwritable tree is an environment problem, not the session's."""
-    readonly = tmp_path / "readonly"
-    readonly.mkdir()
-    readonly.chmod(stat.S_IREAD | stat.S_IEXEC)
-    try:
-        proc = run_hook(pre_payload(), readonly, script=script)
-        print(f"[fail-open] unwritable root -> exit {proc.returncode}")
-        assert proc.returncode == 0, proc.stderr
-        assert records(readonly) == []
-    finally:
-        readonly.chmod(stat.S_IRWXU)
+    """An unwritable tree is an environment problem, not the session's.
+
+    The root is a regular FILE, so `mkdir root/.provenance` fails with
+    ENOTDIR. That condition holds for EVERY user, which a read-only
+    directory does not.
+
+    It used to be `chmod(S_IREAD | S_IEXEC)`, and that passed on macOS as an
+    ordinary user and FAILED on Cloud Build's first run -- both
+    parametrisations, `assert records(readonly) == []`. The failure is its
+    own evidence: records had been written into a 0500 directory, which only
+    a process bypassing the permission bits can do. The build runs as root
+    in the container, so the fixture silently did not create the state it
+    named, and the test had been passing because of who was running it.
+
+    That is this project's recurring shape aimed at a fixture rather than an
+    assertion: the precondition was environment-dependent, its absence was
+    invisible, and the platform that exposed it was the one nobody had run
+    on. A file-as-parent removes the dependence rather than skipping under
+    it -- the test now exercises the fail-open path everywhere instead of
+    being honest about exercising it nowhere.
+    """
+    blocked = tmp_path / "not-a-directory"
+    blocked.write_text("")
+    proc = run_hook(pre_payload(), blocked, script=script)
+    print(f"[fail-open] root is a file -> exit {proc.returncode}")
+    assert proc.returncode == 0, proc.stderr
+    assert records(blocked) == []
 
 
 def test_fail_open_when_the_interpreter_is_missing(tmp_path):

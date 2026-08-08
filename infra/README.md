@@ -30,6 +30,30 @@ So there are three triggers and none of them is per-push:
 green CI that nothing reviewed. And `git log stage2b-ci..stage2b` is then
 exactly the work that has not had a full run — derived, not tracked.
 
+## The three branches
+
+```
+stage2b       many pushes a day, fast, tested locally by agents
+   │ PR       -> vacuous-test review runs here, and only here
+   ▼
+stage2b-ci    checkpoint: full suite on Linux/x86, from clean
+   │ PR
+   ▼
+main          release
+```
+
+**Releases come from `stage2b-ci`, not from `stage2b`.** A PR straight from
+`stage2b` into `main` bypasses the checkpoint entirely — it has had no full
+run and no review — which is the shape PR #23 had before this branch
+existed.
+
+It also keeps release PRs small enough to review. The action's injected
+file list is capped at 100 and unpaginated: PR #23 changed 142 files, 34 of
+them tests, and every review of it reported "17 test files" while
+describing the result as covering the pull request. Incremental
+`stage2b-ci` → `main` PRs stay under that cap. The FIRST one will not — it
+inherits whatever backlog existed when `stage2b-ci` was branched.
+
 Path filtering was measured and rejected. The intuitive ignore set
 (`.claude`, `.github`, `docs`, `*.md`) would skip 39% of pushes, but twelve
 test files read those paths and `docs/` is directly tested. The set no test
