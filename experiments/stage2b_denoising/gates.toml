@@ -427,6 +427,130 @@ test = ""
 break_demonstrated = ""
 trigger = "manual"
 
+[binding_gate.5d8386004c11]
+# DESIGN: "Automatic failures, REGARDLESS of rho or the absolute-convergence
+#  escape below: any non-finite encoded phase; any non-finite final-Delta.
+#  ... Exceedance halts the stage pending investigation."
+enforcement = "experiments/stage2b_denoising/stage2b_encoder_gate.py::evaluate_rho_gate"
+production_reachability = """
+run_ladder_stage1.py::step4_encoder_gate calls run_encoder_gate, which calls
+evaluate_rho_gate and attaches the encoded phases. Reached via the sole
+production entry point `make stage2b-ladder-stage1`. The verdict is cached
+as an artifact whose object name carries the step count
+(`encoder_gate_s{ENCODER_STEPS}`), so a step-count change cannot serve a
+stale verdict past the amendment that changed it.
+
+Note that the check is inside the module, not the driver: the driver reads
+`summary["passed"]` and `summary["failure_reasons"]`, so a caller cannot
+reach the gate without reaching the automatic failures."""
+input_wiring = """
+`delta_clean` / `delta_noisy` -- each image's final-iteration maximum
+absolute phase update, from the encoder at ENCODER_STEPS -- and
+`thetas_clean` / `thetas_noisy`, the encoded phases themselves, which the
+non-finite-PHASE check needs and which run_encoder_gate passes in. Both
+computed on the same 1,000 images, clean and noisy versions separately.
+
+SCOPE LIMITATION, from the module's own docstring and repeated here because
+it narrows what the row may be cited for: the non-finite-PHASE check sees
+only the coordinates the caller supplies. A non-finite phase OUTSIDE the
+active support is still caught, but by the non-finite final-Delta check
+rather than this one."""
+decision_consequence = """
+`automatic_failure` forces `passed = False` regardless of rho and regardless
+of the absolute-convergence escape, and run_ladder_stage1.py raises
+Stage1Halt("encoder gate: " + reasons). The verdict is written into the run
+report on BOTH branches, before the halt -- so a failing gate produces a
+record rather than only an exception."""
+test = "tests/test_stage2b_encoder_gate.py::test_absolute_convergence_escape_does_not_override_automatic_failure"
+break_demonstrated = """
+Both automatic failures disabled independently, each `if ... :` -> `if
+False:` in production:
+
+  non-finite final-Delta   test_gate_automatic_failure_on_non_finite_final_delta_despite_small_rho
+                           and test_gate_automatic_failure_on_infinite_final_delta FAIL.
+  non-finite encoded phase test_absolute_convergence_escape_does_not_override_automatic_failure
+                           and test_gate_automatic_failure_on_non_finite_encoded_phase_with_healthy_rho FAIL.
+
+Disjoint failure sets, which is what shows the two automatic failures are
+separately enforced rather than one standing in for both. The test named in
+`enforcement` is the one that pins the word REGARDLESS: it constructs a case
+where the absolute-convergence escape would otherwise pass the gate, and
+requires the automatic failure to win."""
+trigger = "ci-fast"
+
+[binding_gate.b6e8be29a571]
+# AUDIT_PROTOCOL: "Either alpha regime triggers review. The alpha mechanism
+#  determines the INTERPRETATION of a reversal ... but it does not determine
+#  WHETHER review occurs."
+#
+# Deliberately separate from 12d7b0d5472d, which carries the three trigger
+# CONDITIONS. This clause binds the OR over regimes: a reversal seen under
+# fixed-alpha alone, or under reselected-alpha alone, is sufficient. Merged
+# into one row, the natural implementation -- check the conditions once, on
+# whichever regime the driver happens to compute first -- would satisfy the
+# merged row while silently halving its reach.
+#
+# The clause also records that the trigger is live rather than hypothetical:
+# stage-2 cross-validated contrasts already show both signs (T -2.30e-3 and
+# lattice -3.90e-3 improving; rewired +4.02e-3 and curr_random +2.38e-3
+# worsening). So this is not a gate guarding an unreachable branch.
+enforcement = ""            # UNWRITTEN -- the audit driver does not exist
+production_reachability = ""
+input_wiring = ""
+decision_consequence = ""
+test = ""
+break_demonstrated = ""
+trigger = "manual"
+
+[binding_gate.a375db47a337]
+# DESIGN: the hierarchical identity gate. "1. Primary: evolved_T vs.
+#  pre_evolution. 2. Only if primary succeeds: evolved_T vs. identity -- the
+#  denoising gate; NEVER rescues a failed primary. 3. Always reported
+#  independently: pre_evolution vs. identity, own paired bootstrap interval."
+#
+# A gate rather than a claim, and the distinction is the word "only": step 2
+# is CONDITIONAL on step 1's outcome, so something must evaluate step 1 and
+# branch. Written as a claim it would be discharged by a person noticing the
+# write-up did not overreach, which is a weaker thing than a driver that
+# cannot compute the step-2 comparison until step 1 has passed.
+#
+# Note that step 3's obligation is the opposite shape -- ALWAYS reported,
+# whatever steps 1 and 2 show -- and is the part most likely to be lost by an
+# implementation that treats the sequence as an early-exit ladder.
+enforcement = ""            # UNWRITTEN -- no statistics driver exists
+production_reachability = ""
+input_wiring = ""
+decision_consequence = ""
+test = ""
+break_demonstrated = ""
+trigger = "manual"
+
+[binding_gate.daf41844a257]
+# STAGE3_PLAN Q4: "static import closure UNION runtime closure, established
+#  before generation and revalidated after, every exclusion frozen and
+#  justified. Runtime-alone misses conditional, lazy and branch-specific
+#  imports."
+#
+# PARTIAL COVERAGE EXISTS AND IS NOT CITED AS ENFORCEMENT, deliberately.
+# run_ladder_stage3.py:329 raises Stage3Halt when a named module resolves
+# outside the pinned clone -- real, and a different claim: it checks the
+# ORIGIN of modules already known to matter, from a hand-written tuple
+# ("ridge", "corruption", "encoder_gate", "gcs", "partition", ...). That
+# tuple is a hand-maintained list standing in for a derived set, which is
+# principle 21 exactly, and the clause exists because the derived set is what
+# closes the omitted-helper failure mode. Citing the origin check here would
+# be discharge by adjacent evidence in the shape 9bc6f9e3808a names.
+#
+# Neither closure is computed anywhere today, so both halves are absent --
+# not one half satisfied.
+enforcement = ""            # UNWRITTEN -- no closure is computed
+production_reachability = ""
+input_wiring = ""
+decision_consequence = ""
+test = ""
+break_demonstrated = ""
+trigger = "manual"
+
 # =============================================================================
 # binding_value -- frozen configuration obligations
 # =============================================================================
@@ -702,6 +826,323 @@ the value is live, the obligation about how the audit uses it is not."""
 enforcement = ""
 break_demonstrated = ""
 trigger = "manual"
+
+[binding_value.1837113c184a]
+# STAGE3_PLAN Freeze 3: "Fixed := the alpha selected from the production
+#  1,200-step representation per condition via the frozen 5-fold procedure,
+#  applied identically to both budgets' OOF fits. Reselected := independent
+#  per budget."
+value = """
+The DEFINITION of fixed-alpha for the amendment audit: per condition, the
+alpha the frozen 5-fold procedure selects on the production 1,200-step
+representation, then applied unchanged to both budgets' OOF fits. Reselected
+alpha is chosen independently per budget. Both are reported, alongside the
+production alpha itself.
+
+Per-budget fold-fitted scalers are retained (production preprocessing), so
+fixed-alpha isolates THE EFFECT OF ALPHA RESELECTION -- not raw
+representation change. That narrowing is part of the frozen value: a row
+that recorded only "fixed vs. reselected" would license the stronger reading
+the plan explicitly refuses."""
+production_consumers = ""
+status = "pending_consumer"
+pending_reason = """
+STAGE3_PLAN's statement of the freeze that 1148ede15761 carries for
+AUDIT_PROTOCOL. Deliberately NOT merged with it, for the reason recorded
+there: separate sentences in separate documents with separate ids, and one
+disposition covering two is the collision check_ids_unique refuses. The two
+rows are expected to move together, and if they ever diverge that is a
+finding about the documents rather than about this file.
+
+No consumer for the same reason: neither budget's OOF fit exists until the
+audit driver does. `stage2b_ridge.oof_per_image_mse` and
+`oof_clipped_mse_at_alpha` are the machinery it will call -- built,
+tested, and not yet called by anything that implements this definition."""
+enforcement = ""
+break_demonstrated = ""
+trigger = "manual"
+
+[binding_value.ae2b8a6124e4]
+# DESIGN: "This level is frozen. Adjusting it because measured clip rates
+#  'look awkward' is post-hoc tuning this project refuses. Empirical clip
+#  rates are reported ... as confirmation against this table, not discovery."
+value = """
+The corruption level, `ALPHA_BAR = 0.5`. Frozen, and the freeze carries a
+second half that is easy to drop: the measured clip rates are CONFIRMATION
+against the design's analytical table, never an input to choosing the
+level. The direction of inference is part of the value."""
+production_consumers = """
+stage2b_corruption.py::ALPHA_BAR, the single propagation point. Every
+derived quantity reads it rather than restating a number:
+signal_coefficient / noise_coefficient take it as their argument's default,
+predicted_clip_rates and clip_rate_agreement default to it, and
+run_ladder_stage1.py::step3 calls clip_rate_agreement without overriding
+it. There is no second place a level could drift."""
+status = "enforced"
+enforcement = "tests/test_stage2b_corruption.py::test_analytical_rates_reproduce_the_design_table"
+break_demonstrated = """
+ALPHA_BAR 0.5 -> 0.6: TEN tests fail, and the set is the evidence rather
+than the count. It includes test_analytical_rates_reproduce_the_design_table
+and test_format_analytical_table_reproduces_design_md_rows -- both of which
+compare DERIVED rates against DESIGN.md's transcribed table, so they fail
+because the propagated consequence moved, not because a literal was edited.
+test_master_seed_and_alpha_bar_are_locked also fails, and on its own it
+would be the equality-pin shape this file distrusts; it is not on its own.
+
+Also fails: test_censoring_is_majority_at_every_clean_intensity, which is
+the design's actual scientific premise (~54% censoring) rather than any
+number transcribed from it."""
+provenance_of_use = """
+Stage 1 ran clip_rate_agreement on the real 1,000-image corpus and recorded
+the comparison in the run's report under `clip_rate_agreement`, with
+out-of-tolerance entries routed to `diagnostics.clip_rate_outside_tolerance`
+-- so the artifact records the confirmation direction the clause requires,
+not merely that a level was set."""
+trigger = "ci-fast"
+
+[binding_value.30b820786974]
+# DESIGN: the encoding pipeline. "Gauge: reference-node, theta_ref = node 363
+#  (T's median-weighted-degree node; Stage 2A's final locked choice).
+#  Features: circular embedding, 1008-dim, the two trivially-constant
+#  reference-node columns dropped deterministically ... Encoder RNG: seed 0
+#  per image, primary."
+value = """
+The gauge node, 363, and the feature dimension it implies: 2 x 505 - 2 =
+1008, the two dropped columns being the reference node's own cos/sin, which
+are constant by construction under a reference-node gauge. Encoder RNG seed
+0 per image.
+
+SCOPE. This row covers the three values above. The clause's remaining
+items are dispositioned elsewhere rather than bundled here, because one
+citation covering four values covers a quarter of what it claims: the
+per-training-fold StandardScaler regime binds at ccd85c56816e with the rest
+of the ridge configuration, and the inherited canonical-graph constants
+(fold seed 42; rewire seed 0; matched-sparsity seed 0) are Stage 2A's,
+consumed as data through stage 1's cached topologies rather than set here."""
+production_consumers = """
+run_ladder_stage3.py::EXPECTED_REF_IDX and EXPECTED_FEATURE_DIM, and the
+same pair in run_ladder_stage1.py and run_ladder_stage2.py -- three rungs,
+three declarations, deliberately not shared, since a driver that agreed with
+the others by import could not detect a rung encoded under a different
+gauge. EXPECTED_FEATURE_DIM is written as `2 * EXPECTED_N_ACTIVE - 2` in all
+three, so the support size is the single propagation point.
+
+The gauge is not set by the driver: it ARRIVES as data, in stage 1's cached
+topologies (`meta["nodes_T"]["median"]`), and the driver's role is to refuse
+an artifact that disagrees. stage2b_encoder_gate.py::ENCODER_SEED is the
+seed's single point, consumed by run_ladder_stage1.py::step4_encoder_gate."""
+status = "enforced"
+enforcement = "tests/test_stage2b_ladder_stage3.py::test_topology_reuse_halts_when_the_gauge_node_is_not_the_locked_one"
+break_demonstrated = """
+`if ref_idx != EXPECTED_REF_IDX:` -> `if False:` in the production driver:
+test_topology_reuse_halts_when_the_gauge_node_is_not_the_locked_one FAILS.
+Its partner test_topology_reuse_accepts_the_locked_gauge_node still passes,
+so the halt is shown conditional rather than unconditional.
+
+WHAT DID NOT FAIL is the finding. test_corpus_constants -- `assert
+driver.EXPECTED_REF_IDX == 363` -- passed on the broken driver, because the
+literal was untouched and the halt consuming it was gone. Until the test
+named in `enforcement` was written for this row, that pin was the only thing
+watching the gauge, and it watches the constant rather than the decision.
+Same stream as the FOLD_SEED finding recorded at ccd85c56816e, different
+mechanism: this one fails when the literal moves, and is blind to the halt
+being deleted."""
+provenance_of_use = """
+Phase A's encoded artifact (`encoded_train_s1200`) was produced against
+stage 1's topologies object, whose summary_json carries median=363; the
+stage-3 driver re-reads that same object under a pinned digest, so the
+gauge in the artifact and the gauge the driver checks are the same bytes."""
+trigger = "ci-fast"
+
+[binding_value.15648e761c31]
+# DESIGN post-lock amendment (2026-08-06): "ENCODER_STEPS raised 150 -> 1200,
+#  and the gate formula gains an absolute-convergence escape."
+value = """
+ENCODER_STEPS = 1200, replacing the pre-lock 150. The amendment's own
+disclosure is the reason the value binds rather than merely being a
+default: the gate's first execution on real majority-censored KMNIST FAILED
+honestly at rho=169.851 against a threshold of 10, and 1200 is the step
+count the investigation settled on. A run encoded at any other count is not
+the run the design describes."""
+production_consumers = """
+Two independent declarations, and the duplication is load-bearing:
+
+  stage2b_encoder_gate.py::ENCODER_STEPS   what the encoder RUNS at,
+      consumed by run_ladder_stage1.py::step4_encoder_gate, which also
+      interpolates it into the gate artifact's OBJECT NAME
+      (`encoder_gate_s{steps}`) so a step-count change mints a new object
+      rather than reusing a cached verdict computed at the old count.
+  run_ladder_stage3.py::ENCODER_STEPS      what Phase B EXPECTS its input to
+      have been encoded at, consumed by step3_encoded_input against the
+      artifact's recorded fingerprint config, and by _obj to name the object
+      it fetches.
+
+A shared constant would make the second check tautological. The producer and
+the consumer assert the same number independently, which is what lets the
+consumer detect a producer that changed."""
+status = "enforced"
+enforcement = "tests/test_stage2b_ladder_stage3.py::test_encoded_input_halts_on_a_different_encoder_step_count"
+break_demonstrated = """
+`if int(config.get("encoder_steps", -1)) != ENCODER_STEPS:` -> `if False:`
+in the production driver: test_encoded_input_halts_on_a_different_encoder_step_count
+FAILS. Its partner, test_the_step_count_check_passes_before_the_image_count_check,
+still passes -- and it is the reason this pair is a verdict rather than a
+raise: the step cannot complete locally, so the healthy direction is shown
+by breaking the NEXT check and observing that the message names images,
+which is only reachable if the step-count check was evaluated and accepted.
+
+test_corpus_constants passed on the broken driver, same as at 30b820786974."""
+provenance_of_use = """
+The Phase A artifact is named `encoded_train_s1200` and its manifest's
+fingerprint config records `encoder_steps: 1200`; the stage-3 driver reads
+that config and compares. The step-1 gate artifact for the superseded count
+(`encoder_gate_s150`) survives in the bucket as the historical record of the
+FAIL that produced the amendment -- so both counts are attested, and which
+one produced which result is answerable from object names alone."""
+trigger = "ci-fast"
+
+[binding_value.ccd85c56816e]
+# DESIGN: "One multi-output ridge, shared alpha across all 505 outputs, grid
+#  {1e-6 .. 1e6}, fit_intercept=True, inputs standardized per-fold, targets
+#  unstandardized. Tie: mean validation MSE within 1e-10 absolute; LARGER
+#  ALPHA WINS. Folds: StratifiedKFold(n_splits=5, shuffle=True,
+#  random_state=42), identical partition across all conditions."
+value = """
+The readout's frozen configuration: ALPHA_GRID's thirteen decade values,
+ALPHA_TIE_TOL = 1e-10 with the larger-alpha tie-break, N_SPLITS = 5, and
+FOLD_SEED = 42 -- one partition, identical across every condition.
+
+The tie-break DIRECTION is part of the value. "Within 1e-10, larger alpha
+wins" is a prospective commitment to the more-regularized model; reversed,
+it would select the less-regularized one on ties that are numerically
+meaningless, which is a choice made by looking at results."""
+production_consumers = """
+stage2b_ridge.py::ALPHA_GRID, ALPHA_TIE_TOL, N_SPLITS, FOLD_SEED. Four
+values, and per this section's own warning they are enumerated rather than
+covered by one citation:
+
+  ALPHA_GRID     default of svd_ridge_fit, cross_validate_alpha,
+                 oof_per_image_mse, sklearn_ridge_predict,
+                 ridge_equivalence_check
+  ALPHA_TIE_TOL  default of select_alpha, reached from cross_validate_alpha
+  N_SPLITS       default of cross_validate_alpha, oof_per_image_mse,
+                 oof_clipped_mse_at_alpha, ridge_equivalence_check
+  FOLD_SEED      the `random_state` default of the same four
+
+run_ladder_stage3.py::step7_ridge calls cross_validate_alpha without
+overriding any of them, so the module defaults ARE the production values."""
+status = "enforced"
+enforcement = "tests/test_stage2b_ridge.py::test_the_production_partition_is_the_one_the_design_locks"
+break_demonstrated = """
+Each of the four broken separately, in production, with the test literals
+untouched:
+
+  ALPHA_TIE_TOL 1e-10 -> 0.0   test_select_alpha_within_tolerance_tie_larger_alpha_wins
+                               fails on the VERDICT ("assert 10.0 == 100.0"):
+                               the tie stops being a tie and the smaller
+                               alpha wins. Also the equality pin, which
+                               would not have been enough alone.
+  N_SPLITS 5 -> 4              5 tests fail.
+  ALPHA_GRID (removed decade)  covered by 3043a89b2aae's own row.
+  FOLD_SEED 42 -> 43           1 test fails -- and this is a REPAIR, not a
+                               report. Before the test named in
+                               `enforcement` was written, 42 -> 43 passed
+                               92/92: every test read the seed from the
+                               module and asserted a downstream record
+                               equalled it, which is `x == x`. Distinct
+                               from the equality pins catalogued elsewhere
+                               and worse: an equality pin at least fails
+                               when the literal is edited, a
+                               self-referential one fails under no edit at
+                               all. VACUOUS_TESTS #28."""
+provenance_of_use = """
+ridge_cv_g13_88edf9ac.json records the Phase B re-run's selected alphas per
+condition under this grid and partition, and its manifest records the
+producing commit. The object name's `g13` is the thirteen-value grid, so
+the artifact's own identity carries which grid produced it."""
+trigger = "ci-fast"
+
+[binding_value.ca5c4da6d40e]
+# DESIGN: "Architecture (residual formulation, locked prospectively):
+#  x_hat_0 = x_t_clip + f_psi(x_t_clip)".
+#
+# Separate from 649bb190a18e, which carries the same block's PARAMETER
+# COUNT and layer properties. This row is the residual FORMULATION -- the
+# skip connection itself, which is what makes the 9,857 parameters model a
+# correction rather than a reconstruction. A width change and a dropped skip
+# are different failures and the second leaves the count intact.
+value = """
+The prediction is the clipped input plus a learned correction:
+`x_hat_0 = x_t_clip + f_psi(x_t_clip)`, locked prospectively -- i.e. before
+any measurement of whether the residual form helps."""
+production_consumers = """
+stage2b_cnn.py::Denoiser.__call__, the single site: `x + self.residual(x)`.
+The convolution stack is reached only through it, so there is no path that
+evaluates f_psi without the skip."""
+status = "enforced"
+enforcement = "tests/test_stage2b_cnn.py::test_residual_skip_connection_is_real"
+break_demonstrated = """
+`x + self.residual(x)` -> `self.residual(x)` (the skip dropped, every
+parameter and the 9,857 count untouched): THREE tests fail --
+test_residual_skip_connection_is_real, plus
+test_training_loss_is_raw_and_validation_metric_is_clipped and
+test_clipping_touches_the_prediction_and_never_the_target, both of which
+read the model's output and so see the formulation change independently.
+
+Worth recording that 649bb190a18e's break (CONV_CHANNELS 32 -> 33) does NOT
+fail these three, and this break does not fail its four. Two rows, two
+disjoint failure sets, over one paragraph of DESIGN.md."""
+provenance_of_use = """
+Stage 2's CNN development run reported best-of-three-seeds clipped
+validation MSE 0.0637 against the identity baseline's 0.1998 (FINDINGS.md).
+The model that produced it is this constructor; a non-residual model would
+have been a different architecture reported under the same name."""
+trigger = "ci-fast"
+
+[binding_value.2c7aaa2b46ea]
+# DESIGN: "Training, literal: batch 128, max 100 epochs, early-stopping
+#  patience 10 on clipped active-support validation MSE, min_delta=0.0 with
+#  strict `<` improvement, best checkpoint restored ... Three seeds (0,1,2)
+#  ... best-of-3 by clipped validation MSE, training-derived only."
+value = """
+BATCH_SIZE 128, MAX_EPOCHS 100, PATIENCE 10, MIN_DELTA 0.0 with strict `<`,
+SEEDS (0, 1, 2). The stopping RULE is as frozen as the numbers: min_delta
+zero plus strict improvement means an exact plateau does not reset patience,
+which is what makes "patience 10" a bounded claim rather than a
+configuration that can run to MAX_EPOCHS on a flat curve.
+
+The clause's closing constraint -- selection is training-derived only,
+official-test performance never inspected -- is NOT dispositioned here. It
+binds at f3bbc791e7c6, which gates test-side access in code."""
+production_consumers = """
+stage2b_cnn.py::BATCH_SIZE, MAX_EPOCHS, PATIENCE, MIN_DELTA, SEEDS,
+consumed by train_cnn's epoch loop and its early-stopping branch. SEEDS is
+consumed by the best-of-three caller rather than by train_cnn, which takes
+one seed -- the only one of the five with its propagation outside the
+training function."""
+status = "enforced"
+enforcement = "tests/test_stage2b_cnn.py::test_worsening_run_stops_after_patience_epochs_keeping_the_first_checkpoint"
+break_demonstrated = """
+Two of the five broken in production, both landing on the same VERDICT test
+rather than only on the constants pin:
+
+  PATIENCE 10 -> 3     test_worsening_run_stops_after_patience_epochs_keeping_the_first_checkpoint
+                       fails -- the run stops at a different epoch and the
+                       restored checkpoint changes.
+  MIN_DELTA 0.0 -> 1e-9  same test fails, and this is the more informative
+                       of the two: the epoch count is unchanged on a
+                       strictly-worsening curve, so what moves is the
+                       plateau behaviour the strict-`<` clause exists for.
+
+test_locked_optimizer_and_training_constants fails under both. It is an
+equality pin and is deliberately not cited as `enforcement` -- it is
+reported here because it fired, not because it would have been enough."""
+provenance_of_use = """
+Stage 2 trained under these constants and recorded the per-seed clipped
+validation MSEs and the selected checkpoint in its run report; FINDINGS.md
+carries the best-of-three figure. No stage-3 CNN run exists yet, so the
+provenance is stage 2's, at the 5,000-image development scale."""
+trigger = "ci-fast"
 
 # =============================================================================
 # binding_claim -- obligations on what may be CLAIMED
@@ -1156,6 +1597,132 @@ not a cap, and one that never fires is indistinguishable from one that was
 never set unless the freeze predates the measurement."""
 enforcement = ""
 break_demonstrated = ""
+trigger = "manual"
+
+[binding_claim.23984119d253]
+locator = "DESIGN.md, section 'DESIGN STATUS' (document header)"
+obligation = """
+DESIGN.md is locked. Changes after the lock require an explicit, disclosed
+post-lock amendment; an undisclosed edit is prohibited. The document also
+records that no further scientific review round is required, which is the
+half that makes the first half load-bearing: nothing downstream re-derives
+the design, so an undisclosed edit is not caught by any later reading."""
+status = "pending_package"
+pending_reason = """
+The obligation ranges over every edit from the lock commit onward, so it
+cannot be discharged by a point-in-time check; its discharge point is the
+readiness package's provenance section, stating that DESIGN.md is frozen
+and listing its amendments. No such section exists.
+
+Same shape as 0ac873652382 for AUDIT_PROTOCOL.md and f18749c28dd0 for
+COMPANION_PROTOCOLS.md, and dispositioned separately for the same reason:
+three documents, three lock statements, three histories."""
+negative_attestation = """
+The prohibited thing is an UNDISCLOSED edit, and an absence does not
+announce itself, so the output set is stated rather than sampled: every
+commit touching experiments/stage2b_denoising/DESIGN.md from the lock
+commit to the package's own commit, read as a diff. The set is enumerable
+by `git log --follow -p -- experiments/stage2b_denoising/DESIGN.md`, which
+is what makes this checkable at all -- an attestation over "the document"
+would be satisfied by reading the current text, in which an undisclosed
+edit is by construction invisible.
+
+Compliance to date is observable in the document itself: three amendments
+appear, each carrying its own dated disclosure block (ENCODER_STEPS
+150->1200; the two-phase stage-3 encode; the ridge grid extended to
+1e-6..1e6). That is evidence about the range so far, not a discharge."""
+trigger = "manual"
+
+[binding_claim.916955ebbcf7]
+locator = "DESIGN.md, section 'Feasibility ladder'"
+obligation = """
+The ladder's rung 4: ONE locked evaluation on the official 10,000-image test
+corpus. Exactly one -- the constraint is the count, not merely the ordering.
+A second pass over the test corpus, however motivated, converts the held-out
+estimate into a selected one and there is no way to un-see the first."""
+status = "pending_package"
+pending_reason = """
+Nothing has been evaluated on the test corpus, so the count is zero and the
+obligation has not yet been tested by anything. Filed pending_package rather
+than not_applicable on the section's stated preference: not_applicable would
+pass silently and would become false the moment stage 4 runs.
+
+Scoped deliberately NARROWER than f3bbc791e7c6, which gates ACCESS to
+test-side objects during stages 1-3 and is enforced by
+_check_object_path_allowed. That gate is about reaching the corpus early;
+this clause is about how many times it may be read once reaching it is
+allowed, and no code distinguishes a first read from a second."""
+negative_attestation = """
+The prohibited thing is a SECOND evaluation, so the output set is every
+read of a test-split object after the stage-4 gate opens: the audit trail
+of `stage2b_gcs` object accesses under the `test` split, plus every
+reported test-corpus number in the readiness package and FINDINGS.md. A
+package that reports one test number is not evidence only one was computed
+-- which is why the set ranges over accesses, not over what was written up."""
+trigger = "manual"
+
+[binding_claim.8296ec49b5fa]
+locator = "AUDIT_PROTOCOL.md, section 'Companion protocols', ARM/x86 bullet"
+obligation = """
+The ARM/x86 propagation stress set's construction is fixed in advance:
+largest observed cross-architecture encoding discrepancies; the 79
+convergence-tail stress cases; coverage of every class; and a seeded
+stratified random component. The first comparison applies IDENTICAL FROZEN
+RIDGE COEFFICIENTS to ARM-derived and x86-derived features, isolating
+numerical propagation from refit variation. Max differences are reported at
+five points: encoding, evolved features per graph, prediction, per-image
+MSE, and the evolved-minus-pre contrast.
+
+The clause also fixes the NAMING: "convergence-tail stress cases", so named
+because the earlier "basin-boundary candidates" characterisation was
+retracted as unsupported -- encoder-contraction residuals being a different
+dynamical quantity from evolution-flow boundary proximity. The retraction is
+part of the frozen obligation, not background: reverting to the retracted
+term would restate a claim this project withdrew."""
+status = "pending_package"
+pending_reason = """
+The stress set does not exist and neither do its numbers. AUDIT_PROTOCOL's
+statement of the construction, dispositioned separately from
+COMPANION_PROTOCOLS' own rows (aa0198915e6b, 81d50983153e, c188b4e50c99)
+for the reason this file applies throughout: separate documents, separate
+sentences, separate ids.
+
+Related but distinct from ec37e874562c, which freezes the 500-case CAP.
+This row freezes what goes IN; that one freezes how many."""
+negative_attestation = """
+"Isolating numerical propagation from refit variation" is a must-not in
+positive dress: the first comparison must not refit. The output set is every
+reported ARM/x86 difference in the readiness package -- each must state
+which coefficients produced it, so a refit smuggled in as "the natural thing
+to do at this scale" is visible rather than inferred from a number's size."""
+trigger = "manual"
+
+[binding_claim.91597e31ea96]
+locator = "COMPANION_PROTOCOLS.md, section 'ABS_CONV_EPS sensitivity table'"
+obligation = """
+The reported quantity of interest is WHERE THE VERDICT FLIPS, at the locked
+ENCODER_STEPS=1200 and at every other step count. Both outcomes are
+results and both are reported as such: if the verdict at 1,200 is invariant
+across all four eps, that is the result; if it is not, the eps at which it
+changes AND the direction of the change are the result."""
+status = "pending_package"
+pending_reason = """
+The sensitivity table has not been produced, so there is no verdict to
+report a flip in. Distinct from 0059f193dfec, which is the obligation to
+produce the table; this is the obligation on what the table's write-up may
+present as its finding.
+
+The distinction is worth keeping because the two fail differently. A table
+produced but written up as "eps is not sensitive" -- with the flip locations
+omitted because they were uninteresting -- satisfies 0059f193dfec and
+violates this row."""
+negative_attestation = """
+The must-not is selective reporting: an invariant verdict may not be
+presented as the finding while a flip elsewhere in the sweep goes unstated.
+The output set is every cell of the 5-step-count x 4-eps table -- the
+protocol requires all of them reported, INCLUDING the ones that agree, so
+the attestation is checkable by counting cells in the write-up against the
+table's own dimensions rather than by judging emphasis."""
 trigger = "manual"
 
 # =============================================================================
