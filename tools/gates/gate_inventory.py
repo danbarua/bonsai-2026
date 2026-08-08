@@ -257,15 +257,57 @@ def _resolve(reference: str, repo_root: Path) -> tuple[bool, str]:
 # That one is enforced by a reviewer reading the classifications.
 #
 # **Three kinds of binding, because a frozen protocol contains three kinds
-# of promise.** Measured over this project's record: of 89 candidates, 14
-# are runtime gates, 21 are frozen values, and 54 bind what may be CLAIMED
-# rather than what the program does. A single seven-field schema forces the
-# latter 75 into one of two lies -- `not_binding`, which is false since they
-# are among the most binding things in the record, or `binding` with
-# invented `decision_consequence` prose for clauses that have no runtime
-# decision at all. The second is the confabulation this design refused a
-# model for; writing it by hand is not better.
+# of promise.** A single seven-field schema forces every clause with no
+# runtime decision into one of two lies -- `not_binding`, which is false for
+# clauses that are among the most binding things in the record, or `binding`
+# with invented `decision_consequence` prose for a clause that decides
+# nothing. The second is the confabulation this design refused a model for;
+# writing it by hand is not better.
+#
+# The evidence for the trichotomy is that filled rows land in all three
+# kinds -- checkable by reading `gates.toml` -- not a count. An earlier
+# version of this comment quantified the split three ways. Those figures
+# reached this file from a mesh message rather than from anything runnable,
+# which makes them load-bearing scratch by principle 24, and a reviewer
+# then observed they coincided exactly with the MUST/FROZEN/rest marker
+# histogram. Marker kind is demonstrably NOT semantic kind: LOCKED- and
+# HALT-marked clauses are classified `binding_gate`. So the coincidence
+# could not be dismissed and the figures could not be reproduced -- both
+# reasons to state the structural argument and let `counts_by_kind` report
+# the live numbers, which it does, from the file, on every run.
 _REQUIRED_BY_KIND: dict[str, dict[str, str]] = {}
+
+# Statuses, named once. They appear in three places -- the schema text a
+# filler reads, the check that rejects an unknown one, and the tests -- and
+# a hand-copied list in any of the three is the failure mode this file is
+# about. Order is the order they are offered in.
+_VALUE_STATUSES = ("enforced", "pending_consumer", "unresolved")
+_CLAIM_STATUSES = ("discharged", "pending_package", "not_applicable",
+                   "unresolved")
+
+# Requirements that are CONDITIONAL on status, because demanding them
+# unconditionally forces a lie.
+#
+# `discharged_in` and `evidence` name the package artifact and section where
+# a claim's compliance is recorded. For a claim whose readiness package does
+# not exist yet, there is no such artifact: the only ways to satisfy a
+# required field are to invent a plausible-looking section in a package
+# nobody has assembled -- the exact confabulation `triage_candidates.py`
+# refuses a model for, and no better done by hand -- or to accept a finding
+# per field per row, which buries the real findings. A findings list nobody
+# can read is the green-that-means-nothing in the other direction.
+#
+# So they are required only where they can be true. The row still FAILS
+# readiness via `pending_package`, and still carries a `pending_reason`
+# naming what does not exist yet. Nothing is silently passed; what changes
+# is that the row can be honest while failing, which `binding_value`'s
+# `pending_consumer` already allows and this kind did not.
+_REQUIRED_ONLY_WHEN_STATUS: dict[str, dict[str, frozenset[str]]] = {
+    "binding_claim": {
+        "discharged_in": frozenset({"discharged"}),
+        "evidence": frozenset({"discharged"}),
+    },
+}
 
 
 _REQUIRED_DIMENSIONS = {
@@ -307,7 +349,7 @@ _REQUIRED_BY_KIND["binding_value"] = {
                          "actually USED the frozen value, rather than that the "
                          "value was frozen somewhere",
     "trigger": "what schedules that test",
-    "status": "enforced | pending_consumer | unresolved",
+    "status": " | ".join(_VALUE_STATUSES),
 }
 
 # Binding on what may be CLAIMED, not on what the program does -- "must
@@ -321,7 +363,7 @@ _REQUIRED_BY_KIND["binding_claim"] = {
                   "not be claimed or done",
     "discharged_in": "the package artifact plus section/field where "
                      "compliance is discharged",
-    "status": "discharged | not_applicable | unresolved",
+    "status": " | ".join(_CLAIM_STATUSES),
     "evidence": "a reviewer-checkable evidence pointer, or quoted local "
                 "context, sufficient to VERIFY the discharge without "
                 "searching the package. Point at an ARTIFACT, never at who "
@@ -390,8 +432,8 @@ def _check_value(clause_id: str, entry: dict) -> list[Finding]:
     elif status != "enforced":
         findings.append(Finding(
             "unknown_status",
-            f"{clause_id} has status {status!r}; expected enforced, "
-            f"pending_consumer or unresolved"))
+            f"{clause_id} has status {status!r}; expected one of "
+            f"{', '.join(_VALUE_STATUSES)}"))
     return findings
 
 
@@ -405,17 +447,34 @@ def _check_claim(clause_id: str, entry: dict, clause: Clause | None) -> list[Fin
             "unresolved_claim",
             f"{clause_id} is unresolved. An unresolved obligation fails "
             f"readiness; it is not a state a package ships in"))
+    elif status == "pending_package":
+        # Honest, and still failing. The distinction from `unresolved` is
+        # real and worth keeping separate: unresolved means nobody has
+        # decided, pending_package means somebody decided and the artifact
+        # to discharge into does not exist yet. They need different work --
+        # a reviewer versus a package -- so they are different findings.
+        if not entry.get("pending_reason"):
+            findings.append(Finding(
+                "unreasoned_pending_package",
+                f"{clause_id} is pending_package with no `pending_reason` "
+                f"naming the readiness artifact that does not exist yet"))
+        findings.append(Finding(
+            "claim_has_no_package",
+            f"{clause_id} is binding and cannot be discharged yet: "
+            f"{entry.get('pending_reason', '(no reason given)')}. Fails "
+            f"readiness until the package exists -- absence of a place to "
+            f"discharge into is a finding, never a reclassification"))
     elif status == "not_applicable" and not entry.get("not_applicable_reason"):
         findings.append(Finding(
             "unreasoned_not_applicable",
             f"{clause_id} is marked not_applicable with no reason tied to the "
             f"clause's TRIGGERING CONDITION. Not-applicable is a claim that "
             f"the condition never arose, not an escape hatch"))
-    elif status not in ("discharged", "not_applicable", "unresolved"):
+    elif status not in _CLAIM_STATUSES:
         findings.append(Finding(
             "unknown_status",
-            f"{clause_id} has status {status!r}; expected discharged, "
-            f"not_applicable or unresolved"))
+            f"{clause_id} has status {status!r}; expected one of "
+            f"{', '.join(_CLAIM_STATUSES)}"))
 
     # Negative obligations need an attestation over the output set, because a
     # compliant paragraph cannot prove a prohibited claim is absent elsewhere.
@@ -513,6 +572,13 @@ def reconcile(clauses: list[Clause], inventory: dict,
 
     for clause_id, (kind, entry) in dispositions.items():
         for dimension, description in _REQUIRED_BY_KIND[kind].items():
+            # A conditionally-required field is demanded only in the statuses
+            # where it can be answered truthfully. Everywhere else the row's
+            # status carries the finding instead -- see
+            # `_REQUIRED_ONLY_WHEN_STATUS`.
+            only_when = _REQUIRED_ONLY_WHEN_STATUS.get(kind, {}).get(dimension)
+            if only_when is not None and entry.get("status") not in only_when:
+                continue
             if not entry.get(dimension):
                 findings.append(Finding(
                     f"missing_{dimension}",
@@ -556,10 +622,12 @@ def counts_by_kind(clauses: list[Clause], inventory: dict) -> dict[str, int]:
     """Per-kind counts, and deliberately no aggregate percentage.
 
     Reviewer-mandated, not a presentation preference: *"No aggregate
-    percentage that lets 54 human obligations dilute or inflate executable
-    coverage."* A single figure over a corpus that is 61% human promises
+    percentage that lets human obligations dilute or inflate executable
+    coverage."* A single figure over a corpus dominated by human promises
     would report executable coverage as high by counting promises as
-    covered -- the green-that-means-nothing at report scale.
+    covered -- the green-that-means-nothing at report scale. How dominated
+    is a live number this function returns; it is not quoted here, because a
+    quoted one goes stale in a file nobody rereads.
     """
     ids = {clause.clause_id for clause in clauses}
     out = {kind: len(ids & set(inventory.get(kind, {})))
@@ -582,7 +650,7 @@ def unenforceable(clauses: list[Clause], inventory: dict) -> list[Clause]:
     """Clauses dispositioned as promises no code can keep.
 
     Surfaced rather than netted out, and this is the point rather than a
-    presentation choice. A reconciler reporting "89/89 covered" while 54 of
+    presentation choice. A reconciler reporting "all covered" while most of
     those are human promises has produced exactly the green-that-means-
     nothing the requirement exists to prevent. Their value is that somebody
     READS the list before a package goes out, not that a tool blessed them.

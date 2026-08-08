@@ -616,3 +616,172 @@ def test_a_clean_reconciliation_exits_zero(tmp_path):
         ["--inventory", str(inventory), "--doc", str(doc),
          "--root", str(tmp_path)])
     assert exit_code == 0
+
+
+# --- a claim whose package does not exist yet ------------------------------
+#
+# Raised as blocking by the instance FILLING the inventory, which is the
+# useful direction for a schema defect to travel. Most of their claim rows
+# were binding, reviewed, and not dischargeable because the readiness package
+# to discharge into had not been assembled. The schema offered no way to say
+# so: `discharged_in` and `evidence` were unconditionally required, so an
+# honest row emitted three findings, and the only ways to silence them were
+# to invent artifacts or to drown the real findings.
+
+CLAIM_DOC = "# P\n\nResults MUST be reported with the seed.\n"
+
+
+def test_a_claim_whose_package_does_not_exist_yet_is_not_asked_to_invent_one(tmp_path):
+    """The blocking case: one finding about the true state, not three about
+    fields that cannot be answered."""
+    doc = write_doc(tmp_path, CLAIM_DOC)
+    (clause,) = derive_clauses([doc], tmp_path)
+    inventory = {"reviewed": True, "binding_claim": {clause.clause_id: claim_row(
+        status="pending_package",
+        pending_reason="the Stage 2B readiness package is not assembled yet",
+        discharged_in=None, evidence=None)}}
+    findings = reconcile([clause], inventory, tmp_path)
+    assert kinds(findings) == ["claim_has_no_package"], (
+        "a pending_package row should report only that it cannot be "
+        f"discharged yet; got {kinds(findings)}")
+    assert "not assembled yet" in findings[0].detail, (
+        "the finding does not carry the reason, so a reader cannot tell this "
+        "row from one nobody has looked at")
+
+
+def test_pending_package_without_a_reason_is_also_a_finding(tmp_path):
+    """The escape hatch, closed. Without this, `pending_package` is a word
+    that switches off two required fields and asserts nothing."""
+    doc = write_doc(tmp_path, CLAIM_DOC)
+    (clause,) = derive_clauses([doc], tmp_path)
+    inventory = {"reviewed": True, "binding_claim": {clause.clause_id: claim_row(
+        status="pending_package", discharged_in=None, evidence=None)}}
+    assert "unreasoned_pending_package" in kinds(
+        reconcile([clause], inventory, tmp_path))
+
+
+def test_pending_package_still_fails_readiness(tmp_path):
+    """An honest state, not a passing one. If this ever exits zero, a package
+    that does not exist ships green."""
+    doc = write_doc(tmp_path, CLAIM_DOC)
+    (clause,) = derive_clauses([doc], tmp_path)
+    inventory = tmp_path / "gates.toml"
+    inventory.write_text(
+        'reviewed = true\n'
+        f'[binding_claim."{clause.clause_id}"]\n'
+        'locator = "P.md#reporting"\n'
+        'obligation = "results carry the seed"\n'
+        'status = "pending_package"\n'
+        'pending_reason = "no readiness package exists yet"\n')
+    assert gate_inventory.main(
+        ["--inventory", str(inventory), "--doc", str(doc),
+         "--root", str(tmp_path)]) != 0
+
+
+def test_a_discharged_claim_still_must_say_where_and_show_evidence(tmp_path):
+    """Non-vacuity for the three above. The conditional must not have turned
+    the requirement off everywhere: a `discharged` row asserts an artifact
+    exists, so it is asked to name it."""
+    doc = write_doc(tmp_path, CLAIM_DOC)
+    (clause,) = derive_clauses([doc], tmp_path)
+    for missing in ("discharged_in", "evidence"):
+        inventory = {"reviewed": True, "binding_claim": {
+            clause.clause_id: claim_row(**{missing: None})}}
+        assert f"missing_{missing}" in kinds(
+            reconcile([clause], inventory, tmp_path)), (
+            f"a discharged claim with no `{missing}` was accepted; the "
+            f"conditional requirement has switched the check off entirely")
+
+
+def test_pending_package_is_distinct_from_unresolved(tmp_path):
+    """Different findings, because they need different work: unresolved wants
+    a reviewer, pending_package wants a package. Collapsing them hides
+    which."""
+    doc = write_doc(tmp_path, CLAIM_DOC)
+    (clause,) = derive_clauses([doc], tmp_path)
+    unresolved = reconcile([clause], {"reviewed": True, "binding_claim": {
+        clause.clause_id: claim_row(status="unresolved")}}, tmp_path)
+    pending = reconcile([clause], {"reviewed": True, "binding_claim": {
+        clause.clause_id: claim_row(status="pending_package",
+                                    pending_reason="no package yet",
+                                    discharged_in=None,
+                                    evidence=None)}}, tmp_path)
+    assert kinds(unresolved) != kinds(pending)
+
+
+# --- the conditional map itself, both directions ---------------------------
+#
+# Principle 21. A typo in `_REQUIRED_ONLY_WHEN_STATUS` fails SILENTLY and in
+# the dangerous direction: a misspelled field name never matches, the field
+# stays unconditionally required, and the defect this fix exists to remove is
+# still present behind a green suite.
+
+
+def _conditional_map_problems(conditional: dict) -> list[str]:
+    """Every way a conditional-requirement map can be wrong.
+
+    A function rather than assertions inline, so the checks can be run
+    against a DELIBERATELY BROKEN map as well as the real one. Otherwise
+    these are guards nobody has seen fail: they would pass identically
+    against a validator that returned nothing at all.
+    """
+    valid = {"binding_claim": set(gate_inventory._CLAIM_STATUSES),
+             "binding_value": set(gate_inventory._VALUE_STATUSES)}
+    problems = []
+    for kind, fields in conditional.items():
+        if kind not in gate_inventory._REQUIRED_BY_KIND:
+            problems.append(
+                f"`{kind}` is not a real kind, so its conditions apply to "
+                f"nothing")
+            continue
+        for field, statuses in fields.items():
+            if field not in gate_inventory._REQUIRED_BY_KIND[kind]:
+                problems.append(
+                    f"`{kind}.{field}` is conditioned but is not a required "
+                    f"field of that kind -- the condition matches nothing, "
+                    f"and the field it was meant to relax is unaffected")
+            unknown = set(statuses) - valid.get(kind, set())
+            if unknown:
+                problems.append(
+                    f"`{kind}.{field}` is required only under "
+                    f"{sorted(unknown)}, which the checker never assigns")
+    return problems
+
+
+def test_the_real_conditional_map_is_sound():
+    assert _conditional_map_problems(
+        gate_inventory._REQUIRED_ONLY_WHEN_STATUS) == []
+
+
+@pytest.mark.parametrize("broken,why", [
+    ({"binding_clam": {"discharged_in": frozenset({"discharged"})}},
+     "a misspelled KIND matches nothing, so the field stays unconditionally "
+     "required and the defect is silently still present"),
+    ({"binding_claim": {"discharge_in": frozenset({"discharged"})}},
+     "a misspelled FIELD is the same failure one level down"),
+    ({"binding_claim": {"discharged_in": frozenset({"complete"})}},
+     "a status the checker never assigns makes the field permanently "
+     "optional -- the opposite of the intended effect"),
+])
+def test_a_broken_conditional_map_is_caught(broken, why):
+    """The guard, seen failing. Each of these is a plausible typo whose
+    effect is invisible from behaviour: the suite stays green either way."""
+    assert _conditional_map_problems(broken), why
+
+
+def test_the_offered_statuses_are_the_accepted_statuses():
+    """The schema text a filler reads and the check that rejects an unknown
+    status are one list. They were two hand-copied ones."""
+    assert (gate_inventory._REQUIRED_BY_KIND["binding_claim"]["status"]
+            == " | ".join(gate_inventory._CLAIM_STATUSES))
+    assert (gate_inventory._REQUIRED_BY_KIND["binding_value"]["status"]
+            == " | ".join(gate_inventory._VALUE_STATUSES))
+
+
+def test_an_unknown_claim_status_is_still_rejected(tmp_path):
+    """Non-vacuity: adding a status must not have opened the set."""
+    doc = write_doc(tmp_path, CLAIM_DOC)
+    (clause,) = derive_clauses([doc], tmp_path)
+    assert "unknown_status" in kinds(reconcile([clause], {
+        "reviewed": True, "binding_claim": {
+            clause.clause_id: claim_row(status="pending_review")}}, tmp_path))
