@@ -683,11 +683,18 @@ trigger = "manual"
 #
 # THE FRICTIONLESS ESCAPE, named here so a reviewer can audit for it. A
 # `not_binding` row needs one field and produces zero findings, while every
-# binding kind demands six or seven and can fail. With 83 rows left and a red
-# readiness signal, this section is the path of least resistance, and no check
-# in `gate_inventory.py` can distinguish an honest disposition from a
-# convenient one -- the anti-gaming clause it quotes covers moving a clause
-# BETWEEN binding kinds, not dropping it out of them.
+# binding kind demands six or seven and can fail. While rows remain
+# undispositioned and the readiness signal is red, this section is the path
+# of least resistance, and no check in `gate_inventory.py` can distinguish
+# an honest disposition from a convenient one -- the anti-gaming clause it
+# quotes covers moving a clause BETWEEN binding kinds, not dropping it out
+# of them.
+#
+# (That sentence read "With 83 rows left" until the count went stale. A
+# live count written into prose is principle 21 in a costume the principle
+# does not recognise: a derived quantity, maintained by hand, with nothing
+# checking it. `make stage2b-gate-inventory` derives it. Nothing else
+# should restate it -- including this file about itself.)
 #
 # So the reasons here are written to a fixed shape rather than freely: each
 # opens with the category of prose the sentence actually is --
