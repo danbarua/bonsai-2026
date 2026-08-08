@@ -43,6 +43,7 @@ claim the rest of this repository's discipline exists to prevent.
 | 19 | 08-08 | `8017225` | All three tests of the ridge equivalence gate were pass-side; hardcoding `passed = True` left 142 tests green. The one that asserted the composition, `passed == (pred_agrees and alpha_agrees)`, held trivially because the fixture makes both operands true | building the gate inventory |
 | 20 | 08-08 | `bff25eb`+ | "The driver joins through the shared helper" was `"partition.index_join(" in source`. Replacing all three joins with a hand-rolled positional one and leaving the old call in a comment left it green — the exact substitution the clause forbids | building the gate inventory |
 | 21 | 08-08 | `74b4dcc` | Not a test: internal-citation resolution over the reviewer archive is structurally blind to a clipped FINAL section, because nothing references one. The lost text would have been a licence — "you need not build X" | reasoning about what the check could not see |
+| 22 | 08-08 | `e76997f` | The Tier-2 archive scan guarded on `ARCHIVE.is_dir()`. A worktree checks that directory out present and empty (tracked dir, gitignored contents), so the guard stayed quiet, zero files were scanned, and `findings == []` passed against nothing | a peer ran it from a worktree |
 
 Two near-misses belong here too, because they were caught *before* becoming
 tests:
@@ -507,6 +508,38 @@ looked for. That is an encouraging shape for a problem to have.
     Corollary for anything that records provenance: **point at an artifact,
     never at who checked it.** `verified by <agent>` rests on an identity
     that can be truthfully denied, and is unreviewable besides.
+
+13. **A skip guard must test for the CONTENT it needs, not the container
+    that holds it.** The two-tier convention rests on `skipif` telling the
+    truth about what this machine has, and a guard reading `DIR.is_dir()`
+    answers a question nobody asked.
+
+    The incident (#22, `e76997f`): the Tier-2 archive scan guarded on
+    `C2GPT_ARCHIVE.is_dir()`. A git worktree checks that directory out
+    **present and empty** — the directory is tracked, the mail inside it is
+    gitignored. So the guard did not fire, the test scanned zero files, and
+    asserted `findings == []` against nothing. It passed, in every worktree,
+    for the reason it was written to prevent. Fixed to `is_dir()` **and** at
+    least one `.md`.
+
+    Rule 11's shape again, in a guard written to handle absence: the
+    presence of the container read as the presence of the data. Committed
+    by the author of rule 11, one day later — which is now the third
+    instance of the pattern sparing nobody, and the reason to treat these
+    as mechanical checks rather than as things one has learned.
+
+    Swept the rest of the suite when this landed, since one instance is an
+    incident and a class needs measuring: every other data guard here tests
+    a specific FILE (`train-images-idx3-ubyte`, a named `.pkl`,
+    `all(p.exists() for p in _TIER2_REQUIRED)`), not a directory. The two
+    remaining `is_dir()` calls are not guards — one is an assertion, and one
+    skips absent roots during a scan in the safe direction, where a missing
+    root produces MORE findings rather than fewer.
+
+    The general form, for any guard: **ask whether the thing you tested for
+    can exist while the thing you need does not.** An empty directory, a
+    zero-byte file, an installed package with no data, a credential that
+    authenticates to nothing.
 
 ### Held, pending an incident that actually instantiates it
 
