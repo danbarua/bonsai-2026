@@ -22,9 +22,20 @@ on:
   workflow_dispatch:
     inputs:
       target:
-        description: 'What to review: a ref, a commit range (a..b), or a path'
+        # NOT `HEAD~1..HEAD`, which was the original default and is actively
+        # misleading on a shared branch. Measured on run 31256572529: after a
+        # merge, HEAD and HEAD~1 point at the identical tree, so the range is
+        # EMPTY and the review correctly reports nothing to review. A default
+        # that reviews nothing whenever the last commit was a merge trains
+        # exactly the wrong conclusion -- that the review is working and the
+        # code is clean.
+        #
+        # `origin/main...HEAD` (three dots) is everything on this branch since
+        # it diverged, which is what a reader means by "the changes here". It
+        # can be large; narrow it by hand when that matters.
+        description: 'Commit range or ref to review, e.g. origin/main...HEAD, or a..b'
         required: true
-        default: 'HEAD~1..HEAD'
+        default: 'origin/main...HEAD'
   pull_request:
     types: [opened, ready_for_review, reopened]
 
@@ -84,7 +95,7 @@ jobs:
           # needs to SEE the diff; it has no business writing, pushing, or
           # running the suite, and the prompt already forbids all three.
           claude_args: |
-            --allowed-tools 'Read,Grep,Glob,Bash(git diff:*),Bash(git log:*),Bash(git show:*),Bash(git fetch:*),Bash(git rev-parse:*),Bash(gh pr view:*),Bash(gh pr diff:*)'
+            --allowed-tools 'Read,Grep,Glob,Bash(git diff:*),Bash(git diff-tree:*),Bash(git log:*),Bash(git show:*),Bash(git fetch:*),Bash(git rev-parse:*),Bash(git merge-base:*),Bash(git ls-tree:*),Bash(gh pr view:*),Bash(gh pr diff:*)'
             --json-schema '{"type":"object","properties":{"no_tests_changed":{"type":"boolean","description":"True if the diff contained no test files at all"},"files_examined":{"type":"array","items":{"type":"string"},"description":"Every test file actually read, by path"},"findings":{"type":"array","items":{"type":"object","properties":{"file":{"type":"string"},"test":{"type":"string"},"category":{"type":"string","description":"VACUOUS_TESTS.md taxonomy letter, or none"},"what_would_have_to_change":{"type":"string","description":"What would have to change for this test to fail; say nothing if the answer is nothing"}},"required":["file","test","category","what_would_have_to_change"]}},"summary":{"type":"string"}},"required":["no_tests_changed","files_examined","findings","summary"]}'
           prompt: |
             Review the changed tests in ${{ github.event.inputs.target || format('the pull request {0}', github.event.pull_request.number) }}.
@@ -140,7 +151,15 @@ jobs:
             review exists to catch -- so it must not be the failure the
             review itself commits.
 
-            If the changed files contain no tests, say so in one line and stop.
+            If the changed files contain no tests, say so in one line and
+            stop -- and if the range itself is EMPTY, say that instead and
+            distinguish the two. "No tests changed" and "no files changed at
+            all" are different facts, and the second usually means the range
+            was wrong rather than the code clean.
+
+            Prefer one Bash call per command. A compound line joined with `;`
+            cannot be verified against the tool allowlist and will be denied
+            as a whole, even when every part of it would be permitted alone.
 
       # The review is worthless if its findings are invisible. On a manual
       # run there is no PR to comment on, and the action hides the SDK's
