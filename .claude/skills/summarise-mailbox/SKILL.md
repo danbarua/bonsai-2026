@@ -62,8 +62,14 @@ A message with no `--to-` segment is a broadcast.
 `checkpoint.txt` holds **one already-summarised basename per line**, sorted.
 It is not the single last-read filename.
 
-This matters, and it is not hypothetical — the failure was live in this
-repo the day this skill was written. A message sits in `mailbox/` until
+This matters, and it is not hypothetical — a near-miss was observed on
+disk the day this skill was written. Be precise about what that means:
+an unread message was sitting with a timestamp OLDER than archive's
+newest, so a watermark written in that window WOULD have dropped it. No
+message has yet been observed actually lost, because the manifest went
+in first. The argument does not need the stronger claim, and a design
+defended by an overstated instance is one retraction away from looking
+unjustified. A message sits in `mailbox/` until
 its recipient consumes it, and it is archived under its **original**
 send-time filename. So a message can enter `archive/` with a timestamp
 *older* than files already archived. With a single-filename watermark,
