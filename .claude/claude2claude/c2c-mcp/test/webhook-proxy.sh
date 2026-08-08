@@ -123,6 +123,20 @@ CODE=$(curl -s -o /dev/null -w '%{http_code}' -X POST "$BASE/webhook" \
 check "bad signature gets 401" "$CODE" "401"
 check "backend never saw the request" "$(seen_count)" "$BEFORE"
 
+# The log must name WHY. "rejected" alone cannot tell an unset secret from a
+# wrong one, and those have different fixes -- an operator is left rerunning
+# the delivery to learn nothing again. Observed live: a real GitHub ping
+# failing with no way to tell which it was.
+check "the rejection log names the reason" \
+  "$(grep -c 'digest-mismatch' "$TMP_ROOT/proxy.log")" "1"
+
+# A deliberate rejection is not an upstream failure. Destroying the
+# already-opened upstream request logged a second, misleading line --
+# "upstream error ... socket hang up" -- about a backend never contacted,
+# and tried to write a 502 body after the 401 had gone out.
+check "no spurious upstream error is logged for a rejection" \
+  "$(grep -c 'upstream error' "$TMP_ROOT/proxy.log")" "0"
+
 echo
 echo "== a signature over DIFFERENT bytes than were sent is rejected =="
 BEFORE=$(seen_count)

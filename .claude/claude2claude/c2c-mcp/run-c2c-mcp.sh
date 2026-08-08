@@ -54,7 +54,13 @@ npm run build || { echo "❌ Build failed -- check the tsc output above."; exit 
 
 echo "🚀 Starting local server on port $C2C_MCP_PORT..."
 mkdir -p ./logs
-node dist/index.js >./logs/stdout.log 2>./logs/err.log &
+# APPEND, never truncate. `>` discarded every previous run's logs on each
+# restart -- which is exactly when you most want them, since a restart is
+# usually what you just did to fix something. A restart marker keeps runs
+# separable in the combined file. These grow without bound; rotate when
+# that starts to matter, rather than solving it by deleting the evidence.
+printf '\n===== restart %s =====\n' "$(date -u +%Y-%m-%dT%H:%M:%SZ)" | tee -a ./logs/stdout.log >>./logs/err.log
+node dist/index.js >>./logs/stdout.log 2>>./logs/err.log &
 DEV_PID=$!
 
 # 3. Poll /health instead of a blind sleep -- a fixed sleep either wastes
