@@ -91,7 +91,8 @@ CATALOGUE_ONLY='{"no_tests_changed":false,
 run "$CATALOGUE_ONLY"
 expect_rc "a non-test path does not count as a test file" 1
 check "says none were under a test directory" "none under a test directory"
-check "points at the ref rather than the code" "ref exists"
+check "points at the PR rather than the code" "PR is
+non-empty"
 
 # Non-vacuity for the filter: it must not have become "fail unless the array
 # is all test files". A review that reads the workflow AND a test is normal.
@@ -233,6 +234,44 @@ if grep -qF "PARTIAL" "$OUT"; then
 else
   echo "  ok    a fully-covered review is not reported as partial"
 fi
+
+# --- the contradiction: an honest "no tests changed" over a large PR -------
+#
+# The most dangerous case, and the one no amount of care inside the review
+# can catch. In tag mode the action injects the changed-file list from an
+# unpaginated `files(first: 100)` query, and GitHub returns NULL for that
+# list when a PR's diff is too large -- which the action renders as "No files
+# changed" (src/github/data/fetcher.ts:427). From inside the model that is
+# indistinguishable from a PR that touched nothing, so `no_tests_changed:
+# true` is an HONEST report of what it was shown, and every check that trusts
+# the review's own account of its scope agrees with it.
+#
+# Only a second, independent source breaks the tie. The stub names two
+# changed test files while the payload claims none.
+
+NO_TESTS_CLAIM='{"no_tests_changed":true,"files_examined":[],"findings":[],
+  "summary":"No test files changed in this PR."}'
+run_cov "$NO_TESTS_CLAIM"
+expect_rc "no-tests-changed contradicted by GitHub fails" 1
+check "gives the count GitHub reported"  "GitHub lists"
+check "names the real cause"             "too large"
+check "forbids reading it as clean"      "Do not read this as a clean result"
+
+# Non-vacuity: when GitHub agrees there are no test files, the same claim
+# must PASS. Otherwise the guard is "always fail on no_tests_changed", which
+# would make the honest case unreportable.
+STUB_EMPTY="$TMP/bin_empty"
+mkdir -p "$STUB_EMPTY"
+cat > "$STUB_EMPTY/gh" <<'STUBEOF'
+#!/bin/bash
+printf 'src/thing.py\nREADME.md\n'
+STUBEOF
+chmod +x "$STUB_EMPTY/gh"
+n=$((n + 1)); OUT="$TMP/cov_$n"; : > "$OUT"
+PATH="$STUB_EMPTY:$PATH" PR_NUMBER=99 bash "$SCRIPT" "$NO_TESTS_CLAIM" "$OUT"
+RC=$?
+expect_rc "no-tests-changed CONFIRMED by GitHub passes" 0
+check "says there was nothing to review" "nothing to review"
 
 # With no PR number there is nothing to ask GitHub about, so no coverage
 # claim is made. Silence is correct here; a fabricated "complete" would not

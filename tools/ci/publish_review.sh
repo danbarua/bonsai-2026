@@ -98,8 +98,41 @@ if [ "$no_tests" != "true" ] && [ "${n_test_files:-0}" -eq 0 ]; then
   fail "The review examined 0 TEST files and did not report that the diff
 contained none. Those are different claims, and neither was made. It listed
 $n_examined path(s), none under a test directory -- which is what a review
-that could not reach the diff at all looks like. Check that the dispatched
-ref exists and is non-empty before concluding anything about the code."
+that could not reach the diff at all looks like. Check that the PR is
+non-empty before concluding anything about the code."
+fi
+
+# --- ask GitHub independently ----------------------------------------------
+#
+# The review's view of what changed can be EMPTY WITHOUT BEING WRONG, and
+# that is the dangerous case. In tag mode the action injects `<changed_files>`
+# from an unpaginated `files(first: 100)` query, and when a PR's diff is too
+# large GitHub returns null for the file list, which the action renders as
+# "No files changed" (src/github/data/fetcher.ts:427). From inside the model
+# that is indistinguishable from a PR that touched nothing -- so a large PR
+# can produce an honest `no_tests_changed: true` over hundreds of changed
+# tests, and every downstream check would agree with it.
+#
+# The only way to catch that is a second, independent source. This asks
+# GitHub directly. Nothing here trusts the review's own account of its scope.
+changed=""
+n_changed=0
+if [ -n "${PR_NUMBER:-}" ] && command -v gh >/dev/null 2>&1; then
+  if changed_all=$(gh pr diff "$PR_NUMBER" --name-only 2>/dev/null); then
+    changed=$(printf '%s\n' "$changed_all" | grep -E '(^|/)tests?/' | sort -u)
+    n_changed=$(printf '%s' "$changed" | grep -c . || true)
+  fi
+fi
+
+# The contradiction. Two sources, one says nothing changed, the other names
+# files. Whichever is wrong, the review did not cover this PR.
+if [ "$no_tests" = "true" ] && [ "${n_changed:-0}" -gt 0 ]; then
+  fail "The review reported that NO test files changed, but GitHub lists
+${n_changed} changed test file(s) in this pull request. The likeliest cause is
+not a careless review: the action's injected file list is capped at 100 files
+and comes back EMPTY when a PR's diff is too large, and an empty list reads
+exactly like a PR that touched no tests. Re-run against a smaller PR, or
+review the listed files another way. Do not read this as a clean result."
 fi
 
 # --- coverage: how much of the diff did it actually look at? ---------------
@@ -126,14 +159,9 @@ fi
 # legitimate, and failing it would train route-around -- the one outcome
 # worse than not measuring. Absence still fails, above; this quantifies.
 coverage_note=""
-if [ "$no_tests" != "true" ] && [ -n "${PR_NUMBER:-}" ] \
-   && command -v gh >/dev/null 2>&1; then
-  if changed_all=$(gh pr diff "$PR_NUMBER" --name-only 2>/dev/null); then
-    changed=$(printf '%s\n' "$changed_all" | grep -E '(^|/)tests?/' | sort -u)
-    n_changed=$(printf '%s' "$changed" | grep -c . || true)
-    # A zero here means the computation failed or the path filter missed,
-    # NOT that the diff is clean -- `no_tests_changed` is the claim for
-    # that, and it is false in this branch. Say so rather than reporting
+if [ "$no_tests" != "true" ]; then
+    # A zero here means GitHub was not reachable or named no test files --
+    # NOT that the review was thorough. Say so rather than reporting
     # flawless coverage of nothing, which is this file's own subject.
     if [ "${n_changed:-0}" -gt 0 ]; then
       examined=$(printf '%s' "$RAW" | jq -r '(.files_examined // [])[]' \
@@ -152,9 +180,8 @@ if [ "$no_tests" != "true" ] && [ -n "${PR_NUMBER:-}" ] \
         coverage_note="Complete: every one of the $n_changed changed test files was examined."
       fi
     else
-      coverage_note="Coverage could not be computed (no changed test paths resolved), so the scope of this review is unverified."
+      coverage_note="Coverage could not be computed (GitHub named no changed test paths), so the scope of this review is unverified."
     fi
-  fi
 fi
 
 {
