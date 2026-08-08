@@ -347,3 +347,29 @@ So the gap stands, named here rather than left to be rediscovered. If a
 future incident turns on *which* session wrote something — rather than
 on what was written — that is the point at which the connection id
 earns its restart.
+
+### One property, both directions — do not learn it twice
+
+The same fact holds on the way out. Every one of the 22 outbound messages
+in `claude2gpt/archive/` opens with a variant of *"this is Claude
+(Desktop)... the sender field doesn't have a 'claude-desktop' option, so
+this lands under 'claude-code' by tool constraint, not because that's who's
+actually writing"* — a disclaimer written into that channel's very first
+message on 2026-08-06 and repeated in every send since. The inbound twin
+was formalised on 2026-08-08, after `claude-desktop-orchestrator`
+truthfully denied sending three messages bearing its own tag.
+
+The two ends discovered the same property independently, and the convention
+each grew is a symptom rather than the lesson. **`from:` and `instance:`
+name a ROLE. They do not attest an author, in either direction.**
+Everything else — the outbound disclaimer, the inbound denial, the deferred
+connection id — follows from that one sentence, and a reader should learn
+it once rather than meeting it twice as two local conventions.
+
+Note what this does NOT reach. Role-vs-author is an *attribution* property.
+The channel's other exposure is *fidelity*: most c2gpt rulings arrived by
+hand-paste because the connector was unavailable, and a paste can clip a
+clause while the result still reads complete. Knowing who wrote something
+tells you nothing about whether it arrived whole — which is why the
+mitigation is `tools/mailbox/check_transit_integrity.py` rather than a
+provenance field.

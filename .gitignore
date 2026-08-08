@@ -237,6 +237,10 @@ gcp-*-key.json
 .claude/claude2gpt/inbox/
 .claude/claude2gpt/outbox/
 .claude/claude2gpt/archive/
+# Digests of the above, same reasoning as the code2code summaries below:
+# derived entirely from a local-only archive, so a committed digest would be
+# a durable record nobody else can regenerate or check against its source.
+.claude/claude2gpt/mailbox-summaries/
 .claude/code2code/mailbox/
 .claude/code2code/archive/
 # Digests written by the summarise-mailbox skill, plus its checkpoint
