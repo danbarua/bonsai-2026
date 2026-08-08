@@ -646,6 +646,63 @@ what this row claims: the frozen value is pinned and reachable, and it has
 not yet been the thing that decided a production run."""
 trigger = "ci-fast"
 
+[binding_value.7946f9f0ccc3]
+# AUDIT_PROTOCOL: "Ridge MSE at both budgets is computed from out-of-fold
+#  per-image predictions under the frozen five-fold partition."
+value = """
+The prediction basis for the amendment audit: out-of-fold per-image
+predictions under StratifiedKFold(n_splits=5, shuffle=True,
+random_state=42), for pre_evolution and all four evolved conditions."""
+production_consumers = ""   # the audit driver is unwritten
+status = "pending_consumer"
+pending_reason = """
+`stage2b_ridge` HAS out-of-fold support and it is tested -- but the audit
+driver that would consume it under this protocol does not exist, so nothing
+production consumes this value yet. Naming the existing OOF code here would
+be discharge by adjacent evidence: the module having the capability is not
+the audit using it, and this clause is about the audit."""
+enforcement = ""
+break_demonstrated = ""
+trigger = "manual"
+
+[binding_value.1148ede15761]
+# AUDIT_PROTOCOL Freeze 3: fixed alpha vs reselected alpha, defined.
+value = """
+Fixed alpha := selected from the PRODUCTION 1,200-step representation, per
+condition, via the frozen five-fold procedure, then applied identically to
+both budgets' OOF fits. Reselected alpha := independent selection per
+budget by the same procedure."""
+production_consumers = ""   # the audit driver is unwritten
+status = "pending_consumer"
+pending_reason = """
+Frozen for the unwritten audit driver. Deliberately NOT merged with
+1837113c184a, which is STAGE3_PLAN's statement of the same freeze: they are
+separate sentences in separate documents with separate ids, and one
+disposition covering two is the collision check_ids_unique refuses."""
+enforcement = ""
+break_demonstrated = ""
+trigger = "manual"
+
+[binding_value.259d3b7f30fb]
+# AUDIT_PROTOCOL: "both regimes consume the THIRTEEN-decade grid."
+value = """
+Conforming amendment, disclosed: both alpha regimes search the amended
+thirteen-decade grid {1e-6 .. 1e6}. The protocol's own logic is unchanged --
+"the same frozen procedure" still means the frozen procedure -- what changed
+is which grid that procedure searches, at both budgets and for the
+production alpha alike."""
+production_consumers = ""   # the audit driver is unwritten
+status = "pending_consumer"
+pending_reason = """
+The grid itself IS in production (stage2b_ridge.ALPHA_GRID, thirteen values,
+and the Phase B re-run used it). What has no consumer is this clause's
+specific requirement -- that BOTH AUDIT REGIMES consume it -- because
+neither regime exists until the audit driver does. The distinction matters:
+the value is live, the obligation about how the audit uses it is not."""
+enforcement = ""
+break_demonstrated = ""
+trigger = "manual"
+
 # =============================================================================
 # binding_claim -- obligations on what may be CLAIMED
 # =============================================================================
@@ -1169,6 +1226,60 @@ consequence binds where it was actually implemented rather than here: the
 STAGE3_PLAN.md:285 (37ae915f8e61), the corrected docstring in the script
 itself, and the tail counts in the acceptance report. Listing adopted
 consequences is not a second statement of them."""
+
+[not_binding.df1784828365]
+reason = """
+NARRATION: "Role labels, frozen (Freeze 2):" -- a section lead-in
+introducing the list that follows. The paragraph scanner takes it as its own
+candidate because the list beneath is separately formatted. The labels it
+introduces bind at STAGE3_PLAN.md:354 (8bf414d720f2), which states the
+populations in full and is dispositioned as a substantiated binding_value.
+
+Worth recording rather than silently skipping: a heading whose content lives
+in an unscanned list is a real under-coverage shape, and the reason this one
+is safe is that the content is dispositioned elsewhere -- not that headings
+do not matter."""
+
+[not_binding.9724445a8125]
+reason = """
+RATIONALE: why the propagation halt threshold is borrowed rather than
+invented -- it is already frozen, already derived analytically from the
+metric's algebra and a recorded `d`, and already the line below which a
+difference is called implementation dust. The argument for reusing a number;
+the halt condition it justifies binds at COMPANION_PROTOCOLS.md:191
+(5354bdafe541)."""
+
+[not_binding.a69baac252b1]
+reason = """
+NARRATION: records that AUDIT_PROTOCOL requires four justification axes,
+that three already existed, and that the fourth was dropped in consolidation
+and reinstated here. A statement about the document's own repair history.
+The requirement binds in AUDIT_PROTOCOL.md; the axes themselves are at
+COMPANION_PROTOCOLS.md:161 (16b4ff3b7017)."""
+
+[not_binding.16b4ff3b7017]
+reason = """
+RATIONALE: the four axes justifying ABS_CONV_EPS = 1e-12, each with its
+measured numbers -- float64 dust at 1e-14..1e-16, the smallest meaningful
+measured final-Delta at 2.177e-07, the encoder's contraction residuals, and
+downstream sensitivity against the solver's rtol=1e-6. The argument for the
+value, not the value: it binds at DESIGN.md:192 (5908ac408624), which is
+dispositioned as a substantiated binding_value.
+
+Two of its four axes are written as work still to do ("the axis to write up
+is..."), which makes those forward-looking notes rather than obligations on
+the system -- and the obligation to write them up binds at
+COMPANION_PROTOCOLS.md's sensitivity-table section, not here."""
+
+[not_binding.beb0ab7095d2]
+reason = """
+RATIONALE: why the first ARM/x86 comparison applies identical already-fitted
+ridge coefficients to both architectures' features -- a refit on ARM
+features would produce different coefficients and confound numerical
+propagation with refit variation, with no way to separate them afterwards.
+The argument for the construction. The construction itself is required at
+AUDIT_PROTOCOL.md:219 (8296ec49b5fa), where the companion protocol is
+specified."""
 
 [not_binding.1aa42e6ea102]
 reason = """
