@@ -350,8 +350,11 @@ def test_open_loops_state_that_a_name_is_not_an_assignment() -> None:
         "MAILBOX_SUMMARY_2026-08-08T10-00-00Z.md",
         "a window",
     )
+    # Assert the CLAIM, not the sentence. Pinning exact wording made this
+    # test fail on a pure rephrasing, which trains you to edit the assertion
+    # to match rather than to ask whether the claim survived.
     assert "Addressed to nobody" in out
-    assert "a name is not an assignment to you" in out
+    assert "not an assignment" in out
 
 
 def test_the_advisory_warning_survives_an_empty_loop_list() -> None:

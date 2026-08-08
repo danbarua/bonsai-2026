@@ -463,7 +463,7 @@ def fmt_coverage(
     layer up, the exact failure it was built to correct.
     """
     out = ["## Coverage boundary", ""]
-    out.append("What this briefing can and cannot see. Read before trusting anything below.")
+    out.append("What this can and cannot see. Read before trusting anything below.")
     out.append("")
     out.append("| Channel | Latest digest | Unread | Archived | **Undigested** |")
     out.append("|---|---|---|---|---|")
@@ -482,9 +482,8 @@ def fmt_coverage(
     if stale:
         for ch in stale:
             out.append(
-                f"> **`{ch.name}` is {ch.undigested} messages behind.** Those messages are "
-                f"archived but no digest covers them, so nothing they contain appears in "
-                f"*Rulings* or *Open loops* below. Run `/summarise-mailbox` to close the gap."
+                f"> **`{ch.name}` is {ch.undigested} messages behind.** Nothing in "
+                f"them appears below. `/summarise-mailbox` closes the gap."
             )
         out.append("")
     else:
@@ -515,12 +514,10 @@ def fmt_rulings(gpt: ChannelState) -> str:
 
     text = gpt.latest_digest.read_text()
     out.append(
-        "> **Provenance grade.** `c2gpt-send` takes `from` as a parameter, so "
-        "`from: chatgpt` is a routing instruction, not an attestation — a connector "
-        "write and a hand-paste are byte-identical. **Authority is intact** (Dan is the "
-        "release gate, so a pasted ruling has the authorising human in the loop by "
-        "construction). **Fidelity is unverified** — a paste can clip, and a partial "
-        "ruling reads complete. These lines record what the file SAYS, not how it arrived."
+        "> **Provenance grade.** These record what the file SAYS, not how it "
+        "arrived. **Authority: intact** — Dan is the release gate. "
+        "**Fidelity: unverified** — `from:` is a routing parameter, not an "
+        "attestation, and a hand-paste can clip while reading complete."
     )
     out.append("")
     out.append(f"From `{gpt.latest_digest.name}`:")
@@ -570,18 +567,22 @@ def fmt_loops(loops: list[Loop], src: str | None, window_desc: str) -> str:
     # guessing ownership from a name it happens to match. Deriving "yours"
     # from a mention would be the same weak inference just removed from the
     # join: a loop naming two sessions names neither as its owner.
+    # Rules, not paragraphs. Measured finding from a cold-read audit: a
+    # reader retained one-to-three-sentence principles and re-derived the
+    # essay-length ones from source instead, twenty minutes after reading
+    # them. Every claim below is load-bearing and kept; only the prose around
+    # them is gone. In particular "not proof it is open" stays -- that line
+    # is what stopped a resolved red build being escalated as an emergency.
+    out.append("> **Addressed to nobody.** A name here is not an assignment to you.")
+    out.append(">")
     out.append(
-        "> **Addressed to nobody.** These loops name sessions; a name is not "
-        "an assignment to you. If a loop does not say who owns it, it does "
-        "not say."
+        f"> **The join is ADVISORY.** A match is a judgement, not a "
+        f"derivation. Candidates narrow your search; they close nothing."
     )
-    out.append("")
+    out.append(">")
     out.append(
-        "> **The join is ADVISORY.** Matching a commit to a loop is a judgement, not a "
-        "derivation: a commit mentioning an identifier may be unrelated to the loop that "
-        "also mentions it. Candidates narrow your search; they do not close anything. "
-        f"The join only sees {window_desc} — a loop closed by an older commit still shows "
-        "as open here."
+        f"> **Window: {window_desc}.** A loop closed by an older commit still "
+        f"shows as open."
     )
     out.append("")
 
@@ -623,9 +624,8 @@ def fmt_loops(loops: list[Loop], src: str | None, window_desc: str) -> str:
         out.append(f"### Named artifact now EXISTS — {len(in_tree)} to verify")
         out.append("")
         out.append(
-            "No commit in the window matched, but the thing the loop names is present "
-            "in the tree now — so it was very likely closed by a commit older than the "
-            "window. This check has no window and asks the tree rather than the log."
+            "Nothing matched in the window, but the named thing is in the tree now. "
+            "This check has no window: it asks the tree, not the log."
         )
         out.append("")
         for l in in_tree:
@@ -638,9 +638,8 @@ def fmt_loops(loops: list[Loop], src: str | None, window_desc: str) -> str:
         out.append(f"### No candidate found — {len(unmatched)}")
         out.append("")
         out.append(
-            "Searched the window and the tree; nothing matched. **This does not mean "
-            "the loop is open** — only that this window and these identifiers found "
-            "nothing. Absence of evidence is not evidence of absence (principle 2)."
+            "Searched the window and the tree; nothing matched. "
+            "**This is not proof the loop is open** (principle 2)."
         )
         out.append("")
         for l in unmatched:
@@ -651,9 +650,8 @@ def fmt_loops(loops: list[Loop], src: str | None, window_desc: str) -> str:
         out.append(f"### NOT CHECKED — {len(unchecked)}")
         out.append("")
         out.append(
-            "No joinable identifier (no backticked token, no issue number). "
-            "**These were not searched** — that is different from searching and "
-            "finding nothing, and the two must not be read as the same status."
+            "No joinable identifier. **Not searched at all** — a different "
+            "status from searched-and-found-nothing above."
         )
         out.append("")
         for l in unchecked:
