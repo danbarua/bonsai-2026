@@ -41,7 +41,14 @@ scope and is not counted.
 
 | # | file::test | category | what would have to change for it to fail | first seen |
 |---|---|---|---|---|
-| 1 | `tests/test_x.py::test_y` | A | nothing — it greps source | run 3 |
+| 1 | `tests/test_x.py::test_y` | A | nothing — it greps source | this run |
+| 2 | `tests/test_z.py::test_w` | F | nothing — narrowing checked by the glob | run 3 |
+
+<!-- `first seen` takes "this run" or a run number YOU RECORDED IN THE RUN
+     LOG BELOW. If there is no prior comment, every row says "this run".
+     Never "prior review round" — that is a value invented to fill a
+     column, and the column is not worth a fabricated history. -->
+
 
 ### Fixed since first reported
 
@@ -78,7 +85,24 @@ scope and is not counted.
 
 1. **Read the existing comment first.** It is your own prior state, and it
    is injected into your context along with the rest of the thread.
-2. **Carry every open finding forward**, with its original `first seen`.
+
+2. **If `<comments>` says "No comments", YOU HAVE NO PRIOR STATE.** This is
+   your first run on this pull request. Every finding is `first seen: this
+   run`, the *Fixed* table is empty because nothing has been fixed yet, and
+   the run log has exactly one line. Do not write "prior review round", do
+   not carry anything forward, and do not infer a history from the fact that
+   this document describes one.
+
+   Observed on PR #28: the first run received `<comments>: No comments` and
+   an empty `<review_comments>`, and still filed a finding marked *"first
+   seen: prior review round"*. The finding was real; its history was
+   invented. A required column with no honest value gets one made up — which
+   is the same failure `tools/gates/gate_inventory.py` documents for
+   `discharged_in`, and the reason that field is required only when a row
+   claims to be discharged.
+
+3. **Carry every open finding forward**, with its original `first seen` —
+   **only when there is a prior comment to carry it from.**
    Re-verify it against the current code: if the code changed such that the
    finding no longer holds, move it to *Fixed* and name the commit. If it
    still holds, leave it — do not re-litigate it, and do not restate its
