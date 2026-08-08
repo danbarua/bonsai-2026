@@ -178,7 +178,12 @@ steps:
 
         echo "=== preflight ==="
         apt-get update -qq
-        apt-get install -y -qq --no-install-recommends git make >/dev/null
+        # `jq` is not decoration: tools/ci/review_delta.sh fail-opens to
+        # mode=full without it, so tests/test_review_delta.py's mode
+        # assertions all fail -- including its break-test, which then
+        # correctly reports that it is not pinning the field-semantics bug,
+        # because without jq the break produces no observable change.
+        apt-get install -y -qq --no-install-recommends git make jq >/dev/null
 
         # The Makefile anchors every path on `git rev-parse --show-toplevel`.
         # Some Cloud Build source types deliver an archive with no .git at
