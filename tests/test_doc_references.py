@@ -63,8 +63,33 @@ EXEMPT = {
 }
 
 
+def _strip_fenced(text: str) -> str:
+    """Drop fenced code blocks before extracting citations.
+
+    A path inside a fence is usually an EXAMPLE -- a template's placeholder,
+    a sample command, a transcript -- and an example is not a claim that a
+    file exists. `docs/REVIEW_COMMENT_TEMPLATE.md` shows the shape of a
+    findings table using `tests/test_x.py`, and reading that as a broken
+    citation is the checker misunderstanding the document rather than the
+    document being wrong.
+
+    The accepted cost, stated because it is real: a document whose ONLY
+    mention of a tool is inside a fence is no longer covered. Prose is where
+    a document makes claims about the repository, which is what this test
+    is about, so the trade lands the right way -- but it is a trade.
+    """
+    out, fenced = [], False
+    for line in text.splitlines():
+        if line.lstrip().startswith("```"):
+            fenced = not fenced
+            continue
+        if not fenced:
+            out.append(line)
+    return "\n".join(out)
+
+
 def _cited_paths(doc: Path) -> set[str]:
-    text = doc.read_text()
+    text = _strip_fenced(doc.read_text())
     found = set(_FILE.findall(text)) | set(_DIR.findall(text))
     # Globs are patterns, not citations; bare filenames name no location.
     return {c for c in found if "*" not in c and "/" in c}
@@ -123,6 +148,27 @@ def test_every_exemption_is_still_cited():
     assert not orphaned, (
         f"exemptions name paths no document cites any more: "
         f"{sorted(orphaned)}. Remove them")
+
+
+def test_an_example_inside_a_fence_is_not_a_citation(tmp_path):
+    """The break that motivated fence-stripping, and its non-vacuity partner.
+
+    A placeholder in a template's example block must not be read as a broken
+    citation -- and prose outside the fence must still be read as one, or
+    stripping fences would have switched the whole check off.
+    """
+    doc = tmp_path / "sample.md"
+    doc.write_text(
+        "Real prose cites `docs/PROJECT_MEMORY.md`.\n\n"
+        "```markdown\n"
+        "| 1 | `tests/test_totally_made_up.py::test_y` | A |\n"
+        "```\n")
+    cited = _cited_paths(doc)
+    assert "tests/test_totally_made_up.py" not in cited, (
+        "a placeholder inside a fenced example was read as a citation")
+    assert "docs/PROJECT_MEMORY.md" in cited, (
+        "stripping fences also removed the prose citations, which would "
+        "make this whole check pass over nothing")
 
 
 @pytest.mark.parametrize("sample,should_match", [
