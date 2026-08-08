@@ -389,6 +389,61 @@ def test_a_truncated_tree_fails_open_rather_than_inventing_departures(
     assert "DEPARTED" not in outputs["files"]
 
 
+def test_a_missing_jq_fails_open_loudly_rather_than_reviewing_nothing(
+    tmp_path: Path, real_compare: dict, real_tree: dict
+) -> None:
+    """The dependency this script cannot work without, absent.
+
+    This is not hypothetical: the Cloud Build image installed `git` and `make`
+    and not `jq`, so on Linux the script fell straight through to `mode=full`
+    on every invocation while every test here pinned a mode and went red.
+
+    The behaviour was RIGHT -- fail open, review everything, say so on stderr.
+    What was wrong was that nothing tested it, so the safe degradation looked
+    identical to a logic bug, and the break-confirmation above could not tell
+    the fixed script from the broken one because both returned `full`.
+
+    `tests/test_ci_image_dependencies.py` stops the image losing a required
+    command. This asserts what happens if one goes missing anyway.
+    """
+    bin_dir = tmp_path / "bin"
+    bin_dir.mkdir(exist_ok=True)
+    _write_gh_stub(bin_dir, real_compare, real_tree)
+
+    out_file = tmp_path / "github_output"
+    out_file.write_text("")
+
+    env = dict(os.environ)
+    # ONLY the stub directory: `gh` resolves, `jq` does not.
+    env["PATH"] = str(bin_dir)
+    env["GITHUB_OUTPUT"] = str(out_file)
+
+    # Resolve the interpreter before stripping PATH, or the child cannot even
+    # find `bash` and the test fails for a reason unrelated to jq.
+    bash = shutil.which("bash")
+    assert bash, "no bash on PATH"
+
+    proc = subprocess.run(
+        [bash, str(SCRIPT), "7a5dfaf", "b1d1018", "owner/repo"],
+        capture_output=True,
+        text=True,
+        env=env,
+        cwd=REPO_ROOT,
+    )
+
+    assert proc.returncode == 0, (
+        "a missing dependency must not fail the build -- this script advises a "
+        f"review, it does not gate.\nstderr:\n{proc.stderr}"
+    )
+    outputs = _parse_github_output(out_file.read_text())
+    assert outputs["mode"] == "full", (
+        "without jq the script cannot classify anything, so the only honest "
+        "answer is 'review everything in scope'"
+    )
+    assert "jq unavailable" in proc.stderr
+    assert "reviewing everything in scope" in proc.stderr
+
+
 @pytest.mark.parametrize(
     "before, why",
     [

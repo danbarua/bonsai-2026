@@ -178,7 +178,15 @@ steps:
 
         echo "=== preflight ==="
         apt-get update -qq
-        apt-get install -y -qq --no-install-recommends git make >/dev/null
+        # `jq` is not decoration: tests/test_review_delta.py runs the REAL
+        # tools/ci/review_delta.sh, which needs jq four times. Without it the
+        # script fails open to `mode=full` -- correct behaviour, safe
+        # direction, announced on stderr -- and every test pinning a specific
+        # mode goes red. Worse, the break-confirmation cannot distinguish the
+        # fixed script from the broken one, because both return `full`.
+        # tests/test_ci_image_dependencies.py derives this list rather than
+        # trusting it.
+        apt-get install -y -qq --no-install-recommends git make jq >/dev/null
 
         # The Makefile anchors every path on `git rev-parse --show-toplevel`.
         # Some Cloud Build source types deliver an archive with no .git at
