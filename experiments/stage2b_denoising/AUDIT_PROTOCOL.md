@@ -79,6 +79,23 @@ expectations.
 Report the selected alpha at both budgets (reselected) and the
 production alpha (fixed).
 
+**Conforming amendment (disclosed, not silent): both regimes consume the
+THIRTEEN-decade grid.** DESIGN.md's alpha grid was amended post-lock
+after Phase B to `{1e-6 .. 1e6}` — see its Review history for the ruling,
+its provenance and the frozen one-shot procedure. Nothing about this
+protocol's own logic changes: "the same frozen procedure" still means the
+frozen procedure, and the fixed/reselected distinction is untouched. What
+changes is which grid that procedure searches, at both budgets and for
+the production alpha alike.
+
+**Sequencing, unchanged and now load-bearing**: the amendment and the
+ridge re-run land BEFORE the audit session. The audit's fixed-alpha
+regime is defined as *the alpha selected from the production
+representation*, so running the audit against a production alpha chosen
+on the superseded nine-decade grid would compare two budgets through a
+constraint the amendment exists to remove — and would have to be redone.
+The audit consumes the re-run's artifacts, not Phase B's ridge outputs.
+
 **Honest scope statement, required in the results write-up**: per-budget
 fold-fitted `StandardScaler`s are retained, because that is the
 production preprocessing. Fixed-alpha therefore isolates **the effect of
