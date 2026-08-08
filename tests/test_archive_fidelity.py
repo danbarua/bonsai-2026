@@ -19,6 +19,7 @@ and skips when the archive is absent, because both archives are local-only.
 from __future__ import annotations
 
 import importlib.util
+import subprocess
 import sys
 from pathlib import Path
 
@@ -26,7 +27,37 @@ import pytest
 
 REPO_ROOT = Path(__file__).resolve().parents[1]
 MODULE = REPO_ROOT / "tools" / "mailbox" / "check_transit_integrity.py"
-C2GPT_ARCHIVE = REPO_ROOT / ".claude" / "claude2gpt" / "archive"
+
+
+def _mailbox_root() -> Path:
+    """Resolve the checkout that actually holds the mailboxes.
+
+    Agents work in worktrees under `.claude/worktrees/`, and a worktree's
+    own `.claude/claude2gpt/archive/` is created EMPTY -- the directories
+    are tracked, their contents are gitignored and local-only. So the
+    mailbox lives in the main checkout, which `--git-common-dir` finds
+    (its parent) and `parents[1]` does not.
+    """
+    try:
+        out = subprocess.run(
+            ["git", "rev-parse", "--git-common-dir"],
+            cwd=REPO_ROOT, capture_output=True, text=True, check=True,
+        ).stdout.strip()
+    except (OSError, subprocess.CalledProcessError):
+        return REPO_ROOT
+    common = Path(out)
+    if not common.is_absolute():
+        common = (REPO_ROOT / common).resolve()
+    return common.parent
+
+
+C2GPT_ARCHIVE = _mailbox_root() / ".claude" / "claude2gpt" / "archive"
+
+# Guard on CONTENT, not on the directory. `is_dir()` is true for the empty
+# archive a worktree checkout creates, so the skip did not fire there and
+# the test failed with "0 files scanned" instead of skipping -- the
+# directory's presence reading as the data's presence.
+_HAVE_C2GPT = C2GPT_ARCHIVE.is_dir() and any(C2GPT_ARCHIVE.glob("*.md"))
 
 spec = importlib.util.spec_from_file_location("_transit_integrity", MODULE)
 transit = importlib.util.module_from_spec(spec)
@@ -177,7 +208,7 @@ def test_citation_resolution_is_not_a_default(tmp_path):
     assert any("citation" in f for f in on), on
 
 
-@pytest.mark.skipif(not C2GPT_ARCHIVE.is_dir(),
+@pytest.mark.skipif(not _HAVE_C2GPT,
                     reason="the c2gpt archive is local-only, not committed")
 def test_the_reviewer_archive_has_no_transit_tells():
     """The number quoted in `experiments/stage2b_denoising/gates.toml`.
