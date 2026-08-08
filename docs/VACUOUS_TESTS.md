@@ -375,6 +375,21 @@ workflow triggers on `paths: ["tests/**"]` while the delta narrowed to
 a PR touching only `tests/test_publish_review.sh` fires a review that
 then examines nothing and reports clean.
 
+**The fourth instance is this category catching its own author, hours
+after it was named.** The guard written to close #25
+(`test_ci_image_dependencies.py`) parsed every `apt-get install` line in
+`cloudbuild.yaml` into one set and reported `Installed: ['git']`. The
+parse was correct. It answered *"what does this file install anywhere"*
+when the question was *"what does THIS container have"* — each Cloud
+Build step is its own container, so a union reports a package as present
+where it was never installed. Caught only because the number looked
+wrong, not by any test.
+
+Naming the category does not confer immunity, which is the argument for
+the mechanical remedy over the vigilant one: at the moment of writing a
+derived guard, the wrong field is *not* wrong-looking. It is the obvious
+field, on the object you have in your hand.
+
 Distinguish this from **I**. I is coverage anti-correlated with risk —
 the check cannot see the dangerous region. J is coverage aimed one field
 sideways — the check sees everything it looks at, and looks at the wrong
