@@ -219,14 +219,21 @@ def test_two_identical_sentences_in_different_documents_collide_loudly(tmp_path)
     assert "id_collision" in kinds(reconcile(clauses, {"binding_gate": {}}, tmp_path))
 
 
-def test_a_narrow_marker_list_would_have_certified_two_percent(tmp_path):
-    """The measured near-miss, pinned as a property of the derivation.
+def test_a_narrow_marker_list_would_have_certified_almost_nothing(tmp_path):
+    """The near-miss, pinned as a property of the derivation.
 
-    Across this project's real frozen record -- 601 sentences -- an
-    RFC-2119 marker list matched THREE. Three dispositions would have exited
-    0 over 2% coverage, and the zero-guard never fires because three is not
-    zero. The candidate set must therefore catch lowercase prose forms, and
-    this asserts it does rather than trusting that it does.
+    An RFC-2119 marker list matches almost nothing across this project's real
+    frozen record, because that record was written in prose, for years,
+    before any reconciler existed. A handful of dispositions would have
+    exited 0 over a tiny fraction of the record, and the zero-guard never
+    fires because a handful is not zero. The candidate set must therefore
+    catch lowercase prose forms, and this asserts it does.
+
+    The counts live in `test_the_real_record_is_mostly_lowercase_prose`
+    below, which measures them. This one is a Tier 1 property check on
+    synthetic input and states no figure deliberately -- an earlier version
+    quoted two, both of which turned out to be wrong in unit as well as
+    magnitude.
     """
     prose = ("# P\n\nThe manifest is frozen once written.\n\n"
              "Inputs are locked before the run.\n\n"
@@ -237,6 +244,83 @@ def test_a_narrow_marker_list_would_have_certified_two_percent(tmp_path):
     assert len(clauses) == 5, (
         f"lowercase prose requirements went undetected: found "
         f"{[c.kind for c in clauses]}")
+
+
+# --- Tier 2: the real record, which is where the figures come from ---------
+#
+# Every number this module's comments state about the frozen record is
+# GENERATED HERE, against the documents themselves. Two earlier figures were
+# quoted in a docstring and a source comment as "measured on this project's
+# frozen record" having been measured by nobody: they arrived from a peer's
+# mesh message. See docs/PROVENANCE_CONTRACT.md §3.2a -- a number that
+# arrives from a peer has the provenance of its generator, not its sender.
+#
+# Tier 2 by the CLAUDE.md convention: skipped cleanly when the corpus is not
+# present, rather than failing or fabricating.
+
+RECORD = [REPO_ROOT / "experiments" / "stage2b_denoising" / name for name in
+          ("DESIGN.md", "AUDIT_PROTOCOL.md", "COMPANION_PROTOCOLS.md",
+           "STAGE3_PLAN.md")]
+
+_NARROW_RFC2119 = __import__("re").compile(
+    r"\bMUST NOT\b|\bMUST\b|\bHALT\b|\bNEVER\b")
+
+
+@pytest.mark.skipif(not all(p.exists() for p in RECORD),
+                    reason="the Stage 2B protocol documents are not present")
+def test_the_real_record_is_mostly_lowercase_prose():
+    """The design argument for over-inclusive markers, measured not asserted.
+
+    Reports its evidence rather than only asserting it, per CLAUDE.md
+    principle 20's corollary: a bare PASS records that assertions held, not
+    what was on the wire.
+    """
+    clauses = derive_clauses(RECORD, REPO_ROOT)
+    narrow = [c for c in clauses if _NARROW_RFC2119.search(c.text)]
+    print(f"\ncandidates (paragraphs carrying any marker): {len(clauses)}")
+    print(f"uppercase RFC-2119 among them: {len(narrow)}")
+    # The ratio is the argument. A narrow list would have nominated a
+    # handful, all of which would have been dispositioned, exiting 0.
+    assert len(clauses) > 50, "the broad marker set has stopped nominating"
+    assert len(narrow) * 10 < len(clauses), (
+        f"an uppercase RFC-2119 list now matches {len(narrow)} of "
+        f"{len(clauses)} candidates. The over-inclusive design was justified "
+        f"by that list matching almost nothing; if the record has been "
+        f"rewritten in RFC-2119 style, re-argue the design")
+    assert narrow, (
+        "the narrow list matches NOTHING at all, so this test would pass "
+        "against a regex that had stopped working. Expected a small "
+        "non-zero count")
+
+
+@pytest.mark.skipif(not all(p.exists() for p in RECORD),
+                    reason="the Stage 2B protocol documents are not present")
+def test_the_marker_histogram_is_not_a_semantic_classification():
+    """The pin that stops a wrong number being re-derived.
+
+    A three-way split of the record was cited as evidence for the three-kind
+    schema. It is reproduced EXACTLY by the marker histogram -- first-match
+    marker per paragraph -- which is a fact about which regex fired first,
+    not about what a clause binds. `_clauses_in` returns one clause per
+    paragraph and stops at the first matching pattern, so the histogram is an
+    artifact of `_CANDIDATE_MARKERS` ORDER as much as of the text.
+
+    stage2b-lead's own rows cross the mapping in both directions: LOCKED- and
+    HALT-marked clauses are classified `binding_gate`. So this asserts the
+    coincidence is real, precisely so that nobody -- including a future me --
+    reads the histogram as a classification again.
+    """
+    from collections import Counter
+    hist = Counter(c.kind for c in derive_clauses(RECORD, REPO_ROOT))
+    total = sum(hist.values())
+    rest = total - hist["MUST"] - hist["FROZEN"]
+    print(f"\nmarker histogram: {dict(hist)}")
+    print(f"MUST={hist['MUST']}  FROZEN={hist['FROZEN']}  rest={rest}")
+    assert hist["MUST"] + hist["FROZEN"] + rest == total
+    assert hist["MUST"] and hist["FROZEN"], (
+        "the histogram no longer has the shape the miscitation had; if the "
+        "corpus changed, the warning in gate_inventory.py needs rewording "
+        "rather than deleting")
 
 
 # --- the mapped references must actually resolve ---------------------------
