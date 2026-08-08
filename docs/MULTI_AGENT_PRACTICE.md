@@ -306,6 +306,45 @@ Reports too: a fixed report name overwritten by a resumed run destroys
 the record of what the attempt that *died* had seen, which is exactly the
 run you most want to read afterwards.
 
+### 17b. …and it does nothing about silent REUSE
+
+The half that only shows up later, and the more dangerous one.
+
+**Regeneration-means-a-new-name protects against overwriting and does
+nothing about silent reuse.** Different failures, same cause — a semantic
+name pointing at whatever was computed under some *other* configuration —
+and **only the first one raises.**
+
+Caught in the wild here. A reviewer ruling extended a hyperparameter grid
+and required a full re-run; the grid was duly changed in code. But the
+previous run's outputs were already in the bucket **with valid
+manifests**, and the idempotent-step helper passed no expectation about
+*which configuration* produced them — so its skip branch would have
+validated them happily, handed back the superseded results, recomputed
+nothing, and reported success.
+
+Notice what that failure does to the ruling it was meant to satisfy: the
+requirement was *"do not splice new results into the old tables."* Nothing
+would have been spliced, because nothing would have been computed. **The
+constraint is satisfied by accident, and the result is worthless.** A
+clean artifact, a green run, and conclusions drawn from numbers the
+amendment existed to replace.
+
+Two complementary defenses, and this stage now has one of each:
+
+- **Naming derivation** (producer side): derive the object name from the
+  configuration itself — a digest of the grid, not a hand-written `_v2`.
+  A hand-set suffix is a list standing in for a derivable set: right
+  today, wrong at the next change, and wrong in the direction of reusing
+  stale numbers. Derived, any config change moves the name automatically
+  and the old artifact survives as history.
+- **Expectation pinning** (consumer side): pass the fingerprint you
+  *expect* at the call site, so a consume of the wrong-configuration
+  artifact is refused rather than silently accepted.
+
+Neither subsumes the other. Naming stops you writing over history;
+pinning stops you reading the wrong history. Ask which one you have.
+
 ### 18. Join on identity, never on position
 
 Cross-artifact comparison goes **by official index, never by positional
@@ -394,6 +433,7 @@ whether it mattered.
 8. Reproduce the execution model, not just the code path.
 9. Run device-numerics checks on the device you actually target.
 10. The artifact is the interface: fingerprint it, commit it atomically, never overwrite it.
+10b. Never-overwrite does not prevent silent REUSE — derive the name from the config, and pin the fingerprint you expect.
 11. Join on identity, never on position.
 12. Spend is released by the human, explicitly, every time.
 

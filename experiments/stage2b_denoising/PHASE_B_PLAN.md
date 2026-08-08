@@ -181,6 +181,21 @@ path; if one ever must, the plan has to state which, why historical
 replacement is acceptable, and that no package claim depends on
 recovering earlier versions.
 
+**The reuse half, found when the amended grid landed.** The invariant
+stops an artifact being overwritten and does nothing to stop a re-run
+silently CONSUMING one computed under a different configuration. Phase B's
+`ridge_cv.json` and `ridge_final.npz` sit in the bucket with valid
+manifests; `ensure_json` passes no `expected_fingerprint`, so the
+thirteen-decade re-run would have hit `ensure_artifact`'s skip branch,
+accepted the nine-decade results, recomputed nothing and reported
+`STAGE3_OK` — satisfying the ruling's "do not splice" clause **by
+accident**, since nothing is spliced when nothing is computed. Fixed by
+deriving the artifact name from the grid itself (`ridge_cv_g13_<hex>`), so
+any grid change moves the name automatically and the old tables survive as
+history. Naming-derivation and expectation-pinning are complementary: the
+first stops you writing over history, the second stops you reading the
+wrong history, and neither subsumes the other.
+
 All four negative paths were confirmed by breaking what they watch, each
 firing its own test and no other: force against LINEAGE; a second create
 against a committed name losing its precondition; a RUN_SCOPED artifact
