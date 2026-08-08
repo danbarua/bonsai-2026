@@ -221,6 +221,23 @@ the hook as a real subprocess — JSON on stdin, exit code and filesystem
 effects observed — because the properties that matter are process-level and
 a direct function call cannot show them.
 
+**The corpus caught a fix re-opening an earlier defect.** Bug 4's repair
+replaced naive string splitting with `shlex` tokenising. `shlex` treats a
+newline as ordinary whitespace, so every line of a multi-line command
+merged into one segment — which is exactly bug 1, where a `python -c`
+anywhere but the first token went unseen. The corpus entry for bug 1 failed
+immediately and the regression never left the working tree.
+
+This is the argument the corpus exists to win. `is_scratch` is a pattern
+list, which principle 21 says will under-cover, and the mitigation offered
+was "every shape this project has actually seen, each carrying the reason
+it is there." A fix for one defect silently restoring another is precisely
+what a set of retained real shapes prevents and what a set of unit tests
+written alongside the current implementation does not. Worth naming because
+"the fix for defect N reintroduced defect 1" is common enough to have a
+name in most shops, and catching it during the rewrite is the good outcome
+rather than a non-event.
+
 Every guard here has been watched to fail. Two are worth recording, because
 both found a real defect rather than confirming an expectation:
 
