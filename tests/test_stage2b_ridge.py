@@ -958,6 +958,45 @@ def test_oof_is_reproducible():
     np.testing.assert_array_equal(a["fold_index"], b["fold_index"])
 
 
+def test_the_production_partition_is_the_one_the_design_locks():
+    """`random_state=42` on one side must be a LITERAL, not `FOLD_SEED`.
+
+    Every other test here reads the fold seed from the module and passes it
+    back in, so all of them agree with the module whatever it says --
+    `oof["random_state"] == ridge.FOLD_SEED` is `x == x`. Measured rather
+    than argued: with `FOLD_SEED` moved 42 -> 43, the whole ridge file
+    passed 92/92. `N_SPLITS` 5 -> 4 failed four tests in the same sweep, so
+    the gap was this constant specifically, not the constants generally.
+
+    A different shape of hole from the equality pins catalogued alongside
+    it, and worth naming: an equality pin at least fails when the literal is
+    edited. A self-referential pin does not fail at all.
+
+    So the assertion compares the PARTITION production actually produces
+    against the partition DESIGN.md's literal produces. A seed change moves
+    the partition, and the fold assignments diverge."""
+    from sklearn.model_selection import StratifiedKFold
+
+    X, Y, y = _unequal_fold_regression()
+    produced = ridge.oof_per_image_mse(X, Y, y)["fold_index"]
+
+    def partition_at(seed):
+        index = np.full(X.shape[0], -1, dtype=int)
+        skf = StratifiedKFold(n_splits=5, shuffle=True, random_state=seed)
+        for f, (_, va) in enumerate(skf.split(X, y)):
+            index[va] = f
+        return index
+
+    np.testing.assert_array_equal(produced, partition_at(42))
+
+    # Anti-vacuity: if the partition did not depend on the seed, the
+    # assertion above would hold for any value and pin nothing.
+    assert not np.array_equal(partition_at(42), partition_at(43)), (
+        "the fold partition is seed-invariant on this fixture, so the "
+        "assertion above cannot detect a seed change -- pick a fixture "
+        "where shuffling actually reorders")
+
+
 # ---- per-fold conditioning, rank and coefficient-size diagnostics ----
 
 def test_fold_singular_values_reproduce_the_recorded_condition_ratio():

@@ -49,6 +49,7 @@ claim the rest of this repository's discipline exists to prevent.
 | 25 | 08-08 | `27b61b5` | Not a test: the CI image installed `git` and `make` but not `jq`, so `review_delta.sh` fail-opened to `mode=full` on Linux. Its break-confirmation then could not tell the fixed script from the broken one — both returned `full` | the break-test reported its own blindness, in its own words |
 | 26 | 08-08 | `8fd8aa7` | Not a vacuous test — a guard working, recorded because who it caught is the point. The draft of category J stated a literal count of this catalogue's own incidents, and `test_catalogue_counts.py` rejected it: the guard against the catalogue quantifying itself in prose, firing on its own author, inside the commit adding a category about checks that answer the wrong question. It then fired a *second* time on the row you are reading, which first quoted the offending phrase verbatim | the guard, on the person who wrote it, twice |
 | 27 | 08-08 | `b38e669` | `FIRST_PARTY_ROOTS` listed `experiments/`, `src/` and `tools/` but not `tests/`, so the new hard-import guard reported `tests/_makefile.py` — imported by six test files — as an undeclared third-party package. The roots answered a narrower question than the one asked | it fired on its first real run |
+| 28 | 08-08 | session | `stage2b_ridge.FOLD_SEED` — DESIGN.md's locked `random_state=42` — was pinned only by tests that read the seed from the module and asserted a downstream record equalled it. Moving it 42 → 43 failed nothing: 92 passed. `N_SPLITS` 5 → 4 failed four tests in the same sweep, so the gap was this constant specifically | building the gate inventory |
 
 Two near-misses belong here too, because they were caught *before* becoming
 tests:
@@ -432,6 +433,36 @@ a guard rather than a fixture, and the remedy is the same as principle
 the CI scripts and asserts the image installs it, parsed **per Cloud
 Build step**, because each step is its own container and a union would
 report a package as present where it was never installed.
+
+**L. The expected value is read from the thing it is meant to pin.** #28.
+
+```python
+assert oof["random_state"] == ridge.FOLD_SEED     # x == x
+```
+
+Both sides come from the module. Edit `FOLD_SEED` and the assertion
+follows it, silently, under every value. Nine other tests in the same
+file passed `ridge.FOLD_SEED` into the function and then checked the
+result was consistent with `ridge.FOLD_SEED`, so the whole file agreed
+with the module whatever the module said. Measured, not argued: 42 → 43
+passed 92/92, while `N_SPLITS` 5 → 4 in the same sweep failed four
+tests — so the hole was that constant, not the constants generally.
+
+The relationship to the equality pins (#22 and the `test_corpus_constants`
+shape) is the part worth keeping, because it inverts the intuition. An
+equality pin — `assert X == 42` — is weak: it fails only when someone
+edits the literal, never when the value's *propagation* breaks. A
+self-referential pin is **worse than weak, it is inert**: it fails under
+no edit at all. And it reads as the more rigorous of the two, because
+parameterising on the constant instead of hardcoding it is ordinarily
+good practice. Here it is what removes the test.
+
+The remedy is the one thing parameterisation forbids: one side must be
+the frozen literal, transcribed from the document that froze it, and the
+other must be what production actually produces. For a seed that means
+comparing *partitions* rather than the number — plus an anti-vacuity
+assert that the partition is seed-sensitive on the fixture at all, or the
+comparison would hold for any seed and pin nothing.
 
 ---
 

@@ -811,6 +811,187 @@ enforcement = ""
 break_demonstrated = ""
 trigger = "manual"
 
+[binding_value.ae2b8a6124e4]
+# DESIGN: "This level is frozen. Adjusting it because measured clip rates
+#  'look awkward' is post-hoc tuning this project refuses. Empirical clip
+#  rates are reported ... as confirmation against this table, not discovery."
+value = """
+The corruption level, `ALPHA_BAR = 0.5`. Frozen, and the freeze carries a
+second half that is easy to drop: the measured clip rates are CONFIRMATION
+against the design's analytical table, never an input to choosing the
+level. The direction of inference is part of the value."""
+production_consumers = """
+stage2b_corruption.py::ALPHA_BAR, the single propagation point. Every
+derived quantity reads it rather than restating a number:
+signal_coefficient / noise_coefficient take it as their argument's default,
+predicted_clip_rates and clip_rate_agreement default to it, and
+run_ladder_stage1.py::step3 calls clip_rate_agreement without overriding
+it. There is no second place a level could drift."""
+status = "enforced"
+enforcement = "tests/test_stage2b_corruption.py::test_analytical_rates_reproduce_the_design_table"
+break_demonstrated = """
+ALPHA_BAR 0.5 -> 0.6: TEN tests fail, and the set is the evidence rather
+than the count. It includes test_analytical_rates_reproduce_the_design_table
+and test_format_analytical_table_reproduces_design_md_rows -- both of which
+compare DERIVED rates against DESIGN.md's transcribed table, so they fail
+because the propagated consequence moved, not because a literal was edited.
+test_master_seed_and_alpha_bar_are_locked also fails, and on its own it
+would be the equality-pin shape this file distrusts; it is not on its own.
+
+Also fails: test_censoring_is_majority_at_every_clean_intensity, which is
+the design's actual scientific premise (~54% censoring) rather than any
+number transcribed from it."""
+provenance_of_use = """
+Stage 1 ran clip_rate_agreement on the real 1,000-image corpus and recorded
+the comparison in the run's report under `clip_rate_agreement`, with
+out-of-tolerance entries routed to `diagnostics.clip_rate_outside_tolerance`
+-- so the artifact records the confirmation direction the clause requires,
+not merely that a level was set."""
+trigger = "ci-fast"
+
+[binding_value.ccd85c56816e]
+# DESIGN: "One multi-output ridge, shared alpha across all 505 outputs, grid
+#  {1e-6 .. 1e6}, fit_intercept=True, inputs standardized per-fold, targets
+#  unstandardized. Tie: mean validation MSE within 1e-10 absolute; LARGER
+#  ALPHA WINS. Folds: StratifiedKFold(n_splits=5, shuffle=True,
+#  random_state=42), identical partition across all conditions."
+value = """
+The readout's frozen configuration: ALPHA_GRID's thirteen decade values,
+ALPHA_TIE_TOL = 1e-10 with the larger-alpha tie-break, N_SPLITS = 5, and
+FOLD_SEED = 42 -- one partition, identical across every condition.
+
+The tie-break DIRECTION is part of the value. "Within 1e-10, larger alpha
+wins" is a prospective commitment to the more-regularized model; reversed,
+it would select the less-regularized one on ties that are numerically
+meaningless, which is a choice made by looking at results."""
+production_consumers = """
+stage2b_ridge.py::ALPHA_GRID, ALPHA_TIE_TOL, N_SPLITS, FOLD_SEED. Four
+values, and per this section's own warning they are enumerated rather than
+covered by one citation:
+
+  ALPHA_GRID     default of svd_ridge_fit, cross_validate_alpha,
+                 oof_per_image_mse, sklearn_ridge_predict,
+                 ridge_equivalence_check
+  ALPHA_TIE_TOL  default of select_alpha, reached from cross_validate_alpha
+  N_SPLITS       default of cross_validate_alpha, oof_per_image_mse,
+                 oof_clipped_mse_at_alpha, ridge_equivalence_check
+  FOLD_SEED      the `random_state` default of the same four
+
+run_ladder_stage3.py::step7_ridge calls cross_validate_alpha without
+overriding any of them, so the module defaults ARE the production values."""
+status = "enforced"
+enforcement = "tests/test_stage2b_ridge.py::test_the_production_partition_is_the_one_the_design_locks"
+break_demonstrated = """
+Each of the four broken separately, in production, with the test literals
+untouched:
+
+  ALPHA_TIE_TOL 1e-10 -> 0.0   test_select_alpha_within_tolerance_tie_larger_alpha_wins
+                               fails on the VERDICT ("assert 10.0 == 100.0"):
+                               the tie stops being a tie and the smaller
+                               alpha wins. Also the equality pin, which
+                               would not have been enough alone.
+  N_SPLITS 5 -> 4              5 tests fail.
+  ALPHA_GRID (removed decade)  covered by 3043a89b2aae's own row.
+  FOLD_SEED 42 -> 43           1 test fails -- and this is a REPAIR, not a
+                               report. Before the test named in
+                               `enforcement` was written, 42 -> 43 passed
+                               92/92: every test read the seed from the
+                               module and asserted a downstream record
+                               equalled it, which is `x == x`. Distinct
+                               from the equality pins catalogued elsewhere
+                               and worse: an equality pin at least fails
+                               when the literal is edited, a
+                               self-referential one fails under no edit at
+                               all. VACUOUS_TESTS #28."""
+provenance_of_use = """
+ridge_cv_g13_88edf9ac.json records the Phase B re-run's selected alphas per
+condition under this grid and partition, and its manifest records the
+producing commit. The object name's `g13` is the thirteen-value grid, so
+the artifact's own identity carries which grid produced it."""
+trigger = "ci-fast"
+
+[binding_value.ca5c4da6d40e]
+# DESIGN: "Architecture (residual formulation, locked prospectively):
+#  x_hat_0 = x_t_clip + f_psi(x_t_clip)".
+#
+# Separate from 649bb190a18e, which carries the same block's PARAMETER
+# COUNT and layer properties. This row is the residual FORMULATION -- the
+# skip connection itself, which is what makes the 9,857 parameters model a
+# correction rather than a reconstruction. A width change and a dropped skip
+# are different failures and the second leaves the count intact.
+value = """
+The prediction is the clipped input plus a learned correction:
+`x_hat_0 = x_t_clip + f_psi(x_t_clip)`, locked prospectively -- i.e. before
+any measurement of whether the residual form helps."""
+production_consumers = """
+stage2b_cnn.py::Denoiser.__call__, the single site: `x + self.residual(x)`.
+The convolution stack is reached only through it, so there is no path that
+evaluates f_psi without the skip."""
+status = "enforced"
+enforcement = "tests/test_stage2b_cnn.py::test_residual_skip_connection_is_real"
+break_demonstrated = """
+`x + self.residual(x)` -> `self.residual(x)` (the skip dropped, every
+parameter and the 9,857 count untouched): THREE tests fail --
+test_residual_skip_connection_is_real, plus
+test_training_loss_is_raw_and_validation_metric_is_clipped and
+test_clipping_touches_the_prediction_and_never_the_target, both of which
+read the model's output and so see the formulation change independently.
+
+Worth recording that 649bb190a18e's break (CONV_CHANNELS 32 -> 33) does NOT
+fail these three, and this break does not fail its four. Two rows, two
+disjoint failure sets, over one paragraph of DESIGN.md."""
+provenance_of_use = """
+Stage 2's CNN development run reported best-of-three-seeds clipped
+validation MSE 0.0637 against the identity baseline's 0.1998 (FINDINGS.md).
+The model that produced it is this constructor; a non-residual model would
+have been a different architecture reported under the same name."""
+trigger = "ci-fast"
+
+[binding_value.2c7aaa2b46ea]
+# DESIGN: "Training, literal: batch 128, max 100 epochs, early-stopping
+#  patience 10 on clipped active-support validation MSE, min_delta=0.0 with
+#  strict `<` improvement, best checkpoint restored ... Three seeds (0,1,2)
+#  ... best-of-3 by clipped validation MSE, training-derived only."
+value = """
+BATCH_SIZE 128, MAX_EPOCHS 100, PATIENCE 10, MIN_DELTA 0.0 with strict `<`,
+SEEDS (0, 1, 2). The stopping RULE is as frozen as the numbers: min_delta
+zero plus strict improvement means an exact plateau does not reset patience,
+which is what makes "patience 10" a bounded claim rather than a
+configuration that can run to MAX_EPOCHS on a flat curve.
+
+The clause's closing constraint -- selection is training-derived only,
+official-test performance never inspected -- is NOT dispositioned here. It
+binds at f3bbc791e7c6, which gates test-side access in code."""
+production_consumers = """
+stage2b_cnn.py::BATCH_SIZE, MAX_EPOCHS, PATIENCE, MIN_DELTA, SEEDS,
+consumed by train_cnn's epoch loop and its early-stopping branch. SEEDS is
+consumed by the best-of-three caller rather than by train_cnn, which takes
+one seed -- the only one of the five with its propagation outside the
+training function."""
+status = "enforced"
+enforcement = "tests/test_stage2b_cnn.py::test_worsening_run_stops_after_patience_epochs_keeping_the_first_checkpoint"
+break_demonstrated = """
+Two of the five broken in production, both landing on the same VERDICT test
+rather than only on the constants pin:
+
+  PATIENCE 10 -> 3     test_worsening_run_stops_after_patience_epochs_keeping_the_first_checkpoint
+                       fails -- the run stops at a different epoch and the
+                       restored checkpoint changes.
+  MIN_DELTA 0.0 -> 1e-9  same test fails, and this is the more informative
+                       of the two: the epoch count is unchanged on a
+                       strictly-worsening curve, so what moves is the
+                       plateau behaviour the strict-`<` clause exists for.
+
+test_locked_optimizer_and_training_constants fails under both. It is an
+equality pin and is deliberately not cited as `enforcement` -- it is
+reported here because it fired, not because it would have been enough."""
+provenance_of_use = """
+Stage 2 trained under these constants and recorded the per-seed clipped
+validation MSEs and the selected checkpoint in its run report; FINDINGS.md
+carries the best-of-three figure. No stage-3 CNN run exists yet, so the
+provenance is stage 2's, at the 5,000-image development scale."""
+trigger = "ci-fast"
+
 # =============================================================================
 # binding_claim -- obligations on what may be CLAIMED
 # =============================================================================
