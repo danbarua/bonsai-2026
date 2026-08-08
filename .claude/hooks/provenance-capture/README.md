@@ -125,6 +125,39 @@ needs a session by construction. Slow and CLI-dependent, so it is
 change to `.claude/settings.json` or to the scripts it names**, which is
 exactly when the wiring can break without a single unit test noticing.
 
+## Cost: about 77 ms per Bash tool call, everywhere
+
+The hook is registered on `Bash|mcp__mighty-colab__.*`, so it runs on every
+matching tool call in every session in this repository — not only the ones
+it captures. Measured by `tools/provenance/bench_hook_overhead.py`: ~38 ms
+for the uncaptured case, and since both `PreToolUse` and `PostToolUse` fire,
+**roughly 77 ms is added to each Bash call**. Almost all of it is Python
+interpreter startup; the predicate itself is negligible.
+
+This is recorded rather than buried because latency is a correctness
+property for this design, not a nicety. The hooks were accepted on the
+argument that they never block and never surprise, and the natural response
+to tooling that makes your own work feel sluggish is to switch it off — the
+route-around this feature exists to prevent. A cost imposed on other
+people's sessions should be visible to them.
+
+**Why it is not optimised away.** The obvious fix is a fast substring check
+in `capture.sh` — bash string matching costs ~1 ms — exiting before Python
+starts. That would put a second copy of the predicate in a second language,
+and when the two disagree the result is silent under-capture: exactly the
+defect this feature has already shipped twice, and the one hardest to
+notice because a missing record looks like correct classification.
+
+Narrowing the settings matcher with `if` clauses has the same problem in a
+third place. The broad matcher plus an in-process self-filter was chosen
+deliberately so that the predicate has exactly one definition.
+
+~77 ms against a tool call that typically costs hundreds of milliseconds to
+seconds is single-digit percent. If that ever stops being true, the number
+is here to be re-measured rather than re-guessed, and the trade is worth
+revisiting — but the fix must derive the fast path from the predicate, not
+restate it.
+
 ## Known blind spot: remote execs launched through `make`
 
 **A GPU run started by `make stage2b-ladder-stage3` is not captured**, and
