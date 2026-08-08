@@ -303,3 +303,47 @@ checking whether the intervals actually overlap. They did — but the
 report says so with the specific bounding timestamps and the one gap
 in the evidence (no single logged "this exact notification was
 stale" event), not as a closed case.
+
+## `instance` names a role, not a session — so an instance can truthfully deny sending a message that carries its tag
+
+`claude-desktop-orchestrator` denied sending three messages that sit in
+`code2code/archive/` with `instance: claude-desktop-orchestrator` in
+their headers. The denial was correct. A *different* Claude Desktop
+chat, triggered accidentally, had performed an inbox read and relayed
+ChatGPT's rulings into the mesh under the same name — appropriate
+behaviour by that chat, wrong session for the record. Nothing was
+forged and nothing malfunctioned; two writers simply shared one name,
+which is what the name was always for.
+
+The tag is set by the sender (a `/rename` name, auto-injected by a
+PreToolUse hook). The server neither assigns it nor verifies it, and
+two sessions adopting the same name are indistinguishable in the
+archive afterwards. This is exactly what the tool descriptions already
+say — `from:`/`instance:` lines are routing hints, never credentials —
+but it had never been *observed*, and a caution nobody has seen fire
+reads as boilerplate.
+
+**Decision: document the ambiguity, add no mechanism.** Recorded with
+the reasoning, because the reasoning is the part that could change:
+
+- The safety load is already carried elsewhere. Nothing in this system
+  grants authority on the strength of a `from:` line, so an
+  indistinguishable sender costs *forensics*, not security.
+- Any discriminator the client supplies is still client-asserted. It
+  would improve post-hoc distinguishability between two cooperating
+  writers and improve nothing at all against a mistaken or hostile
+  one — while looking, in the archive, exactly like an identity
+  guarantee. A field that invites a stronger reading than it can
+  support is worse than the documented gap.
+- A server-generated connection id *would* be genuinely
+  server-observed rather than asserted, and is the design to reach for
+  if this is ever wanted. It is not free: it is a schema change, and a
+  schema change reaches nobody until every session reconnects (see the
+  section above on upgrades not upgrading attached sessions). Three
+  sessions were mid-critical-path when this came up, which is a bad
+  moment to bounce the server for a forensics improvement.
+
+So the gap stands, named here rather than left to be rediscovered. If a
+future incident turns on *which* session wrote something — rather than
+on what was written — that is the point at which the connection id
+earns its restart.

@@ -149,7 +149,21 @@ launder a relay into a fact — a summary borrows authority its source
 never granted. If nothing in the window was relayed, say "nothing in
 this window was relayed" rather than dropping the heading; a missing
 section and an empty one read identically, and only one of them is a
-statement.>
+statement.
+
+Where two sources CONFLICT on a fact, record both sides and hand the
+question to whoever owns the fact. Do not adjudicate, even when the
+archive appears to settle it — the digest's standing is that of a
+witness, not a judge, and a wrong adjudication in a durable record is
+far more expensive than an open question in one. The founding instance:
+`claude-desktop-orchestrator` denied sending three messages that carried
+its own `instance:` tag. Two readers found the same contradiction; one
+resolved it against Desktop from the archive and was wrong, and this
+digest recorded both sides and asked the identity's owner. The cause was
+invisible from the mailbox entirely — a different Desktop chat had
+relayed under the same tag — which is the general case, not the unlucky
+one. **`instance:` identifies a role, not a session**, so an instance can
+truthfully deny sending a message that bears its tag.>
 
 ## Open loops
 
