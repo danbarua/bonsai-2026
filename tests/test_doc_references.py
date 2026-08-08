@@ -23,6 +23,7 @@ argument the repository makes everywhere else: hand-verified functionality
 becomes an executable test, or it lives only in a transcript.
 """
 import re
+import subprocess
 from pathlib import Path
 
 import pytest
@@ -130,14 +131,112 @@ def test_every_cited_path_exists():
           "if the absence is expected -- add it to EXEMPT with the reason.")
 
 
+def _is_git_ignored(path: str) -> bool:
+    """Does git ignore this path?
+
+    The DERIVED discriminator between the two kinds of absence in `EXEMPT`,
+    and the reason it is derived rather than a second hand-labelled dict:
+    a hand-split list is the artifact principle 21 says will silently
+    under-cover, and it would need maintaining in step with `.gitignore`.
+
+    A git-ignored path is local-only BY CONSTRUCTION, so its presence is a
+    property of the machine rather than of the repository. `check-ignore`
+    consults the ignore rules, not the filesystem, so it answers for absent
+    paths too -- which is what the other direction needs.
+
+    Self-correcting: if `datasets/` were ever committed, the path stops
+    being ignored and its exemption correctly becomes stale.
+    """
+    try:
+        return subprocess.run(
+            ["git", "-C", str(REPO_ROOT), "check-ignore", "-q", path],
+            capture_output=True, timeout=10).returncode == 0
+    except (OSError, subprocess.SubprocessError):
+        # No git, or no repository. Treat as not-ignored: the staleness
+        # check then applies, which errs toward reporting rather than
+        # toward silence.
+        return False
+
+
 def test_every_exemption_is_still_needed():
     """The other direction. An exemption for a path that now EXISTS is
     silently switching the check off for a file it would otherwise verify,
-    and reads to the next person as a considered decision."""
-    resurrected = [p for p in EXEMPT if (REPO_ROOT / p).exists()]
+    and reads to the next person as a considered decision.
+
+    Applies ONLY to paths git does not ignore, and that qualification was a
+    real defect rather than a nicety. `EXEMPT` holds two kinds of absence,
+    and this assertion was true of one and false of the other:
+
+      environment-dependent  `datasets/kmnist/`, the cached `.pkl` -- absent
+                             in CI, PRESENT on any working machine, which is
+                             the intended state
+      environment-independent  the unbuilt verifier, a path in another repo
+                             -- absent everywhere
+
+    Reported by stage2b-lead, who was running a red suite because of it
+    while CI stayed green for lacking the data. It is the crc32c incident
+    with the sign flipped, and their diagnosis is the line I had sent them
+    that morning turned back on me: when one predicate serves two questions,
+    it IS the shared blind spot. One `EXEMPT` dict, two questions, and the
+    observable -- "the path exists" -- means opposite things for each.
+    """
+    resurrected = [p for p in EXEMPT
+                   if (REPO_ROOT / p).exists() and not _is_git_ignored(p)]
     assert not resurrected, (
-        f"these paths exist now and no longer need exempting: "
+        f"these paths exist now, are tracked, and no longer need exempting: "
         f"{sorted(resurrected)}. Remove them so the check covers them again")
+
+
+def test_the_discriminator_separates_the_two_kinds_of_absence():
+    """The whole fix rests on `git check-ignore`, so check it discriminates
+    rather than assuming it does.
+
+    Both directions matter. If it returned True for everything the staleness
+    check would be switched off entirely -- a guard passing over nothing,
+    which is this file's own subject. If it returned False for everything we
+    are back to the red suite that prompted the fix.
+    """
+    environment_dependent = [p for p in EXEMPT if _is_git_ignored(p)]
+    environment_independent = [p for p in EXEMPT if not _is_git_ignored(p)]
+    print(f"\n[exempt] git-ignored (local-only): {sorted(environment_dependent)}")
+    print(f"[exempt] tracked (absent everywhere): {sorted(environment_independent)}")
+    assert environment_dependent, (
+        "no exemption is git-ignored, so the discriminator classifies "
+        "everything as tracked and the staleness check is unchanged -- "
+        "meaning the defect it was written for is still present")
+    assert environment_independent, (
+        "every exemption is git-ignored, so the staleness check now applies "
+        "to nothing at all. It would pass over an empty set")
+
+
+def test_a_stale_tracked_exemption_still_fires(tmp_path):
+    """The guard, seen failing. A tracked file that exists and is exempted
+    is exactly what this check exists to catch, and the fix must not have
+    quietly excused it along with the local-only data."""
+    tracked_and_present = "tests/test_doc_references.py"
+    assert (REPO_ROOT / tracked_and_present).exists()
+    assert not _is_git_ignored(tracked_and_present), (
+        "this test's own premise is wrong -- the file it uses as a stand-in "
+        "for a tracked path is git-ignored")
+    resurrected = [p for p in {tracked_and_present: "pretend"}
+                   if (REPO_ROOT / p).exists() and not _is_git_ignored(p)]
+    assert resurrected, (
+        "a tracked, existing, exempted path was NOT flagged. The "
+        "git-ignore qualification has switched the staleness check off "
+        "rather than narrowing it")
+
+
+def test_local_only_data_present_on_a_working_machine_does_not_fire():
+    """The false positive that was red on a machine with the datasets, and
+    green in CI for lacking them. Presence of git-ignored data is the
+    intended state of a working checkout, not a stale exemption."""
+    for path in ("datasets/kmnist/",
+                 "experiments/stage0_simulator_calibration/results/"
+                 "stage1a_all_classes.pkl"):
+        assert path in EXEMPT, f"{path} is no longer exempted; update this test"
+        assert _is_git_ignored(path), (
+            f"{path} is no longer git-ignored, so the staleness check now "
+            f"applies to it and will fire on any machine that has the data")
 
 
 def test_every_exemption_is_still_cited():
