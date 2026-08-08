@@ -295,12 +295,86 @@ def test_the_driver_joins_through_the_shared_helper(tree):
     """Principle 16's exact failure shape: two artifacts built from
     differently-ordered index lists align row-for-row, agree on shape, and
     compare entirely wrong numbers with nothing raised anywhere. The join
-    lives in one tested place; the driver must not grow its own."""
-    source = DRIVER_PATH.read_text()
-    assert "partition.index_join(" in source
-    assert "index_join" in source
+    lives in one tested place; the driver must not grow its own.
+
+    Resolved from the AST, not by searching the source text. The string
+    version of this test passed against a driver whose three joins had
+    been replaced by a hand-rolled positional one, with the old call left
+    behind in a comment -- which is the realistic shape of the regression
+    and exactly the failure VACUOUS_TESTS #17 was written about. A comment
+    is not in the AST, so it cannot satisfy this.
+    """
+    import ast
+
+    tree = ast.parse(DRIVER_PATH.read_text(), filename=str(DRIVER_PATH))
+
+    # Which FUNCTION each call sits in, so this asserts more than a count:
+    # the joins must be inside the driver's step functions, which main()
+    # calls. A call in a helper nothing invokes is not a join.
+    joins = {}
+    for node in ast.walk(tree):
+        if not isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef)):
+            continue
+        for inner in ast.walk(node):
+            if (isinstance(inner, ast.Call)
+                    and isinstance(inner.func, ast.Attribute)
+                    and inner.func.attr == "index_join"):
+                joins.setdefault(node.name, 0)
+                joins[node.name] += 1
+
+    assert joins, (
+        "the driver makes no call to index_join anywhere in its AST -- "
+        "a join it does not perform through the shared helper is one it "
+        "performs some other way")
+    assert sum(joins.values()) >= 3, (
+        f"expected the driver's three official-index joins, found "
+        f"{sum(joins.values())} in {sorted(joins)}")
+
+    called_by_main = _functions_reachable_from_main(tree)
+    orphaned = sorted(set(joins) - called_by_main)
+    assert not orphaned, (
+        f"index_join is called only in {orphaned}, which main() never "
+        f"reaches -- production joins by some other route")
+
     # a hand-rolled position map is the shape of the reimplementation
-    assert "for i, v in enumerate(" not in source
+    assert "for i, v in enumerate(" not in DRIVER_PATH.read_text()
+
+
+def _functions_reachable_from_main(tree):
+    """Transitive closure of module-level function names main() calls.
+
+    Deliberately name-based and over-inclusive: it resolves `foo(...)` and
+    `x.foo(...)` alike, so it can call a function reachable when it is
+    not. That direction is the safe one here -- the assertion above uses
+    it to prove a call site IS reached, so over-inclusion weakens the test
+    rather than producing a false failure, and a false failure on
+    reachability would be a hard thing for a reader to disprove.
+    """
+    import ast
+
+    defined = {node.name: node for node in ast.walk(tree)
+               if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef))}
+
+    def calls_in(node):
+        out = set()
+        for inner in ast.walk(node):
+            if isinstance(inner, ast.Call):
+                func = inner.func
+                name = (func.id if isinstance(func, ast.Name)
+                        else func.attr if isinstance(func, ast.Attribute)
+                        else None)
+                if name in defined:
+                    out.add(name)
+        return out
+
+    reached, frontier = set(), {"main"}
+    while frontier:
+        name = frontier.pop()
+        if name in reached or name not in defined:
+            continue
+        reached.add(name)
+        frontier |= calls_in(defined[name]) - reached
+    return reached
 
 
 def test_index_join_agrees_with_a_brute_force_join():

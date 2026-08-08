@@ -41,6 +41,7 @@ claim the rest of this repository's discipline exists to prevent.
 | 17 | 08-08 | `4173bf7` | The test for a *missing halt* grepped `step7_ridge`'s source for the `halt_reasons.append(...)` call — which survives when the branch guarding it is disabled by `if False:`. Green against the broken code | deliberate breakage |
 | 18 | 08-08 | `c6e0312` | Not a test: the capture predicate emitted a `piped_into_remote_exec` record for a command that shipped nothing (a `grep` alternation split on `\|`), and a coverage claim was drawn from it | peer read the record |
 | 19 | 08-08 | `8017225` | All three tests of the ridge equivalence gate were pass-side; hardcoding `passed = True` left 142 tests green. The one that asserted the composition, `passed == (pred_agrees and alpha_agrees)`, held trivially because the fixture makes both operands true | building the gate inventory |
+| 20 | 08-08 | `bff25eb`+ | "The driver joins through the shared helper" was `"partition.index_join(" in source`. Replacing all three joins with a hand-rolled positional one and leaving the old call in a comment left it green — the exact substitution the clause forbids | building the gate inventory |
 
 Two near-misses belong here too, because they were caught *before* becoming
 tests:
@@ -87,6 +88,29 @@ The general rule this project now applies to mappings as well as tests:
 **a citation of a gate is not evidence of a gate.** A test that names a
 predicate, a symbol reference, a grep — none of them establish that the
 predicate can reject anything. Only a demonstrated failure does.
+
+**#20 is #17 again, three days later, in a different file** — and the
+recurrence is the finding. `test_the_driver_joins_through_the_shared_helper`
+asserted `"partition.index_join(" in source`. Replacing all three of the
+driver's joins with a hand-rolled positional one and leaving the old call
+behind in a comment left it green: `AUDIT_PROTOCOL.md`'s "never by
+positional prefix" violated exactly, by the substitution principle 16
+names, with the guard reporting success.
+
+A comment satisfies a substring search. That is the whole mechanism, and
+it is why the fix is not a better pattern but a different instrument:
+**resolve from the AST, where comments and strings do not exist.** The
+rewritten test walks the driver's tree for `Call` nodes naming
+`index_join`, counts them, and checks their enclosing functions against
+the transitive closure of what `main()` calls.
+
+That last part earned its keep immediately. Two of the three assertions
+were confirmed by breaks that hit the *count* check first, which meant
+the reachability assertion was an untested guard living inside a tested
+test — the recursion one level down. A third break was constructed
+specifically for it: all three joins present, all inside a helper nothing
+invokes. **When one assertion shadows another, the shadowed one has not
+been demonstrated, whatever the test's overall red/green says.**
 
 **B. The predicate cannot match.** Session incidents: `perl` patterns that
 matched nothing; `line.startswith("FAILED")` against pytest output that
@@ -276,14 +300,22 @@ already tuned to find.
 
 ## What actually catches them
 
-**A new one, once: building the gate inventory.** #19 was found by
-requirement 4's per-clause demand for evidence the test flips red under a
-deliberate disable. Nobody was auditing that gate; the row simply could
-not be filled in honestly, and trying to fill it produced the break that
-exposed the hole. Worth naming separately from deliberate breakage because
-of what triggered it — an inventory that forces the same question at every
-clause finds the gates nobody thought to suspect, which is exactly the set
-that review and spot-breakage miss.
+**A new one, twice in one session: building the gate inventory.** #19 and
+#20 were both found by requirement 4's per-clause demand for
+evidence the test flips red under a deliberate disable. Nobody was
+auditing either gate; in both cases the row could not be filled in
+honestly, and trying to fill it produced the break that exposed the hole.
+
+Worth naming separately from deliberate breakage because of what triggers
+it. Spot-breakage is aimed — somebody already suspects a guard. An
+inventory asks the same question at *every* clause, including the ones
+nobody thought to suspect, which is precisely the set review and
+spot-breakage miss by construction. Two hits in one session, on gates
+that had been green for weeks, is the argument for the exercise.
+
+The instrument is the demand for evidence, not the tool that files it.
+A reconciler can require a `break_demonstrated` field; only a person can
+decline to write something plausible into it.
 
 **Deliberate breakage, nine of eighteen.** Break what the guard watches;
 observe the specific expected failure. The corollary in CLAUDE.md

@@ -196,6 +196,48 @@ tolerance: it is causal evidence on the PRODUCTION constant's propagation,
 not a check that a literal equals itself."""
 trigger = "ci-fast"
 
+[binding_gate.fc246f4fab3c]
+# AUDIT_PROTOCOL: "All cross-artifact comparison is by official KMNIST image
+#  index, never by positional prefix."
+enforcement = "experiments/stage2b_denoising/stage2b_partition.py::index_join"
+production_reachability = """
+Three call sites in run_ladder_stage3.py (the encoded-array join, and the
+CNN fit/validation row joins) plus compare_stage3_regeneration.py::align.
+Reachability is ASSERTED rather than assumed: the test resolves the calls
+from the driver's AST and then checks the enclosing functions against the
+transitive closure of what main() calls, so three joins parked in a helper
+nothing invokes fail rather than count."""
+input_wiring = """
+`source_indices` and `target_indices` are the official KMNIST index arrays
+travelling beside each artifact -- the second half of Freeze 2
+(8bf414d720f2), which is what makes this join possible at all. The report's
+`alignment_is_a_prefix` and `n_rows_moved` are returned rather than judged:
+`compare_stage3_regeneration.align` refuses a prefix alignment, while a
+caller joining an ascending subset should expect one, so the caller holds
+that judgement."""
+decision_consequence = """
+ValueError before any comparison, on a missing image or on duplicate target
+indices (an ambiguous join). At `align`, a prefix alignment is refused
+outright. Nothing downstream sees rows."""
+test = "tests/test_stage2b_ladder_stage3.py::test_the_driver_joins_through_the_shared_helper"
+break_demonstrated = """
+The second defect this inventory has turned up, and the same shape as
+VACUOUS_TESTS #17. The test WAS a source grep -- `"partition.index_join(" in
+source`. Replacing all three joins with a hand-rolled positional one and
+leaving the old call in a comment left it GREEN: the exact substitution this
+clause forbids, undetected, because a comment satisfies a substring search.
+
+Rewritten to resolve calls from the AST, where comments do not exist, and
+each of its three assertions confirmed by an independent break:
+(a) reimplemented join + comment -> "makes no call to index_join anywhere in
+its AST"; (b) two joins reimplemented, one left in a dead helper -> "found 1"
+against the expected 3; (c) all three joins present but inside a function
+main() never reaches -> "called only in ['_dead_join_helper'], which main()
+never reaches". (c) matters because (b) tripped the COUNT check first, so
+the reachability assertion had to be exercised on its own or it would have
+been an untested guard sitting inside a tested test."""
+trigger = "ci-fast"
+
 # -- deliberately FAILING rows: the gate is documented and unenforced --------
 #
 # These are the anti-gaming clause in practice. Each is a real runtime
@@ -331,6 +373,118 @@ thing this field exists to prevent, a compliant sample standing in for
 coverage. The two documents that DO exist are the ones this row must sweep
 when the package lands; recording that scope now, before the writing, is
 what stops the sweep being defined afterwards to match what was written."""
+
+# =============================================================================
+# binding_claim -- obligations on what may be CLAIMED
+# =============================================================================
+#
+# No code path can enforce these, and pretending one could is the failure the
+# whole requirement exists to prevent. They are discharged by a person reading
+# the package before it ships.
+#
+# `pending_package` is used in preference to `not_applicable` throughout,
+# deliberately, and the reason is the same one that governs the not_binding
+# section: pending_package FAILS readiness with a reason, not_applicable
+# passes silently. Several rows below could be argued not-applicable on the
+# grounds that their triggering condition has not arisen -- no audit number
+# exists yet, so nothing can yet have been claimed wrongly about one. That
+# argument is true today and stops being true the moment the audit runs, and
+# a disposition that quietly expires is worse than one that fails loudly.
+
+[binding_claim.0ac873652382]
+locator = "AUDIT_PROTOCOL.md, section 'Status'"
+obligation = """
+Nothing in AUDIT_PROTOCOL.md may be changed once an audit number has been
+seen. Its purpose is to fix, in advance, what will be measured, what the
+numerical resolution limit is, and what consequences follow -- so that none
+of those can be chosen after the fact to suit a result."""
+status = "pending_package"
+pending_reason = """
+The obligation constrains edits AFTER the first audit number exists. The
+audit driver is unwritten and no audit number exists, so the constraint has
+not yet been tested by anything. Filed pending rather than not_applicable on
+purpose: not_applicable would pass silently and would become false the day
+the audit runs, and a disposition that expires quietly is worse than one
+that fails loudly."""
+negative_attestation = """
+Scoped to the commit history of AUDIT_PROTOCOL.md from the first audit
+result onward. That set is currently EMPTY, which is why the attestation is
+cheap now and will not be later -- recording the scope before the audit is
+what stops it being drawn afterwards around whatever edits happened. The
+check at package time is mechanical: no commit touching this file may be
+dated after the first audit artifact."""
+
+[binding_claim.8bfce59ab9b4]
+locator = "AUDIT_PROTOCOL.md, section 'What this audit is for'"
+obligation = """
+The audit is NOT a model-selection knob. The 1,200-step budget stays frozen
+regardless of every number the audit produces. What may change as a result is
+the SCOPE OF THE CLAIM, never the budget."""
+status = "pending_package"
+pending_reason = """
+Binds the write-up of an audit that has not run. The package section that
+would carry the audit's consequences does not exist."""
+negative_attestation = """
+Scoped to every statement about ENCODER_STEPS in the readiness package,
+FINDINGS.md, and any post-audit amendment to DESIGN.md. The prohibited claim
+is any that presents an audit number as a reason the budget changed. Note
+the asymmetry that makes a single compliant paragraph insufficient here: the
+budget is a NUMBER appearing in many places, and a revised number needs no
+sentence justifying it -- a silent edit satisfies every positive statement in
+the document while violating this clause completely. The check is therefore
+on the value, not on the prose about it."""
+
+[binding_claim.43bd4727af02]
+locator = "AUDIT_PROTOCOL.md, section 'Prediction basis'"
+obligation = """
+In-sample MSE from a full refit is descriptive only and never feeds a
+trigger: a refit can absorb representational change into its own
+coefficients, making it a weak and potentially misleading measure of
+amendment impact."""
+status = "pending_package"
+pending_reason = "the audit results section does not exist yet"
+negative_attestation = """
+Scoped to the audit results write-up and to any trigger evaluation recorded
+in the package. The prohibited use is an in-sample figure appearing as
+EVIDENCE FOR OR AGAINST a trigger, as opposed to appearing beside one as
+description. Those two are hard to tell apart by reading a number in a
+table, so the attestation at package time is on the trigger derivation
+specifically -- each of the three triggers must be traceable to OOF
+quantities alone."""
+
+[binding_claim.401e479ff86c]
+locator = "AUDIT_PROTOCOL.md, section 'Alpha regimes'"
+obligation = """
+Required in the results write-up: per-budget fold-fitted StandardScalers are
+retained, because that is the production preprocessing, so fixed-alpha
+isolates THE EFFECT OF ALPHA RESELECTION and does not completely isolate raw
+representation change. A shared-scaler comparison is optional secondary work
+and must not be presented as the primary probe."""
+status = "pending_package"
+pending_reason = "the results write-up does not exist yet"
+negative_attestation = """
+Scoped to the audit results write-up. Two prohibited claims, not one: that
+fixed-alpha isolates raw representation change, and that a shared-scaler
+comparison is the primary probe. Both are ABSENCES of a qualification rather
+than positive statements, which is why a compliant paragraph elsewhere
+cannot discharge this -- the violation is a sentence that omits the caveat,
+and omissions do not announce themselves."""
+
+[binding_claim.e059e4e4a041]
+locator = "AUDIT_PROTOCOL.md, section 'Metrics'"
+obligation = """
+Aggregation is per-image first, then distribution: median, p95, max. Ungauged
+distances are secondary diagnostic only and never trigger-defining. No metric
+may be added or dropped after results exist."""
+status = "pending_package"
+pending_reason = "the audit metrics table does not exist yet"
+negative_attestation = """
+Scoped to the audit's metric set as recorded in the package. The
+add-or-drop clause is the one needing an attestation rather than a citation:
+it is violated by a DIFFERENCE between two states of the document, so no
+single version of the package can evidence compliance. The check is the
+metric list at package time against the metric list frozen here, both
+directions, with the freeze commit named."""
 
 # =============================================================================
 # not_binding -- candidates that are prose about something else
