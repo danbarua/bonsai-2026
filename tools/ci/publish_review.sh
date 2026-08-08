@@ -133,6 +133,34 @@ if [ -n "${PR_NUMBER:-}" ] && command -v gh >/dev/null 2>&1; then
   fi
 fi
 
+# THE SAME DENOMINATOR ON BOTH SIDES.
+#
+# `changed` above is the WHOLE PULL REQUEST, which is the right input for the
+# truncation check and the wrong one for the contradiction check, because the
+# review now reports incrementally. Comparing them fails a correct review on
+# any push that touched no test file -- and the first red was a DOCS-ONLY
+# push, not a merge artefact, so this fires on most of what anyone pushes
+# between test batches.
+#
+# `GITHUB_EVENT_PATH` carries the same `before`/`after` the delta step used,
+# and it is present in every workflow step, so scoping this correctly costs
+# no change to the workflow file -- which has to stay byte-identical across
+# two branches.
+n_pushed=-1   # -1 means "could not determine"; never treated as zero
+if [ -n "${GITHUB_EVENT_PATH:-}" ] && [ -r "${GITHUB_EVENT_PATH:-}" ] \
+   && command -v gh >/dev/null 2>&1 && command -v jq >/dev/null 2>&1; then
+  before=$(jq -r '.before // empty' "$GITHUB_EVENT_PATH" 2>/dev/null)
+  after=$(jq -r '.after // empty' "$GITHUB_EVENT_PATH" 2>/dev/null)
+  ZERO_SHA="0000000000000000000000000000000000000000"
+  if [ -n "$before" ] && [ "$before" != "$ZERO_SHA" ] && [ -n "$after" ]; then
+    if pushed=$(gh api "repos/${GITHUB_REPOSITORY:-}/compare/${before}...${after}" \
+                  --jq '.files[] | .filename, (.previous_filename // empty)' 2>/dev/null); then
+      n_pushed=$(printf '%s\n' "$pushed" | grep -E '(^|/)tests?/' | sort -u \
+                   | grep -c . || true)
+    fi
+  fi
+fi
+
 # TRUNCATION, which is the empty-list failure's harder sibling.
 #
 # `PR_QUERY` fetches `files(first: 100)` unpaginated, so on a PR with more
@@ -192,14 +220,32 @@ fi
 #
 # This narrowing does not weaken the truncation case, which is caught
 # independently above by the whole-PR file count.
-if [ "$no_tests" = "true" ] && [ "${n_changed:-0}" -gt 0 ] \
+#
+# Which count to compare against: the PUSH when we could resolve it, the whole
+# PR only as a fallback. `n_pushed` is -1, never 0, when it could not be
+# resolved -- so an unresolvable push falls back rather than silently reading
+# as "nothing changed", which would switch the guard off.
+if [ "${n_pushed:-(-1)}" -ge 0 ]; then
+  compare_n="$n_pushed"
+  compare_scope="in this push"
+else
+  compare_n="$n_changed"
+  compare_scope="in this pull request"
+fi
+
+if [ "$no_tests" = "true" ] && [ "${compare_n:-0}" -gt 0 ] \
    && [ "${n_test_files:-0}" -eq 0 ]; then
+  # This message used to assert truncation as the likeliest cause. It cannot
+  # be: the truncation check above EXITS at `n_all >= 100`, so anything
+  # reaching here is under the cap and the empty-list explanation does not
+  # apply. Asserting it anyway sent the reader hunting a large-diff problem
+  # that was not there -- on a 58-file PR, measured -- which is the overclaim
+  # this script's own fail() docstring names, one release later.
   fail "The review reported that NO test files changed AND examined no test
-file, but GitHub lists ${n_changed} changed test file(s) in this pull request.
-The likeliest cause is not a careless review: the action's injected file list
-is capped at 100 files and comes back EMPTY when a PR's diff is too large, and
-an empty list reads exactly like a PR that touched no tests. Re-run against
-a smaller PR, or review the listed files another way.
+file, but GitHub lists ${compare_n} changed test file(s) ${compare_scope}.
+This PR changes ${n_all:-?} files, UNDER the 100-file cap, so a truncated
+file list does not explain it. Check the delta step's output and the uploaded
+execution artifact before concluding anything about the code.
 Do not read this as a clean result."
 fi
 
