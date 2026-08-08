@@ -576,6 +576,21 @@ stage2b-compare-stage3:  ## Verify the stage-3 regeneration against the 54,000-i
 		uv run --group gpu python $(STAGE2B_DIR)/compare_stage3_regeneration.py \
 			--json-out $(STAGE2B_DIR)/results/stage3_regeneration_acceptance.json
 
+# Writes a preserved annotation beside a stage-3 run report -- the
+# correction that stops a historical STAGE3_OK being read as a passed gate
+# when the gate was never implemented. Additive and refuses to replace an
+# existing annotation, so re-running is safe. RUN_ID is required; there is
+# no default, because annotating the wrong run is worse than not annotating.
+#
+#     make stage2b-annotate-report RUN_ID=20260808T014606Z
+#     make stage2b-annotate-report RUN_ID=... ANNOTATE_ARGS=--dry-run
+.PHONY: stage2b-annotate-report
+stage2b-annotate-report:  ## Annotate a stage-3 run report (RUN_ID=... required; --dry-run via ANNOTATE_ARGS)
+	@test -n "$(RUN_ID)" || { echo "[make] RUN_ID is required, e.g. make stage2b-annotate-report RUN_ID=20260808T014606Z"; exit 1; }
+	cd $(REPO_ROOT) && $(GCS_ENV) \
+		uv run --group gpu python $(STAGE2B_DIR)/annotate_run_report.py \
+			--run-id $(RUN_ID) $(ANNOTATE_ARGS)
+
 .PHONY: stage2b-ladder-stage2
 stage2b-ladder-stage2:  ## Run Stage 2B ladder stage 2 (n=5,000, CNN development) on a Colab GPU -- bills while running
 	rc=0; src=0; \
