@@ -105,6 +105,37 @@ run "$NOTESTS"
 expect_rc "no-tests-changed passes" 0
 check "says nothing to review" "nothing to review"
 
+# --- the real payload, captured from the first successful run --------------
+#
+# Verbatim `structured_output` from run 31255640813, downloaded from that
+# run's artifact. A fixture I invented cannot show that the schema and the
+# reader agree about what the ACTION actually emits -- only a captured one
+# can, and the wiring bug that run exposed was exactly a disagreement about
+# which output carried what.
+
+# Read from a file, not inlined: the captured summary contains both quote
+# characters, and hand-quoting it into shell corrupted it on the first
+# attempt -- the fixture then failed for a reason that had nothing to do
+# with the script under test, which is its own small lesson about fixtures
+# that are transcribed rather than stored.
+FIXTURE="$HERE/fixtures/review_structured_output_31255640813.json"
+if [ ! -f "$FIXTURE" ]; then
+  echo "  FAIL  captured fixture missing: $FIXTURE"
+  fails=$((fails + 1))
+fi
+REAL_RUN="$(cat "$FIXTURE")"
+
+run "$REAL_RUN"
+expect_rc "the real captured payload passes" 0
+check "reports nothing to review"     "nothing to review" "$OUT"
+check "carries the summary through"   "5b8bac6" "$OUT"
+if grep -qF "produced no result" "$OUT"; then
+  echo "  FAIL  a real successful review was reported as no result"
+  fails=$((fails + 1))
+else
+  echo "  ok    a real successful review is not reported as no result"
+fi
+
 # --- writes to GITHUB_STEP_SUMMARY when no file argument is given ----------
 
 OUT="$TMP/summary_env"

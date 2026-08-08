@@ -72,19 +72,22 @@ jobs:
           prompt: |
             Review the changed tests in ${{ github.event.inputs.target || format('the pull request {0}', github.event.pull_request.number) }}.
 
-            Read docs/VACUOUS_TESTS.md FIRST. It is this project's catalogue of
-            eighteen tests that passed for reasons unrelated to what they named,
-            with an eight-category taxonomy. It is the specification for this
-            review. A generic code review is not what is wanted here and is
-            already available by mentioning @claude.
+            Read docs/VACUOUS_TESTS.md FIRST. It is this project's catalogue
+            of tests that passed for reasons unrelated to what they named,
+            and its taxonomy is the specification for this review. Take the
+            categories and the count from the document itself -- it grows,
+            and this prompt deliberately states neither. A generic code
+            review is not what is wanted here and is already available by
+            mentioning @claude.
 
             For every test added or modified, answer one question in writing:
 
               WHAT WOULD HAVE TO CHANGE FOR THIS TEST TO FAIL?
 
             If the answer is "nothing", say so plainly and name the taxonomy
-            category. The catalogue records that six of its incidents were
-            caught by exactly this question and no other method.
+            category. The catalogue records that a large share of its
+            incidents were caught by exactly this question and no other
+            method; it gives the tally, this prompt does not.
 
             Check specifically for the shapes that have actually occurred here:
 
@@ -133,7 +136,15 @@ jobs:
       # a green badge stand in for a review.
       - name: Announce it if nothing was published
         if: always()
-        run: bash tools/ci/publish_review.sh "${{ steps.review.outputs.execution_file }}"
+        # `structured_output` is the schema-validated JSON. `execution_file`
+        # is a PATH to the raw execution log -- wiring that one in here cost
+        # a red build on first run, because the script correctly refused a
+        # filename as JSON. Passed through `env` rather than interpolated
+        # into the command, so a quote or brace in the JSON cannot break the
+        # shell line.
+        env:
+          STRUCTURED_OUTPUT: ${{ steps.review.outputs.structured_output }}
+        run: bash tools/ci/publish_review.sh "$STRUCTURED_OUTPUT"
 
       - name: Keep the execution record
         if: always()
