@@ -169,6 +169,39 @@ check "body over the cap gets 413" "$CODE" "413"
 check "backend never saw the oversized body" "$(seen_count)" "$BEFORE"
 
 echo
+echo "== a non-numeric byte cap falls back, it does not switch the cap off =="
+
+# `Number("25MB")` is NaN and `size > NaN` is ALWAYS FALSE, so a plausible
+# human value would silently disable the memory-DoS guard it was meant to
+# configure. The fallback must hold, and it must say so.
+kill "$PROXY_PID" 2>/dev/null; wait "$PROXY_PID" 2>/dev/null
+BAD_LOG="$TMP_ROOT/proxy-badcap.log"
+C2C_PROXY_LISTEN_HOST=127.0.0.1 C2C_PROXY_LISTEN_PORT="$PROXY_PORT" \
+  C2C_PROXY_TARGET_HOST=127.0.0.1 C2C_PROXY_TARGET_PORT="$BACKEND_PORT" \
+  C2C_GITHUB_WEBHOOK_SECRET="$SECRET" C2C_WEBHOOK_MAX_BYTES="25MB" \
+  node "$PKG_DIR/dist-proxy/proxy.cjs" > "$BAD_LOG" 2>&1 &
+PROXY_PID=$!
+for _ in $(seq 1 50); do
+  curl -s -o /dev/null "$BASE/health" && break
+  sleep 0.1
+done
+: > "$SEEN"
+
+check "the bad value is reported" \
+  "$(grep -c 'is not a positive integer number of bytes' "$BAD_LOG")" "1"
+
+# Corroborating, NOT discriminating -- say so rather than let it read as
+# proof. 4096 bytes is under the 25MiB default, but it is also under a NaN
+# cap, since every comparison against NaN is false. This assertion passes
+# whether the fallback works or the cap is switched off entirely. The log
+# line above is the one that tells those apart.
+CODE=$(curl -s -o /dev/null -w '%{http_code}' -X POST "$BASE/webhook" \
+  -H "X-Hub-Signature-256: sha256=$(sign "$BIG")" \
+  -H 'Content-Type: application/json' --data-binary "$BIG")
+check "the default cap applies, so a 4KB body is accepted" "$CODE" "200"
+check "and it reached the backend" "$(seen_count)" "1"
+
+echo
 if [[ "$FAILURES" -eq 0 ]]; then
   echo "== $PASS_COUNT passed, 0 failed =="
 else

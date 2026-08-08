@@ -328,8 +328,13 @@ rejected 401.
 In GitHub repo settings → Webhooks: payload URL `https://<public>/webhook`,
 content type `application/json`, and the same secret.
 
-`C2C_WEBHOOK_MAX_BYTES` (default 25 MB, GitHub's own delivery limit)
-caps the buffer; a larger body is rejected 413 unread.
+`C2C_WEBHOOK_MAX_BYTES` caps the buffer; a larger body is rejected 413
+unread. **In bytes, as a plain integer** — default `26214400`
+(25 MiB, matching GitHub's own 25 MB delivery limit). A value that is
+not a positive integer (`25MB`, `0`, anything unparseable) is refused
+with a startup line and the default used: `Number("25MB")` is `NaN`,
+and every comparison against `NaN` is false, so accepting it would
+silently switch the cap off rather than change it.
 
 ### Comment events are gated on the author
 
