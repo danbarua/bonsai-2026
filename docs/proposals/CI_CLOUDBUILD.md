@@ -659,10 +659,40 @@ out of the built-not-verified column.
    in this document and nowhere demonstrated.
 4. **The same applies to the GitHub review workflow** on its first firing.
 
-Until all four are done, both are catalogued as **built, not verified** —
-and the distinction is the point. Neither has ever run; the suite itself
-has only ever run on macOS/ARM, so even the baseline this build compares
-against is a claim about a platform CI does not use.
+### Discharged 2026-08-08 — by incident, not by drill
+
+All four are now met, and every one was met by something going wrong for
+real rather than by a rehearsal. That is worth more than the drill would
+have been: a staged removal proves the guard can fire, an unplanned one
+proves it fires when nobody is watching for it.
+
+1. **The report states what executed.** Every build prints
+   `selected=N passed=N skipped=N failed=N errored=N` and dumps all skip
+   reasons by name. Build `92a089ac`: `selected=1234 passed=1199
+   skipped=35 failed=0 errored=0`.
+2. **The anti-vacuity check is proven live in CI.** It failed the build
+   twice — `a1e8b70b` and `2d780282` — each with **`failed=0 errored=0`**.
+   Every test passed and the build went red purely because one skip was
+   not in the baseline. That is the guard doing the one thing it exists
+   for, in the environment it runs in, unprompted.
+3. **"Fails closed" is observed behaviour.** Same two builds, plus
+   `7b17e46e`, which failed on three real test failures when `jq` was
+   missing from the image. Both red-to-green cycles were watched end to
+   end.
+4. **The GitHub review workflow** has fired repeatedly on real pull
+   requests, published structured output, maintained its sticky comment,
+   and gone red once on a publisher wiring bug — which is the same
+   requirement satisfied the same way.
+
+Two things the discharge does **not** cover, and they stay open:
+
+- The suite still has **no x86 numeric measurement** beyond "it passed".
+  The tolerance soft spot below is untested rather than disproven, and
+  non-significance is not equivalence.
+- The baseline was regenerated from a CI report, so it now describes the
+  CI platform — but the 4 tests that skip in CI and run locally are a
+  real coverage difference, not an artifact. They are accounted for, which
+  is a different claim from being absent.
 
 ## Bootstrapping the baseline, and the one measurement nobody has taken
 
@@ -711,7 +741,14 @@ report, or from a run in a checkout with the same capabilities removed.
   nothing else: it presents as a plain red test with no hint that the
   platform is the cause. Read a first-build numeric failure as a
   measurement, not as a flake, and not as a defect in the code under test.
-- **`equinox` is imported but not declared.**
+- **~~`equinox` is imported but not declared.~~ CLOSED 2026-08-08** (`b38e669`).
+  Declared at `>=0.13.8` and `uv.lock` re-resolved, promoting it from
+  transitive to direct. The guard gap the entry identifies is closed too:
+  `tests/test_dependency_declarations.py` now walks every HARD import in
+  `tests/`, not only `pytest.importorskip` call sites, and resolves import
+  name to distribution name so `yaml`/`pyyaml` does not misfire.
+  Break-confirmed by removing the declaration. The original analysis, which
+  was right, follows.
   `experiments/stage2b_denoising/stage2b_cnn.py` and
   `tests/test_stage2b_cnn.py` both hard-import it; it reaches the
   environment only as a transitive of `diffrax`/`lineax`/`optimistix`.

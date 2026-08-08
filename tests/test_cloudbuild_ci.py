@@ -601,3 +601,66 @@ def test_the_import_scan_is_not_satisfied_by_a_comment():
         assert _cloud_imports(decoy) == set(), (
             "a comment and a string literal were read as imports, which is "
             "the substring failure this check replaced")
+
+
+def _tier_default() -> str:
+    import yaml
+
+    doc = yaml.safe_load(CLOUDBUILD.read_text())
+    return str(doc.get("substitutions", {}).get("_TIER", ""))
+
+
+def _tier_branches() -> dict:
+    """{tier: the make target that tier runs}, from the `case` in the script.
+
+    Read out of the build config rather than restated here, so a renamed
+    target or a new tier is picked up instead of quietly disagreeing.
+    """
+    import re
+    import yaml
+
+    doc = yaml.safe_load(CLOUDBUILD.read_text())
+    body = "\n".join(
+        (step.get("script") or "\n".join(step.get("args") or []))
+        for step in doc.get("steps", [])
+    )
+    case = re.search(r'case "\$_TIER" in(.*?)\n\s*esac', body, re.S)
+    assert case, "the _TIER case block is no longer where this test looks"
+    return {
+        tier: target.strip()
+        for tier, target in re.findall(
+            r"^\s*(\w+)\)\s*\n\s*(make [\w-]+)", case.group(1), re.M
+        )
+    }
+
+
+def test_an_unset_tier_runs_the_whole_suite_not_a_narrowing():
+    """A default that nobody sets must fail toward MORE coverage.
+
+    No trigger in `infra/` leaves `_TIER` unset; all three pass `full`
+    explicitly. So the default is what an unattended build gets --
+    `gcloud builds submit` by hand, or a new trigger whose author forgets
+    the substitution.
+
+    It defaulted to `fast`, which runs the `STAGE2B_TEST_FILES` narrowing.
+    That subset excludes every test guarding CI itself, so such a build ran
+    less than it looked like it ran and still reported success: an UNSET
+    VARIABLE chose a narrowing. That is principle 21's shape arriving through
+    a default rather than through a list.
+
+    This asserts the direction, not the spelling: whatever the default tier
+    is called, it must run the target that runs everything.
+    """
+    branches = _tier_branches()
+    default = _tier_default()
+
+    assert branches, "no tier branches parsed; the derivation is broken"
+    assert default in branches, (
+        f"the default _TIER {default!r} does not name a branch that runs the "
+        f"suite; branches are {branches}")
+
+    narrowing = {t: v for t, v in branches.items() if v != "make test"}
+    assert branches[default] == "make test", (
+        f"the default _TIER {default!r} runs {branches[default]!r}, which is a "
+        f"narrowing ({narrowing}). An unattended build must run the whole "
+        f"suite -- a subset that reports success is worse than no build")
