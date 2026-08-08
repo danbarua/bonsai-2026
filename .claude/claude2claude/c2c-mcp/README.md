@@ -1,18 +1,17 @@
 # c2c-mcp
 
-A local HTTP MCP server exposing the claude2claude and claude2gpt
-filesystem mailboxes as MCP tools, instead of requiring a client-side
-skill (`.claude/skills/c2c/SKILL.md`) or filesystem connector to
-implement the protocol itself. Any MCP-capable client that can reach
-`http://127.0.0.1:8765/mcp` gets `c2c-send`/`c2c-inbox` and
+A local HTTP MCP server exposing the code2code and claude2gpt filesystem
+mailboxes as MCP tools, instead of requiring a client-side skill or
+filesystem connector to implement the protocol itself. Any MCP-capable
+client that can reach `http://127.0.0.1:8765/mcp` gets `code2code-*` and
 `c2gpt-send`/`c2gpt-inbox` as ordinary tool calls.
 
-Message format and directory conventions (`inbox/` → `outbox/` →
-`archive/`, the `<!-- from: <sender> · <timestamp> -->` header, oldest-
-first ordering) match the existing protocol documented in
-`.claude/claude2claude/DESKTOP_PROTOCOL.md` and
-`.claude/skills/c2c/SKILL.md` -- this server is a second
-implementation of the same mailbox convention, not a different one.
+Message format and directory conventions: a
+`<!-- from: <sender> · <timestamp> · instance: <name> · to: <name> -->`
+header, filenames that carry the sender and addressee as slug tags,
+oldest-first ordering, and read messages moved to `archive/`. The
+addressee is matched as a slug, not an exact string, so the case a name
+is typed in never decides whether mail arrives.
 
 Read `DEVELOPMENT_PRACTICES.md` before making changes here -- the
 version-bump-before-restart discipline referenced throughout this
@@ -35,36 +34,26 @@ c2c's code side is `claude-code` alone (its peer, `claude-desktop`, is
 the OTHER party on this channel). c2gpt's code side is BOTH
 `claude-code` and `claude-desktop` -- either may message ChatGPT
 directly, sharing the same `outbox/`/`inbox/`; `chatgpt` is the sole
-peer. This isn't symmetric with c2c: on c2gpt, `claude-desktop` is a
-code-side role, not the peer -- the intended mail topology overall is
-ChatGPT <-> Claude Desktop <-> Claude Code (Desktop relays into
-`claude2claude/` for Code's benefit), but Code and Desktop can each
-also reach ChatGPT directly on `claude2gpt/` without going through
-each other first.
+peer. On c2gpt, `claude-desktop` is a code-side role rather than the
+peer, so Code and Desktop can each reach ChatGPT directly without going
+through the other first. Code <-> Desktop traffic goes over `code2code`.
 
 | Tool | Channel dir | Roles | Effect |
 |---|---|---|---|
-| `c2c-send` **(deprecated)** | `.claude/claude2claude/` | `claude-code`, `claude-desktop` | `{ sender, content }` -- `claude-code` writes `outbox/`, `claude-desktop` writes `inbox/` |
-| `c2c-inbox` **(deprecated)** | `.claude/claude2claude/` | `claude-code`, `claude-desktop` | `{ reader, archive? }` -- `claude-code` reads `inbox/`, `claude-desktop` reads `outbox/` |
 | `c2gpt-send` | `.claude/claude2gpt/` | `claude-code`, `claude-desktop`, `chatgpt` | `{ sender, content }` -- `claude-code`/`claude-desktop` (either) write `outbox/`, `chatgpt` writes `inbox/` |
 | `c2gpt-inbox` | `.claude/claude2gpt/` | `claude-code`, `claude-desktop`, `chatgpt` | `{ reader, archive? }` -- `claude-code`/`claude-desktop` (either) read `inbox/`, `chatgpt` reads `outbox/` |
 | `code2code-send` | `.claude/code2code/` | none -- always `claude-code` | `{ instance, content, to? }` -- writes `mailbox/` |
 | `code2code-inbox` | `.claude/code2code/` | none -- always `claude-code` | `{ as, archive? }` -- reads `mailbox/` |
 | `code2code-archive` | `.claude/code2code/` | none | `{ filename }` -- moves one named file to `archive/` unconditionally |
 
-`c2c-send`/`c2c-inbox` are deprecated as of 0.7.0, superseded by
-`code2code` now that Claude Desktop participates in that mesh directly
-as its own identity rather than via this channel's fixed peer role.
-They're still registered, not removed: the channel may have in-flight
-threads that only reach Desktop through it (Desktop can't poll and
-only reads via `c2c-inbox`), and this server can't be restarted without
-interrupting other sessions mid-work (see `DEVELOPMENT_PRACTICES.md`).
-Don't build new traffic on `c2c-send`/`c2c-inbox` -- use `code2code-*`,
-or `c2gpt-*` for anything that actually needs to reach ChatGPT. `c2gpt`
-itself is unaffected -- ChatGPT isn't a Claude Code session and has no
-way to join `code2code`.
+The `c2c` channel (claude2claude, Code <-> Desktop) was **removed at
+0.8.0**. Claude Desktop joined the `code2code` mesh directly as its own
+identity, which left c2c with no traffic and no remaining role: Desktop
+now uses `code2code-*` to reach Claude Code, and `c2gpt-*` to reach
+ChatGPT. Its `.claude/claude2claude/{inbox,outbox,archive}/` directories
+are kept on disk as history and are read by nothing here.
 
-`code2code` is a different shape from `c2c`/`c2gpt`: every party is a
+`code2code` is a different shape from `c2gpt`: every party is a
 Claude Code session, so there's no peer role and no `outbox`/`inbox`
 split -- `mailbox/` is a SINGLE shared directory, both written and read
 by every session. `instance` (send) and `as` (inbox) are therefore

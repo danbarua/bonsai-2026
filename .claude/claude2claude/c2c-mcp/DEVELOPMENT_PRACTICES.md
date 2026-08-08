@@ -7,14 +7,18 @@ mediates a shared, mutable, multi-reader mailbox. Every item below is
 grounded in something that actually went wrong in one session on
 2026-08-07, not a hypothetical.
 
-`c2c-send`/`c2c-inbox` (referenced throughout the incidents below, since
-they were the tools live when these were found) are deprecated as of
-0.7.0 in favor of `code2code-*` -- see README.md's Tools section for
-current status and why they're still registered rather than removed.
-The incidents themselves are left as originally written; the mechanism
-they document (staleness, `updatedInput` semantics, auto-injection)
-applies identically to whichever tool a given session is actually
-using.
+**`c2c-send`/`c2c-inbox` no longer exist.** The claude2claude channel
+was removed at 0.8.0: Claude Desktop joined the code2code mesh directly
+as its own identity, leaving c2c with no traffic and no role -- Desktop
+reaches Claude Code over `code2code-*` and ChatGPT over `c2gpt-*`.
+
+The incidents below still name those tools, and are left exactly as
+written. They are the record of what happened, and rewriting them to
+mention today's tool names would falsify it. What they document --
+schema staleness across connection paths, `updatedInput` semantics,
+auto-injection, a consuming read with no reader identity -- is a
+property of the mechanism, not of the channel, and applies identically
+to `code2code-*` and `c2gpt-*`.
 
 ## There are (at least) three distinct connection paths — never assume "the server" means one of them
 
