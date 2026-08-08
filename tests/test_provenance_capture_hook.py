@@ -133,6 +133,22 @@ def session_payload(session: str = "s1", source: str = "startup") -> dict:
             "cwd": str(REPO_ROOT), "source": source}
 
 
+@pytest.mark.parametrize("source", ["startup", "resume", "clear", "compact"])
+def test_the_marker_fires_for_every_session_start_reason(tmp_path, source):
+    """`SessionStart` fires on four reasons, not just a cold start.
+
+    Found by observation rather than by design: the first real session after
+    the hooks landed reported `source=resume`, a path these tests only ever
+    exercised as `startup`. A marker that fired solely on cold start would
+    leave resumed sessions -- the long-lived ones, doing the sustained work
+    most worth capturing -- with an ambiguous log again.
+    """
+    run_hook(session_payload(source=source), tmp_path)
+    (record,) = records(tmp_path)
+    assert record["phase"] == "session_open"
+    assert record["source"] == source
+
+
 def test_session_start_writes_a_commit_point(tmp_path):
     """The marker exists so that an empty log has ONE reading, not two.
 
