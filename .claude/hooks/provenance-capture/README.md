@@ -100,6 +100,14 @@ ls .provenance/runs/<session_id>/
 after a known-scratch command means the hooks are not loaded in that
 session rather than that the predicate declined.
 
+The same check is mechanical in `tests/test_provenance_live_registration.py`,
+which spawns a real headless session and inspects what the hooks wrote —
+the only way to test the wiring rather than the hook, since a registration
+needs a session by construction. Slow and CLI-dependent, so it is
+`@pytest.mark.slow` and excluded from the default suite. **Run it after any
+change to `.claude/settings.json` or to the scripts it names**, which is
+exactly when the wiring can break without a single unit test noticing.
+
 ## Testing
 
 ```bash
