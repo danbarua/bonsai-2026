@@ -33,12 +33,18 @@
 #     with what the Reviewer typed.
 #
 # What was mechanically checked, as of 2026-08-08, over all 37 archive
-# files: every `§`/matter referenced inside a ruling resolves within its
-# file; no file ends mid-clause; no numbered section sequence skips. Zero
-# findings in all three.
+# files by tools/mailbox/check_transit_integrity.py (pinned by
+# tests/test_archive_fidelity.py, which prints the file count): no file
+# ends mid-clause, and no numbered section sequence skips. Zero findings.
 #
-# Those checks are truncation HEURISTICS, not attestation, and the reason
-# the last two exist is worth recording: citation resolution alone is blind
+# STATE THE STRENGTH EXACTLY. A clean run clears detectable TRANSIT LOSS.
+# It does not establish fidelity. Nothing inside a file can prove it
+# matches what was sent -- only a transport-attested channel could, and
+# this one is not one. "No findings" therefore means "none of the three
+# ways a truncated ruling betrays itself is present", and nothing more.
+#
+# The reason two of those three checks exist is worth recording:
+# citation resolution alone is blind
 # to the loss of a section NOTHING references -- which is the final section
 # of a ruling by construction, and where qualifications live. The live
 # example is in the file this inventory's scope depends on most:
