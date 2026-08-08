@@ -412,6 +412,77 @@ def test_matches_sklearn_predictions_all_alphas_well_conditioned():
         np.testing.assert_allclose(fit["b"][a], skl_int[a], rtol=0, atol=1e-10)
 
 
+def test_the_intercept_restores_the_target_mean_at_the_feature_mean():
+    """DESIGN.md's MUST, half one: "restore the intercept from the general
+    expression -- not assume it away."
+
+    Until this test, replacing `b = y_mean - x_mean @ W` with the
+    `mean(Y)` shortcut the design explicitly refuses passed 93/93. The
+    reason is category E and it will recur: every other fixture here
+    standardizes X first, and on centered X the two forms AGREE, because
+    `x_mean @ W` is the term that distinguishes them and it is zero. The
+    fixtures could not discriminate, and the sklearn oracle they compare
+    against agreed with both.
+
+    Production always standardizes, so the shortcut would not be wrong
+    today. That is exactly why the design locks the general form -- it must
+    not depend on an invariant enforced elsewhere in the pipeline. So this
+    checks the defining property of an intercept-aware fit on features that
+    are deliberately NOT centered: the model predicts `mean(Y_train)` at
+    the training feature mean. Note sklearn is not the oracle here; with
+    `fit_intercept=True` it centers X internally and so fits a different
+    estimator from the design's uncentered-X SVD once X is off-center.
+    """
+    X, Y, _ = _synthetic_regression(seed=7)
+    offset = np.linspace(3.0, -4.0, X.shape[1])
+    X_off = X + offset
+    assert np.linalg.norm(X_off.mean(axis=0)) > 1.0, (
+        "the fixture is effectively centered, so this test cannot tell the "
+        "general expression from the shortcut -- the exact blindness it "
+        "exists to close")
+
+    fit = ridge.svd_ridge_fit(X_off, Y, check_centered=False)
+    x_mean = X_off.mean(axis=0)[None, :]
+    for a in range(len(ridge.ALPHA_GRID)):
+        np.testing.assert_allclose(ridge.ridge_predict(fit, x_mean, a)[0],
+                                    Y.mean(axis=0), rtol=0, atol=1e-8)
+
+
+def test_the_fit_is_equivariant_under_a_shift_of_the_targets():
+    """DESIGN.md's MUST, half two: "center targets within the training
+    fold." Dropping the centering also passed 93/93.
+
+    What centering buys is that the penalty never sees the target mean:
+    shift every target by a constant and the coefficients must not move,
+    only the intercept. Uncentered targets put the mean inside the
+    penalized solve, so `W` shrinks toward zero differently for a series
+    measured in [0,1] than for the same series plus ten -- which for this
+    task is the difference between intensities and any rescaling of them.
+
+    Uncentered X again, and for a sharper reason than the test above. On
+    centered X, `U` spans the column space of a centered matrix, so
+    `U.T @ ones == 0` and a target shift leaves `W` algebraically
+    untouched WHETHER OR NOT the targets were centered. Measured, not
+    argued: written against `StandardScaler` output first, this test
+    passed on the mutant. The centering is not merely hard to see under
+    production conditions -- under them it is genuinely a no-op, which is
+    the strongest possible version of category E and the reason a
+    fixture that mirrors production could never have caught this."""
+    X, Y, _ = _synthetic_regression(seed=8)
+    X_off = X + np.linspace(3.0, -4.0, X.shape[1])
+    shift = np.linspace(2.0, 9.0, Y.shape[1])
+
+    base = ridge.svd_ridge_fit(X_off, Y, check_centered=False)
+    shifted = ridge.svd_ridge_fit(X_off, Y + shift, check_centered=False)
+
+    np.testing.assert_allclose(shifted["W"], base["W"], rtol=0, atol=1e-9)
+    np.testing.assert_allclose(shifted["b"], base["b"] + shift,
+                                rtol=0, atol=1e-9)
+    assert np.linalg.norm(base["W"]) > 1e-6, (
+        "the coefficients are numerically zero, so equality under a shift "
+        "would hold for the trivial reason")
+
+
 def test_matches_sklearn_rank_deficient_all_alphas():
     """The discriminating case. With duplicated feature columns the design
     matrix is rank-deficient, which is exactly where the two paths'
