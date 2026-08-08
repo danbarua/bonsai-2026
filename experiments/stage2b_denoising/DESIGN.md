@@ -282,15 +282,24 @@ and that is fine at the level the claims are made"
 ## Readout: multi-output ridge -- JAX SVD production path, sklearn as oracle
 
 One multi-output ridge, shared `alpha` across all 505 outputs, grid
-`{1e-2, 1e-1, 1, 10, 1e2, 1e3, 1e4, 1e5, 1e6}`, `fit_intercept=True`,
-inputs standardized per-fold, targets unstandardized. Tie: mean
-validation MSE within `1e-10` absolute; **larger alpha wins**. Folds:
+`{1e-6, 1e-5, 1e-4, 1e-3, 1e-2, 1e-1, 1, 10, 1e2, 1e3, 1e4, 1e5, 1e6}`
+(**amended post-lock after feasibility stage 3 -- see Review history**;
+originally `{1e-2 .. 1e6}`), `fit_intercept=True`, inputs standardized
+per-fold, targets unstandardized. Tie: mean validation MSE within `1e-10`
+absolute; **larger alpha wins**. Folds:
 `StratifiedKFold(n_splits=5, shuffle=True, random_state=42)`, identical
 partition across all conditions.
 
+**Decade spacing is exact and frozen.** Thirteen values, one per decade,
+no interpolation and no densification around an observed minimum, ever.
+This is a frozen procedural clause rather than a default: a grid that may
+be refined near a minimum after the minimum has been seen has a stopping
+rule chosen by looking at results, which is the shape the amendment below
+exists to make impossible.
+
 **Production implementation: direct JAX SVD-ridge, intercept-aware.**
 Per (fold, condition): one thin SVD of the standardized training
-features; all nine alphas evaluated from that single decomposition.
+features; all thirteen alphas evaluated from that single decomposition.
 Because `fit_intercept=True` and the 505 target columns are left
 unstandardized, the solve must center targets within the training fold
 and restore the intercept from the general expression -- not assume it
@@ -621,3 +630,65 @@ Does not revisit Stage 2A's open items (#9, #10, #11).
   (Colab-to-Colab bit-exact across sessions; this Mac bit-exact across
   runs) and agree to a maximum of 3 ULP across architectures, damped
   rather than amplified by the encoder's contraction to a fixed point.
+- Post-lock amendment, after feasibility stage 3 Phase B: **the alpha
+  grid extends downward by four decades to
+  `{1e-6 .. 1e6}`**, thirteen values, original decade spacing preserved
+  exactly, applied to **all seven conditions**.
+
+  *Provenance*: ChatGPT review ruling, delivered via Dan's manual
+  copy-paste from his ChatGPT chat rather than through the c2gpt channel
+  — recorded because a ruling's route is part of its evidence, and this
+  one did not travel the audited path. Operative text, verbatim:
+
+  > "So my previous ruling stands unchanged: alpha in {1e-6, 1e-5, 1e-4,
+  > 1e-3, 1e-2, 1e-1, 1, ..., 1e6} for all seven conditions, with the
+  > exact extension frozen before fitting. Re-run the full ridge
+  > procedure, do not splice lower-alpha points into the old tables,
+  > re-run the production-scale JAX/sklearn equivalence checks, and halt
+  > for review if any production condition selects 1e-6. One additional
+  > execution detail should be frozen now: the amended grid should
+  > preserve the original decade spacing exactly, so there is no later
+  > ambiguity about interpolation or denser searching around an observed
+  > minimum."
+
+  *What prompted it*: Phase B's ridge selected the grid-MINIMUM alpha in
+  six of seven conditions, where at stage 2 (n=5,000) none did. The
+  scrutiny step cost nothing — the validation curves were already in the
+  committed artifact — and showed the six split: both raw baselines are
+  plateaued (relative MSE rise ~1e-7 across two decades, floor-pin
+  cosmetic), while the four EVOLVED conditions rise 0.4-0.8% per decade
+  off the floor with the argmin at the boundary. The constraint therefore
+  bound asymmetrically across exactly the treatment/control line the
+  readout exists to compare.
+
+  *The frozen procedure, one-shot by construction*: a full re-run of the
+  entire ridge procedure on the new grid (all seven conditions, all
+  folds, all refits); **no splicing** of lower-alpha points into any
+  existing table; the production-scale JAX/sklearn equivalence check
+  re-run on the new grid at the frozen `1e-8` tolerance; and a **HALT for
+  review if any production condition selects `1e-6`** — a pin at the new
+  floor is a named anomaly and is never itself a trigger for further
+  extension. Together with the exact-spacing clause above, the
+  widen-look-widen loop is structurally unavailable rather than merely
+  discouraged: there is no second extension this procedure can authorise.
+
+  *Two consequences found while drafting this, neither anticipated by
+  the ruling*:
+
+  1. **The write-once invariant enforces "no splicing" by construction.**
+     `ridge_cv.json` and `ridge_final.npz` are LINEAGE artifacts and
+     create-once; `force=True` on either raises `WriteOnceViolation`
+     before `produce` runs. The re-run therefore CANNOT overwrite the
+     nine-decade results and must write new names carrying the grid
+     identity, exactly as Phase A wrote `encoded_train_s1200` rather than
+     overwriting `encoded_fit_s1200`. The nine-decade tables survive as
+     history because the storage model refuses to destroy them.
+  2. **`PROBE_JAX_SVD_COUNT = 42` is right as design accounting and wrong
+     as a cost multiplier.** DESIGN.md's "SVD count: 42" counts 35
+     fold-level plus 7 final refits — the PRODUCTION path. It omits
+     `ridge_equivalence_check`'s own five SVDs per condition, which are
+     real wall-clock. The true per-run count is 77 (7 x [5 CV + 5
+     equivalence + 1 final]). The Phase B projection's 7.9% accuracy
+     partly masked this, since the JAX leg is the small one. Disclosed
+     rather than quietly corrected; the constant keeps its
+     design-accounting meaning and the cost note uses 77.
