@@ -5,20 +5,55 @@
 #
 #     make stage2b-gate-inventory
 #
-# THREE KINDS, because a frozen protocol contains three kinds of promise and
-# forcing them into one shape produces either a false `not_binding` or an
-# invented field. See the tool's module docstring.
+# WHAT THE TERMS MEAN -- "binding clause", the three kinds, and what each
+# binds and on whom -- is in `docs/GLOSSARY.md`, not here. That vocabulary
+# is used in tasks, in mail, and by a reconciler this file does not own, so
+# it belongs where terms are defined rather than in one of its consumers.
+#
+# WHAT EACH KIND REQUIRES is at that kind's own section divider below, not
+# in this header. A reader filling a `binding_claim` row is already at the
+# binding_claim section; a contract at the top of the file is read once at
+# orientation and needed later, which is exactly when it is furthest away.
 #
 # ANTI-GAMING, quoted from the ruling and enforced by a reviewer rather than
 # by any check in this file: "a clause cannot be moved from binding_gate to
 # another kind merely because enforcement is absent." Several rows below are
-# deliberately failing for exactly that reason.
+# deliberately failing for exactly that reason. It is stated here rather
+# than per-kind because it is the one rule that governs all of them.
 
 reviewed = false   # set true only when a human has read every row
 
 # =============================================================================
 # binding_gate -- runtime decision obligations
 # =============================================================================
+#
+# Binds THE RUNNING PROGRAM. Something is evaluated, and something halts or
+# branches on the result. The only kind whose enforcement a machine can
+# check -- which is why it carries the most fields, and why an empty one
+# fails readiness rather than being reclassified.
+#
+# Every field required. Six dimensions plus scheduling:
+#
+#   enforcement              the executable predicate, `path/to/file.py::name`
+#   production_reachability  the production path(s) that reach it, INCLUDING
+#                            wrappers and orchestration. A correct predicate
+#                            production never invokes is not a gate.
+#   input_wiring             the concrete runtime values supplied, and their
+#                            provenance
+#   decision_consequence     the observable halt or branch on rejection.
+#                            Logging a failed predicate without preventing
+#                            continuation does not qualify unless the design
+#                            defines the gate as advisory.
+#   test                     the test, `path::name`
+#   break_demonstrated       evidence the test flips RED under a deliberate
+#                            local disable. A source grep, a symbol
+#                            reference, or a test that merely names the
+#                            predicate does not qualify -- see VACUOUS_TESTS
+#                            #17 and #20, both of which were exactly that.
+#   trigger                  what SCHEDULES the test (`ci-fast`, `manual`).
+#                            A separate axis from reachability: "somebody
+#                            runs it by hand" is reported, not failed;
+#                            "production never calls it" is a failure.
 
 [binding_gate.9d4b9ec0ba99]
 # "HALT for review if any production condition selects 1e-6."
@@ -324,6 +359,46 @@ test = ""
 break_demonstrated = ""
 trigger = "manual"
 
+[binding_gate.352d90abe1f9]
+# Freeze 4 -- "atomic payload + manifest ... validity only when payload and
+#  manifest both exist and agree ... one central validated consume path ...
+#  raw download bypass mechanically prohibited or detected."
+enforcement = "experiments/stage2b_denoising/stage2b_gcs.py::consume_validated"
+production_reachability = """
+The one validated read path, and `ensure_artifact`'s SKIP branch IS a
+`consume_validated` call -- so a resumed step is validated by construction
+rather than by the driver remembering to check. Every artifact-producing
+step of every ladder driver goes through `ensure_artifact`. The opt-out is
+`require_manifest=False`, named and greppable, used only at call sites
+reading pre-contract artifacts and annotated with the rung at each."""
+input_wiring = """
+`object_name` from gcs.object_path; the manifest read from the sidecar,
+whose name derives from the payload's; `require_manifest` True by default at
+every call site the drivers use. The manifest is the COMMIT POINT, not a
+description: payload written under a generation precondition, that
+generation captured, sidecar written second recording it."""
+decision_consequence = """
+ManifestMissingError before any payload bytes move. A payload with no
+manifest is UNCOMMITTED -- which is the semantic for the crash window
+between the two writes, not merely a validity rule, so the refusal is the
+correct reading of a half-finished publish rather than a false alarm."""
+test = "tests/test_stage2b_gcs.py::test_a_payload_whose_manifest_never_landed_is_uncommitted"
+break_demonstrated = """
+`if require_manifest:` -> `if False:` inside consume_validated (an
+unmanifested payload is no longer refused): SIX tests FAIL, and the set is
+the evidence rather than the count. It includes
+test_ensure_artifact_refuses_to_resume_from_an_object_with_no_manifest --
+the RESUME path, which is the one that matters: a resumed run is exactly
+where an uncommitted payload would otherwise be consumed silently as though
+the step had finished. It also includes the two orphan-recovery tests, so
+the refusal's own recovery hint is pinned alongside the refusal.
+
+Produced for this row rather than cited from adjacent work.
+NEGATIVE_PATH_EVIDENCE.md's recorded breakage covers the closure checks and
+the teardown signal, not this guard -- citing it here would have been
+discharge by adjacent evidence, which reads exactly like a filled row."""
+trigger = "ci-fast"
+
 # -- deliberately FAILING rows: the gate is documented and unenforced --------
 #
 # These are the anti-gaming clause in practice. Each is a real runtime
@@ -355,6 +430,29 @@ trigger = "manual"
 # =============================================================================
 # binding_value -- frozen configuration obligations
 # =============================================================================
+#
+# Binds A NUMBER, frozen in advance so it cannot be chosen later to suit a
+# result. Nothing rejects anything, so `decision_consequence` is not asked
+# for -- demanding one would be demanding fiction.
+#
+#   value                the authoritative source and the frozen value
+#   production_consumers EVERY consumer, or a proved common propagation
+#                        point. One consumer cited for a value read in four
+#                        places is a row covering a quarter of what it claims.
+#   enforcement          the pinning/identity test
+#   break_demonstrated   causal evidence the test fails when the PRODUCTION
+#                        value or its propagation is altered -- not when the
+#                        literal is edited, which tests that a constant
+#                        equals itself
+#   provenance_of_use    evidence the run actually USED the frozen value,
+#                        rather than that the value was frozen somewhere
+#   trigger              what schedules that test
+#   status               enforced | pending_consumer | unresolved
+#
+# `pending_consumer` is for a value frozen for code that does not exist yet
+# -- several here are frozen for the unwritten audit driver. It needs
+# `pending_reason` and it FAILS readiness. "Nothing consumes it yet" is a
+# true and useful statement; it is not a pass.
 
 [binding_value.b682b6af449a]
 # AUDIT_PROTOCOL: "Safety factor M = 100, frozen here, before any audit result."
@@ -464,6 +562,33 @@ what stops the sweep being defined afterwards to match what was written."""
 # binding_claim -- obligations on what may be CLAIMED
 # =============================================================================
 #
+# Binds WHAT MAY BE WRITTEN, not what the program does. No code path can
+# enforce these and pretending one could is the failure this inventory
+# exists to prevent. A person discharges them; the row records where.
+#
+#   locator      source document plus a STABLE locator -- a line number
+#                moves, a section or anchor does not
+#   obligation   the normalized obligation: what must or must not be
+#                claimed or done
+#   status       discharged | pending_package | not_applicable | unresolved
+#   discharged_in / evidence   required only when status = discharged. The
+#                evidence must point at an ARTIFACT, never at who checked
+#                it: an agent attribution is not reviewer-checkable, and a
+#                mesh `instance:` tag names a ROLE rather than a session.
+#
+# `pending_package` -- reviewed, binding, and not dischargeable because the
+# readiness package it discharges into does not exist. Needs
+# `pending_reason`; fails readiness. Distinct from `unresolved` on purpose:
+# unresolved wants a reviewer, pending_package wants an artifact, and a
+# reader who cannot tell which cannot triage the list.
+#
+# NEGATIVE ATTESTATION, required when the obligation is never/must-not
+# shaped. Pointing at one compliant paragraph cannot establish the
+# prohibited claim is absent from everywhere else, so the row states the
+# OUTPUT SET it ranges over. A positive obligation is discharged by showing
+# something; a negative one is violated by an absence, and absences do not
+# announce themselves.
+#
 # No code path can enforce these, and pretending one could is the failure the
 # whole requirement exists to prevent. They are discharged by a person reading
 # the package before it ships.
@@ -571,6 +696,94 @@ it is violated by a DIFFERENCE between two states of the document, so no
 single version of the package can evidence compliance. The check is the
 metric list at package time against the metric list frozen here, both
 directions, with the freeze commit named."""
+
+[binding_claim.37ae915f8e61]
+locator = "STAGE3_PLAN.md, section 'Acceptance-test shape-note, folded in'"
+obligation = """
+The regeneration spans two populations with different evidentiary status.
+The 54k arrays payload-compare bit-exact against the uploaded artifact; the
+6k arrays are NEW -- no prior artifact exists -- so they are fingerprinted
+at birth and their final-Delta tail computed alongside the full-60k tail.
+The acceptance report MUST STATE THAT SPLIT EXPLICITLY rather than letting
+one "regeneration passed" blur two different kinds of evidence."""
+status = "discharged"
+discharged_in = """
+experiments/stage2b_denoising/results/stage3_regeneration_acceptance.json,
+top-level keys `fit_tail`, `validation_tail`, `fit_tail_crosscheck` and
+`alignment` -- produced by compare_stage3_regeneration.py."""
+evidence = """
+The report does not carry one merged verdict. `fit_tail` and
+`validation_tail` are separate objects, and `fit_tail_crosscheck` exists
+only for the reproduced population -- there is no such key for the 6k,
+because there is nothing to cross-check them against, which is the
+evidentiary asymmetry the clause is about made structural rather than
+stated. `alignment` records the join as by official index.
+
+Pointed at the artifact rather than at who checked it: an agent attribution
+is not reviewer-checkable, and these keys are."""
+
+[binding_claim.9b52d6ca717b]
+locator = "STAGE3_PLAN.md, section 'Verification'"
+obligation = """
+Every new guard confirmed by breaking what it watches and observing the
+specific expected failure -- not by observing a green suite. Payload
+comparison verified by deliberately perturbing one array. Full suite green
+before each commit."""
+status = "discharged"
+discharged_in = """
+The `break_demonstrated` field of every substantiated row in this file, and
+`NEGATIVE_PATH_EVIDENCE.md`'s "Deliberate breakage" subsections."""
+evidence = """
+Each break is stated with the edit made and the specific tests that flipped
+red -- e.g. `if force and artifact_class(name) == LINEAGE:` -> `if False:`
+failing test_an_orphan_payload_closes_every_ordinary_route on its
+`produced == []` assertion, and MEAN_X_TOL_EXPONENT 0.5 -> 0.66 failing six
+tests across the scaling family.
+
+Worth recording what the obligation caught rather than only that it was
+kept: filling `break_demonstrated` honestly is what exposed the ridge
+equivalence gate having no negative-path test at all (142 tests green under
+a hardcoded verdict) and the index-join guard being a source grep that
+stayed green while all three joins were replaced. Neither was found by
+review. The row that would not go in is the instrument."""
+
+[binding_claim.6afc3010a1c1]
+locator = "STAGE3_PLAN.md, section 'What survives the correction'"
+obligation = """
+Convergence is declared by the reviewer, never the responder; and both
+inboxes are checked immediately before any consolidation send."""
+status = "discharged"
+discharged_in = "docs/MULTI_AGENT_PRACTICE.md, Part 1 rule 1"
+evidence = """
+Recorded there as a standing rule with its founding incident: a
+consolidating agent's briefing headed "Review has now CONVERGED" was
+substantially faithful to the archive and the convergence claim was false --
+a twelfth message arrived 111 seconds later contradicting three of its seven
+items. The rule and its corollary (check both inboxes immediately before
+consolidating) are stated as practice rather than as history.
+
+Discharged in a practice document rather than a package artifact because
+the obligation is on how agents coordinate, not on what the write-up may
+claim. That is the honest place for it, and the reason it is `discharged`
+now while most claims here are `pending_package`."""
+negative_attestation = """
+Scoped to consolidation sends -- any message summarising a review round and
+asserting it complete. The honest statement of what this attestation can
+and cannot be: the obligation is FORWARD-LOOKING over an open-ended set of
+future messages, so no sweep establishes absence for messages not yet sent.
+What can be attested is the two things that make a violation catchable:
+
+  (a) ONE known violation exists and is recorded rather than suppressed --
+      the "Review has now CONVERGED" briefing, contradicted 111 seconds
+      later, which is the founding incident in MULTI_AGENT_PRACTICE rule 1;
+  (b) the rule is recorded where the agents who could violate it read it,
+      which is what makes a future instance recognisable as a violation
+      rather than as ordinary summarising.
+
+That is weaker than the attestations on the write-up claims, and
+deliberately so. Those range over a finite artifact that will exist and can
+be swept. This one ranges over behaviour, and claiming a sweep of behaviour
+would be the fabricated-completeness failure the field exists to prevent."""
 
 [binding_claim.f18749c28dd0]
 locator = "COMPANION_PROTOCOLS.md, section 'Status'"
