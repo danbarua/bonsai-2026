@@ -273,6 +273,43 @@ RC=$?
 expect_rc "no-tests-changed CONFIRMED by GitHub passes" 0
 check "says there was nothing to review" "nothing to review"
 
+# --- truncation: the file list capped at 100 without saying so ------------
+#
+# Measured on PR #23: 142 files changed, 34 under tests/, and all three
+# reviews reported "17 test files" -- the model's list stops at exactly 100
+# because PR_QUERY fetches files(first: 100) unpaginated. Harder than the
+# empty-list case because the report looks healthy: plausible denominator,
+# real files read, real findings. Only the implied scope is false.
+
+STUB_BIG="$TMP/bin_big"
+mkdir -p "$STUB_BIG"
+cat > "$STUB_BIG/gh" <<'STUBEOF'
+#!/bin/bash
+# 120 changed files, past the 100 cap.
+for i in $(seq 1 118); do echo "src/file_$i.py"; done
+echo "tests/test_a.py"
+echo "tests/test_b.py"
+STUBEOF
+chmod +x "$STUB_BIG/gh"
+
+n=$((n + 1)); OUT="$TMP/cov_$n"; : > "$OUT"
+PATH="$STUB_BIG:$PATH" PR_NUMBER=99 bash "$SCRIPT" "$FULL" "$OUT"
+RC=$?
+expect_rc "a truncated file list fails" 1
+check "gives the real file count"     "changes 120 files"
+check "names the cap as the cause"    "capped at 100"
+check "forbids reading it as full"    "not the pull request"
+
+# Non-vacuity: a PR under the cap must NOT trip it, or every review fails.
+run_cov "$FULL"
+expect_rc "a small PR is not reported as truncated" 0
+if grep -qF "capped at 100" "$OUT"; then
+  echo "  FAIL  a 3-file PR was reported as truncated"
+  fails=$((fails + 1))
+else
+  echo "  ok    a small PR is not reported as truncated"
+fi
+
 # With no PR number there is nothing to ask GitHub about, so no coverage
 # claim is made. Silence is correct here; a fabricated "complete" would not
 # be, and that is the direction this whole file guards.

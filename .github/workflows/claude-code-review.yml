@@ -42,6 +42,29 @@ on:
     paths:
       - "tests/**"
 
+# One review per pull request at a time, and this is what makes the
+# incremental design work rather than a tidiness preference.
+#
+# Measured on runs 31260998299 and 31261042453: they overlapped by about
+# four minutes. The second assembled its prompt at 14:04:10; the first did
+# not write its report until 14:07:53. So the second read its predecessor's
+# comment and found the PLACEHOLDER -- "Claude Code is working... I'll
+# analyze this and get back to you." It then re-reviewed all seven files
+# from scratch and produced zero findings, for $1.52 and four and a half
+# minutes.
+#
+# Without this, "read your previous review first" points at a placeholder
+# whenever two pushes land inside a review's runtime, which is exactly when
+# a reviewer is most likely to be running. The instruction and the
+# concurrency guard are one mechanism in two files.
+#
+# `cancel-in-progress` because a review of a superseded head is worth less
+# than the tokens it costs -- the newer push will review the newer code, and
+# with the delta step it reviews the union of what changed.
+concurrency:
+  group: vacuous-test-review-${{ github.event.pull_request.number }}
+  cancel-in-progress: true
+
 jobs:
   vacuous-test-review:
     runs-on: ubuntu-latest
@@ -192,11 +215,16 @@ jobs:
             stop. `full` -- the delta could not be computed (first run, or a
             force-push), so review everything in scope and SAY you did.
 
-            The PR branch is checked out: read files from the working tree.
-            You have no Bash except `gh pr comment`, and no git -- everything
-            needed is in your context or on disk. DO NOT RUN THE TEST SUITE;
+            The PR branch is checked out: read files from the working tree
+            with Read, Grep and Glob. The ONLY shell command you may run is
+            `gh pr comment`, for step 4. Everything else is already in your
+            context or on disk -- no git, and do not run the test suite:
             every test in the catalogue passed, so running one tells you
             nothing about whether it can fail.
+
+            Your own previous reviews in `<comments>` and `<review_comments>`
+            are YOUR PRIOR STATE, not background. The general guidance that
+            other comments are "just for context" does not apply to them.
 
             ## 4. Publish
 
