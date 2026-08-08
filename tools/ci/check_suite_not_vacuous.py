@@ -223,7 +223,37 @@ def check(outcomes: list[Outcome], totals: dict[str, int], baseline: set[str],
               f"baseline stops detecting the skips it exists to detect:")
         for key in ran_instead:
             print(f"[vacuity]   - {key}")
-        print(f"[vacuity]   Remove them from {baseline_path} (or regenerate it).")
+        # Name the likeliest cause, because it is TWO LAYERS from the
+        # symptom and this message is otherwise actively misleading: it says
+        # "stale baseline" when the baseline may be exactly right and the
+        # ENVIRONMENT changed under it.
+        #
+        # The live example, caught by reading before this ever ran: a
+        # Makefile target gained `uv run --group gpu` to fix a local skip.
+        # cloudbuild.yaml invokes that target, so the group installs in CI
+        # too, `google_crc32c` becomes importable, and a test the baseline
+        # records as skipped now runs. Nothing about the baseline was wrong.
+        # A build failing here with only "remove them from the baseline"
+        # would have had the entry deleted -- destroying a correct capability
+        # record to silence a message about the wrong thing.
+        print("[vacuity]   BEFORE EDITING THE BASELINE, check whether CI's "
+              "environment changed.")
+        print("[vacuity]   A Makefile target that gained a dependency group "
+              "(e.g. `uv run --group gpu`)")
+        print("[vacuity]   installs it in CI too if cloudbuild.yaml invokes "
+              "that target -- which makes")
+        print("[vacuity]   an optional import succeed and its test run. That "
+              "is an environment change,")
+        print("[vacuity]   not a stale baseline, and the fix belongs in the "
+              "Makefile: keep CI-invoked")
+        print("[vacuity]   targets capability-free and put the capability run "
+              "in a target CI does not")
+        print("[vacuity]   call. Deleting the entry instead discards a "
+              "correct record of what CI lacks.")
+        print(f"[vacuity]   If the environment genuinely SHOULD have gained "
+              f"this, regenerate {baseline_path}")
+        print("[vacuity]   from a run in the new environment and say so in "
+              "the commit message.")
 
     if vanished:
         problems += 1
