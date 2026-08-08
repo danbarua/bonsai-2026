@@ -113,6 +113,29 @@ def is_first_party(module: str) -> bool:
     return module.split(".")[0] in first_party_modules()
 
 
+def distributions_providing(module: str) -> set[str]:
+    """Which declared-name(s) could provide this IMPORT name.
+
+    An import name and a distribution name are different things, and assuming
+    they match is a field-semantics error that only shows up on the packages
+    where they diverge: `yaml` ships in `pyyaml`, `sklearn` in
+    `scikit-learn`, `PIL` in `Pillow`, `cv2` in `opencv-python`. Comparing
+    the import name straight against `pyproject.toml` marks every one of
+    those undeclared -- and then advises declaring what is already there.
+
+    `packages_distributions()` reads the installed metadata, which is the
+    only authority on this mapping; there is no rule to derive it from. It
+    sees only what is INSTALLED, so a module that is genuinely absent
+    resolves to nothing and falls back to the name-equality check -- which is
+    the conservative direction: an undeclared, uninstalled module still gets
+    flagged.
+    """
+    from importlib.metadata import packages_distributions
+
+    top = module.split(".")[0]
+    return {_normalise(d) for d in packages_distributions().get(top, [])}
+
+
 def test_every_importorskip_names_a_declared_or_first_party_module():
     """The guard. A third-party module skipped-on-import must be declared.
 
@@ -129,6 +152,11 @@ def test_every_importorskip_names_a_declared_or_first_party_module():
             continue
         if _normalise(module) in declared:
             continue
+        # The import name is not the distribution name. Ask the installed
+        # metadata which distribution ships this module before calling it
+        # undeclared -- see distributions_providing().
+        if distributions_providing(module) & declared:
+            continue
         offenders[module] = files
     assert not offenders, (
         f"importorskip on undeclared third-party module(s): {offenders}. "
@@ -136,6 +164,31 @@ def test_every_importorskip_names_a_declared_or_first_party_module():
         f"from a capability this machine does not have -- declare it in "
         f"pyproject.toml so it lives and dies with its group, or make the "
         f"import hard so its absence is a failure")
+
+
+def test_an_import_name_is_resolved_to_its_distribution_name():
+    """The mapping the guard was missing, pinned on a live divergence.
+
+    `yaml` ships in `pyyaml`. Before this, `importorskip("yaml")` was reported
+    as an undeclared third-party module although `pyyaml>=6.0` is declared --
+    a guard correct about the field it read (distribution names) answering a
+    question about a different one (import names).
+
+    Asserting the names differ first is the part that stops this going
+    vacuous: if PyYAML were ever renamed so that import and distribution
+    names coincided, the resolution below would pass for the trivial reason
+    and prove nothing about the mapping.
+    """
+    assert _normalise("yaml") != _normalise("pyyaml"), (
+        "this test needs a package whose import name differs from its "
+        "distribution name; pick another if PyYAML stops being one"
+    )
+    assert "pyyaml" in declared_distributions()
+    assert "pyyaml" in distributions_providing("yaml")
+
+    # And it must not invent a provider for something that ships nowhere,
+    # or the guard would wave through any typo'd module name.
+    assert distributions_providing("definitely-not-a-real-module-xyz") == set()
 
 
 def test_the_scan_actually_finds_importorskip_calls():

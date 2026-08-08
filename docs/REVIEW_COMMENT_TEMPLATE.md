@@ -67,6 +67,20 @@ scope and is not counted.
 
 </details>
 
+### Left scope
+
+<!-- In-scope tests that were DELETED or MOVED OUT of `tests/` in this push.
+     The delta reports these under a `DEPARTED` heading; they do not exist in
+     the working tree, so do not try to read them. Record where each one went
+     and, in one clause, whether the move looks legitimate.
+
+     Keep the section even when empty -- "none" is a fact worth stating on a
+     PR that removed tests, and its absence is not. -->
+
+| file | where it went | note |
+|---|---|---|
+| `tests/test_x.py` | `.claude/tooling/test_x.py` | moved out of the science suite |
+
 ### Not examined
 
 <!-- Only in-scope files. If a changed test file was not read, say so and
@@ -120,9 +134,24 @@ scope and is not counted.
    the same file on the same PR, and a disagreement is information — the
    later verdict is not automatically the right one.
 
+7. **A test leaving scope is a reportable event, not an absence.** Deleting a
+   test file, or moving it out of `tests/`, removes it from every future
+   review — so the run in which it happens is the only one that can say so.
+   Record it under *Left scope* and carry any open finding it held into
+   *Fixed* only if the code it guarded also went; otherwise the finding is
+   still open and now unguarded, which is worse, and it stays open.
+
+   This is not hypothetical. `review_delta.sh` reported "no in-scope test
+   files changed" for a push that moved eight tests out of `tests/`, because
+   the compare API returns a rename's DESTINATION in `.filename` and the
+   source only in `.previous_filename`. Fixed 2026-08-08; the delta now emits
+   a `DEPARTED` section, and this is where it lands.
+
 ## What must never happen
 
 - A finding vanishing without appearing under *Fixed*.
+- A test leaving scope with no row under *Left scope* — the one run that
+  could report it is the one where it happened.
 - *Examined* listing a file the run did not actually read.
 - The status line claiming full coverage when *Not examined* is non-empty.
 - Findings gating the build. This comment advises; the deterministic checks
