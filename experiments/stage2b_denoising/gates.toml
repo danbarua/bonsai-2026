@@ -359,6 +359,46 @@ test = ""
 break_demonstrated = ""
 trigger = "manual"
 
+[binding_gate.352d90abe1f9]
+# Freeze 4 -- "atomic payload + manifest ... validity only when payload and
+#  manifest both exist and agree ... one central validated consume path ...
+#  raw download bypass mechanically prohibited or detected."
+enforcement = "experiments/stage2b_denoising/stage2b_gcs.py::consume_validated"
+production_reachability = """
+The one validated read path, and `ensure_artifact`'s SKIP branch IS a
+`consume_validated` call -- so a resumed step is validated by construction
+rather than by the driver remembering to check. Every artifact-producing
+step of every ladder driver goes through `ensure_artifact`. The opt-out is
+`require_manifest=False`, named and greppable, used only at call sites
+reading pre-contract artifacts and annotated with the rung at each."""
+input_wiring = """
+`object_name` from gcs.object_path; the manifest read from the sidecar,
+whose name derives from the payload's; `require_manifest` True by default at
+every call site the drivers use. The manifest is the COMMIT POINT, not a
+description: payload written under a generation precondition, that
+generation captured, sidecar written second recording it."""
+decision_consequence = """
+ManifestMissingError before any payload bytes move. A payload with no
+manifest is UNCOMMITTED -- which is the semantic for the crash window
+between the two writes, not merely a validity rule, so the refusal is the
+correct reading of a half-finished publish rather than a false alarm."""
+test = "tests/test_stage2b_gcs.py::test_a_payload_whose_manifest_never_landed_is_uncommitted"
+break_demonstrated = """
+`if require_manifest:` -> `if False:` inside consume_validated (an
+unmanifested payload is no longer refused): SIX tests FAIL, and the set is
+the evidence rather than the count. It includes
+test_ensure_artifact_refuses_to_resume_from_an_object_with_no_manifest --
+the RESUME path, which is the one that matters: a resumed run is exactly
+where an uncommitted payload would otherwise be consumed silently as though
+the step had finished. It also includes the two orphan-recovery tests, so
+the refusal's own recovery hint is pinned alongside the refusal.
+
+Produced for this row rather than cited from adjacent work.
+NEGATIVE_PATH_EVIDENCE.md's recorded breakage covers the closure checks and
+the teardown signal, not this guard -- citing it here would have been
+discharge by adjacent evidence, which reads exactly like a filled row."""
+trigger = "ci-fast"
+
 # -- deliberately FAILING rows: the gate is documented and unenforced --------
 #
 # These are the anti-gaming clause in practice. Each is a real runtime
@@ -656,6 +696,94 @@ it is violated by a DIFFERENCE between two states of the document, so no
 single version of the package can evidence compliance. The check is the
 metric list at package time against the metric list frozen here, both
 directions, with the freeze commit named."""
+
+[binding_claim.37ae915f8e61]
+locator = "STAGE3_PLAN.md, section 'Acceptance-test shape-note, folded in'"
+obligation = """
+The regeneration spans two populations with different evidentiary status.
+The 54k arrays payload-compare bit-exact against the uploaded artifact; the
+6k arrays are NEW -- no prior artifact exists -- so they are fingerprinted
+at birth and their final-Delta tail computed alongside the full-60k tail.
+The acceptance report MUST STATE THAT SPLIT EXPLICITLY rather than letting
+one "regeneration passed" blur two different kinds of evidence."""
+status = "discharged"
+discharged_in = """
+experiments/stage2b_denoising/results/stage3_regeneration_acceptance.json,
+top-level keys `fit_tail`, `validation_tail`, `fit_tail_crosscheck` and
+`alignment` -- produced by compare_stage3_regeneration.py."""
+evidence = """
+The report does not carry one merged verdict. `fit_tail` and
+`validation_tail` are separate objects, and `fit_tail_crosscheck` exists
+only for the reproduced population -- there is no such key for the 6k,
+because there is nothing to cross-check them against, which is the
+evidentiary asymmetry the clause is about made structural rather than
+stated. `alignment` records the join as by official index.
+
+Pointed at the artifact rather than at who checked it: an agent attribution
+is not reviewer-checkable, and these keys are."""
+
+[binding_claim.9b52d6ca717b]
+locator = "STAGE3_PLAN.md, section 'Verification'"
+obligation = """
+Every new guard confirmed by breaking what it watches and observing the
+specific expected failure -- not by observing a green suite. Payload
+comparison verified by deliberately perturbing one array. Full suite green
+before each commit."""
+status = "discharged"
+discharged_in = """
+The `break_demonstrated` field of every substantiated row in this file, and
+`NEGATIVE_PATH_EVIDENCE.md`'s "Deliberate breakage" subsections."""
+evidence = """
+Each break is stated with the edit made and the specific tests that flipped
+red -- e.g. `if force and artifact_class(name) == LINEAGE:` -> `if False:`
+failing test_an_orphan_payload_closes_every_ordinary_route on its
+`produced == []` assertion, and MEAN_X_TOL_EXPONENT 0.5 -> 0.66 failing six
+tests across the scaling family.
+
+Worth recording what the obligation caught rather than only that it was
+kept: filling `break_demonstrated` honestly is what exposed the ridge
+equivalence gate having no negative-path test at all (142 tests green under
+a hardcoded verdict) and the index-join guard being a source grep that
+stayed green while all three joins were replaced. Neither was found by
+review. The row that would not go in is the instrument."""
+
+[binding_claim.6afc3010a1c1]
+locator = "STAGE3_PLAN.md, section 'What survives the correction'"
+obligation = """
+Convergence is declared by the reviewer, never the responder; and both
+inboxes are checked immediately before any consolidation send."""
+status = "discharged"
+discharged_in = "docs/MULTI_AGENT_PRACTICE.md, Part 1 rule 1"
+evidence = """
+Recorded there as a standing rule with its founding incident: a
+consolidating agent's briefing headed "Review has now CONVERGED" was
+substantially faithful to the archive and the convergence claim was false --
+a twelfth message arrived 111 seconds later contradicting three of its seven
+items. The rule and its corollary (check both inboxes immediately before
+consolidating) are stated as practice rather than as history.
+
+Discharged in a practice document rather than a package artifact because
+the obligation is on how agents coordinate, not on what the write-up may
+claim. That is the honest place for it, and the reason it is `discharged`
+now while most claims here are `pending_package`."""
+negative_attestation = """
+Scoped to consolidation sends -- any message summarising a review round and
+asserting it complete. The honest statement of what this attestation can
+and cannot be: the obligation is FORWARD-LOOKING over an open-ended set of
+future messages, so no sweep establishes absence for messages not yet sent.
+What can be attested is the two things that make a violation catchable:
+
+  (a) ONE known violation exists and is recorded rather than suppressed --
+      the "Review has now CONVERGED" briefing, contradicted 111 seconds
+      later, which is the founding incident in MULTI_AGENT_PRACTICE rule 1;
+  (b) the rule is recorded where the agents who could violate it read it,
+      which is what makes a future instance recognisable as a violation
+      rather than as ordinary summarising.
+
+That is weaker than the attestations on the write-up claims, and
+deliberately so. Those range over a finite artifact that will exist and can
+be swept. This one ranges over behaviour, and claiming a sweep of behaviour
+would be the fabricated-completeness failure the field exists to prevent."""
 
 [binding_claim.f18749c28dd0]
 locator = "COMPANION_PROTOCOLS.md, section 'Status'"
