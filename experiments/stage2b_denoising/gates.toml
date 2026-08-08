@@ -238,6 +238,68 @@ the reachability assertion had to be exercised on its own or it would have
 been an untested guard sitting inside a tested test."""
 trigger = "ci-fast"
 
+[binding_gate.5354bdafe541]
+# COMPANION_PROTOCOLS: "if the verdict at the locked ENCODER_STEPS=1200
+#  differs across the swept eps range ... that triggers renewed
+#  interpretation review before Stage 4."
+enforcement = ""            # UNWRITTEN -- the sensitivity table has no driver
+production_reachability = ""
+input_wiring = ""
+decision_consequence = ""
+test = ""
+break_demonstrated = ""
+trigger = "manual"
+
+[binding_gate.1ab709f01474]
+# COMPANION_PROTOCOLS: "The propagation measurement is descriptive at stages
+#  1-4. Stage 5 has one pre-committed halt condition."
+enforcement = ""            # UNWRITTEN -- no stress-set driver exists
+production_reachability = ""
+input_wiring = ""
+decision_consequence = ""
+test = ""
+break_demonstrated = ""
+trigger = "manual"
+
+[binding_gate.9bc6f9e3808a]
+# AUDIT_PROTOCOL: "the per-fold mean of the new per-image OOF MSEs must
+#  reproduce the already-stored fold-aggregate values from the stage-1 and
+#  stage-2 runs."
+#
+# NOT satisfied by tests/test_stage2b_ridge.py's OOF cross-check, and the
+# distinction is the reason this row stays empty rather than citing it. That
+# test pins the per-fold mean against a within-run recomputation on synthetic
+# data -- real, and a different claim. This clause requires reproduction of
+# the aggregates STORED BY THE STAGE-1 AND STAGE-2 RUNS, which pins new
+# machinery against numbers this project already trusts. Citing the
+# available test here would be the exact substitution the anti-gaming clause
+# forbids, one layer down: not reclassifying the clause, but satisfying it
+# with adjacent evidence.
+enforcement = ""            # UNWRITTEN -- the audit driver does not exist
+production_reachability = ""
+input_wiring = ""
+decision_consequence = ""
+test = ""
+break_demonstrated = ""
+trigger = "manual"
+
+[binding_gate.12d7b0d5472d]
+# AUDIT_PROTOCOL: the three trigger conditions -- primary-contrast sign
+#  reversal; improvement-to-deterioration on any graph; numerically resolved
+#  pairwise order reversal.
+#
+# Two of these three were LOST IN RELAY once already (STAGE3_PLAN.md:118
+# records it: the briefing encoded only pairwise order reversal, and ChatGPT
+# re-listed all three live rather than stale). They are reinstated in the
+# frozen protocol and enforced nowhere, which is the state this row reports.
+enforcement = ""            # UNWRITTEN
+production_reachability = ""
+input_wiring = ""
+decision_consequence = ""
+test = ""
+break_demonstrated = ""
+trigger = "manual"
+
 # -- deliberately FAILING rows: the gate is documented and unenforced --------
 #
 # These are the anti-gaming clause in practice. Each is a real runtime
@@ -485,6 +547,111 @@ it is violated by a DIFFERENCE between two states of the document, so no
 single version of the package can evidence compliance. The check is the
 metric list at package time against the metric list frozen here, both
 directions, with the freeze commit named."""
+
+[binding_claim.f18749c28dd0]
+locator = "COMPANION_PROTOCOLS.md, section 'Status'"
+obligation = """
+Nothing in COMPANION_PROTOCOLS.md may be changed once a result from either
+protocol has been seen. What each protocol measures, how its inputs are
+constructed, and what consequences follow are fixed in advance."""
+status = "pending_package"
+pending_reason = """
+Neither companion protocol has produced a number, so the constraint has not
+been tested. Same shape as 0ac873652382 for AUDIT_PROTOCOL.md, and
+dispositioned separately because they are separate documents with separate
+histories -- one row covering both would be a single disposition over two
+clause ids."""
+negative_attestation = """
+Scoped to COMPANION_PROTOCOLS.md's commit history from the first result of
+EITHER protocol onward. Currently empty. The check is mechanical: no commit
+touching this file dated after the first stress-set or sensitivity-table
+artifact."""
+
+[binding_claim.aa0198915e6b]
+locator = "COMPANION_PROTOCOLS.md, section 'ARM/x86 propagation stress set'"
+obligation = """
+The stress set is built to be adversarial, so its numbers are an UPPER BOUND
+on propagation and are not representative of the corpus. It is not a random
+sample and must never be reported as one."""
+status = "pending_package"
+pending_reason = "the propagation stress set has not been run"
+negative_attestation = """
+Scoped to every presentation of a propagation figure in the readiness
+package and FINDINGS.md. The prohibited claim has a quiet form worth naming:
+reporting a stress-set number WITHOUT its qualification reads as a corpus
+statistic to anyone who does not already know the set is adversarial. So the
+attestation is that every such figure carries the upper-bound framing at the
+point it appears, not that a caveat exists somewhere in the document."""
+
+[binding_claim.81d50983153e]
+locator = "COMPANION_PROTOCOLS.md, section 'What to report'"
+obligation = """
+All five propagation stages -- encoding, evolved features per graph,
+prediction, per-image MSE, evolved-minus-pre contrast -- reported always,
+whatever any one of them shows. Reporting only the stages that stayed small
+would make the chain unreadable."""
+status = "pending_package"
+pending_reason = "no propagation measurement exists to report"
+negative_attestation = """
+Scoped to the propagation section of the package. This is a completeness
+obligation, so the failure is a MISSING row rather than a wrong one, and
+nothing in a written section reveals what was left out of it. The check is
+the reported stage list against the frozen five, both directions."""
+
+[binding_claim.c188b4e50c99]
+locator = "COMPANION_PROTOCOLS.md, section 'Where component A comes from'"
+obligation = """
+Component A was measured on the stage-1 corpus, not the stage-3 one. If the
+per-image differences are not recoverable from the record, A is regenerated
+by encoding the stress set's other components on both architectures and is
+then reported AS REGENERATED, with the substitution stated -- never silently
+replaced by a different rule."""
+status = "pending_package"
+pending_reason = "the stress set has not been constructed"
+negative_attestation = """
+Scoped to component A's provenance statement in the package. The prohibited
+outcome is a substitution that happened and was not disclosed, which by
+construction leaves no trace in the artifact -- a regenerated A and a
+recovered A look identical. So the attestation must rest on the
+CONSTRUCTION record (which branch of the rule ran), not on inspection of
+the number."""
+
+[binding_claim.0059f193dfec]
+locator = "COMPANION_PROTOCOLS.md, section 'ABS_CONV_EPS sensitivity table'"
+obligation = """
+ABS_CONV_EPS does not change as a result of this table, on the same footing
+as AUDIT_PROTOCOL.md's frozen 1,200-step budget. What may change is the
+scope of the claim made about the gate."""
+status = "pending_package"
+pending_reason = "the sensitivity table has not been produced"
+negative_attestation = """
+Scoped to ABS_CONV_EPS's value in stage2b_encoder_gate.py and to every
+statement about it in the package. Same asymmetry as 8bfce59ab9b4: the
+constant is a NUMBER, and a revised number needs no sentence justifying it,
+so a silent edit violates this while leaving every positive statement in the
+document true. The check is on the value against its frozen literal, not on
+the prose about it."""
+
+[binding_value.ec37e874562c]
+# "Cap on component B, frozen here because the count is not yet known."
+value = """
+COMPANION_PROTOCOLS.md: if more than 500 images have final-Delta > 0, take
+the 500 largest by final-Delta, ties broken by official index ascending, and
+record both the cap and the true count. The 54,000-image run measured 79
+(0.146%), so the cap is expected to be INERT; it exists so the set size
+cannot be decided after seeing the number."""
+production_consumers = ""   # the stress-set builder is unwritten
+status = "pending_consumer"
+pending_reason = """
+The ARM/x86 stress-set construction does not exist. production_consumers is
+empty and stays empty until it does. Worth noting what makes this row
+unusual: the value is expected never to bind (79 << 500), which is precisely
+why it had to be frozen in advance -- a cap chosen after seeing the count is
+not a cap, and one that never fires is indistinguishable from one that was
+never set unless the freeze predates the measurement."""
+enforcement = ""
+break_demonstrated = ""
+trigger = "manual"
 
 # =============================================================================
 # not_binding -- candidates that are prose about something else
