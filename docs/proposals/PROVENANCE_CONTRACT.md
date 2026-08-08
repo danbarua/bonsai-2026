@@ -531,6 +531,39 @@ taxonomy G therefore applies to it with full force.
    lessons.
 3. **Its first named test case is the shape this project produced three
    times in one night: component correct, wiring absent.**
+4. **Its second named test case is claim-vs-enforcement reconciliation:
+   does every frozen MUST/HALT in the protocol documents have a
+   corresponding gate in code, located and cited?** Proposed by
+   `stage2b-lead` from the incident below.
+
+   `DESIGN.md`'s amended procedure froze the sentence *"HALT for review if
+   any production condition selects 1e-6."* The grid extension was then
+   implemented without its halt, and a run that selected the floor on two
+   conditions reported `STAGE3_OK` — a verdict meaning **"no such gate
+   exists"**, not "the gate cleared."
+
+   It is the stronger of the two cases for a reason that has nothing to do
+   with severity. The document and the code were written **by the same
+   author, in the same session, hours apart.** No handoff, no stale
+   context, no second party to misread anything. Criterion 3's shape can
+   always be blamed on a seam between parties; this one cannot. If it
+   happens with one author and a four-hour gap, no amount of care closes
+   it — which is the argument for mechanising rather than for trying
+   harder, and it is the same argument this repository already accepted
+   for derived guards over hand-maintained lists.
+
+   It is checkable because it is **a join, not a judgement**: enumerate the
+   imperative clauses in the protocol documents, and for each require a
+   cited enforcement site in code. Absence is the finding. Same derived-set
+   shape as the `STAGE2B_TEST_FILES` guard and the closure check — the
+   failure is always a hand-maintained correspondence nobody re-derives.
+
+   **The limit, stated so a green reconciliation is not read as coverage:
+   a citation proves a gate exists, not that it is reachable or correct.**
+   The make-wrapped blind spot is the standing counterexample — the scratch
+   predicate handles `exec -f` perfectly and nothing ever hands it that
+   string. Reconciliation catches absent gates and says nothing about
+   present-but-unreachable ones.
 
 ### 5.4 Break-tests are part of the definition
 
