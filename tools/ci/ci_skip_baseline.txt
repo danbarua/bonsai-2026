@@ -51,4 +51,3 @@ tests.test_stage2a_topologies::test_rewired_and_curr_random_match_t_edge_count  
 tests.test_stage2a_topologies::test_rewired_preserves_t_degree_sequence  # datasets/kmnist not present locally
 tests.test_stage2b_cnn::test_real_class0_support_builds_the_expected_mask  # datasets/kmnist not present locally
 tests.test_stage2b_cnn::test_real_mask_restricts_identically_to_stage2a_encode_and_restrict  # datasets/kmnist not present locally
-tests.test_stage2b_gcs::test_crc32c_agrees_with_google_crc32c_where_it_is_installed  # could not import 'google_crc32c': No module named 'google_crc32c'

@@ -203,12 +203,12 @@ dependencies = [
 
 [package.dev-dependencies]
 dev = [
+    { name = "google-crc32c" },
     { name = "pytest" },
     { name = "pyyaml" },
 ]
 gpu = [
     { name = "google-cloud-storage" },
-    { name = "google-crc32c" },
     { name = "mighty-colab" },
 ]
 
@@ -235,12 +235,12 @@ requires-dist = [
 
 [package.metadata.requires-dev]
 dev = [
+    { name = "google-crc32c", specifier = ">=1.5.0" },
     { name = "pytest", specifier = ">=9.1.1" },
     { name = "pyyaml", specifier = ">=6.0" },
 ]
 gpu = [
     { name = "google-cloud-storage", specifier = ">=2.19.0" },
-    { name = "google-crc32c", specifier = ">=1.5.0" },
     { name = "mighty-colab", specifier = ">=0.2.2" },
 ]
 
