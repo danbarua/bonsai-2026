@@ -42,6 +42,7 @@ claim the rest of this repository's discipline exists to prevent.
 | 18 | 08-08 | `c6e0312` | Not a test: the capture predicate emitted a `piped_into_remote_exec` record for a command that shipped nothing (a `grep` alternation split on `\|`), and a coverage claim was drawn from it | peer read the record |
 | 19 | 08-08 | `8017225` | All three tests of the ridge equivalence gate were pass-side; hardcoding `passed = True` left 142 tests green. The one that asserted the composition, `passed == (pred_agrees and alpha_agrees)`, held trivially because the fixture makes both operands true | building the gate inventory |
 | 20 | 08-08 | `bff25eb`+ | "The driver joins through the shared helper" was `"partition.index_join(" in source`. Replacing all three joins with a hand-rolled positional one and leaving the old call in a comment left it green — the exact substitution the clause forbids | building the gate inventory |
+| 21 | 08-08 | `74b4dcc` | Not a test: internal-citation resolution over the reviewer archive is structurally blind to a clipped FINAL section, because nothing references one. The lost text would have been a licence — "you need not build X" | reasoning about what the check could not see |
 
 Two near-misses belong here too, because they were caught *before* becoming
 tests:
@@ -295,6 +296,52 @@ unrepresentable — a record must carry the thing it claims to have captured,
 or it is not a capture. It also fails in the safe direction: a future
 classifier bug now yields an absence, which the categories above are
 already tuned to find.
+
+**I. The check's coverage is anti-correlated with the risk.** #21, and
+the reason it deserves its own letter rather than sitting under B or E:
+the check works, matches correctly, and reaches its mechanism. It is
+simply blind in exactly the place the damage happens, and the blindness
+follows from the same property that makes the check work at all.
+
+The instance. Reviewer rulings reach this project through an archive
+whose transport is mixed — `c2gpt-send` takes `from` as a routing
+parameter, so a connector write and a hand-paste are byte-identical, and
+most arrived by paste. A paste can clip. The obvious check is **internal
+citation resolution**: every `§n` a ruling references must exist in its
+file.
+
+That check finds a lost section *something points at*. **The final
+section of a document is pointed at by nothing** — and it is where
+qualifications live: the exception, the caveat, the "you need not do X."
+
+The live case, in the ruling that scopes this project's entire
+binding-clause inventory: its closing paragraph licenses *not* building
+an automated prose checker for 54 human-discharged claims. Nothing in the
+file references it. Clipped in transit, every citation still resolves,
+the file still ends on a complete-looking section III — and the reader
+diligently builds the forbidden thing, believing the ruling demanded it.
+
+> **A missing licence does not leave a gap you notice; it creates work
+> you invent.**
+
+That is what makes this worse than an ordinary omission. There is no
+error state and no dangling reference. The person is working *harder*,
+correctly, on the wrong thing — and the artifact they produce looks like
+compliance.
+
+The remedy is not a better citation check; it is a different one aimed at
+the blind spot: **verify the END of a load-bearing document explicitly,
+because the check that finds missing middles cannot find a missing end.**
+Two heuristics do it — terminal completeness (the file ends on a sentence
+terminator) and ordinal continuity (numbered sections do not skip) — and
+they are the defaults in `tools/mailbox/check_transit_integrity.py` while
+citation resolution is opt-in, on measurement: over 37 archive files it
+produced 28 findings, all legitimate cross-document references.
+
+**The diagnostic that generalises**, and it costs nothing to apply: when
+a check's coverage and the risk it exists for are correlated by the same
+structural property, you have this shape. Ask *what is this check unable
+to see, and is that where the damage is?* — before an incident, not after.
 
 ---
 

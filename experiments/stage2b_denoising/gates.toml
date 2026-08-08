@@ -100,7 +100,31 @@ Every artifact-producing step of every ladder driver goes through
 ensure_artifact; the refusal is raised BEFORE `produce` runs, so it cannot
 be reached only after computation. run_ladder_stage3.py's ensure_npz /
 ensure_json / ensure_text wrappers are the only artifact writers in the
-stage-3 driver, and each delegates to it."""
+stage-3 driver, and each delegates to it.
+
+SCOPE LIMITATION, stated because the frozen clause reads stronger than
+what is implemented. The clause says the nine-decade tables "survive as
+history because THE STORAGE MODEL refuses to destroy them." The storage
+model does not refuse. What refuses is `ensure_artifact`, and it binds
+exactly one thing: writers that go through `stage2b_gcs.py`.
+
+Measured properties of the bucket, from PROJECT_MEMORY (2026-08-07):
+object versioning is OFF, and `soft_delete_policy` is 604800s -- a
+seven-day forensic window that no code path may depend on, not a refusal.
+A principal holding `storage.objects.delete` on the bucket destroys a
+LINEAGE artifact without this predicate being consulted, because it never
+enters this process. infra reports one such principal exists today: the
+legacy project-level Cloud Build service account carries
+`roles/cloudbuild.builds.builder`, which includes object create/delete/
+update on `bonsai-2026-stage2b-cache`.
+
+So the accurate statement of what this gate delivers is: write-once
+against the pipeline, by policy, plus a bounded recovery window -- NOT
+immutability of the object. Recorded here rather than by editing
+DESIGN.md, which is frozen; a disclosure is not an amendment. The gate
+itself is unaffected and its break evidence stands: this narrows what the
+row may be cited FOR, which is the distinction between a gate that works
+and a gate that covers what a reader assumes."""
 input_wiring = """
 `name` from gcs.object_path (stage/condition/kind/ext/split), classified by
 artifact_class against RUN_SCOPED_KIND_PREFIXES; `force` from the call
