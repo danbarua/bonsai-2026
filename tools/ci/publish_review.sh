@@ -31,16 +31,33 @@ RAW="${1:-}"
 SUMMARY="${2:-${GITHUB_STEP_SUMMARY:-/dev/stdout}}"
 
 fail() {
+  # Careful with the claim. This step observes ONE thing: whether what it
+  # was handed is a usable result. It cannot see whether the review ran, so
+  # it does not say so.
+  #
+  # The distinction was earned. On its first firing this step printed "the
+  # review produced no result" directly beneath the review's actual result,
+  # rendered on the same page -- because the workflow had passed it a file
+  # PATH instead of the JSON. The guard was right that its input was
+  # unusable and wrong about what that implied, which is precisely the
+  # overclaim it exists to prevent elsewhere.
   {
-    echo "## The review produced no result"
+    echo "## This step could not read a review result"
     echo
     echo "$1"
     echo
-    echo "**A green conclusion on this job would NOT have meant the review"
-    echo "ran.** A skipped action reports job success, and so does a"
-    echo "successful one that published nothing -- both observed on"
-    echo "2026-08-08. This step fails so that absence is not mistaken for"
-    echo "an all-clear."
+    echo "**What this does and does not tell you.** It means the value handed"
+    echo "to this step was not a usable result. It does NOT establish that"
+    echo "the review failed to run -- check the rendered report above and the"
+    echo "uploaded execution artifact before concluding anything. A wiring"
+    echo "mistake here looks identical to a missing review, and on"
+    echo "2026-08-08 it was a wiring mistake: \`execution_file\` (a path) was"
+    echo "passed where \`structured_output\` (the JSON) was expected."
+    echo
+    echo "It fails rather than passing quietly because the opposite error is"
+    echo "worse: a skipped action reports job success, and so does a"
+    echo "successful one that published nothing. Both were observed the same"
+    echo "day, and a green badge distinguished neither."
   } >> "$SUMMARY"
   exit 1
 }

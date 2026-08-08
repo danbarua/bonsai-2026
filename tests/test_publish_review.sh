@@ -67,8 +67,8 @@ EMPTY_CLAIM='{"no_tests_changed":false,"files_examined":[],"findings":[],
 
 run ""
 expect_rc "no structured output fails" 1
-check "says the action returned nothing" "no \`structured_output\` at all"
-check "warns green would have lied" "would NOT have meant the review"
+check "says what it could not read" "could not read a review result"
+check "does not overclaim that the review failed" "does NOT establish that"
 
 run "not json at all {{{"
 expect_rc "unparseable output fails" 1
@@ -94,7 +94,7 @@ check "states what it examined" "tests/test_a.py"
 run "$CLEAN"
 expect_rc "a clean review passes" 0
 check "reports zero findings" "Findings: **0**"
-if grep -qF "produced no result" "$OUT"; then
+if grep -qF "could not read a review result" "$OUT"; then
   echo "  FAIL  a clean review was reported as no result"
   fails=$((fails + 1))
 else
@@ -129,7 +129,7 @@ run "$REAL_RUN"
 expect_rc "the real captured payload passes" 0
 check "reports nothing to review"     "nothing to review" "$OUT"
 check "carries the summary through"   "5b8bac6" "$OUT"
-if grep -qF "produced no result" "$OUT"; then
+if grep -qF "could not read a review result" "$OUT"; then
   echo "  FAIL  a real successful review was reported as no result"
   fails=$((fails + 1))
 else

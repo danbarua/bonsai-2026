@@ -143,6 +143,47 @@ def test_the_prompt_still_points_at_the_catalogue(text):
         "specification and the count check above passes for the wrong reason")
 
 
+def test_the_review_is_pre_approved_to_read_its_own_diff(text):
+    """A runner has nobody to approve, so "requires approval" means denied.
+
+    Measured on run 31255640813: twelve permission denials, all Bash, every
+    one an attempt to read the diff -- `gh pr view`, `gh pr diff`,
+    `git fetch refs/pull/N/head`, `git log --parents` -- retried across 25
+    turns before the review found another route. It happened to succeed. Had
+    that PR contained tests it could have reported examining nothing, and the
+    publisher would have failed the build for a reason that was really this
+    config.
+    """
+    assert "--allowed-tools" in text, (
+        "no tool allowlist: the review will be denied Bash on a runner and "
+        "cannot read its own diff")
+    allowed = re.search(r"--allowed-tools\s+'([^']*)'", text)
+    assert allowed, "--allowed-tools is present but not readable as a quoted list"
+    listed = allowed.group(1)
+    for needed in ("git diff", "git log", "gh pr diff"):
+        assert needed in listed, (
+            f"`{needed}` is not pre-approved; it was denied on the first real "
+            f"run and is how the review sees what changed")
+
+
+def test_the_review_is_not_granted_write_access(text):
+    """Read-only by construction, not only by instruction.
+
+    The prompt forbids modifying files and pushing. An allowlist that granted
+    them anyway would leave the prohibition resting entirely on the model
+    choosing to obey -- the same request-instead-of-mechanism error that put
+    a path where JSON belonged earlier today.
+    """
+    allowed = re.search(r"--allowed-tools\s+'([^']*)'", text)
+    assert allowed, "no allowlist to check"
+    listed = allowed.group(1)
+    for forbidden in ("Write", "Edit", "git push", "git commit"):
+        assert forbidden not in listed, (
+            f"`{forbidden}` is pre-approved for a review that must only "
+            f"read. Remove it: the prompt's prohibition is not a permission "
+            f"boundary")
+
+
 def test_the_review_is_advisory_and_says_so(text):
     """The line that keeps an LLM verdict from gating a build. It has been
     the design's fixed point all day and is worth pinning."""
