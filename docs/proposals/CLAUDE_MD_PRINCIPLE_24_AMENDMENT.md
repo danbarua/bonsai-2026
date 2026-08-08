@@ -1,9 +1,13 @@
 # Patch-in-waiting: give principle 24's forward reference a path
 
 **Target:** `CLAUDE.md`, principle 24, final sentence.
-**Status:** proposal. Not applied — `CLAUDE.md` is a shared document the
-science track also edits, and concurrent modification is a known merge
-hazard, so the infrastructure track proposes rather than edits.
+**Status: APPLIED** (2026-08-08), on Dan's instruction. Principle 24's
+closing sentence now names `docs/proposals/PROVENANCE_CONTRACT.md`. Kept as
+the reasoning record.
+
+If the contract later moves out of `docs/proposals/` into `docs/`, the path
+in principle 24 moves with it — the amendment fixed a dangling citation, so
+leaving a new one behind would be its own punchline.
 
 ## Why
 

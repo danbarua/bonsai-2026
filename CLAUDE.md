@@ -150,6 +150,33 @@ where a shared, hardened library actually earns its cost.
   in `src/bonsai/stats/permutation.py` -- import and reuse it rather
   than writing new permutation-test code from scratch.
 
+## Concurrent sessions
+
+Other Claude Code sessions -- including headless ones -- may be working
+in this repository at the same time. Two rules, both paid for:
+
+- **`git fetch` before pushing to a shared branch**, and rebase rather
+  than merge. `stage2b` moved under in-flight branches at least five
+  times in one night, across all three tracks. Rebasing is safe because
+  a rejected push means those commits were never on origin -- though
+  worktrees share a local object store, so another local session could
+  in principle have seen them.
+- **Announce before you change shared surface** -- a config file another
+  track writes, a shared branch, or anything that alters behaviour
+  inside another session -- and publish what the change is *supposed* to
+  do. Not so peers know it exists: so they can tell correct behaviour
+  from a defect. A peer who only knows a tool exists can only recognise
+  noise.
+
+**Some shared surface does not propagate.** A git-tracked file reaches
+readers when they next read it; an MCP tool schema and a hook
+registration are fixed at connection or session start and reach nobody
+until they reconnect or restart. For those, announcing is not courtesy
+-- it is the only channel, and skipping it is silently wrong.
+
+Full rationale and the incidents behind each: `docs/MULTI_AGENT_PRACTICE.md`
+Part 1.
+
 ## Documentation style
 
 Reader-facing docs (READMEs, findings docs) state current facts and
@@ -473,7 +500,9 @@ without reading that document's full findings history first.
     inline analytic derivations (the derivation is its own provenance).
     The remedy for a captured scratch that turns out to matter is
     promotion to committed code — never citing the capture. Mechanics:
-    see the provenance contract (capture-at-birth, citation-at-use).
+    `docs/proposals/PROVENANCE_CONTRACT.md` (capture-at-birth,
+    citation-at-use), which also records the measured hook-payload
+    limits any capture mechanism has to work within.
 
 # IntelliJ MCP Server Companion
 This project is open in Pycharm IDE (IntelliJ IDEA platform). 

@@ -2,8 +2,12 @@
 
 **Targets:** `CLAUDE.md` (short, always-loaded rule) and
 `docs/MULTI_AGENT_PRACTICE.md` (the pattern with its rationale).
-**Status:** proposal. Both are shared documents the science and c2c tracks
-also edit, so the infrastructure track proposes rather than edits.
+**Status: APPLIED** (2026-08-08). Landed in `CLAUDE.md` under "Concurrent
+sessions" and in `docs/MULTI_AGENT_PRACTICE.md` as patterns 6b and 6c, on
+Dan's instruction, after both peer sessions reviewed and said land it. This
+file is kept as the reasoning record — what was proposed, what review
+changed, and what was deliberately dropped — none of which belongs in the
+target documents themselves.
 **Origin:** Dan's draft, after a night with three Claude Code sessions
 working the same repository concurrently.
 

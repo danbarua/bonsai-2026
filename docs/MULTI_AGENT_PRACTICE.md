@@ -116,6 +116,103 @@ The corollary that matters for multi-agent work: a derived guard covers
 the driver that gets written next month by an agent with no memory of
 this conversation. A list covers only what someone remembered.
 
+### 6b. Concurrent sessions share a repository, not a view of it
+
+Several Claude Code sessions may hold the same repository open, in the
+main checkout and in worktrees, with no way to see each other's state.
+
+Notably absent: a rule against `git add -A`. Worktrees have private
+indexes, so an agent working in one cannot stage another session's
+changes, and agents here run in worktrees by default. The concurrency
+case for that rule does not hold where the readers are. (The commit
+skill still requires staging by logical unit — a different claim, about
+scoped commits rather than collisions, and unaffected by worktrees.)
+
+**Fetch before pushing to a shared branch.** A local `git log` cannot
+see a branch that moved on the remote. `stage2b` moved under in-flight
+branches at least five times on 2026-08-07/08, across all three tracks,
+and every occurrence surfaced only as a rejected push. Rebase onto the
+moved branch and re-run the suite; a merge commit on a shared release
+branch is harder to reason about later. Rebasing is safe here for a
+specific reason worth stating rather than assuming — a rejected push
+means those commits were never visible on origin, so rewriting them
+cannot invalidate anyone's view of the remote. One caveat: worktrees
+share a single local object store, so another *local* session could in
+principle have inspected them first. Not "always safe, full stop."
+
+**Check mail before starting an increment, not before committing.**
+Commits are private until pushed. A peer's finding is worth having
+before work is built on it, not after it is recorded.
+
+**Announce before changing shared surface, and publish what the change
+is supposed to do.** Not so the peer knows it exists — so they can tell
+correct behaviour from a defect.
+
+> The provenance capture hooks shipped with two defects a green suite
+> did not catch. The announcement had said what should and should not be
+> captured: `git` excluded, heredocs-to-interpreters targeted. Without
+> that, a commit message sitting in a provenance blob looks like the tool
+> working as designed, and there is no baseline against which to call it
+> a defect. **The return on announcing is that a peer can recognise a
+> deviation; a peer who only knows a tool exists can only recognise
+> noise.**
+
+**Some shared surface does not propagate, and there announcing is not
+optional.** A git-tracked file reaches readers when they next read it.
+An MCP server's tool schema is fixed at connection time and a hook
+registration at session start — neither reaches anyone until they
+reconnect or restart. Deprecating a mailbox tool in server source
+reached nobody until each peer reconnected; the mail announcing it was
+the only channel, not a courtesy on top of a self-propagating change.
+Distinguish announcing because it is considerate from announcing
+because there is no other way the reader learns. Skipping the second is
+not impolite, it is silently wrong.
+
+The two rules do not have the same future. A missed fetch fails
+**loudly** — a rejected push — and could be enforced cheaply. A missed
+announcement fails **silently** and cannot be mechanised at all: nothing
+detects a message nobody sent. So the second will always rest on
+practice, which is the argument for stating its rationale well rather
+than tersely.
+
+### 6c. A peer-use round before an infra deliverable is called done
+
+Have a second instance use the tool on its own real work before
+declaring it finished. Not review of the code — use of the tool.
+
+The provenance capture hooks passed 967 tests and shipped with four
+defects. Three were found by another session using the hooks on real
+work within an hour of them landing; the fourth was a version probe
+whose command had never been valid, found by running it against the real
+binary for the first time. None were found by testing.
+
+This is not a testing-effort failure, and treating it as one predicts
+the wrong fix. Every one sat in the gap between "component correct" and
+"wired correctly" — principle 16's territory, catalogued as taxonomy
+entry G in `docs/VACUOUS_TESTS.md`. **The builder cannot see wiring gaps
+from inside the build**, for the same reason this project already runs
+external review on its scientific claims: the author's model of what the
+artifact does is the thing under test, and it cannot audit itself.
+
+The round requires the peer to be told what the tool is *supposed* to do
+(6b), or they can only report noise.
+
+**Founding instance, and it is procedural rather than technical.** The
+paragraph in 6b above originally claimed the reporting instruction
+"converted a silent defect into a bug report." The author asked the
+incident's owner whether the claim was drawn correctly and offered to
+cut it. It was cut: the peer had run their check because they wanted the
+tool working before their own paid run — their own stake, not an
+invitation — and would likely have reported regardless. What came back
+was a mechanism (announcing publishes a specification, so deviation is
+recognisable) in place of a flattering causal story, and the reviewer
+noted their own bias: an unusually motivated reporter, so the channel is
+probably worth *more* for uninvested peers than their case showed.
+
+That is pattern 1 operating at the smallest grain it has — one
+paragraph. Had the author summarised instead of asking, the overstated
+version would be in this document now.
+
 ---
 
 ## Part 2 — Ephemeral compute
@@ -427,6 +524,8 @@ whether it mattered.
 2. Quote the frozen text; do not trust a summary of it, including your own.
 3. Verify a subagent's arithmetic; trust only its retrieval.
 4. Derive guard rails — the next agent has not read your list.
+4b. Concurrent sessions share a repo, not a view of it: fetch before pushing shared branches, announce before changing shared surface — and say what the change is supposed to do, or a peer can only recognise noise.
+4c. Have a peer USE an infra deliverable on real work before calling it done; the builder cannot see wiring gaps from inside the build.
 5. Commit before you think you need to; the session may not end, it may stop.
 6. Tear down unconditionally, check the status, keep leak and verdict distinct.
 7. Require a sentinel *and* an exit code; break each half separately.
