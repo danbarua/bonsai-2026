@@ -53,6 +53,8 @@ claim the rest of this repository's discipline exists to prevent.
 | 29 | 08-08 | session | DESIGN.md's intercept-aware ridge MUST — "center targets within the training fold and restore the intercept from the general expression, not assume it away" — had no test that fails when it is undone. The `mean(Y)` shortcut the design explicitly refuses passed 93/93; so did dropping the target centering entirely. On centered X the two forms are algebraically identical, and every fixture standardized X first | building the gate inventory |
 | 30 | 08-08 | session | `test_corpus_constants` pins `EXPECTED_REF_IDX == 363` and `ENCODER_STEPS == 1200`, and both halts that CONSUME them — the gauge-node refusal in `step1b_topologies`, the step-count refusal in `step3_encoded_input` — had no test at all. `if False:` on either left the pin green. An equality pin notices a literal edit and is blind to its consumer being deleted, which is the failure that costs an A100 run | building the gate inventory |
 
+| 31 | 08-08 | session | Not a test: `make stage2b-gate-inventory` is local and read-only, so nothing ran it. Deleting an entire dispositioned row from `gates.toml` — ~2,000 characters — left all 64 tests across `test_stage2b_gate_corpus.py` and `test_gate_inventory.py` green; the whole inventory could be emptied the same way. Every test either drove the reconciler on synthetic input or derived candidate counts from the DOCUMENTS. None read the dispositions | asking what preserved the 89/89 figure |
+
 Two near-misses belong here too, because they were caught *before* becoming
 tests:
 
