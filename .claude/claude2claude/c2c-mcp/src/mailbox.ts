@@ -229,11 +229,30 @@ export interface InboxMessage {
 // header today, but the parser shouldn't depend on that staying true --
 // anchoring on the `·` delimiter that actually separates fields is what
 // makes this safe regardless of what content later fields carry.
+// The capture runs to the NEXT FIELD DELIMITER, not to the next space.
+// Session names are not restricted to one word -- `/rename` accepts
+// anything, and "mailbox digest generation" is a live example. `(\S+)`
+// truncated that to "mailbox", and since readMailbox compares
+// slugify(to) against slugify(asName), "mailbox" never matched
+// "mailbox-digest-generation": the message was skipped as addressed to
+// someone ELSE, by the only session it was for. Undeliverable, with no
+// error to sender or reader, and left in the mailbox counted as unread by
+// everyone and claimable by nobody.
+//
+// Found by peeking at a real fanned-out delivery, where the parsed `to`
+// read "mailbox" beside a filename that correctly said
+// `--to-mailbox-digest-generation`. Pre-existing: any addressed message to
+// a multi-word name was always lost. Fan-out only made it visible, by
+// addressing every session by name for the first time.
+//
+// `·` remains the anchor and now also the terminator, so the widened
+// capture cannot run past this field into the next one.
 export function parseAddressee(content: string): string | undefined {
   const firstLine = content.split("\n", 1)[0];
   const beforeClose = firstLine.split("-->", 1)[0];
-  const match = /(?:^|·)\s*to:\s*(\S+)/i.exec(beforeClose);
-  return match ? match[1] : undefined;
+  const match = /(?:^|·)\s*to:\s*([^·]+)/i.exec(beforeClose);
+  const value = match?.[1].trim();
+  return value ? value : undefined;
 }
 
 // Extracts the optional "instance: <name>" sender identity from a
@@ -242,11 +261,17 @@ export function parseAddressee(content: string): string | undefined {
 // sender role -- claude-desktop, chatgpt -- that isn't itself
 // multi-instance in the way Claude Code sessions are). Anchored on `·` for
 // the same reason parseAddressee is -- see its comment.
+// Same widened capture, same reason -- see parseAddressee. A sender whose
+// name contains a space had its instance truncated too, which feeds
+// readMailbox's excludeSelfSent check: that session would fail to
+// recognise its own broadcast and could consume it before anyone else saw
+// it, which is precisely what excludeSelfSent exists to prevent.
 export function parseInstance(content: string): string | undefined {
   const firstLine = content.split("\n", 1)[0];
   const beforeClose = firstLine.split("-->", 1)[0];
-  const match = /(?:^|·)\s*instance:\s*(\S+)/i.exec(beforeClose);
-  return match ? match[1] : undefined;
+  const match = /(?:^|·)\s*instance:\s*([^·]+)/i.exec(beforeClose);
+  const value = match?.[1].trim();
+  return value ? value : undefined;
 }
 
 // Extracts the slugified `to` addressee directly from a FILENAME (the
