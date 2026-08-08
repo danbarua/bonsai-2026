@@ -202,6 +202,19 @@ NOT_SCRATCH = [
         "cat <<'EOF' > notes.md\njust some prose\nEOF",
         "a heredoc redirected to a FILE runs no code at all",
     ),
+    (
+        'grep -aE "closure|commit |colab|REFUS|Error" "$LOG" | head -6',
+        "FIELD REPORT bug 4, and the nastiest so far: splitting on `|` "
+        "without respecting quotes cut this regex into pieces, one of "
+        "which was the bare word `colab` -- which matched the remote-exec "
+        "binary list. A grep pattern was read as a pipe target",
+    ),
+    (
+        "ps aux | grep -c '[m]ake x'; uv run mighty-colab sessions | tail -1",
+        "a remote-exec BINARY in a pipeline is not a remote exec: "
+        "`sessions` reports status and consumes no stdin. Only exec/repl/"
+        "console take piped code",
+    ),
 ]
 
 # A DOCUMENTED BLIND SPOT, pinned so it stays known rather than becoming an

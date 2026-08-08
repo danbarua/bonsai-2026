@@ -47,6 +47,11 @@ _INTERPRETERS = ("python", "python3", "python3.11", "python3.12", "python3.13",
 # path is a tmp file the bytes are gone the moment the session ends.
 _REMOTE_EXEC = ("mighty-colab", "colab")
 
+# Subcommands of a remote-exec tool that treat piped stdin as a PROGRAM.
+# `sessions`, `status`, `stop`, `ls` and friends consume no stdin, so a
+# pipeline ending in one ships nothing and is not scratch.
+_STDIN_CODE_SUBCOMMANDS = ("exec", "repl", "console", "run")
+
 # Directories whose contents are expected to vanish.
 _EPHEMERAL_DIRS = ("/tmp/", "/var/folders/", "/private/tmp/")
 
@@ -122,13 +127,79 @@ def _command_portion(command: str) -> str:
     return command if line_end == -1 else command[:line_end]
 
 
-def _segments(command: str) -> list[str]:
-    """Individual commands within a compound shell invocation."""
-    return [s for s in re.split(r"\|\||&&|\||;|\n", _command_portion(command))
-            if s.strip()]
+# Characters shlex treats as punctuation, and the subset of them that end
+# one command and begin another. `(` `)` `<` `>` group and redirect; they do
+# not separate.
+_PUNCTUATION = set("();<>|&")
+_SEPARATOR_CHARS = set(";|&")
 
 
-def _resolved_program(segment: str) -> str | None:
+def _newlines_to_separators(command: str) -> str:
+    """Make an unquoted newline an explicit `;`, leaving quoted text alone.
+
+    A newline separates commands in shell, but `shlex` treats it as ordinary
+    whitespace, which would merge every line of a multi-line block into one
+    segment and hide a `python -c` on line three. Replacing newlines
+    wholesale would instead corrupt a multi-line quoted `-c` program, which
+    is a common shape here. So the replacement is quote-aware.
+    """
+    out: list[str] = []
+    quote: str | None = None
+    for char in command:
+        if quote:
+            if char == quote:
+                quote = None
+            out.append(char)
+        elif char in "'\"":
+            quote = char
+            out.append(char)
+        else:
+            out.append(";" if char == "\n" else char)
+    return "".join(out)
+
+
+def _shell_tokens(command: str) -> list[str]:
+    """Tokenise with shell operators as their own tokens, quotes respected.
+
+    `punctuation_chars=True` is what makes `|` a token rather than part of a
+    word, WITHOUT treating a pipe inside a quoted string as a separator.
+    That distinction is not academic: splitting the raw string on `|` cut
+    `grep -aE "closure|commit |colab|REFUS|Error"` into fragments, one of
+    which was the bare word `colab`, which then matched the remote-exec
+    binary list. A grep pattern was classified as a pipe into a GPU kernel.
+    """
+    try:
+        lexer = shlex.shlex(command, posix=True, punctuation_chars=True)
+        lexer.whitespace_split = True
+        return list(lexer)
+    except ValueError:
+        # Unbalanced quotes. Fall back coarsely rather than raise -- a hook
+        # depends on this -- and accept that odd input classifies poorly.
+        return command.split()
+
+
+def _segments(command: str) -> list[list[str]]:
+    """Token lists for each command within a compound shell invocation."""
+    segments: list[list[str]] = []
+    current: list[str] = []
+    text = _newlines_to_separators(_command_portion(command))
+    for token in _shell_tokens(text):
+        # shlex groups runs of punctuation into one token, so a `);` arrives
+        # whole rather than as `)` and `;`. Testing membership against a set
+        # of exact operators would miss it -- which is how a segment boundary
+        # gets silently dropped and two commands merge into one.
+        if token and set(token) <= _PUNCTUATION:
+            if set(token) & _SEPARATOR_CHARS and current:
+                segments.append(current)
+                current = []
+            continue  # grouping/redirect punctuation carries no program
+        current.append(token)
+    if current:
+        segments.append(current)
+    return segments
+
+
+def _resolved_program(segment: list[str]) -> str | None:
     """What this segment actually EXECUTES, after stripping wrappers.
 
     The distinction the whole predicate turns on. `-c` and heredocs describe
@@ -138,7 +209,7 @@ def _resolved_program(segment: str) -> str | None:
     first token, and `git commit -F - <<EOF` captured because a heredoc was
     present at all.
     """
-    tokens = _strip_wrappers(_tokens(segment))
+    tokens = _strip_wrappers(segment)
     return Path(tokens[0]).name if tokens else None
 
 
@@ -155,7 +226,7 @@ def _inline_code(command: str) -> str | None:
     variable assignment, or at the end of a `;`-chain.
     """
     for segment in _segments(command):
-        tokens = _strip_wrappers(_tokens(segment))
+        tokens = _strip_wrappers(segment)
         if not tokens or Path(tokens[0]).name not in _INTERPRETERS:
             continue
         for i, token in enumerate(tokens[1:], start=1):
@@ -213,12 +284,29 @@ def is_scratch(tool_name: str, tool_input: dict,
                repo_root: Path | None = None) -> Verdict:
     """Classify one tool call. Never raises -- a hook depends on it."""
     try:
-        return _classify(tool_name, tool_input, repo_root)
+        verdict = _classify(tool_name, tool_input, repo_root)
     except Exception as exc:  # noqa: BLE001
         # Fail OPEN, in the direction of not capturing. A predicate that
         # throws would break the hook; one that over-captures on a parse
         # bug would quietly log unrelated work.
         return Verdict(False, f"predicate_error: {type(exc).__name__}: {exc}")
+
+    # **A capture must attest to something.** A verdict carrying neither
+    # script text nor a referenced file would write a record whose
+    # `trigger_reason` asserts that code was captured while the record holds
+    # no code -- a positive artifact stating something untrue, in a store
+    # whose only value is being trustworthy about what ran.
+    #
+    # That is a worse failure than silent under-capture, and it happened: a
+    # grep pattern was classified as a pipe into a GPU kernel, and the
+    # resulting record was read by a human as evidence of coverage it did
+    # not have. Under-capture leaves an absence you can be suspicious of;
+    # this leaves a confident lie. Blocked structurally rather than by
+    # fixing each classifier that could produce it.
+    if verdict.capture and not verdict.script_text \
+            and not verdict.referenced_files:
+        return Verdict(False, f"{verdict.reason}_but_attested_nothing")
+    return verdict
 
 
 def _classify(tool_name: str, tool_input: dict,
@@ -279,12 +367,20 @@ def _classify(tool_name: str, tool_input: dict,
 
     # Code piped into a remote kernel: the pipeline's left side is the
     # program, and it never touches disk.
-    if "|" in command:
-        segments = [s.strip() for s in command.split("|")]
-        if any(_remote_exec_files(_tokens(s)) or
-               (_tokens(s) and Path(_tokens(s)[0]).name in _REMOTE_EXEC)
-               for s in segments[1:]):
-            return Verdict(True, "piped_into_remote_exec",
-                           script_text=segments[0], script_source="stdin_pipe")
+    segments = _segments(command)
+    for i, segment in enumerate(segments[1:], start=1):
+        if _resolved_program(segment) not in _REMOTE_EXEC:
+            continue
+        # Being the mighty-colab BINARY is not enough. `sessions`, `status`
+        # and `stop` report or manage; they consume no stdin and running one
+        # in a pipeline ships nothing. Only these subcommands treat piped
+        # text as a program.
+        subcommand = next((t for t in _strip_wrappers(segment)[1:]
+                           if not t.startswith("-")), None)
+        if subcommand not in _STDIN_CODE_SUBCOMMANDS:
+            continue
+        return Verdict(True, "piped_into_remote_exec",
+                       script_text=" ".join(segments[i - 1]),
+                       script_source="stdin_pipe")
 
     return Verdict(False, "not_scratch")
