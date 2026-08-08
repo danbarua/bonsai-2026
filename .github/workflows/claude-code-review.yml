@@ -22,9 +22,18 @@ on:
   workflow_dispatch:
     inputs:
       target:
-        description: 'What to review: a ref, a commit range (a..b), or a path'
+        # NO DEFAULT, deliberately. `HEAD~1..HEAD` was one, and it is EMPTY
+        # after a merge -- the merge commit's tree equals its parent's -- so
+        # the pre-filled value reviewed nothing and the run went green.
+        # Observed on run 31256572529. Any default risks that: a value the
+        # caller did not choose, reviewing a range that happens to be empty,
+        # reported as success. Required and unfilled forces one deliberate
+        # decision instead.
+        description: >-
+          Commit range or ref to review. Must be non-empty: e.g.
+          origin/main...HEAD for this branch's changes, or an explicit
+          a..b range. NOTE HEAD~1..HEAD is empty after a merge.
         required: true
-        default: 'HEAD~1..HEAD'
   pull_request:
     types: [opened, ready_for_review, reopened]
 
