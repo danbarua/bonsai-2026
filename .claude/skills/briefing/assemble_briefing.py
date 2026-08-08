@@ -346,7 +346,16 @@ def join_loops(loops: list[Loop], commits: list[Commit]) -> None:
                 continue
             # Rarity is the evidence -- see MAX_ABS_HITS. Both bounds apply:
             # the absolute one carries long windows, the fractional one short.
-            if len(hits) > MAX_ABS_HITS or len(hits) / n > LOW_SIGNAL_FRACTION:
+            #
+            # A SINGLE hit is always discriminating and is never suppressed.
+            # Without that clause the fraction punished small windows for
+            # being small: one hit in three commits is 0.33, over the 0.25
+            # bound, so a unique genuine match was discarded and the loop
+            # filed under "no candidate found". That fires exactly when the
+            # digests catch up and the cold window shrinks to a handful of
+            # commits -- the normal steady state, not an edge case.
+            crowded = len(hits) > 1 and len(hits) / n > LOW_SIGNAL_FRACTION
+            if len(hits) > MAX_ABS_HITS or crowded:
                 loop.low_signal.append(tok)
                 continue
             for c in hits:

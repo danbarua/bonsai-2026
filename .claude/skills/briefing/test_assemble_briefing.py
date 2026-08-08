@@ -134,6 +134,24 @@ def test_rare_token_is_accepted_as_a_candidate() -> None:
     assert loop.low_signal == []
 
 
+@pytest.mark.parametrize("window", [2, 3, 4, 8])
+def test_a_single_hit_is_never_suppressed_however_small_the_window(window: int) -> None:
+    """The fraction bound must not punish a window for being small.
+
+    One hit in three commits is 0.33, over the 0.25 bound, so a unique and
+    genuine match was discarded and its loop filed under "no candidate
+    found". That fires as soon as the digests catch up and the cold window
+    shrinks -- the steady state, not an edge case. The suite was silent on
+    it because it pinned 2-of-2 (correctly ambiguous) and never 1-of-2.
+    """
+    commits = [_commit(f"c{i}", f"unrelated {i}") for i in range(window - 1)]
+    commits.append(_commit("hit", "fix zeta.py"))
+    loop = Loop(text="about `zeta.py`", tokens=["zeta.py"])
+    join_loops([loop], commits)
+    assert [c.short for _, c in loop.matches] == ["hit"]
+    assert loop.low_signal == []
+
+
 def test_fraction_bound_guards_a_short_window() -> None:
     """On a 2-commit window the absolute cap of 3 would admit everything,
     so the fractional bound has to carry the small-n end."""
