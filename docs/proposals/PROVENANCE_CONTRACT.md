@@ -344,8 +344,15 @@ the failure it was built to prevent, one level up.
 - **How big.** Blobs are content-addressed, so re-running the same script
   fifty times costs one copy. Output blobs are capped: above a ceiling the
   record keeps head, tail, digest and true size rather than the whole
-  payload, and says so in `fidelity`. The ceiling is a parameter, not yet
-  measured — see the open questions.
+  payload, and says so in `fidelity`. **That ceiling is a policy choice, not
+  a measured threshold** — nothing about it scales with a quantity, so
+  principle 22 does not govern it, and it should not be dressed up as
+  empirical. `tools/provenance/capture_stats.py` reports what the local logs
+  actually contain, and to date nothing has come close to the ceiling; but
+  those logs are gitignored and local-only, so that observation is context
+  and explicitly not the anchor. Turning this into a measured threshold
+  would require committed code regenerating real outputs, not a reading of
+  the forensic log.
 - **How it dies.** Pruned **by age, never by size.** A size-capped log
   evicts its oldest records first, which are exactly the ones whose
   generator is most likely already gone — the failure mode inverted. Age
@@ -563,6 +570,10 @@ Open, deliberately not decided here:
 - **Retention period** for `.provenance/runs/`. Needs a week of real
   captures to size honestly; guessing now would be a frozen constant with
   no measurement behind it, which this document is poorly placed to do.
+  `tools/provenance/capture_stats.py` is the instrument for answering it
+  when the data exists — and it exists to keep that answer from arriving as
+  an inline `python -c` whose output lands in a document, which is the
+  failure this whole contract describes.
 - **Whether the 30,000 cap is stable across harness versions.** It is a
   measured property of one version, not a contract. The capture hook
   therefore compares against `persistedOutputSize` rather than testing

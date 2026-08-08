@@ -48,8 +48,23 @@ sys.path.insert(0, str(HOOK_DIR))
 from scratch_predicate import is_scratch  # noqa: E402
 
 # Output larger than this is stored head+tail+digest rather than whole. The
-# full bytes are already recoverable from the harness's own persisted file
-# for the life of the session; the log's job is to stay readable.
+# full bytes stay recoverable from the harness's own persisted file for the
+# life of the session; the log's job is to stay readable.
+#
+# **A policy ceiling, not a measured threshold, and the distinction is the
+# point.** Principle 22 governs thresholds that track a measured quantity --
+# this is not one. Nothing here scales with n; it is a flat statement that a
+# single forensic record should not exceed a couple of megabytes. No
+# observation anchors it and none is claimed to.
+#
+# For context rather than justification: across the local logs to date
+# (`tools/provenance/capture_stats.py`), the largest captured output was
+# under a kilobyte and nothing has ever been truncated by this ceiling. That
+# is descriptive of one machine's logs, which are gitignored and not
+# reproducible by anyone else -- so it is deliberately NOT the anchor for
+# the value. If this ever needs to become a measured threshold, the
+# measurement has to come from committed code regenerating real outputs,
+# not from reading the forensic log.
 OUTPUT_BLOB_MAX = 2_000_000
 
 # Bumped whenever the record schema or the predicate's rule set changes, so
