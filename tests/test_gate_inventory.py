@@ -107,7 +107,7 @@ def test_clause_id_survives_reflowing_but_not_rewording(tmp_path):
 def test_an_unmapped_clause_is_a_finding(tmp_path):
     """The incident this exists for: a frozen HALT with no implementation."""
     clauses = derive_clauses([write_doc(tmp_path)], tmp_path)
-    findings = reconcile(clauses, {"binding": {}}, tmp_path)
+    findings = reconcile(clauses, {"reviewed": True, "binding": {}}, tmp_path)
     assert kinds(findings) == ["undispositioned_candidate", "undispositioned_candidate"]
 
 
@@ -149,7 +149,8 @@ def test_a_fully_dispositioned_document_produces_no_findings(tmp_path):
     (tmp_path / "gate.py").write_text("def verify_digest():\n    return True\n")
     (tmp_path / "test_gate.py").write_text("def test_digest():\n    pass\n")
     clauses = derive_clauses([doc], tmp_path)
-    inventory = {"binding": {c.clause_id: complete_row() for c in clauses}}
+    inventory = {"reviewed": True,
+                 "binding": {c.clause_id: complete_row() for c in clauses}}
     assert reconcile(clauses, inventory, tmp_path) == []
 
 
@@ -277,6 +278,24 @@ def test_a_manual_only_trigger_is_reported_but_not_treated_as_absent(tmp_path):
     assert "missing_trigger" not in found
 
 
+def test_an_unreviewed_inventory_cannot_pass_however_complete_it_looks(tmp_path):
+    """A machine-drafted file must not be mistakable for a finished one.
+
+    The failure without this is obvious in hindsight: a draft lands, looks
+    complete, somebody runs the reconciler and gets a green. `reviewed`
+    defaults absent-is-false, so an inventory that never says a human read
+    it fails on that alone.
+    """
+    doc = write_doc(tmp_path)
+    (tmp_path / "gate.py").write_text("def verify_digest():\n    return True\n")
+    (tmp_path / "test_gate.py").write_text("def test_digest():\n    pass\n")
+    clauses = derive_clauses([doc], tmp_path)
+    complete_but_undeclared = {
+        "binding": {c.clause_id: complete_row() for c in clauses}}
+    assert "unreviewed_inventory" in kinds(
+        reconcile(clauses, complete_but_undeclared, tmp_path))
+
+
 def test_an_exemption_needs_a_reason(tmp_path):
     clauses = derive_clauses([write_doc(tmp_path)], tmp_path)[:1]
     inventory = {"binding": {}, "not_binding": {clauses[0].clause_id: {}}}
@@ -318,6 +337,7 @@ def test_a_clean_reconciliation_exits_zero(tmp_path):
     (clause,) = derive_clauses([doc], tmp_path)
     inventory = tmp_path / "gates.toml"
     inventory.write_text(
+        'reviewed = true\n'
         f'[binding."{clause.clause_id}"]\n'
         f'enforcement = "g.py::f"\n'
         f'production_reachability = "called by the stage3 driver"\n'

@@ -253,6 +253,20 @@ def reconcile(clauses: list[Clause], inventory: dict,
     inventory keeps entries for requirements that no longer exist.
     """
     findings: list[Finding] = list(check_ids_unique(clauses))
+
+    # A draft must not be mistakable for a finished inventory. Without this,
+    # the failure is obvious in hindsight: a machine-drafted file lands,
+    # looks complete, somebody runs the reconciler against it and gets a
+    # green. `reviewed` defaults to false, so a file that never says a human
+    # read it cannot pass -- an artifact carrying evidence of the thing it
+    # claims, rather than being trusted for looking finished.
+    if not inventory.get("reviewed", False):
+        findings.append(Finding(
+            "unreviewed_inventory",
+            "the inventory does not carry `reviewed = true`. A draft -- "
+            "machine-generated or half-finished -- cannot produce a clean "
+            "run no matter what its rows contain"))
+
     binding = inventory.get("binding", {})
     not_binding = inventory.get("not_binding", {})
     by_id = {clause.clause_id: clause for clause in clauses}
