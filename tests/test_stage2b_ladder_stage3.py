@@ -568,3 +568,60 @@ def test_stats_smoke_decision_is_explicit_and_carries_its_reason(driver):
     reason = driver.STATS_SMOKE_REASON
     assert "776.6" in reason and "non-inferential" in reason
     assert len(reason) > 100, "a decision without a reason is an omission"
+
+
+# ---- the frozen floor-halt, which the first amended-grid run needed and lacked ----
+
+def _cv_stub(selected, grid):
+    return {"alpha": selected, "alphas": list(grid), "mean_clipped_val_mse": [0.1] * len(grid)}
+
+
+def test_selecting_the_grid_floor_is_a_halt(driver):
+    """DESIGN.md's amended frozen procedure, verbatim: "HALT for review if
+    any production condition selects 1e-6."
+
+    Behavioural, because the FIRST version of this test was vacuous: it
+    asserted `halt_reasons.append(...)` appeared in the source, which
+    stays true when the branch guarding it is disabled. Breaking the guard
+    left it green -- a vacuous test written while fixing a defect about a
+    guard that did not exist."""
+    import stage2b_ridge as ridge
+    grid = ridge.ALPHA_GRID
+    reason = driver.floor_halt_reason("T", min(grid), grid)
+    assert reason is not None
+    assert "FLOOR" in reason and "unbracketed" in reason
+    assert "NEVER" in reason and "extension" in reason, (
+        "the halt must state a floor pin is not a trigger for further "
+        "extension -- that clause is what keeps the procedure one-shot")
+
+
+def test_an_interior_alpha_does_not_halt(driver):
+    """The negative direction, without which the guard could be a constant."""
+    import stage2b_ridge as ridge
+    grid = ridge.ALPHA_GRID
+    for interior in (1e-5, 1e-3, 1.0, 1000.0):
+        assert driver.floor_halt_reason("x", interior, grid) is None, interior
+
+
+def test_the_ceiling_is_recorded_but_does_not_halt(driver):
+    """Scope is exactly what is frozen. The rule names 1e-6 and nothing
+    else; inventing a gate mid-ladder is precluded in both directions, so
+    the asymmetry is the rule's rather than this driver's."""
+    import stage2b_ridge as ridge
+    grid = ridge.ALPHA_GRID
+    assert driver.floor_halt_reason("x", max(grid), grid) is None
+    assert "alpha_at_grid_edge" in inspect.getsource(driver.step7_ridge)
+
+
+def test_the_floor_halt_would_have_fired_on_the_observed_run(driver):
+    """The concrete case: T and lattice selected 1e-6 on 2026-08-08. A
+    guard that cannot be shown to fire on the event it was written for is
+    not yet a guard."""
+    import stage2b_ridge as ridge
+    grid = ridge.ALPHA_GRID
+    assert min(grid) == 1e-6
+    observed = {"T": 1e-6, "lattice": 1e-6, "rewired": 1e-5,
+                "curr_random": 1e-5, "pre_evolution": 1000.0,
+                "raw_505": 0.001, "raw_784": 0.001}
+    would_halt = [c for c, a in observed.items() if a == min(grid)]
+    assert sorted(would_halt) == ["T", "lattice"], would_halt

@@ -414,6 +414,46 @@ def _obj(mods, kind, ext, condition=None, stage=LADDER_STAGE):
                                 ext=ext, split=SPLIT)
 
 
+def floor_halt_reason(condition, alpha, alphas):
+    """The frozen floor halt, as a pure function so it can be TESTED rather
+    than grepped for.
+
+    Returns a halt reason when `alpha` is the grid minimum, else None.
+
+    ## Why this is a function and not three lines inline
+
+    It was three lines inline first, and the test written for it was
+    vacuous: it asserted the `halt_reasons.append(...)` call appeared in
+    the source of `step7_ridge`, which stays true when the branch guarding
+    it is disabled. Breaking the guard left that test green. Pulling the
+    decision out makes a test exercise the decision instead of the
+    spelling of the code around it.
+
+    ## What is frozen, and what is deliberately not
+
+    DESIGN.md's amended procedure, verbatim: "HALT for review if any
+    production condition selects 1e-6." Scope is the FLOOR only. A pin at
+    the ceiling is recorded by the caller and does not halt, because the
+    frozen rule does not name it and inventing a gate mid-ladder is
+    precluded in both directions -- that asymmetry belongs to the rule,
+    not to this code.
+
+    ## Why this exists at all
+
+    The rule was frozen into DESIGN.md and never written into the driver.
+    The first amended-grid run selected the floor on T and lattice and
+    reported STAGE3_OK -- a verdict meaning "no gate was implemented",
+    not "the gate cleared". Added after that run, which is later than it
+    should have been."""
+    alphas = np.asarray(alphas, dtype=float)
+    if float(alpha) != float(alphas.min()):
+        return None
+    return (f"{condition}: selected the grid FLOOR alpha={float(alpha):g}. The "
+            f"optimum is at or below it and is unbracketed. Per the frozen "
+            f"procedure this is a named anomaly requiring review before Stage 4 "
+            f"-- and is NEVER itself a trigger for further extension.")
+
+
 def grid_tag(alphas):
     """A short, stable identity for an alpha grid, e.g. `g13_4f2a9c01`.
 
@@ -1053,6 +1093,11 @@ def step7_ridge(mods, bucket, features, Y, y_strat, record, fp, parents_by_condi
                 alphas = np.asarray(cv["alphas"])
                 entry["alpha_at_grid_edge"] = bool(
                     cv["alpha"] == float(alphas.min()) or cv["alpha"] == float(alphas.max()))
+                floor_reason = floor_halt_reason(condition, cv["alpha"], alphas)
+                entry["alpha_at_grid_floor"] = bool(floor_reason)
+                if floor_reason:
+                    out["halt_reasons"].append(floor_reason)
+                    say(f"ridge/{condition}: GRID FLOOR SELECTED -- {floor_reason}")
             except AssertionError as exc:
                 entry["cv_error"] = f"{type(exc).__name__}: {exc}"
                 out["halt_reasons"].append(f"{condition}: centering guard: {exc}")
