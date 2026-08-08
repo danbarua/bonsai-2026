@@ -208,6 +208,7 @@ dev = [
 ]
 gpu = [
     { name = "google-cloud-storage" },
+    { name = "google-crc32c" },
     { name = "mighty-colab" },
 ]
 
@@ -239,6 +240,7 @@ dev = [
 ]
 gpu = [
     { name = "google-cloud-storage", specifier = ">=2.19.0" },
+    { name = "google-crc32c", specifier = ">=1.5.0" },
     { name = "mighty-colab", specifier = ">=0.2.2" },
 ]
 

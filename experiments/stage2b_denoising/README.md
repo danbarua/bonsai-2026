@@ -145,6 +145,14 @@ mention here, in the same commit that creates it.
   before it ran; thetas and features are persisted per graph and per
   condition because the amendment audit consumes those exact objects.
 
+- **`gate_corpus.py`** — pins which documents the binding-clause
+  inventory ranges over, and asserts that list against the `.md` files
+  actually present, in both directions, before handing them to
+  `tools/gates/gate_inventory.py`. Run it via `make
+  stage2b-gate-inventory`; it exits non-zero while any clause is
+  undispositioned, which is the normal state until the inventory is
+  complete.
+
 **Frozen protocols** (each committed before any of its own numbers
 existed; nothing in them may change once a result has been seen):
 
@@ -427,6 +435,7 @@ make test                      # the whole repository suite
 | `test_stage2b_ladder_stage1.py` | the stage-1 driver's constants, call sites and Makefile agreement |
 | `test_stage2b_ladder_stage2.py` | the stage-2 driver's constants, call sites (including the CNN closure) and Makefile agreement |
 | `test_stage2b_ladder_stage3.py` | the stage-3 driver's constants, the sizing probe's projections and halt paths, the pinned pre-contract consumes, and Makefile agreement |
+| `test_stage2b_gate_corpus.py` | which documents the binding-clause inventory ranges over — corpus against on-disk, both directions |
 
 This table is the whole of what `make stage2b-test` runs, and the one
 exclusion is the slow round trip. It carries no test counts, deliberately:
@@ -438,6 +447,15 @@ nobody wrote a wrong number and the numbers became wrong anyway. Principle
 `make stage2b-test`, which prints it, so the file list is what is asserted
 here (`tests/test_stage2b_ladder_stage1.py`) and the numbers are not
 duplicated.
+
+`make stage2b-test` runs under `--group gpu` and prints every skip with
+its reason. Both are there because a bare `uv sync` once pruned
+`google-crc32c` — which `stage2b_gcs.py` falls back away from by design —
+and the test checking that fallback against the real library became a
+skip. Nothing failed; the count moved by one and nobody diffs counts. The
+group makes the packages present for this target regardless of how the
+environment was last synced, and `-rs` means an absence has to announce
+itself rather than being inferred from a total.
 
 The round trip is the only test that leaves this machine. It provisions
 a CPU runtime, writes an object to GCS from it, and reads that object

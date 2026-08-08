@@ -103,6 +103,203 @@ the message changes from 'refusing to touch a Stage 2B TEST-side object' to
 fired."""
 trigger = "ci-fast"
 
+[binding_gate.7e0f91ff9d81]
+# "JAX and sklearn must produce (a) max abs difference in clipped validation
+#  predictions <= 1e-8 and (b) identical alpha selection. Any exceedance
+#  halts pending investigation."
+enforcement = "experiments/stage2b_denoising/stage2b_ridge.py::ridge_equivalence_check"
+production_reachability = """
+run_ladder_stage3.py::step7_ridge calls it once per condition and appends to
+out["halt_reasons"] when `passed` is false; main() raises Stage3Halt on a
+non-empty list. Reached via the sole production entry point `make
+stage2b-ladder-stage3`. An AssertionError from the centering guard INSIDE
+the equivalence path is caught separately and also becomes a halt reason, so
+neither the gate failing nor the gate erroring can pass silently."""
+input_wiring = """
+`X`, `Y`, `y_strat` are the same arrays the production CV consumed for that
+condition; `alphas` defaults to ALPHA_GRID and `tol` to EQUIVALENCE_TOL=1e-8.
+Both paths share one StratifiedKFold(5, shuffle=True, random_state=42), one
+per-fold StandardScaler and one `select_alpha` -- deliberately, since a
+separately written argmin would test the selection rule against a
+reimplementation of itself (principle 16). Provenance: the per-condition
+`equivalence` block is recorded in ridge_cv_g13_88edf9ac.json, whose manifest
+carries the producing commit."""
+decision_consequence = """
+`passed` false -> a halt reason naming pred_diff, tol and both selected
+alphas -> Stage3Halt in main() -> verdict STAGE3_FAIL, the FAIL sentinel,
+non-zero exit. Max abs COEFFICIENT difference is recorded at whatever value
+it takes and is explicitly NOT a second halt rule, per DESIGN.md."""
+test = "tests/test_stage2b_ridge.py::test_the_equivalence_gate_fails_when_predictions_exceed_the_tolerance"
+break_demonstrated = """
+This row is why the inventory was worth doing. Before it, all three tests of
+this gate were PASS-side: replacing the `passed` expression with a literal
+`True` left every test in test_stage2b_ridge.py AND
+test_stage2b_ladder_stage3.py green -- 142 of them. The gate was implemented,
+reachable, and had no test that it could fail. One step milder than the
+incident this inventory exists for, where the halt was documented and never
+implemented at all.
+
+`test_ridge_equivalence_check_reports_coefficient_diff_as_diagnostic_only`
+looks like it should have caught that -- it asserts
+`passed == (pred_agrees and alpha_agrees)` -- and did not, because the
+identity holds trivially when both operands are True, which they are on any
+fixture the gate passes. An identity checked only where both sides are true
+tests nothing about the operator between them.
+
+Two negative-path tests added and confirmed against two deliberate breaks:
+(a) `passed` -> True fails BOTH new tests; (b) `pred_agrees` -> True fails
+the prediction test alone, leaving the alpha test green -- which is the
+evidence they isolate the two gate conditions rather than both tripping on
+any perturbation. The prediction test asserts the measured difference is
+non-zero BEFORE tightening the tolerance, so it cannot pass vacuously on a
+fixture where the two solvers happen to agree exactly."""
+trigger = "ci-fast"
+
+[binding_gate.eaa2db103093]
+# "The per-fold guard on the standardized training features halts when
+#  ||mean(X_train_scaled)|| >= 1e-9 * (n / 1000) ** 0.5."
+enforcement = "experiments/stage2b_denoising/stage2b_ridge.py::assert_scaler_centered"
+production_reachability = """
+Called inside `svd_ridge_fit` before any solve, so every production fit
+passes through it: `cross_validate_alpha` per (fold, condition), and the
+final refit. `check_centered=False` is the opt-out and is not used by
+run_ladder_stage3.py. The driver additionally catches the AssertionError at
+the call site and turns it into a halt reason rather than letting it abort
+mid-condition, so a fired guard is reported per condition."""
+input_wiring = """
+`X_scaled` is the per-fold standardized training matrix; `tol` defaults to
+`mean_x_tol_for(X_scaled.shape[0])` -- derived from the matrix passed in,
+which is the point: the tolerance is n-dependent and a default argument
+cannot be. n is the FOLD's training row count, not the rung's nominal corpus
+size (pinned by test_guard_tolerance_is_the_folds_row_count_not_the_corpus).
+Constants: MEAN_X_TOL_ANCHOR=1e-9 at MEAN_X_TOL_ANCHOR_N=1000,
+MEAN_X_TOL_EXPONENT=0.5. Provenance of use: `mean_x_tol` and `mean_x_norm`
+are recorded per fold in the run's ridge_cv artifact, so the tolerance each
+fit was actually checked against is in the record rather than inferred."""
+decision_consequence = """
+AssertionError before the solve, naming the measured norm, the tolerance,
+the row count it was derived from, and the worst offending column. At the
+driver it becomes a halt reason -> Stage3Halt -> STAGE3_FAIL. The guard is
+what makes the intercept formula `b = mean(Y) - mean(X) @ W` benign; without
+it a misconfigured scaler invents intercept structure silently, since the
+ridge still fits and still predicts."""
+test = "tests/test_stage2b_ridge.py::test_svd_ridge_fit_raises_on_uncentered_input_by_default"
+break_demonstrated = """
+Two directions, both observed. (a) `assert norm < tol` -> `assert True`
+(the guard never fires): 13 tests FAIL, including the caller-side
+svd_ridge_fit test -- so the break is caught at the production entry point
+and not only at the predicate. (b) MEAN_X_TOL_EXPONENT 0.5 -> 0.66 (the
+CPU-evolved value that, paired with the GPU-measured anchor, described
+neither pipeline -- principle 22's named anti-precedent): 6 tests FAIL
+across the scaling family. The second is the one that matters for a
+tolerance: it is causal evidence on the PRODUCTION constant's propagation,
+not a check that a literal equals itself."""
+trigger = "ci-fast"
+
+[binding_gate.fc246f4fab3c]
+# AUDIT_PROTOCOL: "All cross-artifact comparison is by official KMNIST image
+#  index, never by positional prefix."
+enforcement = "experiments/stage2b_denoising/stage2b_partition.py::index_join"
+production_reachability = """
+Three call sites in run_ladder_stage3.py (the encoded-array join, and the
+CNN fit/validation row joins) plus compare_stage3_regeneration.py::align.
+Reachability is ASSERTED rather than assumed: the test resolves the calls
+from the driver's AST and then checks the enclosing functions against the
+transitive closure of what main() calls, so three joins parked in a helper
+nothing invokes fail rather than count."""
+input_wiring = """
+`source_indices` and `target_indices` are the official KMNIST index arrays
+travelling beside each artifact -- the second half of Freeze 2
+(8bf414d720f2), which is what makes this join possible at all. The report's
+`alignment_is_a_prefix` and `n_rows_moved` are returned rather than judged:
+`compare_stage3_regeneration.align` refuses a prefix alignment, while a
+caller joining an ascending subset should expect one, so the caller holds
+that judgement."""
+decision_consequence = """
+ValueError before any comparison, on a missing image or on duplicate target
+indices (an ambiguous join). At `align`, a prefix alignment is refused
+outright. Nothing downstream sees rows."""
+test = "tests/test_stage2b_ladder_stage3.py::test_the_driver_joins_through_the_shared_helper"
+break_demonstrated = """
+The second defect this inventory has turned up, and the same shape as
+VACUOUS_TESTS #17. The test WAS a source grep -- `"partition.index_join(" in
+source`. Replacing all three joins with a hand-rolled positional one and
+leaving the old call in a comment left it GREEN: the exact substitution this
+clause forbids, undetected, because a comment satisfies a substring search.
+
+Rewritten to resolve calls from the AST, where comments do not exist, and
+each of its three assertions confirmed by an independent break:
+(a) reimplemented join + comment -> "makes no call to index_join anywhere in
+its AST"; (b) two joins reimplemented, one left in a dead helper -> "found 1"
+against the expected 3; (c) all three joins present but inside a function
+main() never reaches -> "called only in ['_dead_join_helper'], which main()
+never reaches". (c) matters because (b) tripped the COUNT check first, so
+the reachability assertion had to be exercised on its own or it would have
+been an untested guard sitting inside a tested test."""
+trigger = "ci-fast"
+
+[binding_gate.5354bdafe541]
+# COMPANION_PROTOCOLS: "if the verdict at the locked ENCODER_STEPS=1200
+#  differs across the swept eps range ... that triggers renewed
+#  interpretation review before Stage 4."
+enforcement = ""            # UNWRITTEN -- the sensitivity table has no driver
+production_reachability = ""
+input_wiring = ""
+decision_consequence = ""
+test = ""
+break_demonstrated = ""
+trigger = "manual"
+
+[binding_gate.1ab709f01474]
+# COMPANION_PROTOCOLS: "The propagation measurement is descriptive at stages
+#  1-4. Stage 5 has one pre-committed halt condition."
+enforcement = ""            # UNWRITTEN -- no stress-set driver exists
+production_reachability = ""
+input_wiring = ""
+decision_consequence = ""
+test = ""
+break_demonstrated = ""
+trigger = "manual"
+
+[binding_gate.9bc6f9e3808a]
+# AUDIT_PROTOCOL: "the per-fold mean of the new per-image OOF MSEs must
+#  reproduce the already-stored fold-aggregate values from the stage-1 and
+#  stage-2 runs."
+#
+# NOT satisfied by tests/test_stage2b_ridge.py's OOF cross-check, and the
+# distinction is the reason this row stays empty rather than citing it. That
+# test pins the per-fold mean against a within-run recomputation on synthetic
+# data -- real, and a different claim. This clause requires reproduction of
+# the aggregates STORED BY THE STAGE-1 AND STAGE-2 RUNS, which pins new
+# machinery against numbers this project already trusts. Citing the
+# available test here would be the exact substitution the anti-gaming clause
+# forbids, one layer down: not reclassifying the clause, but satisfying it
+# with adjacent evidence.
+enforcement = ""            # UNWRITTEN -- the audit driver does not exist
+production_reachability = ""
+input_wiring = ""
+decision_consequence = ""
+test = ""
+break_demonstrated = ""
+trigger = "manual"
+
+[binding_gate.12d7b0d5472d]
+# AUDIT_PROTOCOL: the three trigger conditions -- primary-contrast sign
+#  reversal; improvement-to-deterioration on any graph; numerically resolved
+#  pairwise order reversal.
+#
+# Two of these three were LOST IN RELAY once already (STAGE3_PLAN.md:118
+# records it: the briefing encoded only pairwise order reversal, and ChatGPT
+# re-listed all three live rather than stale). They are reinstated in the
+# frozen protocol and enforced nowhere, which is the state this row reports.
+enforcement = ""            # UNWRITTEN
+production_reachability = ""
+input_wiring = ""
+decision_consequence = ""
+test = ""
+break_demonstrated = ""
+trigger = "manual"
+
 # -- deliberately FAILING rows: the gate is documented and unenforced --------
 #
 # These are the anti-gaming clause in practice. Each is a real runtime
@@ -148,3 +345,474 @@ with no consumer is a true and useful readiness statement."""
 enforcement = ""
 break_demonstrated = ""
 trigger = "manual"
+
+[binding_value.8bf414d720f2]
+# Freeze 2 -- "official corpus 60,000; CNN weight-fit 54,000; CNN validation
+#  6,000; ridge CV and final-fit 60,000. All old-vs-new comparison is by
+#  official image index, never positional prefix."
+value = """
+STAGE3_PLAN.md Freeze 2. Populations: official corpus 60,000; CNN weight-fit
+54,000; CNN validation 6,000; ridge CV and final refit 60,000. The 6k are
+held out from CNN gradient updates only, not from training-side analysis."""
+production_consumers = """
+Both production drivers, and they are the only two that carry a population:
+encode_stage3_local.py::N_OFFICIAL_TRAIN = 60_000, with the 54,000/6,000
+split asserted at the point the index arrays are built (fit_indices.size ==
+54_000, validation_indices.size == 6_000); and
+run_ladder_stage3.py::EXPECTED_N = 60_000, which the corpus and role checks
+read. No third consumer: the ridge and CNN modules take their row counts from
+the arrays they are handed rather than from a constant of their own, so these
+two constants are the common propagation point rather than two of several."""
+status = "enforced"
+enforcement = "tests/test_stage2b_ladder_stage3.py::test_roles_match_the_locked_partition"
+break_demonstrated = """
+The production constants moved to 54,000 -- Desktop's withdrawn
+recommendation, so the break is the specific wrong value this freeze exists
+to exclude rather than an arbitrary one. Four tests FAIL across both drivers:
+test_corpus_constants, test_evolve_chunk_divides_the_corpus_exactly,
+test_roles_match_the_locked_partition, and
+test_the_declared_population_is_the_official_training_split. Causal evidence
+on the production values' propagation: the chunk-division and role-sum tests
+fail because quantities DERIVED from the constant stop agreeing, not because
+a literal stopped equalling itself."""
+provenance_of_use = """
+The 2026-08-08 stage-3 run's artifacts are (60000, ...) in both axes that
+carry the population, and the encoded array's manifest records shape and the
+producing commit. The regeneration acceptance path
+(compare_stage3_regeneration.py) joins old to new BY OFFICIAL INDEX rather
+than positional prefix, which is the second half of this freeze and is what
+makes the population claim checkable at all -- a positional join would agree
+on a prefix whatever the populations were."""
+trigger = "ci-fast"
+
+[binding_value.7ff6b43436c6]
+# Freeze 1 -- analytic audit tolerance, M = 100, sign convention.
+value = """
+STAGE3_PLAN.md Freeze 1, frozen into AUDIT_PROTOCOL.md: d = 1.151190e-12
+propagated through the metric; |Delta MSE| <= 2d + d^2; contrast 4d + 2d^2;
+pair ordering 4d + 2d^2 when the shared `pre` term cancels algebraically,
+else 8d + 4d^2. Safety factor M = 100 -> 4.604761e-10 (contrast),
+9.209522e-10 (4-term pair). Sign convention: Delta_g = MSE_evolved_g -
+MSE_pre, negative = improvement."""
+production_consumers = ""   # the audit driver is unwritten
+status = "pending_consumer"
+pending_reason = """
+Same state as b682b6af449a (M = 100), which is one input to these numbers:
+the tolerances are frozen for the amendment-impact audit driver, and that
+driver does not exist. production_consumers is empty, not unknown, and stays
+empty until it is written. Deliberately NOT merged with b682b6af449a --
+that clause freezes the safety factor, this one freezes the derived
+tolerances and the sign convention, and one disposition covering two clause
+ids is the collision check_ids_unique refuses."""
+enforcement = ""
+break_demonstrated = ""
+trigger = "manual"
+
+[binding_claim.0771659e4158]
+# Freeze 5 -- the dirty-tree claim, narrowed to four permitted statements.
+locator = "STAGE3_PLAN.md, section 'Freeze 5 -- the dirty-tree claim, narrowed'"
+obligation = """
+About Phase A's provenance, state ONLY: (a) the recovered script matches the
+later commit; (b) provenance for the other participating modules is
+unavailable; (c) payload identity under the clean fingerprinted regeneration
+is strong EMPIRICAL evidence of computational equivalence; (d) the
+regenerated artifact, not the old one, is the authoritative Phase A input
+going forward. The stronger claim -- that the script which ran is provably
+the committed one -- may not be made: without a launch-time source hash,
+matching bytes establish only that CURRENT bytes match the later commit."""
+status = "pending_package"
+pending_reason = """
+The Stage 2B readiness package is not assembled. This obligation binds what
+the package's provenance section may assert, and there is no such section to
+point at yet. Distinct from `unresolved`: nothing here needs a reviewer's
+judgement, it needs the artifact to exist."""
+negative_attestation = """
+Scoped to the output set this obligation ranges over: any statement about
+Phase A's provenance in the Stage 2B readiness package, FINDINGS.md, and
+STAGE3_PLAN.md. Not yet attestable -- the package does not exist, and an
+attestation over an output set with a missing member would be exactly the
+thing this field exists to prevent, a compliant sample standing in for
+coverage. The two documents that DO exist are the ones this row must sweep
+when the package lands; recording that scope now, before the writing, is
+what stops the sweep being defined afterwards to match what was written."""
+
+# =============================================================================
+# binding_claim -- obligations on what may be CLAIMED
+# =============================================================================
+#
+# No code path can enforce these, and pretending one could is the failure the
+# whole requirement exists to prevent. They are discharged by a person reading
+# the package before it ships.
+#
+# `pending_package` is used in preference to `not_applicable` throughout,
+# deliberately, and the reason is the same one that governs the not_binding
+# section: pending_package FAILS readiness with a reason, not_applicable
+# passes silently. Several rows below could be argued not-applicable on the
+# grounds that their triggering condition has not arisen -- no audit number
+# exists yet, so nothing can yet have been claimed wrongly about one. That
+# argument is true today and stops being true the moment the audit runs, and
+# a disposition that quietly expires is worse than one that fails loudly.
+
+[binding_claim.0ac873652382]
+locator = "AUDIT_PROTOCOL.md, section 'Status'"
+obligation = """
+Nothing in AUDIT_PROTOCOL.md may be changed once an audit number has been
+seen. Its purpose is to fix, in advance, what will be measured, what the
+numerical resolution limit is, and what consequences follow -- so that none
+of those can be chosen after the fact to suit a result."""
+status = "pending_package"
+pending_reason = """
+The obligation constrains edits AFTER the first audit number exists. The
+audit driver is unwritten and no audit number exists, so the constraint has
+not yet been tested by anything. Filed pending rather than not_applicable on
+purpose: not_applicable would pass silently and would become false the day
+the audit runs, and a disposition that expires quietly is worse than one
+that fails loudly."""
+negative_attestation = """
+Scoped to the commit history of AUDIT_PROTOCOL.md from the first audit
+result onward. That set is currently EMPTY, which is why the attestation is
+cheap now and will not be later -- recording the scope before the audit is
+what stops it being drawn afterwards around whatever edits happened. The
+check at package time is mechanical: no commit touching this file may be
+dated after the first audit artifact."""
+
+[binding_claim.8bfce59ab9b4]
+locator = "AUDIT_PROTOCOL.md, section 'What this audit is for'"
+obligation = """
+The audit is NOT a model-selection knob. The 1,200-step budget stays frozen
+regardless of every number the audit produces. What may change as a result is
+the SCOPE OF THE CLAIM, never the budget."""
+status = "pending_package"
+pending_reason = """
+Binds the write-up of an audit that has not run. The package section that
+would carry the audit's consequences does not exist."""
+negative_attestation = """
+Scoped to every statement about ENCODER_STEPS in the readiness package,
+FINDINGS.md, and any post-audit amendment to DESIGN.md. The prohibited claim
+is any that presents an audit number as a reason the budget changed. Note
+the asymmetry that makes a single compliant paragraph insufficient here: the
+budget is a NUMBER appearing in many places, and a revised number needs no
+sentence justifying it -- a silent edit satisfies every positive statement in
+the document while violating this clause completely. The check is therefore
+on the value, not on the prose about it."""
+
+[binding_claim.43bd4727af02]
+locator = "AUDIT_PROTOCOL.md, section 'Prediction basis'"
+obligation = """
+In-sample MSE from a full refit is descriptive only and never feeds a
+trigger: a refit can absorb representational change into its own
+coefficients, making it a weak and potentially misleading measure of
+amendment impact."""
+status = "pending_package"
+pending_reason = "the audit results section does not exist yet"
+negative_attestation = """
+Scoped to the audit results write-up and to any trigger evaluation recorded
+in the package. The prohibited use is an in-sample figure appearing as
+EVIDENCE FOR OR AGAINST a trigger, as opposed to appearing beside one as
+description. Those two are hard to tell apart by reading a number in a
+table, so the attestation at package time is on the trigger derivation
+specifically -- each of the three triggers must be traceable to OOF
+quantities alone."""
+
+[binding_claim.401e479ff86c]
+locator = "AUDIT_PROTOCOL.md, section 'Alpha regimes'"
+obligation = """
+Required in the results write-up: per-budget fold-fitted StandardScalers are
+retained, because that is the production preprocessing, so fixed-alpha
+isolates THE EFFECT OF ALPHA RESELECTION and does not completely isolate raw
+representation change. A shared-scaler comparison is optional secondary work
+and must not be presented as the primary probe."""
+status = "pending_package"
+pending_reason = "the results write-up does not exist yet"
+negative_attestation = """
+Scoped to the audit results write-up. Two prohibited claims, not one: that
+fixed-alpha isolates raw representation change, and that a shared-scaler
+comparison is the primary probe. Both are ABSENCES of a qualification rather
+than positive statements, which is why a compliant paragraph elsewhere
+cannot discharge this -- the violation is a sentence that omits the caveat,
+and omissions do not announce themselves."""
+
+[binding_claim.e059e4e4a041]
+locator = "AUDIT_PROTOCOL.md, section 'Metrics'"
+obligation = """
+Aggregation is per-image first, then distribution: median, p95, max. Ungauged
+distances are secondary diagnostic only and never trigger-defining. No metric
+may be added or dropped after results exist."""
+status = "pending_package"
+pending_reason = "the audit metrics table does not exist yet"
+negative_attestation = """
+Scoped to the audit's metric set as recorded in the package. The
+add-or-drop clause is the one needing an attestation rather than a citation:
+it is violated by a DIFFERENCE between two states of the document, so no
+single version of the package can evidence compliance. The check is the
+metric list at package time against the metric list frozen here, both
+directions, with the freeze commit named."""
+
+[binding_claim.f18749c28dd0]
+locator = "COMPANION_PROTOCOLS.md, section 'Status'"
+obligation = """
+Nothing in COMPANION_PROTOCOLS.md may be changed once a result from either
+protocol has been seen. What each protocol measures, how its inputs are
+constructed, and what consequences follow are fixed in advance."""
+status = "pending_package"
+pending_reason = """
+Neither companion protocol has produced a number, so the constraint has not
+been tested. Same shape as 0ac873652382 for AUDIT_PROTOCOL.md, and
+dispositioned separately because they are separate documents with separate
+histories -- one row covering both would be a single disposition over two
+clause ids."""
+negative_attestation = """
+Scoped to COMPANION_PROTOCOLS.md's commit history from the first result of
+EITHER protocol onward. Currently empty. The check is mechanical: no commit
+touching this file dated after the first stress-set or sensitivity-table
+artifact."""
+
+[binding_claim.aa0198915e6b]
+locator = "COMPANION_PROTOCOLS.md, section 'ARM/x86 propagation stress set'"
+obligation = """
+The stress set is built to be adversarial, so its numbers are an UPPER BOUND
+on propagation and are not representative of the corpus. It is not a random
+sample and must never be reported as one."""
+status = "pending_package"
+pending_reason = "the propagation stress set has not been run"
+negative_attestation = """
+Scoped to every presentation of a propagation figure in the readiness
+package and FINDINGS.md. The prohibited claim has a quiet form worth naming:
+reporting a stress-set number WITHOUT its qualification reads as a corpus
+statistic to anyone who does not already know the set is adversarial. So the
+attestation is that every such figure carries the upper-bound framing at the
+point it appears, not that a caveat exists somewhere in the document."""
+
+[binding_claim.81d50983153e]
+locator = "COMPANION_PROTOCOLS.md, section 'What to report'"
+obligation = """
+All five propagation stages -- encoding, evolved features per graph,
+prediction, per-image MSE, evolved-minus-pre contrast -- reported always,
+whatever any one of them shows. Reporting only the stages that stayed small
+would make the chain unreadable."""
+status = "pending_package"
+pending_reason = "no propagation measurement exists to report"
+negative_attestation = """
+Scoped to the propagation section of the package. This is a completeness
+obligation, so the failure is a MISSING row rather than a wrong one, and
+nothing in a written section reveals what was left out of it. The check is
+the reported stage list against the frozen five, both directions."""
+
+[binding_claim.c188b4e50c99]
+locator = "COMPANION_PROTOCOLS.md, section 'Where component A comes from'"
+obligation = """
+Component A was measured on the stage-1 corpus, not the stage-3 one. If the
+per-image differences are not recoverable from the record, A is regenerated
+by encoding the stress set's other components on both architectures and is
+then reported AS REGENERATED, with the substitution stated -- never silently
+replaced by a different rule."""
+status = "pending_package"
+pending_reason = "the stress set has not been constructed"
+negative_attestation = """
+Scoped to component A's provenance statement in the package. The prohibited
+outcome is a substitution that happened and was not disclosed, which by
+construction leaves no trace in the artifact -- a regenerated A and a
+recovered A look identical. So the attestation must rest on the
+CONSTRUCTION record (which branch of the rule ran), not on inspection of
+the number."""
+
+[binding_claim.0059f193dfec]
+locator = "COMPANION_PROTOCOLS.md, section 'ABS_CONV_EPS sensitivity table'"
+obligation = """
+ABS_CONV_EPS does not change as a result of this table, on the same footing
+as AUDIT_PROTOCOL.md's frozen 1,200-step budget. What may change is the
+scope of the claim made about the gate."""
+status = "pending_package"
+pending_reason = "the sensitivity table has not been produced"
+negative_attestation = """
+Scoped to ABS_CONV_EPS's value in stage2b_encoder_gate.py and to every
+statement about it in the package. Same asymmetry as 8bfce59ab9b4: the
+constant is a NUMBER, and a revised number needs no sentence justifying it,
+so a silent edit violates this while leaving every positive statement in the
+document true. The check is on the value against its frozen literal, not on
+the prose about it."""
+
+[binding_value.ec37e874562c]
+# "Cap on component B, frozen here because the count is not yet known."
+value = """
+COMPANION_PROTOCOLS.md: if more than 500 images have final-Delta > 0, take
+the 500 largest by final-Delta, ties broken by official index ascending, and
+record both the cap and the true count. The 54,000-image run measured 79
+(0.146%), so the cap is expected to be INERT; it exists so the set size
+cannot be decided after seeing the number."""
+production_consumers = ""   # the stress-set builder is unwritten
+status = "pending_consumer"
+pending_reason = """
+The ARM/x86 stress-set construction does not exist. production_consumers is
+empty and stays empty until it does. Worth noting what makes this row
+unusual: the value is expected never to bind (79 << 500), which is precisely
+why it had to be frozen in advance -- a cap chosen after seeing the count is
+not a cap, and one that never fires is indistinguishable from one that was
+never set unless the freeze predates the measurement."""
+enforcement = ""
+break_demonstrated = ""
+trigger = "manual"
+
+# =============================================================================
+# not_binding -- candidates that are prose about something else
+# =============================================================================
+#
+# THE FRICTIONLESS ESCAPE, named here so a reviewer can audit for it. A
+# `not_binding` row needs one field and produces zero findings, while every
+# binding kind demands six or seven and can fail. With 83 rows left and a red
+# readiness signal, this section is the path of least resistance, and no check
+# in `gate_inventory.py` can distinguish an honest disposition from a
+# convenient one -- the anti-gaming clause it quotes covers moving a clause
+# BETWEEN binding kinds, not dropping it out of them.
+#
+# So the reasons here are written to a fixed shape rather than freely: each
+# opens with the category of prose the sentence actually is --
+#
+#     NARRATION      a past incident, error, or how a decision was reached
+#     RATIONALE      why a choice was made; the argument behind a freeze
+#     RESULT         what a run or check measured
+#     PLAN           forward-looking sequencing or a recommendation
+#
+# -- and then says where the binding content lives, when the surrounding
+# passage has any. A reviewer scanning this section is looking for a reason
+# that fits none of those four shapes, or one whose "binds at X" pointer
+# names nothing. That is a cheaper audit than re-reading 89 sentences, which
+# is the point of constraining the shape at all.
+
+[not_binding.1aa42e6ea102]
+reason = """
+RESULT: reports the cross-architecture bit-reproducibility measurement made
+before any stage-3 artifact was written (Colab-to-Colab bit-exact, Mac-to-Mac
+bit-exact, <=3 ULP across architectures). It states what was measured, not
+what the system must do. The obligation the measurement was taken to satisfy
+-- disclose a post-lock execution change before acting on it -- binds at
+DESIGN.md's Review history."""
+
+[not_binding.24013b62d98c]
+reason = """
+RATIONALE: the argument that the cross-architecture difference cannot
+amplify -- the encoder is a contraction toward a fixed point, and the
+downstream solver's rtol=1e-6 sits eight orders above the difference. An
+analytic justification for why the measured result above is tolerable. It
+commits the system to nothing; the tolerance it justifies is the solver's,
+set elsewhere."""
+
+[not_binding.76afced21901]
+reason = """
+RATIONALE: why the scaler-centering tolerance has the anchor and exponent it
+has -- 1e-9 measured with a 12.7x margin, 0.5 chosen because the mechanism
+implies sqrt(n) and that upper-bounds the measured 0.405. The gate itself,
+with the formula this paragraph argues for, binds at DESIGN.md:345
+(eaa2db103093)."""
+
+[not_binding.ddc8d96d73d7]
+reason = """
+NARRATION: the Review history -- seven drafts, four ChatGPT rounds, the
+Fable-5 and Grok reviews, and each post-lock amendment in sequence. A record
+of how the document reached its current state. Every amendment it lists is
+binding where the amendment is WRITTEN (the grid extension at DESIGN.md:284
+and :664, the scaler tolerance at :345, ENCODER_STEPS at :144); this
+paragraph is the index to them, not a second statement of them."""
+
+[not_binding.93cd3bded6d5]
+reason = """
+RATIONALE: the textual and arithmetic case for reading 'full training' as
+60,000 -- DESIGN.md:479's explicit definition, :492's 48,000 = 0.8 x 60,000,
+and the counter-argument from role labels. The argument that produced
+Freeze 2; the population it argues for binds at STAGE3_PLAN.md:354
+(8bf414d720f2)."""
+
+[not_binding.ef1b61b7eac3]
+reason = """
+NARRATION: how the 54k-vs-60k question was decided -- Desktop withdrawing its
+recommendation, ChatGPT's independent agreement, and why it was resolved
+explicitly rather than by convenience. The decision binds at Freeze 2
+(8bf414d720f2); this records the process that reached it."""
+
+[not_binding.02dbbe96e032]
+reason = """
+NARRATION: the Q1 answer restated in the decisions summary. Same content as
+ef1b61b7eac3 one section later; binds at Freeze 2 (8bf414d720f2). Listed
+separately because it is a separate paragraph with its own id, and merging
+two ids under one disposition is exactly the id-collision failure
+check_ids_unique exists to refuse."""
+
+[not_binding.bef10704fe47]
+reason = """
+NARRATION: a past error traced to its origin -- briefing items 3 and 4
+contradicted each other because Desktop's first message described Phase A as
+'full 60,000-image encoding' when it was 54,000, and the audit scope was
+built on that. A record of how a defect entered and where; it imposes nothing
+on the system."""
+
+[not_binding.c6b46028d99b]
+reason = """
+NARRATION: what was lost in relay between reviewers -- two of three audit
+triggers dropped, a FINDINGS correction that reached nobody, two of four
+justification axes. A record of specific past omissions. Each item it names
+is REINSTATED somewhere binding (all three triggers at AUDIT_PROTOCOL.md:183,
+the four axes at COMPANION_PROTOCOLS.md:156); this is the list of what had to
+be put back, not the putting back."""
+
+[not_binding.983786ebaabb]
+reason = """
+NARRATION: 'I computed both readings from the stored artifacts' -- the
+working behind the tolerance, shown so the reading that was adopted can be
+distinguished from the one that was not. The tolerance it produced binds at
+Freeze 1 (7ff6b43436c6)."""
+
+[not_binding.fe7dddf03cdd]
+reason = """
+NARRATION: a superseded recommendation and why it was wrong -- exact zeros in
+a difference of two independently-computed aggregates are the symptom of
+cancellation, not evidence of agreement. Disclosed rather than deleted. What
+replaced it, the analytic bound, binds at Freeze 1 (7ff6b43436c6)."""
+
+[not_binding.c0af1bf62c60]
+reason = """
+NARRATION: discloses that Phase A ran from a dirty tree and states precisely
+what the recovered bytes do and do not establish. A disclosure of a
+provenance gap. The constraint it produces -- what may be CLAIMED about that
+run -- binds at Freeze 5 (0771659e4158), which is dispositioned as an
+obligation on the write-up rather than here."""
+
+[not_binding.958a90f98dc2]
+reason = """
+RESULT: reports a verification already performed -- Phase A's corruption RNG
+consumed official dataset indices, confirmed by recomputing epsilon_for under
+both hypotheses at rows 0 / 27000 / 53999, with the note that row 0 alone
+would have been vacuous. It reports 'No halt'. The halt condition it reports
+against is stated where the gate is, not here."""
+
+[not_binding.9866f9da1eb1]
+reason = """
+NARRATION: 'All four were adopted' -- records which of the reviewed options
+became freezes. An index line. Each of the four binds where it is written
+(Freeze 2, Q4, Freeze 1/Q3, Q5)."""
+
+[not_binding.f5e145d34109]
+reason = """
+RESULT: reports how much negative-path evidence already existed at the time
+of writing -- four of the reviewer's five demands covered by named tests,
+only stale-artifact refusal outstanding. A status report, now itself
+superseded: demand 5 was closed by the fingerprint refusal guards. The
+obligation to produce that evidence is the reviewer's demand, not this
+sentence."""
+
+[not_binding.2b3de08a8e87]
+reason = """
+PLAN: the seven-item work programme and its dependency order. Sequencing --
+what to build and in what order -- not a commitment the system must keep.
+Each item's own obligations bind where they are stated; item 4's protocol
+freezes, for instance, bind in AUDIT_PROTOCOL.md and COMPANION_PROTOCOLS.md
+rather than in this list of them."""
+
+[not_binding.6e3cd29f9310]
+reason = """
+PLAN: an implementation note for unbuilt Phase B work -- kappa_alpha needs
+s_max and s_min as absolute magnitudes, a ratio cannot be un-divided, and the
+per-fold fit object is discarded, so compute for all alphas and column-index
+after, or retain the fits. It recommends ('Recommend the former') rather than
+requiring. Note also that it says 'all nine alphas', written before the grid
+was extended to thirteen -- a sign of how much of this document is
+contemporaneous narration rather than standing obligation."""

@@ -320,11 +320,12 @@ STAGE2B_TEST_FILES := tests/test_stage2b_corruption.py tests/test_stage2b_encode
                       tests/test_stage2b_negative_path_evidence.py \
                       tests/test_stage2b_encode_stage3_local.py \
                       tests/test_stage2b_compare_stage3.py \
-                      tests/test_stage2b_ladder_stage3.py
+                      tests/test_stage2b_ladder_stage3.py \
+                      tests/test_stage2b_gate_corpus.py
 
 .PHONY: stage2b-test
 stage2b-test:  ## Run the Stage 2B test suite (fast only; the Colab round trip is excluded)
-	cd $(REPO_ROOT) && uv run pytest $(STAGE2B_TEST_FILES) -m "not slow" -q
+	cd $(REPO_ROOT) && uv run --group gpu pytest $(STAGE2B_TEST_FILES) -m "not slow" -rs -q
 
 # The round trip is the only Stage 2B test that leaves this machine: it
 # provisions a real Colab CPU runtime, writes an object to GCS from it,
@@ -372,7 +373,7 @@ stage2b-test-roundtrip:  ## Real Colab+GCS round trip -- provisions a CPU runtim
 
 .PHONY: test
 test:  ## Run the whole default suite (every stage, slow reproduction checks excluded)
-	cd $(REPO_ROOT) && uv run pytest tests/ -m "not slow" -q
+	cd $(REPO_ROOT) && uv run pytest tests/ -m "not slow" -rs -q
 
 ##@ Stage 2B verification against real infrastructure
 
@@ -590,6 +591,24 @@ stage2b-annotate-report:  ## Annotate a stage-3 run report (RUN_ID=... required;
 	cd $(REPO_ROOT) && $(GCS_ENV) \
 		uv run --group gpu python $(STAGE2B_DIR)/annotate_run_report.py \
 			--run-id $(RUN_ID) $(ANNOTATE_ARGS)
+
+# Reconciles every binding clause in the frozen Stage 2B protocol corpus
+# against the code that enforces it. Local, read-only, no bucket and no
+# GPU. Exits non-zero while any candidate is undispositioned or any row is
+# incomplete -- so a red exit here is the normal state until the inventory
+# is finished, not a broken target.
+#
+# It goes through gate_corpus.py rather than calling the reconciler with a
+# doc list written out here, because WHICH documents are scanned is itself
+# load-bearing: 89 is a fact about four specific files, and a doc list in a
+# recipe is a hand-maintained set nobody checks. gate_corpus.py asserts its
+# corpus against the documents on disk, in both directions, before the
+# reconciler runs.
+.PHONY: stage2b-gate-inventory
+stage2b-gate-inventory:  ## Reconcile the Stage 2B binding-clause inventory against enforcing code (local, read-only)
+	cd $(REPO_ROOT) && \
+		uv run python $(STAGE2B_DIR)/gate_corpus.py \
+			--inventory $(STAGE2B_DIR)/gates.toml $(GATE_ARGS)
 
 .PHONY: stage2b-ladder-stage2
 stage2b-ladder-stage2:  ## Run Stage 2B ladder stage 2 (n=5,000, CNN development) on a Colab GPU -- bills while running

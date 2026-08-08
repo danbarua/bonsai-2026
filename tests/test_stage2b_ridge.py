@@ -718,6 +718,84 @@ def test_ridge_equivalence_check_reports_coefficient_diff_as_diagnostic_only():
     assert result["passed"] == (result["pred_agrees"] and result["alpha_agrees"])
 
 
+# ---- the equivalence gate's negative path ------------------------------
+#
+# Found by the binding-clause inventory, which is what that exercise is
+# for. Every test above this point is a PASS-side test: replacing the
+# `passed` expression with a literal `True` left all 142 tests in this
+# file and `test_stage2b_ladder_stage3.py` green. The gate was implemented
+# and reachable and had no test that it could fail -- one step milder than
+# the incident the inventory exists for, where the halt was documented and
+# never implemented at all.
+#
+# Note why the test directly above did NOT catch it, since it looks like
+# it should: `passed == (pred_agrees and alpha_agrees)` holds trivially
+# when both operands are True, which they are on any fixture the gate
+# passes. An identity checked only where both sides are true tests
+# nothing about the operator between them.
+
+def test_the_equivalence_gate_fails_when_predictions_exceed_the_tolerance():
+    """Condition (a): max abs clipped prediction difference <= tol.
+
+    Driven by tightening `tol` below the real measured difference rather
+    than by corrupting one of the two paths. The two solvers genuinely
+    disagree at the float64 level, so this exercises the comparison on a
+    real, non-zero quantity -- and the first assertion is what keeps it
+    honest: at an exactly-zero difference the gate would pass at any
+    positive tolerance and this test would be vacuous.
+    """
+    X, Y, y = _synthetic_regression(n=300, p=35, k=10, seed=10)
+    baseline = ridge.ridge_equivalence_check(X, Y, y)
+    assert baseline["max_abs_clipped_pred_diff"] > 0.0, (
+        "the two paths agree exactly, so tightening the tolerance cannot "
+        "make this gate fail -- the test would prove nothing")
+
+    result = ridge.ridge_equivalence_check(
+        X, Y, y, tol=baseline["max_abs_clipped_pred_diff"] / 2.0)
+    assert result["pred_agrees"] is False
+    assert result["passed"] is False
+    assert result["alpha_agrees"] is True, (
+        "only condition (a) should have been broken here")
+
+
+def test_the_equivalence_gate_fails_when_alpha_selection_disagrees(monkeypatch):
+    """Condition (b): identical alpha selection.
+
+    Structurally unreachable by construction -- both paths call the same
+    `select_alpha`, which is deliberate (a separately written argmin would
+    test the selection rule against a reimplementation of itself, which is
+    principle 16's failure). So the disagreement is injected: the second
+    call returns a different alpha, leaving predictions untouched.
+
+    Worth having despite being unreachable today, because "unreachable"
+    is a property of the current implementation. If the oracle ever grows
+    its own selection path, this is the test that says whether the gate
+    still notices.
+    """
+    real = ridge.select_alpha
+    calls = {"n": 0}
+
+    def alternating(mean_val_mse, *args, **kwargs):
+        calls["n"] += 1
+        chosen, index = real(mean_val_mse, *args, **kwargs)
+        if calls["n"] % 2 == 0:            # the oracle's selection only
+            other = next(i for i, a in enumerate(ridge.ALPHA_GRID)
+                         if a != chosen)
+            return float(ridge.ALPHA_GRID[other]), other
+        return chosen, index
+
+    monkeypatch.setattr(ridge, "select_alpha", alternating)
+    X, Y, y = _synthetic_regression(n=300, p=35, k=10, seed=10)
+    result = ridge.ridge_equivalence_check(X, Y, y)
+
+    assert calls["n"] == 2, "both paths should have selected exactly once"
+    assert result["alpha_jax"] != result["alpha_sklearn"]
+    assert result["alpha_agrees"] is False
+    assert result["pred_agrees"] is True, (
+        "only condition (b) should have been broken here")
+    assert result["passed"] is False
+
+
 # ---- out-of-fold per-image error (AUDIT_PROTOCOL.md's prediction basis) ----
 
 def test_unequal_fold_fixture_really_has_unequal_folds():

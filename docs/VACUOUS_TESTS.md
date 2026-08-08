@@ -40,6 +40,8 @@ claim the rest of this repository's discipline exists to prevent.
 | 16 | 08-08 | `4b1a23b` | The capture hook's whole test suite drove `capture.py` directly and asserted nothing about whether `.claude/settings.json` causes it to run — registrations load at session start, so an already-running session captured nothing, silently | live firing |
 | 17 | 08-08 | `4173bf7` | The test for a *missing halt* grepped `step7_ridge`'s source for the `halt_reasons.append(...)` call — which survives when the branch guarding it is disabled by `if False:`. Green against the broken code | deliberate breakage |
 | 18 | 08-08 | `c6e0312` | Not a test: the capture predicate emitted a `piped_into_remote_exec` record for a command that shipped nothing (a `grep` alternation split on `\|`), and a coverage claim was drawn from it | peer read the record |
+| 19 | 08-08 | `8017225` | All three tests of the ridge equivalence gate were pass-side; hardcoding `passed = True` left 142 tests green. The one that asserted the composition, `passed == (pred_agrees and alpha_agrees)`, held trivially because the fixture makes both operands true | building the gate inventory |
+| 20 | 08-08 | `bff25eb`+ | "The driver joins through the shared helper" was `"partition.index_join(" in source`. Replacing all three joins with a hand-rolled positional one and leaving the old call in a comment left it green — the exact substitution the clause forbids | building the gate inventory |
 
 Two near-misses belong here too, because they were caught *before* becoming
 tests:
@@ -87,6 +89,29 @@ The general rule this project now applies to mappings as well as tests:
 predicate, a symbol reference, a grep — none of them establish that the
 predicate can reject anything. Only a demonstrated failure does.
 
+**#20 is #17 again, three days later, in a different file** — and the
+recurrence is the finding. `test_the_driver_joins_through_the_shared_helper`
+asserted `"partition.index_join(" in source`. Replacing all three of the
+driver's joins with a hand-rolled positional one and leaving the old call
+behind in a comment left it green: `AUDIT_PROTOCOL.md`'s "never by
+positional prefix" violated exactly, by the substitution principle 16
+names, with the guard reporting success.
+
+A comment satisfies a substring search. That is the whole mechanism, and
+it is why the fix is not a better pattern but a different instrument:
+**resolve from the AST, where comments and strings do not exist.** The
+rewritten test walks the driver's tree for `Call` nodes naming
+`index_join`, counts them, and checks their enclosing functions against
+the transitive closure of what `main()` calls.
+
+That last part earned its keep immediately. Two of the three assertions
+were confirmed by breaks that hit the *count* check first, which meant
+the reachability assertion was an untested guard living inside a tested
+test — the recursion one level down. A third break was constructed
+specifically for it: all three joins present, all inside a helper nothing
+invokes. **When one assertion shadows another, the shadowed one has not
+been demonstrated, whatever the test's overall red/green says.**
+
 **B. The predicate cannot match.** Session incidents: `perl` patterns that
 matched nothing; `line.startswith("FAILED")` against pytest output that
 was ANSI-coloured, so every line began with an escape sequence. A filter
@@ -103,9 +128,39 @@ was real code that would work — but the whole-payload digest ran earlier
 and caught every corruption the test could inject, so the per-array check
 was never reached. Deleting it broke nothing.
 
-**E. The fixture cannot discriminate.** The row-0 near-miss. The test runs,
-the assertion is evaluated, and it would pass under the hypothesis being
-rejected as well as the one being confirmed.
+**E. The fixture cannot discriminate.** The row-0 near-miss, and #19. The
+test runs, the assertion is evaluated, and it would pass under the
+hypothesis being rejected as well as the one being confirmed.
+
+**#19 is the form to watch for, because it is the one that looks like
+coverage.** DESIGN.md's ridge equivalence gate has two conditions —
+prediction agreement within `1e-8`, and identical alpha selection — and
+three tests. Replacing the gate's verdict with a literal `True` left all
+142 tests in `test_stage2b_ridge.py` and `test_stage2b_ladder_stage3.py`
+green. Every test was a pass-side test: each ran the gate on data it
+passes and checked that it passed.
+
+One of them was written to pin the composition itself:
+
+```python
+assert result["passed"] == (result["pred_agrees"] and result["alpha_agrees"])
+```
+
+That is precisely the relationship the break destroys, and it stayed
+green — because on any fixture the gate passes, all three values are
+`True`, and `True == (True and True)` holds no matter what the operator
+between them is. **An identity checked only where every side is true
+tests nothing about the operator.** It is category E with an assertion
+that reads like a specification: the shape of the claim is right, the
+fixture flattens it.
+
+The general form: *a gate's tests all run it on data it accepts.* Nothing
+in a green suite distinguishes that from a gate that cannot reject
+anything, and #19 was found by a process asking a different question —
+requirement 4's per-clause demand for evidence the test flips red under a
+deliberate disable. The fix is a negative case per gate CONDITION, not
+per gate: breaking `pred_agrees` alone must fail the prediction test and
+leave the alpha test green, or the two cases are one case written twice.
 
 **F. The narrowing is verified with the broader form.** #5, #13. This is
 the one that keeps biting, and it deserves its own statement:
@@ -244,6 +299,23 @@ already tuned to find.
 ---
 
 ## What actually catches them
+
+**A new one, twice in one session: building the gate inventory.** #19 and
+#20 were both found by requirement 4's per-clause demand for
+evidence the test flips red under a deliberate disable. Nobody was
+auditing either gate; in both cases the row could not be filled in
+honestly, and trying to fill it produced the break that exposed the hole.
+
+Worth naming separately from deliberate breakage because of what triggers
+it. Spot-breakage is aimed — somebody already suspects a guard. An
+inventory asks the same question at *every* clause, including the ones
+nobody thought to suspect, which is precisely the set review and
+spot-breakage miss by construction. Two hits in one session, on gates
+that had been green for weeks, is the argument for the exercise.
+
+The instrument is the demand for evidence, not the tool that files it.
+A reconciler can require a `break_demonstrated` field; only a person can
+decline to write something plausible into it.
 
 **Deliberate breakage, nine of eighteen.** Break what the guard watches;
 observe the specific expected failure. The corollary in CLAUDE.md
