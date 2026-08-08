@@ -296,6 +296,45 @@ export function parseFromSlugFromFilename(filename: string): string | undefined 
 }
 
 /**
+ * Sender name reserved for machine-generated notifications -- webhook
+ * deliveries and the like -- that nobody replies to.
+ *
+ * A convention, not a credential: `instance` is caller-supplied, so any
+ * session could claim this name. Same trust model as every other routing
+ * field in this mailbox.
+ */
+export const NO_REPLY_SLUG = "no-reply";
+
+/**
+ * Retires one consumed message: deletes it if it came from `no-reply`,
+ * otherwise moves it to `archiveDir` as usual.
+ *
+ * Webhook traffic is high-volume and worthless the moment it has been read.
+ * Archiving it would put it in the digest corpus, where `comm -13` counts it
+ * as undigested and every digest gets padded with CI notifications nobody
+ * will read a week later. Deleting keeps the archive what it is for: the
+ * conversation between agents.
+ *
+ * The test is FILENAME-derived on purpose. archiveMessageByFilename never
+ * opens the file -- it is handed a name -- so a content-based check could not
+ * be shared between the two call sites, and an unshared check means two
+ * implementations that drift (CLAUDE.md principle 16). One function, both
+ * call sites.
+ */
+export async function retireMessage(
+  filePath: string,
+  archiveDir: string,
+  filename: string,
+): Promise<void> {
+  if (parseFromSlugFromFilename(filename) === NO_REPLY_SLUG) {
+    await fs.unlink(filePath);
+    return;
+  }
+  await ensureDir(archiveDir);
+  await fs.rename(filePath, path.join(archiveDir, filename));
+}
+
+/**
  * Reads every `.md` file in `sourceDir` (the caller picks inbox or outbox
  * based on whose messages the reader wants -- see server.ts's role
  * mapping), oldest first (filenames sort chronologically). When `archive`
@@ -378,15 +417,15 @@ export async function readMailbox(
 
     messages.push({ filename, content, to, instance });
     if (archive) {
-      await ensureDir(archiveDir);
-      await fs.rename(filePath, path.join(archiveDir, filename));
+      await retireMessage(filePath, archiveDir, filename);
     }
   }
   return { messages, skipped };
 }
 
 /**
- * Moves ONE specific, named file from `dir` to `archiveDir`, unconditionally
+ * Retires ONE specific, named file from `dir` -- to `archiveDir`, or deleted
+ * if it came from `no-reply` (see retireMessage) -- unconditionally
  * -- no addressing or self-exclusion logic applies, since the caller is
  * explicitly naming the exact file to archive, not doing a bulk consuming
  * read. Exists specifically as the escape hatch for code2code's
@@ -421,8 +460,7 @@ export async function archiveMessageByFilename(
   } catch {
     return false;
   }
-  await ensureDir(archiveDir);
-  await fs.rename(filePath, path.join(archiveDir, filename));
+  await retireMessage(filePath, archiveDir, filename);
   return true;
 }
 
