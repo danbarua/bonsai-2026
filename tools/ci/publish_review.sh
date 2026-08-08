@@ -59,6 +59,15 @@ fail() {
     echo "successful one that published nothing. Both were observed the same"
     echo "day, and a green badge distinguished neither."
   } >> "$SUMMARY"
+
+  # ALSO to stderr, because the step summary is not where anyone looks first.
+  # Run 31281775221 failed here and `gh run view --log-failed` showed only
+  # `Process completed with exit code 1` -- the reason was on the summary
+  # page, one click away and invisible to every command-line debugger. A
+  # guard that explains itself somewhere nobody is reading has explained
+  # nothing.
+  echo "[publish_review] FAIL: $1" >&2
+
   exit 1
 }
 
@@ -155,13 +164,43 @@ fi
 
 # The contradiction. Two sources, one says nothing changed, the other names
 # files. Whichever is wrong, the review did not cover this PR.
-if [ "$no_tests" = "true" ] && [ "${n_changed:-0}" -gt 0 ]; then
-  fail "The review reported that NO test files changed, but GitHub lists
-${n_changed} changed test file(s) in this pull request. The likeliest cause is
-not a careless review: the action's injected file list is capped at 100 files
-and comes back EMPTY when a PR's diff is too large, and an empty list reads
-exactly like a PR that touched no tests. Re-run against a smaller PR, or
-review the listed files another way. Do not read this as a clean result."
+#
+# NARROWED 2026-08-08, on a false positive this guard produced against a
+# healthy run (31281775221).
+#
+# `no_tests_changed` carries two readings and its name settles neither:
+#
+#   CUMULATIVE   this pull request changed no test files
+#   INCREMENTAL  no test files changed SINCE THE LAST REVIEW
+#
+# This guard was written against the cumulative reading, and it was the only
+# reading available at the time — every review read the whole PR. Adding
+# `review_delta.sh` created the second one: on delta mode `none` the review
+# correctly reports nothing new, re-verifies its open findings, and sets the
+# flag in the incremental sense. GitHub then names every test file the PR has
+# ever touched, the two are compared, and a correct review fails the build.
+# Same shape as the `.filename`-at-`after` bug in the delta itself: a field
+# read correctly, answering a question nobody asked it.
+#
+# The discriminator is `files_examined`, NOT the flag. The failure this guard
+# exists for is a review whose injected file list came back EMPTY — a
+# too-large diff renders as "No files changed", indistinguishable from a PR
+# that touched nothing. A review in that state cannot have examined any test
+# file. So the contradiction only holds when the review ALSO examined none:
+# if it examined test files, it demonstrably had a list, and its flag is the
+# incremental reading rather than a blind spot.
+#
+# This narrowing does not weaken the truncation case, which is caught
+# independently above by the whole-PR file count.
+if [ "$no_tests" = "true" ] && [ "${n_changed:-0}" -gt 0 ] \
+   && [ "${n_test_files:-0}" -eq 0 ]; then
+  fail "The review reported that NO test files changed AND examined no test
+file, but GitHub lists ${n_changed} changed test file(s) in this pull request.
+The likeliest cause is not a careless review: the action's injected file list
+is capped at 100 files and comes back EMPTY when a PR's diff is too large, and
+an empty list reads exactly like a PR that touched no tests. Re-run against
+a smaller PR, or review the listed files another way.
+Do not read this as a clean result."
 fi
 
 # --- coverage: how much of the diff did it actually look at? ---------------
@@ -217,7 +256,14 @@ fi
   echo "## Vacuous-test review"
   echo
   if [ "$no_tests" = "true" ]; then
-    echo "No test files changed; nothing to review."
+    # Two different situations reach this branch, and conflating them in the
+    # headline is the same ambiguity that made the guard above misfire.
+    if [ "${n_test_files:-0}" -gt 0 ]; then
+      echo "No NEW test files changed since the last review. Re-verified"
+      echo "**$n_test_files** test file(s) carrying open findings."
+    else
+      echo "No test files changed; nothing to review."
+    fi
   else
     echo "Examined **$n_examined** test file(s). Findings: **$n_findings**."
     if [ -n "$coverage_note" ]; then

@@ -273,6 +273,36 @@ RC=$?
 expect_rc "no-tests-changed CONFIRMED by GitHub passes" 0
 check "says there was nothing to review" "nothing to review"
 
+# The INCREMENTAL reading, which this guard used to fail on. Run 31281775221:
+# delta mode `none`, so the review correctly reported no NEW test files since
+# its last pass, re-verified its open findings against four test files, and
+# found nothing. GitHub named 25 changed test files across the whole PR, the
+# two were compared, and a healthy review failed the build.
+#
+# `no_tests_changed` carries two readings -- cumulative ("this PR changed no
+# tests") and incremental ("none since my last review") -- and its name
+# settles neither. The discriminator is `files_examined`: a review whose
+# injected list came back EMPTY, which is the failure the guard exists for,
+# cannot have examined any test file. One that examined some demonstrably had
+# a list.
+
+INCREMENTAL_CLAIM='{"no_tests_changed":true,
+  "files_examined":["tests/test_a.py","tests/test_b.py"],"findings":[],
+  "summary":"Delta mode none; re-verified open findings, all still closed."}'
+run_cov "$INCREMENTAL_CLAIM"
+expect_rc "no-tests-changed WITH test files examined passes" 0
+check "says no NEW test files"        "No NEW test files"
+check "reports what it re-verified"   "Re-verified"
+
+# And the narrowing must not have switched the guard off: the same payload
+# with NOTHING examined still has to fail, or the empty-list failure this
+# whole section exists for would sail through.
+STILL_FAILS='{"no_tests_changed":true,"files_examined":["docs/VACUOUS_TESTS.md"],
+  "findings":[],"summary":"Nothing changed."}'
+run_cov "$STILL_FAILS"
+expect_rc "no-tests-changed with no TEST file examined still fails" 1
+check "still names the count"  "GitHub lists"
+
 # --- truncation: the file list capped at 100 without saying so ------------
 #
 # Measured on PR #23: 142 files changed, 34 under tests/, and all three
