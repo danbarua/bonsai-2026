@@ -1,11 +1,12 @@
 resource "google_project_service" "ci" {
   for_each = toset([
     "cloudbuild.googleapis.com",
-    "cloudscheduler.googleapis.com", # NOT currently enabled
-    "pubsub.googleapis.com",
     "logging.googleapis.com",
     "iam.googleapis.com",
   ])
+  # `cloudscheduler` and `pubsub` are gone with the poll. Nothing schedules
+  # a build and nothing publishes a message, so neither API is enabled --
+  # which is a stronger statement than a comment saying they are unused.
 
   project = var.project_id
   service = each.value

@@ -51,6 +51,41 @@ places and leave `equinox`, `optax` and `google-cloud-storage` unpinned in
 three others. None of these blocks CI, which cannot reach Colab by
 construction. All three block a second person setting up a machine.
 
+## SUPERSEDED: the poll, and the fast tier on every push
+
+**The scheduling design below was replaced before it ever ran.** `infra/` is
+what will exist; this section is kept because its reasoning is what the
+measurement contradicted, and deleting it would hide why.
+
+What changed, and the measurement that changed it. Agents run
+`make stage2b-test` habitually and locally, so a cloud run of the same suite
+on the same commit differs in exactly three ways: **Linux/x86** instead of
+macOS/ARM, a **clean checkout**, and a **record**. None of those change
+between one push and the next — so a per-push cloud run re-answers a
+question an agent answered minutes earlier, faster. Measured on this
+repository: **368 commits over 7 days, ~46 pushes/day**, which at any
+plausible per-build duration is roughly twice the free tier.
+
+The poll was the same error one level up: inferring "work has reached a
+coherent point" from elapsed time. A `stage2b-ci` branch **declares** it,
+and this project's whole discipline is that a derived or declared fact beats
+an inferred one.
+
+Dropping the poll also deleted the `decide` step and all three of its
+documented-unverified dependencies, `roles/cloudbuild.builds.editor` — the
+one over-broad role, and a spend path the spend guard could not see — a
+second service account, and five substitutions.
+
+Path filtering was measured and rejected: the intuitive ignore set would
+skip 39% of pushes, but twelve test files read those paths and `docs/` is
+directly tested. The set no test reads covers 2%.
+
+What replaced it: `bonsai-ci-checkpoint` on a push to `stage2b-ci` (reached
+by pull request, so the vacuous-test review sees the diff),
+`bonsai-ci-deps` on a `uv.lock`/`pyproject.toml` change — 2.0/day, and the
+only thing that catches an undeclared dependency, which this repository
+currently has — and `bonsai-ci-manual`.
+
 ## What runs
 
 `cloudbuild.yaml` has four steps: `decide`, `spend-guard`, `verify`,

@@ -1,57 +1,57 @@
 output "ci_runner_email" {
-  description = "Identity the fast and full tiers run as."
+  description = "The identity every trigger runs as. Holds roles/logging.logWriter and nothing else."
   value       = google_service_account.ci_runner.email
-}
-
-output "ci_poll_email" {
-  description = "Identity the gated tier runs as. The only one holding cloudbuild.builds.editor."
-  value       = google_service_account.ci_poll.email
 }
 
 output "triggers" {
   description = "Trigger ids, for gcloud."
   value = {
-    fast = google_cloudbuild_trigger.fast.trigger_id
-    full = google_cloudbuild_trigger.full.trigger_id
-    poll = google_cloudbuild_trigger.poll.trigger_id
+    checkpoint = google_cloudbuild_trigger.checkpoint.trigger_id
+    deps       = google_cloudbuild_trigger.deps.trigger_id
+    manual     = google_cloudbuild_trigger.manual.trigger_id
   }
 }
 
-output "poll_is_paused" {
-  description = "False means CI is spending on a schedule with nobody watching."
-  value       = google_cloud_scheduler_job.poll.paused
-}
-
 # The first-run sequence, emitted by apply so it survives without anyone
-# re-reading a document. Steps 1 and 2 are CI_CLOUDBUILD.md's first-run
-# protocol; step 3 is what asserts they were done.
+# re-reading a document.
 output "next_steps" {
-  description = "Run these in order. Do not skip to the last one."
+  description = "Run these in order. The first build is a measurement, not a formality."
   value       = <<-EOT
 
-    1. Run the full tier by hand and WATCH IT:
+    1. Create the checkpoint branch, once:
 
-         gcloud builds triggers run bonsai-ci-full \
-             --region=global --branch=${var.default_branch} --project=${var.project_id}
+         git branch ${var.checkpoint_branch} origin/stage2b
+         git push -u origin ${var.checkpoint_branch}
+
+       That first push fires `bonsai-ci-checkpoint`. WATCH IT.
 
        The suite has never run on Linux/x86. Expect the skip set to differ
-       and the vacuity check to fail -- that is the correct direction, and a
-       measurement rather than a defect. Regenerate the baseline from the
-       CI JUnit report, never from a developer checkout.
+       and the vacuity check to fail -- that is the correct direction and a
+       measurement, not a defect. Regenerate the baseline from the CI JUnit
+       report, never from a developer checkout. Read the build DURATION
+       while you are there: every cost figure in this design is arithmetic
+       on a constant nobody has measured.
 
-    2. Confirm the deadline rule can see that build:
+    2. Thereafter, checkpoint by PULL REQUEST:
 
-         gcloud builds list --project=${var.project_id} \
-             --filter="status=SUCCESS AND substitutions._TIER=full" \
-             --format='value(id,finishTime)'
+         gh pr create --base ${var.checkpoint_branch} --head stage2b
 
-       If this returns nothing, DO NOT unpause the poll. Filtering on a
-       substitution key is flagged unverified in CI_CLOUDBUILD.md; an empty
-       result means the deadline branch would fire on every single poll.
+       Not a direct merge. A direct push skips the vacuous-test review and
+       produces a green CI that nothing reviewed.
 
-    3. Only then, and only after watching one deliberate failure close:
+       What has not been checked yet is derived, not tracked:
 
-         terraform apply -var=poll_paused=false
+         git log ${var.checkpoint_branch}..stage2b --oneline
+
+    3. Watch one deliberate failure close before trusting a green. Break
+       something small, push it to ${var.checkpoint_branch}, see the build go
+       red, revert. `docs/proposals/CI_CLOUDBUILD.md`'s first-run protocol is
+       four requirements and creating triggers discharges none of them.
+
+    Run the full suite on demand at any time:
+
+      gcloud builds triggers run bonsai-ci-manual \
+          --region=global --project=${var.project_id}
 
   EOT
 }
