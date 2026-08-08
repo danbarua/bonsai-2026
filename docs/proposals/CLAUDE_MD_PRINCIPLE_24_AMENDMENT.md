@@ -1,13 +1,17 @@
 # Patch-in-waiting: give principle 24's forward reference a path
 
 **Target:** `CLAUDE.md`, principle 24, final sentence.
-**Status: APPLIED** (2026-08-08), on Dan's instruction. Principle 24's
-closing sentence now names `docs/proposals/PROVENANCE_CONTRACT.md`. Kept as
-the reasoning record.
+**Status: APPLIED** (2026-08-08), on Dan's instruction, then **AMENDED the
+same day** when the contract was promoted from a proposal to a working
+practice. Principle 24 now names `docs/PROVENANCE_CONTRACT.md`. Kept as the
+reasoning record.
 
-If the contract later moves out of `docs/proposals/` into `docs/`, the path
-in principle 24 moves with it — the amendment fixed a dangling citation, so
-leaving a new one behind would be its own punchline.
+The follow-up was anticipated here and is recorded rather than silently
+absorbed: this amendment existed to fix a dangling citation, so a move that
+left a new one behind would have been its own punchline. Every reference
+was re-derived by grep at promotion time — six of them, across `CLAUDE.md`,
+two hook files, a test docstring, a tool docstring and this file — rather
+than trusting that the author remembered where they all were.
 
 ## Why
 
@@ -19,11 +23,11 @@ Principle 24 currently ends:
 There is no such document, and no path. A reader following that pointer
 finds nothing. It is a dangling citation in the principle that exists to
 stop dangling citations — which is not a gotcha so much as evidence that
-the citation check in `docs/proposals/PROVENANCE_CONTRACT.md` §5 has real
+the citation check in `docs/PROVENANCE_CONTRACT.md` §5 has real
 work to do: this instance was written by a careful author, reviewed, and
 committed, and the gap still shipped.
 
-`docs/proposals/PROVENANCE_CONTRACT.md` is now that document.
+`docs/PROVENANCE_CONTRACT.md` is now that document.
 
 ## Proposed change
 
@@ -35,10 +39,14 @@ Replace the final sentence of principle 24:
 -    see the provenance contract (capture-at-birth, citation-at-use).
 +    The remedy for a captured scratch that turns out to matter is
 +    promotion to committed code — never citing the capture. Mechanics:
-+    `docs/proposals/PROVENANCE_CONTRACT.md` (capture-at-birth,
++    `docs/PROVENANCE_CONTRACT.md` (capture-at-birth,
 +    citation-at-use), which also records the measured hook-payload
 +    limits any capture mechanism has to work within.
 ```
+
+The path above is the final one. As first applied it read
+`docs/proposals/PROVENANCE_CONTRACT.md`; the document was promoted to
+`docs/` hours later and the citation moved with it.
 
 If and when the proposal is accepted and the document moves out of
 `docs/proposals/` into `docs/`, the path in this amendment moves with it.

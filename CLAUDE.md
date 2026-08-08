@@ -43,6 +43,14 @@ where a shared, hardened library actually earns its cost.
   a commit; teardown is unconditional and its status is read), and
   artifacts as the only durable interface between agents. Read it before
   driving a cloud session or delegating to a subagent.
+- **`docs/PROVENANCE_CONTRACT.md`** -- the mechanics principle 24 points
+  at: how load-bearing scratch is captured at birth, and what may be cited
+  at use. Records the MEASURED limits any capture mechanism works within
+  (a 30,000-character inline cap on hook payloads, a byte-exact persisted
+  copy above it, and a failure path carrying no tool response at all), the
+  capture hooks that are live in every session, and the citation verifier
+  that is specified but not built. Read it before adding a hook, or before
+  quoting a number whose generator was a one-off script.
 - **`benchmark_programme/`** -- the CLOSED benchmark-feature programme
   (does oscillator dynamics produce useful exported classifier
   features? -- answered, largely negatively, see PROJECT_MEMORY.md Part
@@ -500,7 +508,7 @@ without reading that document's full findings history first.
     inline analytic derivations (the derivation is its own provenance).
     The remedy for a captured scratch that turns out to matter is
     promotion to committed code — never citing the capture. Mechanics:
-    `docs/proposals/PROVENANCE_CONTRACT.md` (capture-at-birth,
+    `docs/PROVENANCE_CONTRACT.md` (capture-at-birth,
     citation-at-use), which also records the measured hook-payload
     limits any capture mechanism has to work within.
 

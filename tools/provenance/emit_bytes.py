@@ -16,7 +16,7 @@ is byte-identical to what was sent.
 
 This file exists because a number produced by an ephemeral script is not a
 decision anchor (CLAUDE.md principle 24). The truncation figures quoted in
-`docs/proposals/PROVENANCE_CONTRACT.md` come from running this, and can be
+`docs/PROVENANCE_CONTRACT.md` come from running this, and can be
 re-derived by running it again.
 
 Usage:

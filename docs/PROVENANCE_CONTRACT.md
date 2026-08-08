@@ -1,21 +1,26 @@
 # The provenance contract: capture at birth, citation at use
 
-Design for GitHub issue #22 (load-bearing scratch hooks). This is the
-document CLAUDE.md principle 24 forward-references as "the provenance
-contract (capture-at-birth, citation-at-use)" — that reference currently
-has no path, and this file is meant to be it.
+The working practice CLAUDE.md principle 24 points at, from GitHub issue
+#22 (load-bearing scratch hooks).
 
-**Status: design.** One part is built and measured (the payload probe in
-`tools/provenance/`, whose numbers this document quotes). The capture
-hooks, the classification skill, and the citation verifier are specified
-here and not yet implemented.
+**Status: in force, partly built.**
 
-**Where this lives, and why here.** `docs/proposals/` rather than `docs/`,
-because the infrastructure track edits shared documents only as
-patches-in-waiting. Two companion proposals accompany this one:
-`CLAUDE_MD_PRINCIPLE_24_AMENDMENT.md` (adding the path principle 24 is
-missing) and nothing else — this document does not amend
-`PROJECT_MEMORY.md` or `MULTI_AGENT_PRACTICE.md`.
+| Part | State |
+|---|---|
+| §2 payload contract | Measured. `tools/provenance/run_truncation_probe.py` re-derives it. |
+| §3 capture hooks | **Built and live** in every session — `.claude/hooks/provenance-capture/`. |
+| §4 classification skill | Specified. Held on sequencing, not merit. |
+| §5 citation verifier | Specified, with binding acceptance criteria. Not built. |
+
+The parts that are live are described in the present tense and are
+enforced. The parts that are not are marked where they appear; nothing
+here should be read as describing behaviour that exists unless it says so.
+
+Its history as a proposal is kept in `docs/proposals/` — what was
+proposed, what peer review changed, and what was deliberately dropped.
+That reasoning does not belong in a practice document, but discarding it
+would lose the argument for why several of these rules are shaped the way
+they are.
 
 ---
 

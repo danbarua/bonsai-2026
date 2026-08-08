@@ -1,7 +1,7 @@
 """The provenance probe's instruments, pinned.
 
 `tools/provenance/` measures what a `PostToolUse` hook receives, and
-`docs/proposals/PROVENANCE_CONTRACT.md` §2 quotes those measurements as
+`docs/PROVENANCE_CONTRACT.md` §2 quotes those measurements as
 the substrate the whole capture design sits on. The instruments therefore
 need the same treatment as any other load-bearing code here: if
 `emit_bytes.build_stream` stops producing a self-describing stream, or

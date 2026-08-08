@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """Capture load-bearing scratch at the moment it runs.
 
-Implements part 1 of `docs/proposals/PROVENANCE_CONTRACT.md`. Fires on
+Implements part 1 of `docs/PROVENANCE_CONTRACT.md`. Fires on
 three events and writes an append-only JSONL log:
 
   PreToolUse          -> `open` record: the script itself, plus snapshots of

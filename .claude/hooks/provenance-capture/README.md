@@ -3,7 +3,7 @@
 Records *load-bearing scratch* — an ephemeral script (heredoc, `python -c`,
 tmp file, inline remote exec) whose output can enter a durable record while
 the script itself dies with the session. CLAUDE.md principle 24; full design
-in `docs/proposals/PROVENANCE_CONTRACT.md`.
+in `docs/PROVENANCE_CONTRACT.md`.
 
 Registered project-wide in `.claude/settings.json` on three events, all
 matching `Bash|mcp__mighty-colab__.*`:
