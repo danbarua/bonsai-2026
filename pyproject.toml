@@ -33,6 +33,12 @@ packages = ["src/bonsai"]
 [dependency-groups]
 dev = [
     "pytest>=9.1.1",
+    # tests/test_review_workflow.py parses the GitHub workflow rather than
+    # substring-matching it. Declared rather than relied on transitively:
+    # PyYAML arrives today via another dependency, so the test passes locally
+    # and would break on any lockfile change with an ImportError pointing
+    # nowhere near the cause.
+    "pyyaml>=6.0",
 ]
 gpu = [
     "mighty-colab>=0.2.2",

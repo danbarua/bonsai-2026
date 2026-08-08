@@ -204,6 +204,7 @@ dependencies = [
 [package.dev-dependencies]
 dev = [
     { name = "pytest" },
+    { name = "pyyaml" },
 ]
 gpu = [
     { name = "google-cloud-storage" },
@@ -232,7 +233,10 @@ requires-dist = [
 ]
 
 [package.metadata.requires-dev]
-dev = [{ name = "pytest", specifier = ">=9.1.1" }]
+dev = [
+    { name = "pytest", specifier = ">=9.1.1" },
+    { name = "pyyaml", specifier = ">=6.0" },
+]
 gpu = [
     { name = "google-cloud-storage", specifier = ">=2.19.0" },
     { name = "mighty-colab", specifier = ">=0.2.2" },

@@ -25,6 +25,7 @@ import re
 from pathlib import Path
 
 import pytest
+import yaml
 
 REPO_ROOT = Path(__file__).resolve().parents[1]
 WORKFLOW = REPO_ROOT / ".github" / "workflows" / "claude-code-review.yml"
@@ -36,30 +37,85 @@ def text():
     return WORKFLOW.read_text()
 
 
+def _steps(text: str) -> list[dict]:
+    """The job's steps, PARSED. A workflow is structured data.
+
+    The first version of the two tests below matched substrings against the
+    whole file and inspected the first line containing `publish_review.sh`.
+    Both were shown to be inadequate by mutation, and the failure is
+    instructive rather than embarrassing:
+
+    - the wiring moved into `env:` when the value was un-interpolated to
+      survive quotes in the JSON, so the `run:` line the test inspected can
+      no longer contain `outputs.execution_file` under ANY input. That
+      assertion had become unfalsifiable without changing shape.
+    - the remaining whole-file check was carried entirely by there being
+      exactly one mention of the string, in a 190-line file that is mostly
+      commentary and whose comment block directly above the wiring discusses
+      both output names. Reintroducing the real bug plus one comment naming
+      `outputs.structured_output` passed all three assertions.
+
+    Category A in docs/VACUOUS_TESTS.md -- matching source rather than
+    evaluating the decision -- committed by a test written to pin a wiring
+    bug, which is where it does the most damage. Found by the review this
+    workflow runs, on the first range that contained tests.
+    """
+    doc = yaml.safe_load(text)
+    jobs = doc.get("jobs") or {}
+    assert jobs, "the workflow declares no jobs"
+    steps = []
+    for job in jobs.values():
+        steps.extend(job.get("steps") or [])
+    assert steps, "the workflow declares no steps"
+    return steps
+
+
+def _step_invoking(text: str, script: str) -> dict:
+    """The single step whose `run` invokes `script`. Ambiguity is an error,
+    not a first-match."""
+    matches = [s for s in _steps(text) if script in (s.get("run") or "")]
+    assert matches, f"no step runs `{script}` -- it is no longer invoked"
+    assert len(matches) == 1, (
+        f"{len(matches)} steps run `{script}`; this check cannot tell which "
+        f"one carries the wiring")
+    return matches[0]
+
+
 def test_the_publisher_receives_structured_output_not_a_file_path(text):
-    """The wiring bug, pinned.
+    """The wiring bug, pinned to the step that actually carries it.
 
     `execution_file` and `structured_output` are both action outputs and only
     one is JSON. Passing the wrong one fails loudly, which is fortunate, but
     it should fail here rather than in a build.
     """
-    assert "publish_review.sh" in text, "the publisher is no longer invoked"
-    assert "outputs.structured_output" in text, (
-        "the publisher is not being given `structured_output`. If it is "
+    step = _step_invoking(text, "publish_review.sh")
+    wiring = " ".join(str(v) for v in (step.get("env") or {}).values())
+    wiring += " " + str(step.get("run") or "")
+    assert "outputs.structured_output" in wiring, (
+        "the publisher step is not given `structured_output`. If it is "
         "receiving `execution_file`, that is a PATH and jq will reject it")
-    publisher_line = next(
-        line for line in text.splitlines() if "publish_review.sh" in line)
-    assert "outputs.execution_file" not in publisher_line, (
-        "`execution_file` is being passed to the publisher; it is a path, "
+    assert "outputs.execution_file" not in wiring, (
+        "`execution_file` is wired into the publisher step; it is a path, "
         "not JSON")
 
 
 def test_the_execution_file_is_still_kept_as_an_artifact(text):
     """It is the right output for the artifact, and only for that. Keeping
-    both uses straight is the whole point of the test above."""
-    assert "outputs.execution_file" in text, (
-        "the execution record is no longer archived -- the durable copy of "
-        "what the review did is gone")
+    the two uses straight is the point of the test above.
+
+    Scoped to the upload step for the same reason: as a whole-file substring
+    this passed even with the upload deleted, so long as any comment
+    mentioned the name -- and this file comments heavily on exactly that
+    name.
+    """
+    uploads = [s for s in _steps(text)
+               if "upload-artifact" in str(s.get("uses") or "")]
+    assert uploads, (
+        "no upload-artifact step: the durable copy of what the review did is "
+        "gone, and the rendered report is the only remaining record")
+    assert any("outputs.execution_file" in str(s.get("with", {}).get("path", ""))
+               for s in uploads), (
+        "an artifact is uploaded but it is not the execution record")
 
 
 def _embedded_schema(text: str) -> dict:
@@ -182,6 +238,75 @@ def test_the_review_is_not_granted_write_access(text):
             f"`{forbidden}` is pre-approved for a review that must only "
             f"read. Remove it: the prompt's prohibition is not a permission "
             f"boundary")
+
+
+# --- the mutation, promoted out of a transcript ----------------------------
+#
+# Principle 21's corollary: a guard nobody has seen fail is not yet a guard.
+# The previous version of the publisher test passed against a reintroduced
+# wiring bug, and that was established by mutating the file in a throwaway
+# script -- which is load-bearing scratch by principle 24, produced while
+# building the tooling that exists to stop it. So the mutation lives here
+# instead, where it re-runs and can fail.
+#
+# `MUTANT_KILLED_BY` names, for each mutation, the assertion that must
+# reject it. A mutation nothing rejects is the defect being reintroduced.
+
+def _mutate(text: str, old: str, new: str) -> str:
+    assert old in text, f"mutation target absent, test is stale: {old!r}"
+    return text.replace(old, new)
+
+
+WIRING = "STRUCTURED_OUTPUT: ${{ steps.review.outputs.structured_output }}"
+BUG = "STRUCTURED_OUTPUT: ${{ steps.review.outputs.execution_file }}"
+
+
+# `match=` is not decoration. `pytest.raises(AssertionError)` around a test
+# that parses and asserts its way to the real check will happily pass on an
+# assertion from the SETUP -- a stale mutation target, a workflow with no
+# steps -- and report a guard as working when the guard never ran. The
+# expected message pins which assertion did the killing.
+@pytest.mark.parametrize("mutate,expected,why", [
+    (lambda t: _mutate(t, WIRING, BUG),
+     "not given `structured_output`",
+     "the exact wiring bug that turned the first real run red"),
+    (lambda t: _mutate(_mutate(t, WIRING, BUG),
+                       "# `structured_output` is the schema-validated JSON.",
+                       "# steps.review.outputs.structured_output is the JSON."),
+     "not given `structured_output`",
+     "the same bug, plus one comment mentioning the string the old "
+     "whole-file check relied on. THIS is the case that walked through"),
+    (lambda t: _mutate(t, WIRING, "STRUCTURED_OUTPUT: ''"),
+     "not given `structured_output`",
+     "the publisher wired to nothing at all"),
+])
+def test_a_broken_publisher_wiring_is_rejected(text, mutate, expected, why):
+    with pytest.raises(AssertionError, match=re.escape(expected)):
+        test_the_publisher_receives_structured_output_not_a_file_path(
+            mutate(text))
+
+
+@pytest.mark.parametrize("mutate,expected,why", [
+    (lambda t: re.sub(r"      - name: Keep the execution record.*",
+                      "", t, flags=re.DOTALL),
+     "no upload-artifact step",
+     "the upload step deleted outright -- which the whole-file substring "
+     "check passed, because the name still appears in the commentary above"),
+])
+def test_a_missing_execution_artifact_is_rejected(text, mutate, expected, why):
+    with pytest.raises(AssertionError, match=re.escape(expected)):
+        test_the_execution_file_is_still_kept_as_an_artifact(mutate(text))
+
+
+def test_an_innocent_comment_does_not_change_the_verdict(text):
+    """The other direction. Scoping must not have made the checks brittle:
+    a comment naming the script above the step is harmless and must stay
+    harmless, which the old first-match `next()` could not promise."""
+    noisy = _mutate(
+        text, "      - name: Announce it if nothing was published",
+        "      # publish_review.sh is invoked below\n"
+        "      - name: Announce it if nothing was published")
+    test_the_publisher_receives_structured_output_not_a_file_path(noisy)
 
 
 def test_the_review_is_advisory_and_says_so(text):
