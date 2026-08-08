@@ -400,6 +400,49 @@ None of this exists. Nothing below has been run.
 7. **Notifications.** A break is only useful if it reaches the loop. Cloud
    Build → Pub/Sub `cloud-builds` topic → whatever the loops read.
 
+## The first firing proved the protocol, by being green and doing nothing
+
+Observed 2026-08-08 on PR #24, and it is the concrete case the rule below
+was written for rather than a hypothetical.
+
+The review workflow fired, and reported:
+
+```
+run:  Claude Vacuous-Test Review  completed/success
+job:  vacuous-test-review         completed/success
+```
+
+**It reviewed nothing.** Every action step was skipped:
+
+```
+##[warning]Skipping action due to workflow validation: Workflow validation
+failed. The workflow file must exist and have identical content to the
+version on the repository's default branch.
+```
+
+The cause is benign and documented by the action itself — a pull request
+that MODIFIES a workflow cannot run its own modified version, which is an
+anti-injection protection, and it resolves once the change is on the
+default branch. The finding is not the cause.
+
+**The finding is that a skipped action reports job success.** Green at run
+level and green at job level, with the work not done. Anyone reading the
+badge — or a summary that quotes the conclusion — would conclude the review
+had passed with no findings. That is the presence-shaped failure at CI
+scale: the record is correct in form and reports the opposite of what
+happened.
+
+Two consequences, both concrete rather than cautionary:
+
+- **A green run is not evidence the review executed.** Verifying it means
+  looking for the posted comment, or grepping the log for the skip warning.
+  A conclusion field cannot distinguish "nothing to report" from "did not
+  run", which are the two readings this project keeps having to separate.
+- **This is why requirement 1 below says the report must name what actually
+  executed.** Had the workflow been asked to state which suites it read,
+  its silence would have been visible in its own output instead of needing
+  a log dive to discover.
+
 ## First-run protocol: treat the first green as suspect
 
 Standing requirement set by the orchestrator on 2026-08-08, and the reason
