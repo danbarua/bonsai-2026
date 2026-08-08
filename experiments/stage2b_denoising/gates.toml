@@ -427,6 +427,79 @@ test = ""
 break_demonstrated = ""
 trigger = "manual"
 
+[binding_gate.b6e8be29a571]
+# AUDIT_PROTOCOL: "Either alpha regime triggers review. The alpha mechanism
+#  determines the INTERPRETATION of a reversal ... but it does not determine
+#  WHETHER review occurs."
+#
+# Deliberately separate from 12d7b0d5472d, which carries the three trigger
+# CONDITIONS. This clause binds the OR over regimes: a reversal seen under
+# fixed-alpha alone, or under reselected-alpha alone, is sufficient. Merged
+# into one row, the natural implementation -- check the conditions once, on
+# whichever regime the driver happens to compute first -- would satisfy the
+# merged row while silently halving its reach.
+#
+# The clause also records that the trigger is live rather than hypothetical:
+# stage-2 cross-validated contrasts already show both signs (T -2.30e-3 and
+# lattice -3.90e-3 improving; rewired +4.02e-3 and curr_random +2.38e-3
+# worsening). So this is not a gate guarding an unreachable branch.
+enforcement = ""            # UNWRITTEN -- the audit driver does not exist
+production_reachability = ""
+input_wiring = ""
+decision_consequence = ""
+test = ""
+break_demonstrated = ""
+trigger = "manual"
+
+[binding_gate.a375db47a337]
+# DESIGN: the hierarchical identity gate. "1. Primary: evolved_T vs.
+#  pre_evolution. 2. Only if primary succeeds: evolved_T vs. identity -- the
+#  denoising gate; NEVER rescues a failed primary. 3. Always reported
+#  independently: pre_evolution vs. identity, own paired bootstrap interval."
+#
+# A gate rather than a claim, and the distinction is the word "only": step 2
+# is CONDITIONAL on step 1's outcome, so something must evaluate step 1 and
+# branch. Written as a claim it would be discharged by a person noticing the
+# write-up did not overreach, which is a weaker thing than a driver that
+# cannot compute the step-2 comparison until step 1 has passed.
+#
+# Note that step 3's obligation is the opposite shape -- ALWAYS reported,
+# whatever steps 1 and 2 show -- and is the part most likely to be lost by an
+# implementation that treats the sequence as an early-exit ladder.
+enforcement = ""            # UNWRITTEN -- no statistics driver exists
+production_reachability = ""
+input_wiring = ""
+decision_consequence = ""
+test = ""
+break_demonstrated = ""
+trigger = "manual"
+
+[binding_gate.daf41844a257]
+# STAGE3_PLAN Q4: "static import closure UNION runtime closure, established
+#  before generation and revalidated after, every exclusion frozen and
+#  justified. Runtime-alone misses conditional, lazy and branch-specific
+#  imports."
+#
+# PARTIAL COVERAGE EXISTS AND IS NOT CITED AS ENFORCEMENT, deliberately.
+# run_ladder_stage3.py:329 raises Stage3Halt when a named module resolves
+# outside the pinned clone -- real, and a different claim: it checks the
+# ORIGIN of modules already known to matter, from a hand-written tuple
+# ("ridge", "corruption", "encoder_gate", "gcs", "partition", ...). That
+# tuple is a hand-maintained list standing in for a derived set, which is
+# principle 21 exactly, and the clause exists because the derived set is what
+# closes the omitted-helper failure mode. Citing the origin check here would
+# be discharge by adjacent evidence in the shape 9bc6f9e3808a names.
+#
+# Neither closure is computed anywhere today, so both halves are absent --
+# not one half satisfied.
+enforcement = ""            # UNWRITTEN -- no closure is computed
+production_reachability = ""
+input_wiring = ""
+decision_consequence = ""
+test = ""
+break_demonstrated = ""
+trigger = "manual"
+
 # =============================================================================
 # binding_value -- frozen configuration obligations
 # =============================================================================
@@ -699,6 +772,41 @@ and the Phase B re-run used it). What has no consumer is this clause's
 specific requirement -- that BOTH AUDIT REGIMES consume it -- because
 neither regime exists until the audit driver does. The distinction matters:
 the value is live, the obligation about how the audit uses it is not."""
+enforcement = ""
+break_demonstrated = ""
+trigger = "manual"
+
+[binding_value.1837113c184a]
+# STAGE3_PLAN Freeze 3: "Fixed := the alpha selected from the production
+#  1,200-step representation per condition via the frozen 5-fold procedure,
+#  applied identically to both budgets' OOF fits. Reselected := independent
+#  per budget."
+value = """
+The DEFINITION of fixed-alpha for the amendment audit: per condition, the
+alpha the frozen 5-fold procedure selects on the production 1,200-step
+representation, then applied unchanged to both budgets' OOF fits. Reselected
+alpha is chosen independently per budget. Both are reported, alongside the
+production alpha itself.
+
+Per-budget fold-fitted scalers are retained (production preprocessing), so
+fixed-alpha isolates THE EFFECT OF ALPHA RESELECTION -- not raw
+representation change. That narrowing is part of the frozen value: a row
+that recorded only "fixed vs. reselected" would license the stronger reading
+the plan explicitly refuses."""
+production_consumers = ""
+status = "pending_consumer"
+pending_reason = """
+STAGE3_PLAN's statement of the freeze that 1148ede15761 carries for
+AUDIT_PROTOCOL. Deliberately NOT merged with it, for the reason recorded
+there: separate sentences in separate documents with separate ids, and one
+disposition covering two is the collision check_ids_unique refuses. The two
+rows are expected to move together, and if they ever diverge that is a
+finding about the documents rather than about this file.
+
+No consumer for the same reason: neither budget's OOF fit exists until the
+audit driver does. `stage2b_ridge.oof_per_image_mse` and
+`oof_clipped_mse_at_alpha` are the machinery it will call -- built,
+tested, and not yet called by anything that implements this definition."""
 enforcement = ""
 break_demonstrated = ""
 trigger = "manual"
@@ -1156,6 +1264,132 @@ not a cap, and one that never fires is indistinguishable from one that was
 never set unless the freeze predates the measurement."""
 enforcement = ""
 break_demonstrated = ""
+trigger = "manual"
+
+[binding_claim.23984119d253]
+locator = "DESIGN.md, section 'DESIGN STATUS' (document header)"
+obligation = """
+DESIGN.md is locked. Changes after the lock require an explicit, disclosed
+post-lock amendment; an undisclosed edit is prohibited. The document also
+records that no further scientific review round is required, which is the
+half that makes the first half load-bearing: nothing downstream re-derives
+the design, so an undisclosed edit is not caught by any later reading."""
+status = "pending_package"
+pending_reason = """
+The obligation ranges over every edit from the lock commit onward, so it
+cannot be discharged by a point-in-time check; its discharge point is the
+readiness package's provenance section, stating that DESIGN.md is frozen
+and listing its amendments. No such section exists.
+
+Same shape as 0ac873652382 for AUDIT_PROTOCOL.md and f18749c28dd0 for
+COMPANION_PROTOCOLS.md, and dispositioned separately for the same reason:
+three documents, three lock statements, three histories."""
+negative_attestation = """
+The prohibited thing is an UNDISCLOSED edit, and an absence does not
+announce itself, so the output set is stated rather than sampled: every
+commit touching experiments/stage2b_denoising/DESIGN.md from the lock
+commit to the package's own commit, read as a diff. The set is enumerable
+by `git log --follow -p -- experiments/stage2b_denoising/DESIGN.md`, which
+is what makes this checkable at all -- an attestation over "the document"
+would be satisfied by reading the current text, in which an undisclosed
+edit is by construction invisible.
+
+Compliance to date is observable in the document itself: three amendments
+appear, each carrying its own dated disclosure block (ENCODER_STEPS
+150->1200; the two-phase stage-3 encode; the ridge grid extended to
+1e-6..1e6). That is evidence about the range so far, not a discharge."""
+trigger = "manual"
+
+[binding_claim.916955ebbcf7]
+locator = "DESIGN.md, section 'Feasibility ladder'"
+obligation = """
+The ladder's rung 4: ONE locked evaluation on the official 10,000-image test
+corpus. Exactly one -- the constraint is the count, not merely the ordering.
+A second pass over the test corpus, however motivated, converts the held-out
+estimate into a selected one and there is no way to un-see the first."""
+status = "pending_package"
+pending_reason = """
+Nothing has been evaluated on the test corpus, so the count is zero and the
+obligation has not yet been tested by anything. Filed pending_package rather
+than not_applicable on the section's stated preference: not_applicable would
+pass silently and would become false the moment stage 4 runs.
+
+Scoped deliberately NARROWER than f3bbc791e7c6, which gates ACCESS to
+test-side objects during stages 1-3 and is enforced by
+_check_object_path_allowed. That gate is about reaching the corpus early;
+this clause is about how many times it may be read once reaching it is
+allowed, and no code distinguishes a first read from a second."""
+negative_attestation = """
+The prohibited thing is a SECOND evaluation, so the output set is every
+read of a test-split object after the stage-4 gate opens: the audit trail
+of `stage2b_gcs` object accesses under the `test` split, plus every
+reported test-corpus number in the readiness package and FINDINGS.md. A
+package that reports one test number is not evidence only one was computed
+-- which is why the set ranges over accesses, not over what was written up."""
+trigger = "manual"
+
+[binding_claim.8296ec49b5fa]
+locator = "AUDIT_PROTOCOL.md, section 'Companion protocols', ARM/x86 bullet"
+obligation = """
+The ARM/x86 propagation stress set's construction is fixed in advance:
+largest observed cross-architecture encoding discrepancies; the 79
+convergence-tail stress cases; coverage of every class; and a seeded
+stratified random component. The first comparison applies IDENTICAL FROZEN
+RIDGE COEFFICIENTS to ARM-derived and x86-derived features, isolating
+numerical propagation from refit variation. Max differences are reported at
+five points: encoding, evolved features per graph, prediction, per-image
+MSE, and the evolved-minus-pre contrast.
+
+The clause also fixes the NAMING: "convergence-tail stress cases", so named
+because the earlier "basin-boundary candidates" characterisation was
+retracted as unsupported -- encoder-contraction residuals being a different
+dynamical quantity from evolution-flow boundary proximity. The retraction is
+part of the frozen obligation, not background: reverting to the retracted
+term would restate a claim this project withdrew."""
+status = "pending_package"
+pending_reason = """
+The stress set does not exist and neither do its numbers. AUDIT_PROTOCOL's
+statement of the construction, dispositioned separately from
+COMPANION_PROTOCOLS' own rows (aa0198915e6b, 81d50983153e, c188b4e50c99)
+for the reason this file applies throughout: separate documents, separate
+sentences, separate ids.
+
+Related but distinct from ec37e874562c, which freezes the 500-case CAP.
+This row freezes what goes IN; that one freezes how many."""
+negative_attestation = """
+"Isolating numerical propagation from refit variation" is a must-not in
+positive dress: the first comparison must not refit. The output set is every
+reported ARM/x86 difference in the readiness package -- each must state
+which coefficients produced it, so a refit smuggled in as "the natural thing
+to do at this scale" is visible rather than inferred from a number's size."""
+trigger = "manual"
+
+[binding_claim.91597e31ea96]
+locator = "COMPANION_PROTOCOLS.md, section 'ABS_CONV_EPS sensitivity table'"
+obligation = """
+The reported quantity of interest is WHERE THE VERDICT FLIPS, at the locked
+ENCODER_STEPS=1200 and at every other step count. Both outcomes are
+results and both are reported as such: if the verdict at 1,200 is invariant
+across all four eps, that is the result; if it is not, the eps at which it
+changes AND the direction of the change are the result."""
+status = "pending_package"
+pending_reason = """
+The sensitivity table has not been produced, so there is no verdict to
+report a flip in. Distinct from 0059f193dfec, which is the obligation to
+produce the table; this is the obligation on what the table's write-up may
+present as its finding.
+
+The distinction is worth keeping because the two fail differently. A table
+produced but written up as "eps is not sensitive" -- with the flip locations
+omitted because they were uninteresting -- satisfies 0059f193dfec and
+violates this row."""
+negative_attestation = """
+The must-not is selective reporting: an invariant verdict may not be
+presented as the finding while a flip elsewhere in the sweep goes unstated.
+The output set is every cell of the 5-step-count x 4-eps table -- the
+protocol requires all of them reported, INCLUDING the ones that agree, so
+the attestation is checkable by counting cells in the write-up against the
+table's own dimensions rather than by judging emphasis."""
 trigger = "manual"
 
 # =============================================================================
