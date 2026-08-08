@@ -785,6 +785,129 @@ deliberately so. Those range over a finite artifact that will exist and can
 be swept. This one ranges over behaviour, and claiming a sweep of behaviour
 would be the fabricated-completeness failure the field exists to prevent."""
 
+[binding_claim.3043a89b2aae]
+locator = "DESIGN.md, section 'Alpha grid' -- 'Decade spacing is exact and frozen'"
+obligation = """
+Thirteen values, one per decade, NO interpolation and NO densification
+around an observed minimum, ever. A grid that may be refined near a minimum
+after the minimum has been seen has a stopping rule chosen by looking at
+results."""
+status = "discharged"
+discharged_in = "experiments/stage2b_denoising/stage2b_ridge.py::ALPHA_GRID"
+evidence = """
+ALPHA_GRID is thirteen literal decade values and there is no densification
+code path -- no refine step, no second grid, nothing that takes a selected
+alpha and searches near it. The one extension that has happened was the
+whole grid moving four decades DOWN under the frozen one-shot procedure,
+which preserved exact decade spacing and re-ran everything rather than
+splicing; `grid_tag()` derives the artifact name from a digest of the grid,
+so the amended run could not silently reuse the old results.
+
+Discharged rather than pending because this is a claim about what the CODE
+may do, not about what a write-up may say, and the code exists."""
+negative_attestation = """
+Scoped to every alpha the production ridge path can evaluate. The
+prohibited thing is a value not on the frozen decade grid reaching a fit,
+by any route -- a refinement pass, a hand-added point, a caller passing its
+own `alphas`.
+
+Two things make the absence checkable rather than asserted: `cross_validate_alpha`
+and `ridge_equivalence_check` both DEFAULT to ALPHA_GRID and the stage-3
+driver passes no override, and the run's own artifact records the grid it
+used, so a run on a different grid is visible in the record afterwards
+rather than only preventable beforehand. What is NOT established is that a
+future caller cannot pass its own list -- the parameter exists. That is a
+real gap and it is named here rather than papered over."""
+
+[binding_claim.4e826a51fe84]
+locator = "DESIGN.md, section 'Named possible outcomes'"
+obligation = """
+Five outcomes named in advance, including ones unflattering to the
+hypothesis (evolution does not help; the unevolved encoding carries most of
+the value; raw-pixel ridge dominates every phase-based condition). If
+observed, a coherent reportable dissociation -- a WATCHED OUTCOME, NOT A
+SUCCESS CRITERION. Success remains defined by the evolution-vs-encoded
+contrasts under the identity gate."""
+status = "pending_package"
+pending_reason = """
+Binds how the results are written up, and no results write-up exists. The
+confirmatory statistics have not been computed on the test split and may
+not be before the Stage 4 gate."""
+negative_attestation = """
+Scoped to the results write-up. The prohibited move is presenting one of
+these five as a success criterion the design met, when the design named it
+in advance precisely so it could not be claimed as one. Naming an outcome
+before seeing it is what makes it a prediction; describing it afterwards as
+what success looked like converts a pre-registration into a post-hoc story
+with no textual tell -- the sentence reads identically either way. So the
+attestation at package time is on the SUCCESS CRITERION as stated (the
+evolution-vs-encoded contrasts under the identity gate), checked to be
+unchanged from DESIGN.md, rather than on the prose about outcomes."""
+
+[binding_claim.ea9dc1d668e1]
+locator = "DESIGN.md, section 'Computational strategy'"
+obligation = """
+Colab/GCP is a compute RUNTIME for this implementation only, not a
+commitment about final deliverable format. Visuals/plots delivery format is
+an explicitly DEFERRED decision made once results exist. Do not treat
+notebook packaging as a pending or implied task at any point before then.
+GCS paths are implementation details; FINDINGS.md in-repo remains the record
+of note."""
+status = "discharged"
+discharged_in = """
+The absence of any notebook or delivery-format work item, and
+experiments/stage2b_denoising/FINDINGS.md as the record of note in
+practice."""
+evidence = """
+Every result to date -- both ladder rungs, Phase A, Phase B and its
+amended-grid re-run -- is recorded in FINDINGS.md in the repository, not in
+a notebook, and no task or plan item proposes packaging one. The clause is
+unusual in being satisfied by something NOT happening, which is why it is
+worth a row: an implied task that nobody started leaves no trace, so the
+only way to show it was declined is to have said so where the decision
+would have been made."""
+negative_attestation = """
+Scoped to the plan of record, the task queue, and PHASE_B_PLAN.md. The
+prohibited thing is notebook packaging appearing as pending or implied
+work. Checked: no such item exists in any of them. This attestation is
+cheap NOW and gets more expensive the closer Stage 4 comes, since that is
+when a deliverable format becomes a live question and the deferral is
+easiest to forget was deliberate."""
+
+[binding_claim.aec9fff59bbe]
+locator = "STAGE3_PLAN.md, section 'Consent'"
+obligation = """
+Execution through fingerprint implementation, Phase A regeneration, the
+amendment audit and Phase B is consented ONCE THOSE ARE COMMITTED. Mismatch
+gates halt automatically. Successful completion of planned steps creates NO
+additional discretionary review. Stage 4 stays blocked behind the package
+review and explicit release."""
+status = "discharged"
+discharged_in = "The execution record: FINDINGS.md's Phase A and Phase B sections, and the absence of any Stage 4 artifact."
+evidence = """
+Both halves held, and they pull in opposite directions, which is what makes
+the pair worth one row. Phase B ran without a fresh discretionary approval
+after its freezes were committed -- the consent was standing, as written,
+and nobody re-asked. And Stage 4 has NOT run: no test-side object has been
+read, written or named, and the gate stays closed pending the package
+review and Dan's explicit release.
+
+The clause is easy to satisfy in one direction only. An agent that treats
+every completed step as an opportunity to re-check has not honoured it
+either -- 'successful completion creates no additional discretionary
+review' is an obligation not to manufacture a checkpoint, and reading it as
+mere permission loses half of it."""
+negative_attestation = """
+Scoped to the Stage 2B test split. The prohibited thing is any test-side
+result generated or inspected before the Stage 4 gate. Established
+structurally rather than by inspection: `stage2b_gcs._check_object_path_allowed`
+refuses any test-split path at every transport function, not only at
+construction, so a caller assembling a name by hand is still refused -- and
+`test_the_driver_never_names_the_test_split` greps the driver for the
+literal `testsplit` and `allow_test_split`. Absence here is enforced by a
+gate rather than attested by a sweep, which is the strongest form this
+field takes."""
+
 [binding_claim.f18749c28dd0]
 locator = "COMPANION_PROTOCOLS.md, section 'Status'"
 obligation = """
@@ -922,6 +1045,42 @@ trigger = "manual"
 # that fits none of those four shapes, or one whose "binds at X" pointer
 # names nothing. That is a cheaper audit than re-reading 89 sentences, which
 # is the point of constraining the shape at all.
+
+[not_binding.51fde2dbc946]
+reason = """
+NARRATION: how S*=1200 was selected, and the disclosure that an earlier,
+looser reading of the rule was caught before being applied -- "some S*
+brings noisy within 10x of clean-AT-150" is satisfied at S*=300, which then
+fails its own re-run. A record of a corrected defect, kept rather than
+edited away. The gate it describes binds at DESIGN.md:135 and :192
+(5d8386004c11, 5908ac408624)."""
+
+[not_binding.4b27219dd7cc]
+reason = """
+NARRATION: names the review rounds the freeze was reached under and where
+they are archived. A provenance statement about how the document came to be
+frozen; it commits the system to nothing. The freeze itself binds at
+AUDIT_PROTOCOL.md:3 (0ac873652382)."""
+
+[not_binding.659ab6a9978b]
+reason = """
+NARRATION: the plan's own status line -- reviewed across eight rounds,
+conditional consensus reached, conditional on the five freezes being
+committed. Records how the document reached plan-of-record standing. Its one
+forward-looking clause, "execution additionally requires Dan's explicit
+release", is not narration -- but it binds at STAGE3_PLAN.md:335
+(aec9fff59bbe), which states the consent boundary in full and is
+dispositioned there."""
+
+[not_binding.9e9598bd470a]
+reason = """
+NARRATION: "Consequences, all adopted" -- the four downstream effects of
+deciding the population at 60,000. A record of what was adopted, and each
+consequence binds where it was actually implemented rather than here: the
+6,000 re-scope in encode_stage3_local.py, the acceptance test's shape at
+STAGE3_PLAN.md:285 (37ae915f8e61), the corrected docstring in the script
+itself, and the tail counts in the acceptance report. Listing adopted
+consequences is not a second statement of them."""
 
 [not_binding.1aa42e6ea102]
 reason = """
