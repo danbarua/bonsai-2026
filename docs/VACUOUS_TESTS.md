@@ -44,6 +44,9 @@ claim the rest of this repository's discipline exists to prevent.
 | 20 | 08-08 | `bff25eb`+ | "The driver joins through the shared helper" was `"partition.index_join(" in source`. Replacing all three joins with a hand-rolled positional one and leaving the old call in a comment left it green — the exact substitution the clause forbids | building the gate inventory |
 | 21 | 08-08 | `74b4dcc` | Not a test: internal-citation resolution over the reviewer archive is structurally blind to a clipped FINAL section, because nothing references one. The lost text would have been a licence — "you need not build X" | reasoning about what the check could not see |
 | 22 | 08-08 | `e76997f` | The Tier-2 archive scan guarded on `ARCHIVE.is_dir()`. A worktree checks that directory out present and empty (tracked dir, gitignored contents), so the guard stayed quiet, zero files were scanned, and `findings == []` passed against nothing | a peer ran it from a worktree |
+| 23 | 08-08 | `e6d704c` | `review_delta.sh` filtered the compare API's `.filename` — the path AT `after`, so for a rename, the DESTINATION. A test moved OUT of `tests/` matched nothing, and the delta reported "no in-scope test files changed" for a push that took eight tests off the reviewed surface. The review examined nothing and posted a clean comment | a peer's hunch about a *different* cause, then the live API |
+| 24 | 08-08 | `e6d704c` | The dependency guard compared an IMPORT name against DISTRIBUTION names, so `importorskip("yaml")` was reported undeclared although `pyyaml>=6.0` is declared — and the message advised declaring what was already there. Would misfire identically on `sklearn`, `PIL`, `cv2` | it fired on a legitimate change |
+| 25 | 08-08 | `27b61b5` | Not a test: the CI image installed `git` and `make` but not `jq`, so `review_delta.sh` fail-opened to `mode=full` on Linux. Its break-confirmation then could not tell the fixed script from the broken one — both returned `full` | the break-test reported its own blindness, in its own words |
 
 Two near-misses belong here too, because they were caught *before* becoming
 tests:
@@ -343,6 +346,75 @@ produced 28 findings, all legitimate cross-document references.
 a check's coverage and the risk it exists for are correlated by the same
 structural property, you have this shape. Ask *what is this check unable
 to see, and is that where the damage is?* — before an incident, not after.
+
+**J. The check reads the right field and answers the wrong question.**
+#23, #24, plus a latent one below — all in a single session, which is
+what makes it a category rather than a coincidence.
+
+The shape: a filter or comparison is *correct about the field it reads*,
+and that field does not mean what the question needed. Nothing is
+misspelled, no wiring is missing, and the check is not lying — it is
+answering a neighbouring question so precisely that the difference is
+invisible.
+
+- **#23.** `.files[].filename` from the GitHub compare API is the path
+  **at `after`**. For a rename that is the destination; the source lives
+  in `.previous_filename`. Filtering `.filename` against `^tests/` is a
+  correct test of "does this path end up under `tests/`" and a useless
+  one for "did a test change", because **moving a test out of `tests/`
+  is exactly the manoeuvre that removes it from review**, and it was the
+  one manoeuvre the filter could not see.
+- **#24.** An import name is not a distribution name. `yaml` ships in
+  `pyyaml`. Comparing the import name to `pyproject.toml` is a correct
+  test of string equality and the wrong test for "is this declared".
+
+A third instance in the same session never fired, and is the useful one
+because it was found by *looking* rather than by breaking: the review
+workflow triggers on `paths: ["tests/**"]` while the delta narrowed to
+`^tests/[^/]*\.py$`. Both are correct; they describe different sets, so
+a PR touching only `tests/test_publish_review.sh` fires a review that
+then examines nothing and reports clean.
+
+Distinguish this from **I**. I is coverage anti-correlated with risk —
+the check cannot see the dangerous region. J is coverage aimed one field
+sideways — the check sees everything it looks at, and looks at the wrong
+noun. A test written against a J-defect passes for the same reason the
+defect exists, so mutation testing does catch it: the mutant and the
+original disagree, once the mutation is on the *field* rather than the
+value.
+
+> **A field name is an answer to a question somebody else asked.**
+
+The remedy is not more care. It is to ask, of every derived guard, *what
+question is this field the answer to, and is it mine?* — and where two
+narrowings describe the same surface, assert they agree rather than
+eyeballing it. Note the asymmetry: for #23's pair only one direction is
+dangerous, so the guard asserts that one and says why the other is
+merely wasteful.
+
+**K. The environment removes a check's discriminating power, silently.**
+#25, and it is the reason #23's break-confirmation is worth having twice.
+
+`review_delta.sh` guards `command -v jq || fail_open`. The Cloud Build
+image installed `git` and `make`. So on Linux the script returned
+`mode=full` on every invocation — correct behaviour, the safe direction,
+announced on stderr — and the tests pinning specific modes went red.
+
+The red was not the problem. The problem is what the red concealed:
+**the break-confirmation could no longer distinguish the fixed script
+from the broken one**, because both returned `full`. A guard whose
+discriminating power depends on a capability the environment lacks is not
+weakened, it is switched off, and the only thing that made this visible
+was that the test said so in its own words — *"these tests are not
+pinning the field-semantics bug"*.
+
+This is category B's cousin (a precondition that does not hold) aimed at
+a guard rather than a fixture, and the remedy is the same as principle
+21's: derive the requirement instead of listing it.
+`tests/test_ci_image_dependencies.py` reads every `command -v X` out of
+the CI scripts and asserts the image installs it, parsed **per Cloud
+Build step**, because each step is its own container and a union would
+report a package as present where it was never installed.
 
 ---
 
