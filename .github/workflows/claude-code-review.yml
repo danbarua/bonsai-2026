@@ -1,44 +1,95 @@
-name: Claude Code Review
+name: Claude Vacuous-Test Review
+
+# INVOKED, never automatic. Two reasons, both about cost rather than taste.
+#
+# This project pushes directly to shared branches -- roughly twenty times to
+# `stage2b` in a single session -- so a push trigger would re-review the same
+# code repeatedly and emit near-identical reports on work in progress. Noise
+# gets ignored, and an ignored guard trains route-around, which is the exact
+# failure this repository spends its discipline avoiding. Paid for with
+# tokens, at that.
+#
+# The `pull_request` trigger is kept because it costs nothing while no PRs
+# exist, and because the day one is opened is a moment where review is wanted
+# by definition.
+#
+# The value here is the PROMPT, not the schedule: it encodes what this
+# project's reviews are actually for, so invoking it is one command rather
+# than remembering to type all of the below. General-purpose review is
+# already available by mentioning @claude, via claude.yml.
 
 on:
+  workflow_dispatch:
+    inputs:
+      target:
+        description: 'What to review: a ref, a commit range (a..b), or a path'
+        required: true
+        default: 'HEAD~1..HEAD'
   pull_request:
-    types: [opened, synchronize, ready_for_review, reopened]
-    # Optional: Only run on specific file changes
-    # paths:
-    #   - "src/**/*.ts"
-    #   - "src/**/*.tsx"
-    #   - "src/**/*.js"
-    #   - "src/**/*.jsx"
+    types: [opened, ready_for_review, reopened]
 
 jobs:
-  claude-review:
-    # Optional: Filter by PR author
-    # if: |
-    #   github.event.pull_request.user.login == 'external-contributor' ||
-    #   github.event.pull_request.user.login == 'new-developer' ||
-    #   github.event.pull_request.author_association == 'FIRST_TIME_CONTRIBUTOR'
-
+  vacuous-test-review:
     runs-on: ubuntu-latest
     permissions:
       contents: read
-      pull-requests: read
-      issues: read
+      pull-requests: write
+      issues: write
       id-token: write
 
     steps:
       - name: Checkout repository
         uses: actions/checkout@v4
         with:
-          fetch-depth: 1
+          fetch-depth: 0  # a commit-range target needs history
 
-      - name: Run Claude Code Review
-        id: claude-review
+      - name: Review for vacuous tests
         uses: anthropics/claude-code-action@v1
         with:
           claude_code_oauth_token: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
-          plugin_marketplaces: 'https://github.com/anthropics/claude-code.git'
-          plugins: 'code-review@claude-code-plugins'
-          prompt: '/code-review:code-review ${{ github.repository }}/pull/${{ github.event.pull_request.number }}'
-          # See https://github.com/anthropics/claude-code-action/blob/main/docs/usage.md
-          # or https://code.claude.com/docs/en/cli-reference for available options
+          prompt: |
+            Review the changed tests in ${{ github.event.inputs.target || format('the pull request {0}', github.event.pull_request.number) }}.
 
+            Read docs/VACUOUS_TESTS.md FIRST. It is this project's catalogue of
+            eighteen tests that passed for reasons unrelated to what they named,
+            with an eight-category taxonomy. It is the specification for this
+            review. A generic code review is not what is wanted here and is
+            already available by mentioning @claude.
+
+            For every test added or modified, answer one question in writing:
+
+              WHAT WOULD HAVE TO CHANGE FOR THIS TEST TO FAIL?
+
+            If the answer is "nothing", say so plainly and name the taxonomy
+            category. The catalogue records that six of its incidents were
+            caught by exactly this question and no other method.
+
+            Check specifically for the shapes that have actually occurred here:
+
+            - a test that greps or substring-matches SOURCE rather than
+              evaluating a decision (category A). The precedent: a test for a
+              missing halt asserted `halt_reasons.append(...)` appeared in the
+              source, which survives the guarding branch being disabled by
+              `if False:`. It was green against broken code.
+            - a narrowing verified with the broader form (category F): an
+              explicit list checked by running the glob it narrows.
+            - a normaliser between the test and the mechanism (category F,
+              layered): a wrapper ending in an unconditional exit, a catch-all,
+              a default return. No input can make such a test fail.
+            - the component tested while its wiring is not (category G):
+              registration, invocation, input supply, or scheduling. A correct
+              component that nothing reaches is not enforced.
+            - an assertion that passes on an EMPTY extraction. If a set, list
+              or match could be empty, is there a guard that says so?
+
+            Also flag any test that would pass if its fixture were replaced by
+            a trivially different one, and any assertion whose failure message
+            would not tell a reader what broke.
+
+            COMMENT ONLY. Do not modify files, do not push, do not approve or
+            request changes. This review advises; the deterministic checks in
+            cloudbuild.yaml are what gate. Keeping those apart is deliberate --
+            an LLM verdict wearing a green badge is the failure mode this
+            repository has spent the most effort learning to avoid.
+
+            If the changed files contain no tests, say so in one line and stop.
