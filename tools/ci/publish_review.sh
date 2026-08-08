@@ -80,9 +80,76 @@ n_examined=$(printf '%s' "$RAW" | jq -r '(.files_examined // []) | length')
 n_findings=$(printf '%s' "$RAW" | jq -r '(.findings // []) | length')
 summary=$(printf '%s' "$RAW" | jq -r '.summary // ""')
 
-if [ "$no_tests" != "true" ] && [ "$n_examined" -eq 0 ]; then
-  fail "The review examined 0 test files and did not report that the diff
-contained none. Those are different claims, and neither was made."
+# Count TEST files, not entries. The field is documented as "every test file
+# actually read", and a review legitimately reads other things -- the
+# workflow, this script, and docs/VACUOUS_TESTS.md, which the prompt orders
+# it to read FIRST. Those land in the same array.
+#
+# Measured on run 31259604880: an invalid ref was dispatched, the review
+# correctly reported that the range did not exist and examined no tests, and
+# `files_examined` came back as exactly `["docs/VACUOUS_TESTS.md"]`. One
+# entry, so the old count-based guard passed, and a review that examined
+# nothing reported job SUCCESS in 59 seconds. The guard was reading a field
+# whose semantics it had assumed -- entries, where the claim was test files.
+n_test_files=$(printf '%s' "$RAW" | jq -r '
+  [ (.files_examined // [])[] | select(test("(^|/)tests?/")) ] | length')
+
+if [ "$no_tests" != "true" ] && [ "${n_test_files:-0}" -eq 0 ]; then
+  fail "The review examined 0 TEST files and did not report that the diff
+contained none. Those are different claims, and neither was made. It listed
+$n_examined path(s), none under a test directory -- which is what a review
+that could not reach the diff at all looks like. Check that the dispatched
+ref exists and is non-empty before concluding anything about the code."
+fi
+
+# --- coverage: how much of the diff did it actually look at? ---------------
+#
+# "Examined N files" and "reviewed the diff" are different claims, and the
+# gap between them is invisible from the report. Measured on run
+# 31259263566: a pull_request review examined 10 of 32 changed test files
+# and summarised as "no vacuous tests found in this diff" -- describing a
+# subset as the whole.
+#
+# The cause is structural rather than a lazy model, which is why it needs a
+# mechanism. `gh pr diff` returns HTTP 406 above 20,000 lines and that is an
+# allowlisted tool the review reaches for; on a large PR it simply cannot
+# retrieve the diff and proceeds on what it could reach. Nothing in the
+# report distinguishes that from a thorough pass.
+#
+# Computed here with git rather than passed in from the workflow, on purpose:
+# the workflow file is hand-synced to two branches, and a check that costs a
+# sync to add is a check that does not get added.
+#
+# It REPORTS and does not fail. Partial coverage on a large diff is often
+# legitimate, and failing it would train route-around -- the one outcome
+# worse than not measuring. Absence still fails, above; this quantifies.
+coverage_note=""
+if [ "$no_tests" != "true" ] && [ -n "${GITHUB_BASE_REF:-}" ] \
+   && command -v git >/dev/null 2>&1; then
+  base="origin/$GITHUB_BASE_REF"
+  if git rev-parse --verify --quiet "$base" >/dev/null 2>&1; then
+    changed=$(git diff --name-only "$base...HEAD" -- 'tests/*' 2>/dev/null \
+              | sort -u)
+    n_changed=$(printf '%s' "$changed" | grep -c . || true)
+    # A zero here means the computation failed or the path filter missed,
+    # NOT that the diff is clean -- `no_tests_changed` is the claim for
+    # that, and it is false in this branch. Say so rather than reporting
+    # flawless coverage of nothing, which is this file's own subject.
+    if [ "${n_changed:-0}" -gt 0 ]; then
+      examined=$(printf '%s' "$RAW" | jq -r '(.files_examined // [])[]' \
+                 | sort -u)
+      missed=$(comm -23 <(printf '%s\n' "$changed") \
+                       <(printf '%s\n' "$examined") 2>/dev/null | grep . || true)
+      n_missed=$(printf '%s' "$missed" | grep -c . || true)
+      if [ "${n_missed:-0}" -gt 0 ]; then
+        coverage_note="PARTIAL: $n_examined of $n_changed changed test files examined; ${n_missed} not looked at."
+      else
+        coverage_note="Complete: every one of the $n_changed changed test files was examined."
+      fi
+    else
+      coverage_note="Coverage could not be computed (no changed test paths resolved), so the scope of this review is unverified."
+    fi
+  fi
 fi
 
 {
@@ -92,6 +159,22 @@ fi
     echo "No test files changed; nothing to review."
   else
     echo "Examined **$n_examined** test file(s). Findings: **$n_findings**."
+    if [ -n "$coverage_note" ]; then
+      echo
+      echo "**Coverage — $coverage_note**"
+      if [ "${n_missed:-0}" -gt 0 ]; then
+        echo
+        echo "A clean result covers what was examined, not what changed."
+        echo "\`gh pr diff\` returns HTTP 406 above 20,000 lines, so on a large"
+        echo "diff the review proceeds on what it could reach."
+        echo
+        echo "<details><summary>Changed but not examined</summary>"
+        echo
+        printf '%s\n' "$missed" | sed 's/^/- `/; s/$/`/'
+        echo
+        echo "</details>"
+      fi
+    fi
     echo
     echo "<details><summary>Files examined</summary>"
     echo

@@ -78,7 +78,28 @@ check "names the parse failure" "not valid JSON"
 # no tests. Those are different assertions and this makes neither.
 run "$EMPTY_CLAIM"
 expect_rc "examined-nothing fails" 1
-check "distinguishes the two claims" "examined 0 test files"
+check "distinguishes the two claims" "examined 0 TEST files"
+
+# The invalid-ref case, verbatim from run 31259604880. The review behaved
+# correctly -- it reported that origin/staging does not exist and refused to
+# substitute a range -- but `files_examined` carried the CATALOGUE it had
+# been told to read first. One entry, non-zero, so a count-based guard
+# passed and a review that examined no tests went green in 59 seconds.
+CATALOGUE_ONLY='{"no_tests_changed":false,
+  "files_examined":["docs/VACUOUS_TESTS.md"],"findings":[],
+  "summary":"Cannot review: the requested range does not exist."}'
+run "$CATALOGUE_ONLY"
+expect_rc "a non-test path does not count as a test file" 1
+check "says none were under a test directory" "none under a test directory"
+check "points at the ref rather than the code" "ref exists"
+
+# Non-vacuity for the filter: it must not have become "fail unless the array
+# is all test files". A review that reads the workflow AND a test is normal.
+MIXED='{"no_tests_changed":false,
+  "files_examined":["docs/VACUOUS_TESTS.md",".github/workflows/x.yml",
+                    "tests/test_a.py"],"findings":[],"summary":"Fine."}'
+run "$MIXED"
+expect_rc "context files alongside a real test still pass" 0
 
 # --- findings do NOT fail --------------------------------------------------
 
@@ -142,6 +163,75 @@ OUT="$TMP/summary_env"
 : > "$OUT"
 GITHUB_STEP_SUMMARY="$OUT" bash "$SCRIPT" "$REAL"
 check "honours GITHUB_STEP_SUMMARY" "tests/test_a.py"
+
+# --- coverage: examined vs changed -----------------------------------------
+#
+# The gap this measures was real and invisible. On run 31259263566 a
+# pull_request review examined 10 of 32 changed test files and summarised as
+# "no vacuous tests found in this diff" -- a subset described as the whole.
+# Structural, not lazy: `gh pr diff` returns HTTP 406 above 20,000 lines.
+#
+# Exercised against a REAL git repository rather than a stubbed `git`,
+# because the check's whole substance is which refs and paths git resolves,
+# and a stub would assert that the stub works.
+
+echo
+echo "publish_review.sh -- coverage"
+
+REPO="$TMP/repo"
+mkdir -p "$REPO/tests"
+(
+  cd "$REPO" || exit 1
+  git init -q -b main .
+  git config user.email t@t; git config user.name t
+  echo x > README; git add -A; git commit -qm base
+  # a fake "origin/main" so GITHUB_BASE_REF resolves the way CI's would
+  git update-ref refs/remotes/origin/main HEAD
+  echo a > tests/test_a.py; echo b > tests/test_b.py
+  git add -A; git commit -qm "two test files"
+) || { echo "  FAIL  could not build the fixture repo"; fails=$((fails + 1)); }
+
+run_cov() {  # run_cov <json> -> OUT/RC, executed inside the fixture repo
+  n=$((n + 1))
+  OUT="$TMP/cov_$n"
+  : > "$OUT"
+  ( cd "$REPO" && GITHUB_BASE_REF=main bash "$SCRIPT" "$1" "$OUT" )
+  RC=$?
+}
+
+PARTIAL='{"no_tests_changed":false,"files_examined":["tests/test_a.py"],
+          "findings":[],"summary":"Nothing vacuous in this diff."}'
+FULL='{"no_tests_changed":false,
+       "files_examined":["tests/test_a.py","tests/test_b.py"],
+       "findings":[],"summary":"All good."}'
+
+run_cov "$PARTIAL"
+expect_rc "partial coverage does NOT fail the build" 0
+check "reports the shortfall"        "PARTIAL: 1 of 2"
+check "names what was not examined"  "tests/test_b.py"
+check "warns a clean result is scoped" "covers what was examined"
+
+# The guard seen passing, not only failing -- otherwise it could be a
+# routine that always cries partial.
+run_cov "$FULL"
+expect_rc "complete coverage passes" 0
+check "reports completeness" "Complete: every one of the 2"
+if grep -qF "PARTIAL" "$OUT"; then
+  echo "  FAIL  a fully-covered review was reported as partial"
+  fails=$((fails + 1))
+else
+  echo "  ok    a fully-covered review is not reported as partial"
+fi
+
+# Outside a pull request there is no base ref, so no coverage claim is made.
+# Silence is correct here; a fabricated "complete" would not be.
+run "$CLEAN"
+if grep -qE "PARTIAL|Complete: every one" "$OUT"; then
+  echo "  FAIL  coverage was claimed with no base ref to compute it from"
+  fails=$((fails + 1))
+else
+  echo "  ok    no coverage claim without a base ref"
+fi
 
 echo
 if [ "$fails" -eq 0 ]; then echo "all checks passed"; exit 0; fi
