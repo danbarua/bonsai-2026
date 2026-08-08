@@ -89,14 +89,28 @@ def test_the_publisher_receives_structured_output_not_a_file_path(text):
     it should fail here rather than in a build.
     """
     step = _step_invoking(text, "publish_review.sh")
-    wiring = " ".join(str(v) for v in (step.get("env") or {}).values())
-    wiring += " " + str(step.get("run") or "")
-    assert "outputs.structured_output" in wiring, (
-        "the publisher step is not given `structured_output`. If it is "
-        "receiving `execution_file`, that is a PATH and jq will reject it")
-    assert "outputs.execution_file" not in wiring, (
-        "`execution_file` is wired into the publisher step; it is a path, "
-        "not JSON")
+    env = step.get("env") or {}
+    # Scoped to the variable the command ACTUALLY CONSUMES, not to the step.
+    # Joining every env value into one string was the first attempt and it
+    # repeated the defect one level down: over-broad, since an unrelated
+    # `EXEC_LOG` on the same step would trip it, and simultaneously blind,
+    # since a value naming the right output anywhere satisfied it.
+    names = [a or b for a, b in re.findall(r"\$\{(\w+)\}|\$(\w+)",
+                                           str(step.get("run") or ""))]
+    assert names, "the publisher command passes no variable at all"
+    for name in names:
+        assert name in env, (
+            f"the publisher command passes `${name}`, which the step's `env` "
+            f"does not define. The shell expands it to an empty string and "
+            f"the publisher fails the build for a missing review -- a red "
+            f"build whose cause is a renamed variable")
+    wired = " ".join(str(env[name]) for name in names)
+    assert "outputs.structured_output" in wired, (
+        "the publisher is not given `structured_output`. If it is receiving "
+        "`execution_file`, that is a PATH and jq will reject it")
+    assert "outputs.execution_file" not in wired, (
+        "`execution_file` is wired into the value the publisher reads; it is "
+        "a path, not JSON")
 
 
 def test_the_execution_file_is_still_kept_as_an_artifact(text):
@@ -279,6 +293,24 @@ BUG = "STRUCTURED_OUTPUT: ${{ steps.review.outputs.execution_file }}"
     (lambda t: _mutate(t, WIRING, "STRUCTURED_OUTPUT: ''"),
      "not given `structured_output`",
      "the publisher wired to nothing at all"),
+    # The three above all die on the same assertion. These two exist because
+    # of that: an assertion no mutation reaches is unexercised, which is the
+    # defect this whole block was written to fix.
+    (lambda t: _mutate(t, WIRING, BUG + "\n          REVIEW_JSON: "
+                       "${{ steps.review.outputs.structured_output }}"),
+     "not given `structured_output`",
+     "INVERSION: the consumed variable carries the path while a SECOND, "
+     "unconsumed variable carries the JSON. Whole-step matching passed this"),
+    (lambda t: _mutate(t, WIRING, WIRING.rstrip()
+                       + "${{ steps.review.outputs.execution_file }}"),
+     "is wired into the value the publisher reads",
+     "both outputs concatenated into the consumed value -- the only "
+     "mutation that reaches the second assertion"),
+    (lambda t: _mutate(t, "STRUCTURED_OUTPUT: ${{", "REVIEW_JSON: ${{"),
+     "does not define",
+     "the env key renamed while `run:` still passes $STRUCTURED_OUTPUT. The "
+     "shell expands it to empty and the publisher fails the build for a "
+     "missing review -- a red build blamed on the wrong thing"),
 ])
 def test_a_broken_publisher_wiring_is_rejected(text, mutate, expected, why):
     with pytest.raises(AssertionError, match=re.escape(expected)):
@@ -298,15 +330,21 @@ def test_a_missing_execution_artifact_is_rejected(text, mutate, expected, why):
         test_the_execution_file_is_still_kept_as_an_artifact(mutate(text))
 
 
-def test_an_innocent_comment_does_not_change_the_verdict(text):
-    """The other direction. Scoping must not have made the checks brittle:
-    a comment naming the script above the step is harmless and must stay
-    harmless, which the old first-match `next()` could not promise."""
-    noisy = _mutate(
-        text, "      - name: Announce it if nothing was published",
-        "      # publish_review.sh is invoked below\n"
-        "      - name: Announce it if nothing was published")
-    test_the_publisher_receives_structured_output_not_a_file_path(noisy)
+@pytest.mark.parametrize("mutate,why", [
+    (lambda t: _mutate(t, "      - name: Announce it if nothing was published",
+                       "      # publish_review.sh is invoked below\n"
+                       "      - name: Announce it if nothing was published"),
+     "a comment naming the script above the step is harmless and must stay "
+     "harmless, which the old first-match `next()` could not promise"),
+    (lambda t: _mutate(t, WIRING, WIRING + "\n          EXEC_LOG: "
+                       "${{ steps.review.outputs.execution_file }}"),
+     "an unrelated env var on the same step, naming the path for logging, "
+     "is not a defect. Whole-step matching called it one"),
+])
+def test_harmless_changes_do_not_change_the_verdict(text, mutate, why):
+    """The other direction: scoping must not have made the check brittle. A
+    guard that fires on innocent edits gets routed around."""
+    test_the_publisher_receives_structured_output_not_a_file_path(mutate(text))
 
 
 def test_the_review_is_advisory_and_says_so(text):
