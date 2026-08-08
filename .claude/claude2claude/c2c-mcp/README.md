@@ -331,6 +331,33 @@ content type `application/json`, and the same secret.
 `C2C_WEBHOOK_MAX_BYTES` (default 25 MB, GitHub's own delivery limit)
 caps the buffer; a larger body is rejected 413 unread.
 
+### Comment events are gated on the author
+
+This repository is **public**, so anyone with a GitHub account can
+comment on a PR or issue. Unfiltered, that is two problems at once: a
+volume one (any stranger can make the unread counter climb and ping
+every agent's doorbell) and the worst injection surface here, since a
+comment body is chosen in full by whoever wrote it.
+
+`issue_comment`, `pull_request_review_comment` and
+`pull_request_review` therefore produce mail **only** when the author
+is in `TRUSTED_COMMENT_AUTHORS` — currently just
+`github-actions[bot]`, the login the repo's own CI posts under via
+`GITHUB_TOKEN`. An outside contributor cannot post under it, which is
+what makes it verifiable rather than merely plausible.
+
+`author_association` (`OWNER`, `MEMBER`, `COLLABORATOR`) is
+deliberately **not** accepted. It names a relationship, not an identity
+GitHub vouches for on our behalf.
+
+**The comment body is never copied.** The message carries the PR
+number, the author and `gh pr view <n> -R <repo> --comments`; the
+reader fetches the text itself, deliberately, over HTTP. That is the
+same doorbell-not-letter split the mailbox uses everywhere else.
+
+A dropped delivery answers `202`, not an error — GitHub retries
+failures, and there is nothing here to retry. The reason is logged.
+
 ### Adding an event type
 
 `summariseGithub` in `src/index.ts` writes a short summary and a
