@@ -236,6 +236,11 @@ gcp-*-key.json
 .claude/claude2gpt/archive/
 .claude/code2code/mailbox/
 .claude/code2code/archive/
+# Digests written by the summarise-mailbox skill, plus its checkpoint
+# manifest. Derived entirely from archive/ above, which is itself local-
+# only -- a committed digest would be a durable record nobody else can
+# regenerate or check against its source.
+.claude/code2code/mailbox-summaries/
 
 # work-and-mail-loop skill: per-session iteration logs, one file per
 # /rename name. Ephemeral scratch, not durable project record.
