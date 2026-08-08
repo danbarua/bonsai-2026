@@ -44,14 +44,9 @@ Replace the final sentence of principle 24:
 +    limits any capture mechanism has to work within.
 ```
 
-The path above is the final one. As first applied it read
-`docs/proposals/PROVENANCE_CONTRACT.md`; the document was promoted to
-`docs/` hours later and the citation moved with it.
-
-If and when the proposal is accepted and the document moves out of
-`docs/proposals/` into `docs/`, the path in this amendment moves with it.
-The amendment should not be applied ahead of that decision, or it will
-itself become a stale citation.
+The path above is the final one. The contract has been promoted out of
+`docs/proposals/` and now lives at `docs/PROVENANCE_CONTRACT.md`, so the
+citation in this amendment is the one to apply as written.
 
 ## One substantive note for whoever applies it
 

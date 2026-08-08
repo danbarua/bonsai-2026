@@ -6,7 +6,7 @@ would stay green if the thing it guards were deleted.
 
 This project has produced them repeatedly enough that the pattern is worth
 recording as its own artifact rather than as scattered commit messages.
-Sixteen incidents are catalogued below with dates and SHAs, spanning
+They are catalogued below with dates and SHAs, spanning
 2026-08-04 to 2026-08-08 and two model generations. Every one was written
 by an AI agent — mostly me — and every one was caught, which is the more
 useful half of the record: the catching has a method, and the method is
@@ -58,7 +58,7 @@ tests:
 
 ---
 
-## Taxonomy — eight ways a test comes out empty
+## Taxonomy — the ways a test comes out empty
 
 Sorted roughly by how hard each is to see by reading.
 
@@ -293,7 +293,7 @@ correctly fixes this misparse; requiring a stdin-consuming subcommand fixes
 this over-match; only the structural rule makes the *class*
 unrepresentable — a record must carry the thing it claims to have captured,
 or it is not a capture. It also fails in the safe direction: a future
-classifier bug now yields an absence, which the eight categories above are
+classifier bug now yields an absence, which the categories above are
 already tuned to find.
 
 ---
@@ -317,7 +317,7 @@ The instrument is the demand for evidence, not the tool that files it.
 A reconciler can require a `break_demonstrated` field; only a person can
 decline to write something plausible into it.
 
-**Deliberate breakage, nine of eighteen.** Break what the guard watches;
+**Deliberate breakage, the largest share.** Break what the guard watches;
 observe the specific expected failure. The corollary in CLAUDE.md
 principle 21 states it as: *a guard you have not seen fail is not yet a
 guard.* Incident #10 is the clearest demonstration — the break fired
@@ -424,8 +424,8 @@ looked for. That is an encouraging shape for a problem to have.
     carries a break shown to turn it red. #17 is the instance, and it
     reproduced the very gap it was written to close.
 
-11. **Suspect presences, not only absences.** Eight of the categories above
-    are absence-shaped, which trains the eye to look for what is missing.
+11. **Suspect presences, not only absences.** Every category above is
+    absence-shaped, which trains the eye to look for what is missing.
     #18 is a record that arrived and attested to something untrue, and the
     reader who drew a false conclusion from it reasoned correctly. Where a
     mechanism emits positive artifacts, require each to carry the thing it
