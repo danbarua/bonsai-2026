@@ -14,7 +14,9 @@ green suite.
 from __future__ import annotations
 
 import importlib.util
+import re
 import sys
+import tomllib
 from pathlib import Path
 
 import pytest
@@ -82,6 +84,73 @@ def test_the_corpus_derives_the_scoped_candidate_count():
 
     docs = [STAGE2B_DIR / name for name in gate_corpus.PROTOCOL_DOCS]
     assert len(derive_clauses(docs)) == 89
+
+
+def test_each_exemption_still_contributes_the_candidate_count_it_did():
+    """The exemption that grows clauses is the one nothing else catches.
+
+    Both direction tests are satisfied by a document that is DECLARED,
+    and the 89-count pin only moves when the corpus changes -- so an
+    exempt document quietly acquiring binding obligations is invisible to
+    every other check here. Judging that a document states no obligations
+    is as unmechanisable as judging a sentence non-binding; noticing that
+    the judgement now covers different content is not.
+
+    These counts are what each exempt document contributed when it was
+    exempted. A change means the reason on that exemption was written
+    about different text and needs re-reading -- not that anything is
+    broken. Update the number with the re-read, never ahead of it.
+    """
+    sys.path.insert(0, str(REPO_ROOT / "tools" / "gates"))
+    from gate_inventory import derive_clauses
+
+    at_exemption_time = {
+        "FINDINGS.md": 37,
+        "NEGATIVE_PATH_EVIDENCE.md": 19,
+        "PHASE_B_PLAN.md": 38,
+        "README.md": 21,
+    }
+    assert set(at_exemption_time) == set(gate_corpus.EXEMPT), (
+        "an exemption was added or removed without a candidate count")
+    for name, expected in at_exemption_time.items():
+        actual = len(derive_clauses([STAGE2B_DIR / name]))
+        assert actual == expected, (
+            f"{name} now derives {actual} candidates, not {expected}: its "
+            f"exemption reason was written about different text")
+
+
+def test_every_binds_at_pointer_names_a_clause_in_a_binding_kind():
+    """The `not_binding` reasons' pointers must terminate somewhere real.
+
+    A reason saying a clause is narration and "binds at X (id)" is only
+    honest if `id` is dispositioned as binding. If X is later dispositioned
+    `not_binding` too, the obligation has been narrated away by a chain of
+    rows each pointing at the next -- and `gate_inventory.py` cannot see
+    it, because these reasons are prose to it.
+
+    Scoped to the `binds at ... (id)` construction specifically. A bare id
+    elsewhere in a reason is a cross-reference to a sibling row, which is
+    legitimate: `02dbbe96e032` says it restates `ef1b61b7eac3`, and both
+    are correctly narration.
+    """
+    inventory = tomllib.loads(
+        (STAGE2B_DIR / "gates.toml").read_text())
+    binding = set()
+    for kind in ("binding_gate", "binding_value", "binding_claim"):
+        binding |= set(inventory.get(kind, {}))
+
+    pointer = re.compile(r"binds at [^(]*\(([0-9a-f]{12})\)")
+    found = 0
+    for clause_id, entry in inventory.get("not_binding", {}).items():
+        for target in pointer.findall(entry["reason"]):
+            found += 1
+            assert target in binding, (
+                f"{clause_id} says its binding content lives at {target}, "
+                f"which is not dispositioned in any binding kind")
+    assert found >= 4, (
+        "no `binds at ... (id)` pointers found -- the convention this "
+        "test enforces has been dropped or reworded, and the test is "
+        "passing over an empty set")
 
 
 def test_check_corpus_rejects_an_undeclared_document(tmp_path):

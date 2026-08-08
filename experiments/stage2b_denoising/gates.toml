@@ -242,6 +242,96 @@ enforcement = ""
 break_demonstrated = ""
 trigger = "manual"
 
+[binding_value.8bf414d720f2]
+# Freeze 2 -- "official corpus 60,000; CNN weight-fit 54,000; CNN validation
+#  6,000; ridge CV and final-fit 60,000. All old-vs-new comparison is by
+#  official image index, never positional prefix."
+value = """
+STAGE3_PLAN.md Freeze 2. Populations: official corpus 60,000; CNN weight-fit
+54,000; CNN validation 6,000; ridge CV and final refit 60,000. The 6k are
+held out from CNN gradient updates only, not from training-side analysis."""
+production_consumers = """
+Both production drivers, and they are the only two that carry a population:
+encode_stage3_local.py::N_OFFICIAL_TRAIN = 60_000, with the 54,000/6,000
+split asserted at the point the index arrays are built (fit_indices.size ==
+54_000, validation_indices.size == 6_000); and
+run_ladder_stage3.py::EXPECTED_N = 60_000, which the corpus and role checks
+read. No third consumer: the ridge and CNN modules take their row counts from
+the arrays they are handed rather than from a constant of their own, so these
+two constants are the common propagation point rather than two of several."""
+status = "enforced"
+enforcement = "tests/test_stage2b_ladder_stage3.py::test_roles_match_the_locked_partition"
+break_demonstrated = """
+The production constants moved to 54,000 -- Desktop's withdrawn
+recommendation, so the break is the specific wrong value this freeze exists
+to exclude rather than an arbitrary one. Four tests FAIL across both drivers:
+test_corpus_constants, test_evolve_chunk_divides_the_corpus_exactly,
+test_roles_match_the_locked_partition, and
+test_the_declared_population_is_the_official_training_split. Causal evidence
+on the production values' propagation: the chunk-division and role-sum tests
+fail because quantities DERIVED from the constant stop agreeing, not because
+a literal stopped equalling itself."""
+provenance_of_use = """
+The 2026-08-08 stage-3 run's artifacts are (60000, ...) in both axes that
+carry the population, and the encoded array's manifest records shape and the
+producing commit. The regeneration acceptance path
+(compare_stage3_regeneration.py) joins old to new BY OFFICIAL INDEX rather
+than positional prefix, which is the second half of this freeze and is what
+makes the population claim checkable at all -- a positional join would agree
+on a prefix whatever the populations were."""
+trigger = "ci-fast"
+
+[binding_value.7ff6b43436c6]
+# Freeze 1 -- analytic audit tolerance, M = 100, sign convention.
+value = """
+STAGE3_PLAN.md Freeze 1, frozen into AUDIT_PROTOCOL.md: d = 1.151190e-12
+propagated through the metric; |Delta MSE| <= 2d + d^2; contrast 4d + 2d^2;
+pair ordering 4d + 2d^2 when the shared `pre` term cancels algebraically,
+else 8d + 4d^2. Safety factor M = 100 -> 4.604761e-10 (contrast),
+9.209522e-10 (4-term pair). Sign convention: Delta_g = MSE_evolved_g -
+MSE_pre, negative = improvement."""
+production_consumers = ""   # the audit driver is unwritten
+status = "pending_consumer"
+pending_reason = """
+Same state as b682b6af449a (M = 100), which is one input to these numbers:
+the tolerances are frozen for the amendment-impact audit driver, and that
+driver does not exist. production_consumers is empty, not unknown, and stays
+empty until it is written. Deliberately NOT merged with b682b6af449a --
+that clause freezes the safety factor, this one freezes the derived
+tolerances and the sign convention, and one disposition covering two clause
+ids is the collision check_ids_unique refuses."""
+enforcement = ""
+break_demonstrated = ""
+trigger = "manual"
+
+[binding_claim.0771659e4158]
+# Freeze 5 -- the dirty-tree claim, narrowed to four permitted statements.
+locator = "STAGE3_PLAN.md, section 'Freeze 5 -- the dirty-tree claim, narrowed'"
+obligation = """
+About Phase A's provenance, state ONLY: (a) the recovered script matches the
+later commit; (b) provenance for the other participating modules is
+unavailable; (c) payload identity under the clean fingerprinted regeneration
+is strong EMPIRICAL evidence of computational equivalence; (d) the
+regenerated artifact, not the old one, is the authoritative Phase A input
+going forward. The stronger claim -- that the script which ran is provably
+the committed one -- may not be made: without a launch-time source hash,
+matching bytes establish only that CURRENT bytes match the later commit."""
+status = "pending_package"
+pending_reason = """
+The Stage 2B readiness package is not assembled. This obligation binds what
+the package's provenance section may assert, and there is no such section to
+point at yet. Distinct from `unresolved`: nothing here needs a reviewer's
+judgement, it needs the artifact to exist."""
+negative_attestation = """
+Scoped to the output set this obligation ranges over: any statement about
+Phase A's provenance in the Stage 2B readiness package, FINDINGS.md, and
+STAGE3_PLAN.md. Not yet attestable -- the package does not exist, and an
+attestation over an output set with a missing member would be exactly the
+thing this field exists to prevent, a compliant sample standing in for
+coverage. The two documents that DO exist are the ones this row must sweep
+when the package lands; recording that scope now, before the writing, is
+what stops the sweep being defined afterwards to match what was written."""
+
 # =============================================================================
 # not_binding -- candidates that are prose about something else
 # =============================================================================
