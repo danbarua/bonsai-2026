@@ -142,6 +142,36 @@ def complete_row(**overrides):
     return row
 
 
+def value_row(**overrides):
+    """A `binding_value` row to the reviewer's five requirements."""
+    row = {
+        "value": "ALPHA_BAR = 0.5, DESIGN.md 'Frozen parameters'",
+        "production_consumers": "step7_ridge.py; proved common propagation "
+                                "point is stage2b_conditions.ALPHA_BAR",
+        "enforcement": "t.py::test_alpha",
+        "break_demonstrated": "altered the propagated value in "
+                              "stage2b_conditions; the test failed",
+        "provenance_of_use": "run manifest records alpha_bar=0.5 for the run",
+        "trigger": "ci-fast",
+    }
+    row.update(overrides)
+    return row
+
+
+def claim_row(**overrides):
+    """A `binding_claim` row to the reviewer's six requirements."""
+    row = {
+        "locator": "DESIGN.md#reporting-constraints",
+        "obligation": "the control is described as degree-preserving rewiring",
+        "discharged_in": "FINDINGS.md, Scope and limits",
+        "status": "discharged",
+        "evidence": "quoted: 'a degree-preserving rewiring, not a random "
+                    "sample from the space of graphs'",
+    }
+    row.update(overrides)
+    return row
+
+
 def test_a_fully_dispositioned_document_produces_no_findings(tmp_path):
     """Non-vacuity for every negative assertion above: they would all pass
     against a reconcile() that reported findings unconditionally."""
@@ -290,11 +320,7 @@ def test_a_frozen_value_is_not_asked_for_a_decision_consequence(tmp_path):
     doc = write_doc(tmp_path, "# P\n\nALPHA_BAR is frozen at 0.5.\n")
     (tmp_path / "t.py").write_text("def test_alpha():\n    pass\n")
     clauses = derive_clauses([doc], tmp_path)
-    inventory = {"reviewed": True, "binding_value": {clauses[0].clause_id: {
-        "value": "0.5",
-        "enforcement": "t.py::test_alpha",
-        "break_demonstrated": "changed the constant, test failed",
-        "trigger": "ci-fast"}}}
+    inventory = {"reviewed": True, "binding_value": {clauses[0].clause_id: value_row()}}
     assert reconcile(clauses, inventory, tmp_path) == []
 
 
@@ -308,8 +334,7 @@ def test_a_process_promise_needs_no_code_fields_at_all(tmp_path):
     doc = write_doc(
         tmp_path, "# P\n\nThe control must never be reported as random.\n")
     clauses = derive_clauses([doc], tmp_path)
-    inventory = {"reviewed": True, "binding_claim": {clauses[0].clause_id: {
-        "discharged_in": "FINDINGS.md, scope paragraph"}}}
+    inventory = {"reviewed": True, "binding_claim": {clauses[0].clause_id: claim_row()}}
     assert reconcile(clauses, inventory, tmp_path) == []
 
 
@@ -324,8 +349,7 @@ def test_unenforceable_promises_are_listed_not_netted_into_coverage(tmp_path):
     doc = write_doc(
         tmp_path, "# P\n\nThe control must never be reported as random.\n")
     clauses = derive_clauses([doc], tmp_path)
-    inventory = {"reviewed": True, "binding_claim": {clauses[0].clause_id: {
-        "discharged_in": "FINDINGS.md"}}}
+    inventory = {"reviewed": True, "binding_claim": {clauses[0].clause_id: claim_row()}}
     listed = gate_inventory.unenforceable(clauses, inventory)
     assert [c.clause_id for c in listed] == [clauses[0].clause_id]
     # And it still counts as dispositioned -- the point is that it is
@@ -344,14 +368,78 @@ def test_tagging_a_claim_mechanizable_does_not_promote_it_out_of_the_list(tmp_pa
     doc = write_doc(
         tmp_path, "# P\n\nNo metric may be added after results exist.\n")
     clauses = derive_clauses([doc], tmp_path)
-    inventory = {"reviewed": True, "binding_claim": {clauses[0].clause_id: {
-        "discharged_in": "FINDINGS.md",
-        "mechanizable_candidate": "a doc-diff lint could compare metric "
-                                  "lists across commits"}}}
+    inventory = {"reviewed": True, "binding_claim": {clauses[0].clause_id: claim_row(
+            negative_attestation="checked all of FINDINGS.md and the tables",
+            mechanizable_candidate="a doc-diff lint could compare metric "
+                                   "lists across commits")}}
     assert reconcile(clauses, inventory, tmp_path) == []
     still_listed = gate_inventory.unenforceable(clauses, inventory)
     assert [c.clause_id for c in still_listed] == [clauses[0].clause_id], (
         "a mechanizable tag removed the row from the unenforceable listing")
+
+
+def test_an_unresolved_claim_fails_readiness(tmp_path):
+    """Reviewer-mandated: an unresolved obligation is not a state a package
+    ships in."""
+    doc = write_doc(tmp_path, "# P\n\nThe scope statement is required.\n")
+    clauses = derive_clauses([doc], tmp_path)
+    inventory = {"reviewed": True, "binding_claim": {
+        clauses[0].clause_id: claim_row(status="unresolved")}}
+    assert "unresolved_claim" in kinds(reconcile(clauses, inventory, tmp_path))
+
+
+def test_not_applicable_without_a_reason_is_a_finding(tmp_path):
+    """`not applicable` is a claim that the triggering condition never arose.
+    Without a reason tied to it, it is an escape hatch."""
+    doc = write_doc(tmp_path, "# P\n\nThe scope statement is required.\n")
+    clauses = derive_clauses([doc], tmp_path)
+    inventory = {"reviewed": True, "binding_claim": {
+        clauses[0].clause_id: claim_row(status="not_applicable")}}
+    assert "unreasoned_not_applicable" in kinds(
+        reconcile(clauses, inventory, tmp_path))
+
+
+def test_a_negative_obligation_needs_an_attestation_over_the_output_set(tmp_path):
+    """Pointing at one compliant passage cannot establish that a prohibited
+    claim is absent from everywhere else. That is a logical gap, not a
+    procedural one, which is why a compliant `evidence` pointer does not
+    discharge it."""
+    doc = write_doc(
+        tmp_path, "# P\n\nThe control must never be reported as random.\n")
+    clauses = derive_clauses([doc], tmp_path)
+    inventory = {"reviewed": True, "binding_claim": {
+        clauses[0].clause_id: claim_row(
+            obligation="must never be reported as a random sample")}}
+    assert "missing_negative_attestation" in kinds(
+        reconcile(clauses, inventory, tmp_path))
+
+
+def test_a_positive_obligation_does_not_need_one(tmp_path):
+    """Non-vacuity for the case above: it would pass on a check that
+    demanded an attestation from every claim row."""
+    doc = write_doc(tmp_path, "# P\n\nAn honest scope statement is required.\n")
+    clauses = derive_clauses([doc], tmp_path)
+    inventory = {"reviewed": True, "binding_claim": {
+        clauses[0].clause_id: claim_row(
+            obligation="the write-up carries an honest scope statement")}}
+    assert "missing_negative_attestation" not in kinds(
+        reconcile(clauses, inventory, tmp_path))
+
+
+def test_counts_are_reported_per_kind_with_no_aggregate_percentage(tmp_path):
+    """Reviewer-mandated: no single figure may let 54 human obligations
+    dilute or inflate executable coverage."""
+    doc = write_doc(tmp_path)
+    clauses = derive_clauses([doc], tmp_path)
+    inventory = {"reviewed": True,
+                 "binding_claim": {clauses[0].clause_id: claim_row()}}
+    counts = gate_inventory.counts_by_kind(clauses, inventory)
+    assert counts["binding_claim"] == 1
+    assert counts["binding_gate"] == 0
+    assert counts["undispositioned"] == 1
+    assert all(isinstance(v, int) for v in counts.values()), (
+        "counts_by_kind returned a non-integer -- a ratio or percentage "
+        "would be exactly what the ruling forbids")
 
 
 def test_a_gate_row_is_not_listed_as_unenforceable(tmp_path):

@@ -213,6 +213,19 @@ def _resolve(reference: str, repo_root: Path) -> tuple[bool, str]:
 # predicate that production never invokes is not an implemented gate, and
 # that is a failure. Collapsing the two would let "somebody runs it by hand"
 # stand in for "production actually calls it".
+# THE ANTI-GAMING CLAUSE, quoted verbatim from the Stage 2B reviewer ruling
+# of 2026-08-08 and binding on every use of this schema:
+#
+#   "Classification itself is reviewable: a clause cannot be moved from
+#    `binding_gate` to another kind merely because enforcement is absent."
+#
+# It closes the only loophole the trichotomy opens. Three kinds make the
+# inventory honest about a record that is mostly promises -- and would also
+# let an unimplemented gate be reclassified as a value or a claim until it
+# stops failing. The kinds describe what a clause IS, not how much work its
+# enforcement would be, and no check in this file can tell the difference.
+# That one is enforced by a reviewer reading the classifications.
+#
 # **Three kinds of binding, because a frozen protocol contains three kinds
 # of promise.** Measured over this project's record: of 89 candidates, 14
 # are runtime gates, 21 are frozen values, and 54 bind what may be CLAIMED
@@ -250,9 +263,19 @@ _REQUIRED_BY_KIND["binding_gate"] = _REQUIRED_DIMENSIONS
 # value, and demanding `decision_consequence` for it would be demanding
 # fiction.
 _REQUIRED_BY_KIND["binding_value"] = {
-    "value": "the frozen value itself, as written in the document",
-    "enforcement": "the test that asserts it",
-    "break_demonstrated": "evidence that test fails when the value drifts",
+    "value": "the authoritative source and the frozen value itself",
+    "production_consumers": "EVERY production consumer of the value, or a "
+                            "proved common propagation point -- one consumer "
+                            "cited for a value read in four places is a row "
+                            "that covers a quarter of what it claims",
+    "enforcement": "the pinning/identity test",
+    "break_demonstrated": "causal evidence the test fails when the PRODUCTION "
+                          "value or its propagation is altered -- not merely "
+                          "when the constant literal is edited, which tests "
+                          "that the literal equals itself",
+    "provenance_of_use": "evidence sufficient to establish the artifact or run "
+                         "actually USED the frozen value, rather than that the "
+                         "value was frozen somewhere",
     "trigger": "what schedules that test",
 }
 
@@ -261,9 +284,25 @@ _REQUIRED_BY_KIND["binding_value"] = {
 # after results exist". No code path can enforce these, and pretending one
 # could is the failure this whole requirement exists to prevent.
 _REQUIRED_BY_KIND["binding_claim"] = {
-    "discharged_in": "where in the write-up this promise is kept, so a "
-                     "reader can check it before the package goes out",
+    "locator": "source document plus a STABLE locator -- a line number moves, "
+               "a section or anchor does not",
+    "obligation": "the normalized obligation: concisely, what must or must "
+                  "not be claimed or done",
+    "discharged_in": "the package artifact plus section/field where "
+                     "compliance is discharged",
+    "status": "discharged | not_applicable | unresolved",
+    "evidence": "a reviewer-checkable evidence pointer, or quoted local "
+                "context, sufficient to VERIFY the discharge without "
+                "searching the package",
 }
+
+# Negative obligations need more than a compliant example, and the reason is
+# logical rather than procedural: pointing at one paragraph that says the
+# right thing cannot establish that the prohibited claim is absent from
+# everywhere else. So a `must not` / `never` row carries an attestation
+# scoped to the output set it ranges over.
+_NEGATIVE_OBLIGATION = re.compile(
+    r"\bmust not\b|\bnever\b|\bmay not\b|\bcannot\b|\bno\s+\w+\s+may\b", re.I)
 
 # Optional on `binding_claim`: a note that future tooling could plausibly
 # enforce this one -- a doc-diff lint for "no metric added after results
@@ -277,6 +316,41 @@ _REQUIRED_BY_KIND["binding_claim"] = {
 # and a half-built lint firing on some cases is exactly how that happens.
 # Same reason a `manual` trigger is reported rather than fatal.
 _OPTIONAL_BY_KIND = {"binding_claim": ("mechanizable_candidate",)}
+
+
+def _check_claim(clause_id: str, entry: dict, clause: Clause | None) -> list[Finding]:
+    """The `binding_claim` semantics that go beyond required fields."""
+    findings: list[Finding] = []
+    status = entry.get("status")
+
+    if status == "unresolved":
+        findings.append(Finding(
+            "unresolved_claim",
+            f"{clause_id} is unresolved. An unresolved obligation fails "
+            f"readiness; it is not a state a package ships in"))
+    elif status == "not_applicable" and not entry.get("not_applicable_reason"):
+        findings.append(Finding(
+            "unreasoned_not_applicable",
+            f"{clause_id} is marked not_applicable with no reason tied to the "
+            f"clause's TRIGGERING CONDITION. Not-applicable is a claim that "
+            f"the condition never arose, not an escape hatch"))
+    elif status not in ("discharged", "not_applicable", "unresolved"):
+        findings.append(Finding(
+            "unknown_status",
+            f"{clause_id} has status {status!r}; expected discharged, "
+            f"not_applicable or unresolved"))
+
+    # Negative obligations need an attestation over the output set, because a
+    # compliant paragraph cannot prove a prohibited claim is absent elsewhere.
+    text = entry.get("obligation") or (clause.text if clause else "")
+    if _NEGATIVE_OBLIGATION.search(text) and not entry.get("negative_attestation"):
+        findings.append(Finding(
+            "missing_negative_attestation",
+            f"{clause_id} is a must-not/never obligation and carries no "
+            f"`negative_attestation` scoped to the relevant output set. "
+            f"Pointing at one compliant passage cannot establish the "
+            f"prohibited claim is absent from the rest"))
+    return findings
 
 
 def check_ids_unique(clauses: list[Clause]) -> list[Finding]:
@@ -377,6 +451,9 @@ def reconcile(clauses: list[Clause], inventory: dict,
                 if not ok:
                     findings.append(Finding(
                         f"unresolved_{reference_field}", f"{clause_id}: {why}"))
+        if kind == "binding_claim":
+            findings.extend(_check_claim(clause_id, entry, by_id.get(clause_id)))
+
         if entry.get("trigger") == "manual":
             # Reported, not failed -- some gates legitimately cost too much
             # to automate. This is SCHEDULING, and distinct from dimension 2:
@@ -394,6 +471,23 @@ def reconcile(clauses: list[Clause], inventory: dict,
                 "unreasoned_disposition",
                 f"{clause_id} is dispositioned not-binding with no reason"))
     return findings
+
+
+def counts_by_kind(clauses: list[Clause], inventory: dict) -> dict[str, int]:
+    """Per-kind counts, and deliberately no aggregate percentage.
+
+    Reviewer-mandated, not a presentation preference: *"No aggregate
+    percentage that lets 54 human obligations dilute or inflate executable
+    coverage."* A single figure over a corpus that is 61% human promises
+    would report executable coverage as high by counting promises as
+    covered -- the green-that-means-nothing at report scale.
+    """
+    ids = {clause.clause_id for clause in clauses}
+    out = {kind: len(ids & set(inventory.get(kind, {})))
+           for kind in _REQUIRED_BY_KIND}
+    out["not_binding"] = len(ids & set(inventory.get("not_binding", {})))
+    out["undispositioned"] = len(ids) - sum(out.values())
+    return out
 
 
 def coverage(clauses: list[Clause], inventory: dict) -> tuple[int, int]:
@@ -432,11 +526,11 @@ def main(argv=None) -> int:
     done, total = coverage(clauses, inventory)
 
     claims = unenforceable(clauses, inventory)
+    by_kind = counts_by_kind(clauses, inventory)
     print(f"candidates derived : {total}")
-    print(f"dispositioned      : {done}")
-    for kind in _REQUIRED_BY_KIND:
-        print(f"  {kind:<16} : {len(inventory.get(kind, {}))}")
-    print(f"  not_binding      : {len(inventory.get('not_binding', {}))}")
+    print("counts by kind (no aggregate percentage -- see counts_by_kind):")
+    for kind, n in by_kind.items():
+        print(f"  {kind:<20} : {n}")
 
     if claims:
         # Printed in full, every time, and never folded into the coverage
