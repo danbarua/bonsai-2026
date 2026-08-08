@@ -277,6 +277,7 @@ _REQUIRED_BY_KIND["binding_value"] = {
                          "actually USED the frozen value, rather than that the "
                          "value was frozen somewhere",
     "trigger": "what schedules that test",
+    "status": "enforced | pending_consumer | unresolved",
 }
 
 # Binding on what may be CLAIMED, not on what the program does -- "must
@@ -293,7 +294,12 @@ _REQUIRED_BY_KIND["binding_claim"] = {
     "status": "discharged | not_applicable | unresolved",
     "evidence": "a reviewer-checkable evidence pointer, or quoted local "
                 "context, sufficient to VERIFY the discharge without "
-                "searching the package",
+                "searching the package. Point at an ARTIFACT, never at who "
+                "checked it: an agent attribution is not reviewer-checkable, "
+                "and a mesh `instance:` tag names a ROLE rather than a "
+                "session -- an instance can truthfully deny sending a "
+                "message that carries its tag, so it cannot carry provenance "
+                "into a readiness package",
 }
 
 # Negative obligations need more than a compliant example, and the reason is
@@ -316,6 +322,47 @@ _NEGATIVE_OBLIGATION = re.compile(
 # and a half-built lint firing on some cases is exactly how that happens.
 # Same reason a `manual` trigger is reported rather than fatal.
 _OPTIONAL_BY_KIND = {"binding_claim": ("mechanizable_candidate",)}
+
+
+def _check_value(clause_id: str, entry: dict) -> list[Finding]:
+    """`binding_value` statuses, including the not-yet-consumed case.
+
+    Several frozen values in this record are consumed by code that does not
+    exist yet -- `AUDIT_PROTOCOL.md` freezes values the unwritten audit
+    driver will read. For those, `production_consumers` is not unknown, it
+    is EMPTY, and will stay empty until the driver is written.
+
+    That is not a schema defect: it is the inventory correctly reporting
+    that a frozen value has no consumer yet, which is a true and useful
+    readiness statement. But it needs a disposition that is neither a lie
+    nor an escape hatch, so it gets a status of its own that FAILS
+    readiness rather than a prose field somebody can satisfy by writing
+    "none yet" into a required box.
+    """
+    findings: list[Finding] = []
+    status = entry.get("status")
+    if status == "pending_consumer":
+        if not entry.get("pending_reason"):
+            findings.append(Finding(
+                "unreasoned_pending_consumer",
+                f"{clause_id} is pending_consumer with no `pending_reason` "
+                f"naming the code that does not exist yet"))
+        findings.append(Finding(
+            "value_has_no_production_consumer",
+            f"{clause_id} is frozen but nothing consumes it yet: "
+            f"{entry.get('pending_reason', '(no reason given)')}. Fails "
+            f"readiness until the consumer exists -- absence of enforcement "
+            f"is a finding, never a reclassification"))
+    elif status == "unresolved":
+        findings.append(Finding(
+            "unresolved_value",
+            f"{clause_id} is unresolved and fails readiness"))
+    elif status != "enforced":
+        findings.append(Finding(
+            "unknown_status",
+            f"{clause_id} has status {status!r}; expected enforced, "
+            f"pending_consumer or unresolved"))
+    return findings
 
 
 def _check_claim(clause_id: str, entry: dict, clause: Clause | None) -> list[Finding]:
@@ -453,6 +500,8 @@ def reconcile(clauses: list[Clause], inventory: dict,
                         f"unresolved_{reference_field}", f"{clause_id}: {why}"))
         if kind == "binding_claim":
             findings.extend(_check_claim(clause_id, entry, by_id.get(clause_id)))
+        if kind == "binding_value":
+            findings.extend(_check_value(clause_id, entry))
 
         if entry.get("trigger") == "manual":
             # Reported, not failed -- some gates legitimately cost too much

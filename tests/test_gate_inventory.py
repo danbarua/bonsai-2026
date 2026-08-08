@@ -153,6 +153,7 @@ def value_row(**overrides):
                               "stage2b_conditions; the test failed",
         "provenance_of_use": "run manifest records alpha_bar=0.5 for the run",
         "trigger": "ci-fast",
+        "status": "enforced",
     }
     row.update(overrides)
     return row
@@ -376,6 +377,47 @@ def test_tagging_a_claim_mechanizable_does_not_promote_it_out_of_the_list(tmp_pa
     still_listed = gate_inventory.unenforceable(clauses, inventory)
     assert [c.clause_id for c in still_listed] == [clauses[0].clause_id], (
         "a mechanizable tag removed the row from the unenforceable listing")
+
+
+def test_a_frozen_value_with_no_consumer_yet_fails_readiness(tmp_path):
+    """The case where `production_consumers` is EMPTY, not unknown.
+
+    Some frozen values here are consumed by code that does not exist yet --
+    the audit protocol freezes values its unwritten driver will read. That
+    is a true and useful readiness statement, but it needs a disposition
+    that is neither a lie nor an escape hatch, so it fails rather than being
+    satisfiable by writing "none yet" into a required prose box.
+    """
+    doc = write_doc(tmp_path, "# P\n\nM is frozen at 100 for the audit.\n")
+    (tmp_path / "t.py").write_text("def test_m():\n    pass\n")
+    clauses = derive_clauses([doc], tmp_path)
+    inventory = {"reviewed": True, "binding_value": {clauses[0].clause_id:
+        value_row(status="pending_consumer",
+                  pending_reason="the audit driver is unwritten",
+                  production_consumers="none yet")}}
+    found = kinds(reconcile(clauses, inventory, tmp_path))
+    assert "value_has_no_production_consumer" in found
+
+
+def test_pending_consumer_without_a_reason_is_also_a_finding(tmp_path):
+    doc = write_doc(tmp_path, "# P\n\nM is frozen at 100 for the audit.\n")
+    clauses = derive_clauses([doc], tmp_path)
+    inventory = {"reviewed": True, "binding_value": {clauses[0].clause_id:
+        value_row(status="pending_consumer", production_consumers="none yet")}}
+    assert "unreasoned_pending_consumer" in kinds(
+        reconcile(clauses, inventory, tmp_path))
+
+
+def test_an_enforced_value_is_not_flagged(tmp_path):
+    """Non-vacuity for the two cases above."""
+    doc = write_doc(tmp_path, "# P\n\nALPHA_BAR is frozen at 0.5.\n")
+    (tmp_path / "t.py").write_text("def test_alpha():\n    pass\n")
+    clauses = derive_clauses([doc], tmp_path)
+    inventory = {"reviewed": True,
+                 "binding_value": {clauses[0].clause_id: value_row()}}
+    found = kinds(reconcile(clauses, inventory, tmp_path))
+    assert "value_has_no_production_consumer" not in found
+    assert "unknown_status" not in found
 
 
 def test_an_unresolved_claim_fails_readiness(tmp_path):
