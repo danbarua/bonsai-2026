@@ -46,13 +46,22 @@ REPO_ROOT = Path(__file__).resolve().parents[2]
 # candidate costs one line saying "not binding, because ...", while an
 # under-matched one is invisible and takes a green readiness signal with it.
 #
-# Measured on this project's frozen record (601 sentences across DESIGN.md,
-# AUDIT_PROTOCOL.md, COMPANION_PROTOCOLS.md, STAGE3_PLAN.md): an RFC-2119
-# marker list -- MUST / MUST NOT / HALT / NEVER, uppercase -- matched THREE.
-# The record was written in prose, years of it, before any reconciler
-# existed: `MUST` appears 0 times, lowercase `never` 23, `locked` 22,
-# `frozen` 41. A narrow list would have derived 3 clauses, seen 3 mapped,
-# and exited 0 over 2% coverage.
+# Across this project's frozen record -- DESIGN.md, AUDIT_PROTOCOL.md,
+# COMPANION_PROTOCOLS.md, STAGE3_PLAN.md -- an uppercase RFC-2119 marker
+# list matches a tiny fraction of what the broad set nominates. The record
+# was written in prose, years of it, before any reconciler existed. A narrow
+# list would have derived a handful of clauses, seen them all mapped, and
+# exited 0 over a sliver of the record -- and the zero-guard would not fire,
+# because a handful is not zero.
+#
+# The figures are GENERATED, not stated here:
+# `tests/test_gate_inventory.py::test_the_real_record_is_mostly_lowercase_prose`
+# measures them against the documents and prints them. An earlier version of
+# this comment quoted a sentence count and a match count, both wrong -- wrong
+# in unit as well as magnitude, since the derivation walks PARAGRAPHS and
+# returns one clause each, never sentences. Neither had been measured by
+# anyone here; both arrived from a peer's message. See
+# `docs/PROVENANCE_CONTRACT.md` §3.2a.
 #
 # So detection is not attempted. These patterns nominate; a human disposes.
 _CANDIDATE_MARKERS = (
@@ -695,10 +704,12 @@ def main(argv=None) -> int:
               file=sys.stderr)
         return 2
 
-    # A zero-guard is not enough, and the reason is measured. A narrow
-    # marker list derived THREE candidates from a 601-sentence record; three
-    # dispositions would have exited 0 over 2% coverage. Three is not zero,
-    # so the zero-guard never fires. The floor is the guard that does.
+    # A zero-guard is not enough. A narrow marker list derives a handful of
+    # candidates from this record, all of which would be dispositioned,
+    # exiting 0 over a sliver of it -- and a handful is not zero, so the
+    # zero-guard never fires. The floor is the guard that does. Figures are
+    # measured by tests/test_gate_inventory.py against the record itself,
+    # never quoted here.
     if done < total:
         print(f"\nCOVERAGE {done}/{total} -- below the 100% floor. "
               f"Undispositioned candidates are unreviewed, not absent.",
