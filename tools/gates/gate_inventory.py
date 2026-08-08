@@ -41,17 +41,33 @@ from pathlib import Path
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
 
-# Markers that make a sentence binding. A pattern list, and -- as with the
-# scratch predicate -- there is no derivation available: no enumeration
-# exists of "ways a document states a requirement". It is kept explicit,
-# tested against a corpus, and extended by incident rather than by guess.
-# Order matters only for reporting `kind`; matching is by any.
-_MARKERS = (
-    ("HALT", re.compile(r"\bHALT\b")),
-    ("MUST_NOT", re.compile(r"\bMUST NOT\b|\bmust not\b")),
-    ("MUST", re.compile(r"\bMUST\b|\bmust\b")),
-    ("REFUSE", re.compile(r"\brefuses? to\b|\bREFUS")),
-    ("NEVER", re.compile(r"\bNEVER\b|\bnever\b")),
+# Candidate markers. **Deliberately over-inclusive**, and the asymmetry is
+# the whole design: with an explicit-disposition model, an over-matched
+# candidate costs one line saying "not binding, because ...", while an
+# under-matched one is invisible and takes a green readiness signal with it.
+#
+# Measured on this project's frozen record (601 sentences across DESIGN.md,
+# AUDIT_PROTOCOL.md, COMPANION_PROTOCOLS.md, STAGE3_PLAN.md): an RFC-2119
+# marker list -- MUST / MUST NOT / HALT / NEVER, uppercase -- matched THREE.
+# The record was written in prose, years of it, before any reconciler
+# existed: `MUST` appears 0 times, lowercase `never` 23, `locked` 22,
+# `frozen` 41. A narrow list would have derived 3 clauses, seen 3 mapped,
+# and exited 0 over 2% coverage.
+#
+# So detection is not attempted. These patterns nominate; a human disposes.
+_CANDIDATE_MARKERS = (
+    ("MUST", re.compile(r"\bmust\b", re.I)),
+    ("HALT", re.compile(r"\bhalts?\b|\bhalting\b", re.I)),
+    ("REFUSE", re.compile(r"\brefus", re.I)),
+    ("NEVER", re.compile(r"\bnever\b", re.I)),
+    ("REQUIRED", re.compile(r"\brequire[ds]?\b", re.I)),
+    ("LOCKED", re.compile(r"\block(?:ed|s)?\b", re.I)),
+    ("FROZEN", re.compile(r"\bfrozen\b|\bfreeze[sd]?\b", re.I)),
+    ("CANNOT", re.compile(r"\bcannot\b|\bcan not\b|\bmay not\b", re.I)),
+    ("SHALL", re.compile(r"\bshall\b", re.I)),
+    ("FORBIDDEN", re.compile(r"\bforbidden\b|\bnot permitted\b|\bprohibit", re.I)),
+    ("ONLY", re.compile(r"\bonly ever\b|\bthe one place\b|\bexactly one\b", re.I)),
+    ("ALWAYS", re.compile(r"\balways\b|\bunconditional", re.I)),
 )
 
 # Lines that look binding but are not requirements about the system.
@@ -129,7 +145,7 @@ def _clauses_in(paragraph: list[str], doc: str, start: int) -> list[Clause]:
     if any(_SKIP_LINE.match(line) for line in paragraph[:1]):
         return []
     text = _normalise_paragraph(paragraph)
-    for kind, pattern in _MARKERS:
+    for kind, pattern in _CANDIDATE_MARKERS:
         if pattern.search(text):
             return [Clause(doc=doc, line=start, kind=kind, text=text)]
     return []
@@ -176,6 +192,58 @@ def _resolve(reference: str, repo_root: Path) -> tuple[bool, str]:
     return True, ""
 
 
+# The Reviewer's six dimensions. Fail-closed completeness (6) falls out of
+# every other field being required, so it is not a field of its own.
+#
+# `trigger` is deliberately NOT one of these. It records SCHEDULING -- what
+# causes the test to run -- and a `manual` value is reported rather than
+# failed. `production_reachability` is a different axis entirely: a correct
+# predicate that production never invokes is not an implemented gate, and
+# that is a failure. Collapsing the two would let "somebody runs it by hand"
+# stand in for "production actually calls it".
+_REQUIRED_DIMENSIONS = {
+    "enforcement": "(1) the executable predicate",
+    "production_reachability": "(2) the production path(s) that reach it, "
+                               "INCLUDING wrappers and orchestration",
+    "input_wiring": "(3) the concrete runtime values supplied, and their "
+                    "provenance",
+    "decision_consequence": "(4) the observable halt or branch on rejection "
+                            "-- logging a failed predicate without preventing "
+                            "continuation is insufficient unless the design "
+                            "explicitly defines the gate as advisory",
+    "test": "(5a) the test",
+    "break_demonstrated": "(5b) evidence the test flips red under a "
+                          "deliberate local disable -- a source grep, symbol "
+                          "reference, or test that merely names the predicate "
+                          "does not qualify",
+    "trigger": "what schedules the test (separate axis from reachability)",
+}
+
+
+def check_ids_unique(clauses: list[Clause]) -> list[Finding]:
+    """Two distinct clauses sharing an id would let one mapping cover both.
+
+    A gap that looks mapped, which is the worst shape available here. The
+    risk is not hypothetical in a record that repeats formulations --
+    "locked", "frozen", "never overwritten" -- across several documents,
+    and normalization (whitespace collapse + lowercasing) raises the odds.
+    Collisions fail rather than merge.
+    """
+    findings: list[Finding] = []
+    seen: dict[str, Clause] = {}
+    for clause in clauses:
+        prior = seen.get(clause.clause_id)
+        if prior is not None and prior.text != clause.text:
+            findings.append(Finding(
+                "id_collision",
+                f"{clause.clause_id} is shared by {prior.doc}:{prior.line} "
+                f"and {clause.doc}:{clause.line} -- one disposition would "
+                f"silently cover both"))
+        else:
+            seen[clause.clause_id] = clause
+    return findings
+
+
 def reconcile(clauses: list[Clause], inventory: dict,
               repo_root: Path = REPO_ROOT) -> list[Finding]:
     """Every way a documented gate and its enforcement can fail to agree.
@@ -184,78 +252,79 @@ def reconcile(clauses: list[Clause], inventory: dict,
     while the documents grow requirements nobody enforced, or while the
     inventory keeps entries for requirements that no longer exist.
     """
-    findings: list[Finding] = []
-    mappings = inventory.get("gate", {})
-    exemptions = inventory.get("exempt", {})
+    findings: list[Finding] = list(check_ids_unique(clauses))
+    binding = inventory.get("binding", {})
+    not_binding = inventory.get("not_binding", {})
     by_id = {clause.clause_id: clause for clause in clauses}
 
-    # Direction 1: every derived clause is mapped or exempted.
+    # Direction 1: every candidate carries an explicit DISPOSITION.
+    #
+    # Not "is mapped" -- dispositioned. Detection of what is binding is a
+    # semantic judgement with no derivation available, so it is not
+    # attempted; candidates are nominated broadly and a human rules on each.
+    # An unreviewed candidate is a finding rather than an absence, which is
+    # what converts "silently missed" into "visibly unclassified" and is the
+    # only move that survives a semantic boundary.
     for clause_id, clause in by_id.items():
-        if clause_id in mappings or clause_id in exemptions:
+        if clause_id in binding or clause_id in not_binding:
             continue
         findings.append(Finding(
-            "unmapped_clause",
-            f"{clause.doc}:{clause.line} [{clause.kind}] has no enforcement "
-            f"mapping (id {clause_id}): {clause.text[:110]}",
+            "undispositioned_candidate",
+            f"{clause.doc}:{clause.line} [{clause.kind}] has no disposition "
+            f"(id {clause_id}): {clause.text[:110]}",
             clause))
 
-    # Direction 2: every mapping and exemption still names a live clause.
-    for clause_id in list(mappings) + list(exemptions):
+    # Direction 2: every disposition still names a live candidate.
+    for clause_id in list(binding) + list(not_binding):
         if clause_id not in by_id:
             findings.append(Finding(
-                "orphaned_mapping",
-                f"inventory entry {clause_id} matches no clause in the "
-                f"documents -- the requirement was reworded or removed, and "
-                f"its mapping no longer describes anything"))
+                "orphaned_disposition",
+                f"inventory entry {clause_id} matches no candidate in the "
+                f"documents -- the sentence was reworded or removed, and its "
+                f"disposition no longer describes anything"))
 
-    # The mapped references must resolve, and the break evidence must exist.
-    for clause_id, entry in mappings.items():
-        for field_name in ("enforcement", "test"):
-            reference = entry.get(field_name)
-            if not reference:
+    for clause_id, entry in binding.items():
+        for dimension, description in _REQUIRED_DIMENSIONS.items():
+            if not entry.get(dimension):
                 findings.append(Finding(
-                    "incomplete_mapping",
-                    f"{clause_id} has no `{field_name}`"))
-                continue
-            ok, why = _resolve(reference, repo_root)
-            if not ok:
-                findings.append(Finding(
-                    f"missing_{field_name}", f"{clause_id}: {why}"))
-        if not entry.get("break_demonstrated"):
-            findings.append(Finding(
-                "unproven_test",
-                f"{clause_id} does not record that its test was demonstrated "
-                f"to FAIL without the gate. A cited test certifies spelling: "
-                f"a grep for the enforcement call survives the branch being "
-                f"disabled by `if False:`"))
-
-        # What causes the test to RUN. A gate whose test only executes when
-        # somebody remembers is closer to an unenforced requirement than an
-        # enforced one -- the same "component correct, path to it wrong"
-        # signature as a hook that never loads or a predicate never handed
-        # its input, with `never run` as the mechanism. Observed: a correct,
-        # self-deriving guard caught a file hours late because firing it
-        # required a human to run the full suite in another session.
-        trigger = entry.get("trigger")
-        if not trigger:
-            findings.append(Finding(
-                "untriggered_test",
-                f"{clause_id} does not record what RUNS its test"))
-        elif trigger == "manual":
-            # Reported, not fatal. Some gates legitimately cost too much to
-            # run automatically; the point is that this is visible in the
-            # inventory rather than discovered when one fires late.
+                    f"missing_{dimension}",
+                    f"{clause_id} has no `{dimension}` -- {description}"))
+        # Only the two code references are machine-checkable; the rest are
+        # prose claims a human makes and a reviewer reads. Checking what can
+        # be checked is not the same as validating the row, and this tool
+        # does not pretend otherwise.
+        for reference_field in ("enforcement", "test"):
+            reference = entry.get(reference_field)
+            if reference:
+                ok, why = _resolve(reference, repo_root)
+                if not ok:
+                    findings.append(Finding(
+                        f"unresolved_{reference_field}", f"{clause_id}: {why}"))
+        if entry.get("trigger") == "manual":
+            # Reported, not failed -- some gates legitimately cost too much
+            # to automate. This is SCHEDULING, and distinct from dimension 2:
+            # "nobody has automated the test" is a weakness worth seeing,
+            # while "production never invokes the predicate" is a failure and
+            # is caught by `production_reachability` being required.
             findings.append(Finding(
                 "manual_trigger_only",
                 f"{clause_id} is enforced only by a test somebody must "
                 f"remember to run: {entry.get('test')}"))
 
-    for clause_id, entry in exemptions.items():
+    for clause_id, entry in not_binding.items():
         if not entry.get("reason"):
             findings.append(Finding(
-                "unreasoned_exemption",
-                f"{clause_id} is exempted with no reason"))
+                "unreasoned_disposition",
+                f"{clause_id} is dispositioned not-binding with no reason"))
     return findings
+
+
+def coverage(clauses: list[Clause], inventory: dict) -> tuple[int, int]:
+    """(dispositioned, total candidates). The floor a readiness run asserts."""
+    dispositioned = set(inventory.get("binding", {})) | set(
+        inventory.get("not_binding", {}))
+    ids = {clause.clause_id for clause in clauses}
+    return len(ids & dispositioned), len(ids)
 
 
 def main(argv=None) -> int:
@@ -269,16 +338,30 @@ def main(argv=None) -> int:
     clauses = derive_clauses(args.doc, args.root)
     inventory = load_inventory(args.inventory)
     findings = reconcile(clauses, inventory, args.root)
+    done, total = coverage(clauses, inventory)
 
-    print(f"clauses derived : {len(clauses)}")
-    print(f"gates mapped    : {len(inventory.get('gate', {}))}")
-    print(f"exempted        : {len(inventory.get('exempt', {}))}")
+    print(f"candidates derived : {total}")
+    print(f"dispositioned      : {done}")
+    print(f"  binding          : {len(inventory.get('binding', {}))}")
+    print(f"  not binding      : {len(inventory.get('not_binding', {}))}")
+
     if not clauses:
-        # A run over zero clauses reports zero findings and looks clean.
-        print("\nNO CLAUSES DERIVED -- the scan found nothing, which is not "
-              "the same as everything being mapped.", file=sys.stderr)
+        # A run over zero candidates reports zero findings and looks clean.
+        print("\nNO CANDIDATES DERIVED -- the scan found nothing, which is "
+              "not the same as everything being dispositioned.",
+              file=sys.stderr)
         return 2
-    print(f"\nfindings        : {len(findings)}")
+
+    # A zero-guard is not enough, and the reason is measured. A narrow
+    # marker list derived THREE candidates from a 601-sentence record; three
+    # dispositions would have exited 0 over 2% coverage. Three is not zero,
+    # so the zero-guard never fires. The floor is the guard that does.
+    if done < total:
+        print(f"\nCOVERAGE {done}/{total} -- below the 100% floor. "
+              f"Undispositioned candidates are unreviewed, not absent.",
+              file=sys.stderr)
+
+    print(f"\nfindings           : {len(findings)}")
     for finding in findings:
         print(f"  [{finding.kind}] {finding.detail}")
     return 1 if findings else 0

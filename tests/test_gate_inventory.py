@@ -107,49 +107,114 @@ def test_clause_id_survives_reflowing_but_not_rewording(tmp_path):
 def test_an_unmapped_clause_is_a_finding(tmp_path):
     """The incident this exists for: a frozen HALT with no implementation."""
     clauses = derive_clauses([write_doc(tmp_path)], tmp_path)
-    findings = reconcile(clauses, {"gate": {}}, tmp_path)
-    assert kinds(findings) == ["unmapped_clause", "unmapped_clause"]
+    findings = reconcile(clauses, {"binding": {}}, tmp_path)
+    assert kinds(findings) == ["undispositioned_candidate", "undispositioned_candidate"]
 
 
 def test_a_mapping_for_a_clause_that_no_longer_exists_is_a_finding(tmp_path):
     """The other direction. Without it, editing a requirement leaves a
     mapping that describes nothing and nothing reports it."""
     clauses = derive_clauses([write_doc(tmp_path)], tmp_path)
-    inventory = {"gate": {c.clause_id: {"enforcement": "x.py::f",
+    inventory = {"binding": {c.clause_id: {"enforcement": "x.py::f",
                                         "test": "t.py::t",
                                         "break_demonstrated": "yes"}
                           for c in clauses}}
-    inventory["gate"]["deadbeef1234"] = {"enforcement": "x.py::f",
+    inventory["binding"]["deadbeef1234"] = {"enforcement": "x.py::f",
                                          "test": "t.py::t",
                                          "break_demonstrated": "yes"}
     findings = reconcile(clauses, inventory, tmp_path)
-    assert "orphaned_mapping" in kinds(findings)
+    assert "orphaned_disposition" in kinds(findings)
 
 
-def test_a_fully_mapped_document_produces_no_findings(tmp_path):
+def complete_row(**overrides):
+    """All six Reviewer dimensions plus scheduling. Missing ANY fails."""
+    row = {
+        "enforcement": "gate.py::verify_digest",
+        "production_reachability": "run_ladder_stage3.py calls it via "
+                                   "make stage2b-ladder-stage3",
+        "input_wiring": "digest from BONSAI_DRIVER_SHA256, set at upload",
+        "decision_consequence": "raises SystemExit before the kernel starts",
+        "test": "test_gate.py::test_digest",
+        "break_demonstrated": "disabled the branch, test failed",
+        "trigger": "ci-fast",
+    }
+    row.update(overrides)
+    return row
+
+
+def test_a_fully_dispositioned_document_produces_no_findings(tmp_path):
     """Non-vacuity for every negative assertion above: they would all pass
     against a reconcile() that reported findings unconditionally."""
     doc = write_doc(tmp_path)
     (tmp_path / "gate.py").write_text("def verify_digest():\n    return True\n")
     (tmp_path / "test_gate.py").write_text("def test_digest():\n    pass\n")
     clauses = derive_clauses([doc], tmp_path)
-    inventory = {"gate": {c.clause_id: {"enforcement": "gate.py::verify_digest",
-                                        "test": "test_gate.py::test_digest",
-                                        "break_demonstrated": "disabled the "
-                                                              "branch, test failed",
-                                        "trigger": "ci-fast"}
-                          for c in clauses}}
+    inventory = {"binding": {c.clause_id: complete_row() for c in clauses}}
     assert reconcile(clauses, inventory, tmp_path) == []
+
+
+@pytest.mark.parametrize("dimension", [
+    "production_reachability", "input_wiring", "decision_consequence"])
+def test_each_reviewer_dimension_is_required(tmp_path, dimension):
+    """The three dimensions beyond existence-and-test.
+
+    `production_reachability` is the one that carries the most weight: a
+    correct predicate production never invokes is not an implemented gate,
+    and citing it without it would certify exactly the make-wrapped shape.
+    """
+    doc = write_doc(tmp_path, "# P\n\nThe driver MUST verify the digest.\n")
+    (tmp_path / "gate.py").write_text("def verify_digest():\n    return True\n")
+    (tmp_path / "test_gate.py").write_text("def test_digest():\n    pass\n")
+    clauses = derive_clauses([doc], tmp_path)
+    row = complete_row()
+    del row[dimension]
+    inventory = {"binding": {clauses[0].clause_id: row}}
+    assert f"missing_{dimension}" in kinds(reconcile(clauses, inventory, tmp_path))
+
+
+def test_two_identical_sentences_in_different_documents_collide_loudly(tmp_path):
+    """A shared id would let one disposition silently cover both.
+
+    Not hypothetical in a record that repeats "locked", "frozen" and
+    "never overwritten" across four documents.
+    """
+    same = "# P\n\nThe artifact is never overwritten.\n"
+    a = write_doc(tmp_path, same, "A.md")
+    b = write_doc(tmp_path, same.replace("never", "NEVER"), "B.md")
+    clauses = derive_clauses([a, b], tmp_path)
+    assert len(clauses) == 2
+    assert clauses[0].clause_id == clauses[1].clause_id, "fixture is wrong"
+    assert "id_collision" in kinds(reconcile(clauses, {"binding": {}}, tmp_path))
+
+
+def test_a_narrow_marker_list_would_have_certified_two_percent(tmp_path):
+    """The measured near-miss, pinned as a property of the derivation.
+
+    Across this project's real frozen record -- 601 sentences -- an
+    RFC-2119 marker list matched THREE. Three dispositions would have exited
+    0 over 2% coverage, and the zero-guard never fires because three is not
+    zero. The candidate set must therefore catch lowercase prose forms, and
+    this asserts it does rather than trusting that it does.
+    """
+    prose = ("# P\n\nThe manifest is frozen once written.\n\n"
+             "Inputs are locked before the run.\n\n"
+             "The artifact is never overwritten.\n\n"
+             "A credential is required for upload.\n\n"
+             "The driver refuses to launch on divergence.\n")
+    clauses = derive_clauses([write_doc(tmp_path, prose)], tmp_path)
+    assert len(clauses) == 5, (
+        f"lowercase prose requirements went undetected: found "
+        f"{[c.kind for c in clauses]}")
 
 
 # --- the mapped references must actually resolve ---------------------------
 
 def test_an_enforcement_site_that_does_not_exist_is_a_finding(tmp_path):
     clauses = derive_clauses([write_doc(tmp_path)], tmp_path)[:1]
-    inventory = {"gate": {clauses[0].clause_id: {
+    inventory = {"binding": {clauses[0].clause_id: {
         "enforcement": "nonexistent.py::f", "test": "also_missing.py::t",
         "break_demonstrated": "yes"}}}
-    assert "missing_enforcement" in kinds(reconcile(clauses, inventory, tmp_path))
+    assert "unresolved_enforcement" in kinds(reconcile(clauses, inventory, tmp_path))
 
 
 def test_a_name_only_mentioned_in_a_comment_does_not_satisfy_a_citation(tmp_path):
@@ -157,10 +222,10 @@ def test_a_name_only_mentioned_in_a_comment_does_not_satisfy_a_citation(tmp_path
     comment is the `endswith` failure from the vacuous-test catalogue."""
     clauses = derive_clauses([write_doc(tmp_path)], tmp_path)[:1]
     (tmp_path / "gate.py").write_text("# verify_digest is not defined here\n")
-    inventory = {"gate": {clauses[0].clause_id: {
+    inventory = {"binding": {clauses[0].clause_id: {
         "enforcement": "gate.py::verify_digest", "test": "gate.py::verify_digest",
         "break_demonstrated": "yes"}}}
-    assert "missing_enforcement" in kinds(reconcile(clauses, inventory, tmp_path))
+    assert "unresolved_enforcement" in kinds(reconcile(clauses, inventory, tmp_path))
 
 
 def test_a_mapping_without_break_evidence_is_a_finding(tmp_path):
@@ -173,9 +238,9 @@ def test_a_mapping_without_break_evidence_is_a_finding(tmp_path):
     """
     clauses = derive_clauses([write_doc(tmp_path)], tmp_path)[:1]
     (tmp_path / "g.py").write_text("def f():\n    pass\n")
-    inventory = {"gate": {clauses[0].clause_id: {
+    inventory = {"binding": {clauses[0].clause_id: {
         "enforcement": "g.py::f", "test": "g.py::f"}}}
-    assert "unproven_test" in kinds(reconcile(clauses, inventory, tmp_path))
+    assert "missing_break_demonstrated" in kinds(reconcile(clauses, inventory, tmp_path))
 
 
 def test_a_mapping_must_record_what_runs_its_test(tmp_path):
@@ -189,10 +254,10 @@ def test_a_mapping_must_record_what_runs_its_test(tmp_path):
     """
     clauses = derive_clauses([write_doc(tmp_path)], tmp_path)[:1]
     (tmp_path / "g.py").write_text("def f():\n    pass\n")
-    inventory = {"gate": {clauses[0].clause_id: {
+    inventory = {"binding": {clauses[0].clause_id: {
         "enforcement": "g.py::f", "test": "g.py::f",
         "break_demonstrated": "yes"}}}
-    assert "untriggered_test" in kinds(reconcile(clauses, inventory, tmp_path))
+    assert "missing_trigger" in kinds(reconcile(clauses, inventory, tmp_path))
 
 
 def test_a_manual_only_trigger_is_reported_but_not_treated_as_absent(tmp_path):
@@ -204,18 +269,18 @@ def test_a_manual_only_trigger_is_reported_but_not_treated_as_absent(tmp_path):
     """
     clauses = derive_clauses([write_doc(tmp_path)], tmp_path)[:1]
     (tmp_path / "g.py").write_text("def f():\n    pass\n")
-    inventory = {"gate": {clauses[0].clause_id: {
+    inventory = {"binding": {clauses[0].clause_id: {
         "enforcement": "g.py::f", "test": "g.py::f",
         "break_demonstrated": "yes", "trigger": "manual"}}}
     found = kinds(reconcile(clauses, inventory, tmp_path))
     assert "manual_trigger_only" in found
-    assert "untriggered_test" not in found
+    assert "missing_trigger" not in found
 
 
 def test_an_exemption_needs_a_reason(tmp_path):
     clauses = derive_clauses([write_doc(tmp_path)], tmp_path)[:1]
-    inventory = {"gate": {}, "exempt": {clauses[0].clause_id: {}}}
-    assert "unreasoned_exemption" in kinds(reconcile(clauses, inventory, tmp_path))
+    inventory = {"binding": {}, "not_binding": {clauses[0].clause_id: {}}}
+    assert "unreasoned_disposition" in kinds(reconcile(clauses, inventory, tmp_path))
 
 
 # --- the vacuity guard -----------------------------------------------------
@@ -253,8 +318,13 @@ def test_a_clean_reconciliation_exits_zero(tmp_path):
     (clause,) = derive_clauses([doc], tmp_path)
     inventory = tmp_path / "gates.toml"
     inventory.write_text(
-        f'[gate."{clause.clause_id}"]\nenforcement = "g.py::f"\n'
-        f'test = "g.py::f"\nbreak_demonstrated = "disabled it, test failed"\n'
+        f'[binding."{clause.clause_id}"]\n'
+        f'enforcement = "g.py::f"\n'
+        f'production_reachability = "called by the stage3 driver"\n'
+        f'input_wiring = "digest from BONSAI_DRIVER_SHA256"\n'
+        f'decision_consequence = "raises SystemExit before launch"\n'
+        f'test = "g.py::f"\n'
+        f'break_demonstrated = "disabled it, test failed"\n'
         f'trigger = "ci-fast"\n')
     exit_code = gate_inventory.main(
         ["--inventory", str(inventory), "--doc", str(doc),
