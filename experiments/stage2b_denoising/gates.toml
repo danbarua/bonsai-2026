@@ -13,6 +13,41 @@
 # by any check in this file: "a clause cannot be moved from binding_gate to
 # another kind merely because enforcement is absent." Several rows below are
 # deliberately failing for exactly that reason.
+#
+# PROVENANCE OF THE AUTHORITY THIS FILE RESTS ON. The scope of the whole
+# inventory -- the 89-clause corpus, the three kinds, the discharge
+# semantics -- comes from the two rulings cited above, quoted from the
+# c2gpt archive, which is the primary record within this system. Transport
+# is MIXED: `c2gpt-send` takes `from` as a routing parameter, so a
+# connector write and a human paste are byte-identical in the archive, and
+# most replies came by paste.
+#
+# Split the consequence, because only one half is affected:
+#
+#   * AUTHORITY is unaffected, and the package should claim it confidently.
+#     Every relay had the authorizing human in the loop by construction --
+#     a pasted ruling is not a weaker ruling, it is the authorization
+#     pathway working.
+#   * FIDELITY to the Reviewer's original text is attested by the relaying
+#     human, not by the channel. This file does not claim byte-exactness
+#     with what the Reviewer typed.
+#
+# What was mechanically checked, as of 2026-08-08, over all 37 archive
+# files: every `§`/matter referenced inside a ruling resolves within its
+# file; no file ends mid-clause; no numbered section sequence skips. Zero
+# findings in all three.
+#
+# Those checks are truncation HEURISTICS, not attestation, and the reason
+# the last two exist is worth recording: citation resolution alone is blind
+# to the loss of a section NOTHING references -- which is the final section
+# of a ruling by construction, and where qualifications live. The live
+# example is in the file this inventory's scope depends on most:
+# 10-24-39Z's closing paragraph licenses NOT building an automated prose
+# checker for the 54 claims. Nothing references it. Clipped in transit, every
+# internal citation would still resolve, the file would end on §III looking
+# complete, and the work it forbids would have been built in the belief that
+# the ruling required it. A missing licence does not leave a gap you notice;
+# it creates work you invent.
 
 reviewed = false   # set true only when a human has read every row
 
