@@ -75,6 +75,31 @@ ephemeral script". The mitigation is the corpus in
 is there. A new shape found in the wild gets a corpus entry *and* a rule,
 never a rule alone.
 
+## Hook registrations are read at session start
+
+**A session that was already running when these hooks landed captures
+nothing, silently, until it is restarted.** Confirmed live: after the merge
+to `stage2b` at `07a33a0`, a scratch command in an already-open session
+produced no record, while the same command in a freshly-started session
+produced a correct `open`/`close` pair.
+
+This matters more than an ordinary gotcha, because the failure is quiet in
+the worst direction. Nothing errors. The absence of a record is
+indistinguishable from "that command was correctly classified as not
+scratch", so a long-running session can look like it is being captured when
+it never was — and the natural time to have a long-running session is
+during exactly the sustained work most worth capturing.
+
+If you need capture active in a session, restart it and confirm with:
+
+```bash
+ls .provenance/runs/<session_id>/
+```
+
+`session_id` appears in every record, so an empty or missing directory
+after a known-scratch command means the hooks are not loaded in that
+session rather than that the predicate declined.
+
 ## Testing
 
 ```bash
