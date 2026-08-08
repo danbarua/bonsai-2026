@@ -38,6 +38,8 @@ claim the rest of this repository's discipline exists to prevent.
 | 14 | 08-07 | `a73c5cd` | Generation-pin test asserted on `download_file` directly; removing the pin from `consume_validated` left it green | deliberate breakage |
 | 15 | 08-08 | `2184644` | Three fail-open tests for the provenance capture hook ran it through a shell wrapper ending in unconditional `exit 0`, which masks any exit code from the Python layer beneath | deliberate breakage |
 | 16 | 08-08 | `4b1a23b` | The capture hook's whole test suite drove `capture.py` directly and asserted nothing about whether `.claude/settings.json` causes it to run — registrations load at session start, so an already-running session captured nothing, silently | live firing |
+| 17 | 08-08 | `4173bf7` | The test for a *missing halt* grepped `step7_ridge`'s source for the `halt_reasons.append(...)` call — which survives when the branch guarding it is disabled by `if False:`. Green against the broken code | deliberate breakage |
+| 18 | 08-08 | `c6e0312` | Not a test: the capture predicate emitted a `piped_into_remote_exec` record for a command that shipped nothing (a `grep` alternation split on `\|`), and a coverage claim was drawn from it | peer read the record |
 
 Two near-misses belong here too, because they were caught *before* becoming
 tests:
@@ -54,7 +56,7 @@ tests:
 
 ---
 
-## Taxonomy — seven ways a test comes out empty
+## Taxonomy — eight ways a test comes out empty
 
 Sorted roughly by how hard each is to see by reading.
 
@@ -63,6 +65,27 @@ no call), #14 (asserted on a helper rather than the path that uses it).
 The most embarrassing category and the easiest to miss, because the test
 *reads* correctly — the names are right, the assertions are meaningful,
 and the wiring is absent.
+
+**#17 is the recursive case, and it is the reason this document exists.**
+The gate it tested was missing: `DESIGN.md` froze "HALT for review if any
+production condition selects 1e-6", the driver never implemented it, and a
+production run reported success while the condition held. The remedy — a
+test for the now-implemented halt — asserted that
+`halt_reasons.append(...)` *appeared in the source of the enclosing
+function*. That string survives `if False:`, so the test passed against
+code where the halt could not fire.
+
+**A test written to close a gap reproduced the gap's own failure mode
+inside itself.** Source-grepping is category A wearing the costume of a
+behavioural test: it reads the spelling of the code and never evaluates the
+decision. The fix was to extract the decision into a pure function
+(`floor_halt_reason`) so a test could call it, after which disabling the
+halt fails the positive case and making it constant fails the negatives.
+
+The general rule this project now applies to mappings as well as tests:
+**a citation of a gate is not evidence of a gate.** A test that names a
+predicate, a symbol reference, a grep — none of them establish that the
+predicate can reject anything. Only a demonstrated failure does.
 
 **B. The predicate cannot match.** Session incidents: `perl` patterns that
 matched nothing; `line.startswith("FAILED")` against pytest output that
@@ -175,11 +198,54 @@ becomes a real inference about the predicate. It is the same move as a
 manifest beside a payload: the sidecar exists so that absence means
 something definite.
 
+**H. The evidence is manufactured — the presence-shaped twin of G.**
+#18, and the one that took longest to see because it is the opposite of
+everything above.
+
+Every category so far is *absence*-shaped: a check that never runs, never
+matches, never reaches the mechanism. The artifact you are missing is the
+finding. That trains a particular suspicion — look for what is not there.
+
+#18 inverts it. The provenance capture predicate split a shell command on
+`|` without tokenising, cutting through a quoted `grep` alternation
+`"closure|commit|colab|REFUS|Error"`. One fragment was the bare word
+`colab`, which is an entry in its remote-execution binary list. A grep
+pattern was classified as a pipe into a GPU kernel, and the hook wrote a
+record whose `trigger_reason` reads `piped_into_remote_exec` — for a
+command that shipped no file and executed nothing remotely.
+
+The record was then read in aggregate, and a **coverage conclusion** was
+drawn from it: that a documented blind spot was "narrower in practice"
+because remote executions were evidently being captured by other routes.
+The reasoning was sound. The record lied.
+
+> **An absence invites suspicion; a presence invites belief.**
+
+That is why this is worse than silent under-capture, and why it belongs
+beside G rather than inside it. Under-capture leaves a hole someone may
+notice. This leaves a positive artifact asserting something untrue, inside
+a store whose entire purpose is being trustworthy about what ran — and no
+amount of testing the component reveals it, because the component behaved
+exactly as written.
+
+Caught only because the record described *a command its reader had
+personally typed*, and knew shipped nothing. There was no guard for it and
+it is not obvious what one would look like.
+
+The structural fix that generalises: **a verdict carrying neither the
+script text nor a referenced file can no longer capture at all.** Tokenising
+correctly fixes this misparse; requiring a stdin-consuming subcommand fixes
+this over-match; only the structural rule makes the *class*
+unrepresentable — a record must carry the thing it claims to have captured,
+or it is not a capture. It also fails in the safe direction: a future
+classifier bug now yields an absence, which the eight categories above are
+already tuned to find.
+
 ---
 
 ## What actually catches them
 
-**Deliberate breakage, eight of sixteen.** Break what the guard watches;
+**Deliberate breakage, nine of eighteen.** Break what the guard watches;
 observe the specific expected failure. The corollary in CLAUDE.md
 principle 21 states it as: *a guard you have not seen fail is not yet a
 guard.* Incident #10 is the clearest demonstration — the break fired
@@ -277,6 +343,23 @@ looked for. That is an encouraging shape for a problem to have.
    positive evidence at runtime — a marker whose absence is diagnostic —
    over a static check, since configuration has no import graph to derive
    from.
+
+10. **A citation of a gate is not evidence of a gate.** A test that names a
+    predicate, a symbol reference, a source grep — none of them establish
+    that the predicate can reject anything. Only a demonstrated failure
+    does. This applies to *mappings* as much as to tests: an inventory
+    claiming "gate here, test there" certifies spelling unless each row
+    carries a break shown to turn it red. #17 is the instance, and it
+    reproduced the very gap it was written to close.
+
+11. **Suspect presences, not only absences.** Eight of the categories above
+    are absence-shaped, which trains the eye to look for what is missing.
+    #18 is a record that arrived and attested to something untrue, and the
+    reader who drew a false conclusion from it reasoned correctly. Where a
+    mechanism emits positive artifacts, require each to carry the thing it
+    claims — a capture without its payload, a pass without its evidence, a
+    verdict without its gate. Then a malfunction yields an absence, which
+    everything above is already tuned to find.
 
 ## Related
 
