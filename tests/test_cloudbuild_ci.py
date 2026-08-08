@@ -283,12 +283,26 @@ def test_the_committed_baseline_covers_every_capability_ci_lacks():
     of these is a capability the build environment does not have, and if a
     whole class of them disappeared from the baseline that is a change in
     what CI covers, not a tidy-up.
+
+    REMOVED 2026-08-08: `google_crc32c`. This guard fired when its baseline
+    entry went, and its own message named the two possibilities -- CI gained
+    the capability, or the baseline was regenerated where it should not have
+    been. It is the first: `google-crc32c` moved into the `dev` group, which
+    CI installs, so `test_crc32c_agrees_with_google_crc32c_where_it_is_installed`
+    now RUNS in CI rather than skipping.
+
+    Recorded here rather than deleted silently, because deleting an entry
+    from a list to make a guard pass is the move this whole file exists to
+    catch. The distinction that makes it legitimate: the list is a claim
+    about what CI lacks, and CI stopped lacking this -- deliberately, in a
+    change whose reasoning is in `pyproject.toml` beside the dependency.
+    The library is a checksum wheel: no credentials, no cost, no cloud CLI,
+    and nothing about the credential-free profile changes by having it.
     """
     text = vacuity.DEFAULT_BASELINE.read_text()
     for reason in ("datasets/kmnist not present",
                    "not present locally",
-                   "mighty-colab",
-                   "google_crc32c"):
+                   "mighty-colab"):
         assert reason in text, (
             f"no baseline entry mentions {reason!r}. Either CI gained that "
             f"capability -- in which case say so -- or the baseline was "

@@ -448,14 +448,18 @@ nobody wrote a wrong number and the numbers became wrong anyway. Principle
 here (`tests/test_stage2b_ladder_stage1.py`) and the numbers are not
 duplicated.
 
-`make stage2b-test` runs under `--group gpu` and prints every skip with
-its reason. Both are there because a bare `uv sync` once pruned
-`google-crc32c` — which `stage2b_gcs.py` falls back away from by design —
-and the test checking that fallback against the real library became a
-skip. Nothing failed; the count moved by one and nobody diffs counts. The
-group makes the packages present for this target regardless of how the
-environment was last synced, and `-rs` means an absence has to announce
-itself rather than being inferred from a total.
+`make stage2b-test` prints every skip with its reason (`-rs`), because a
+bare `uv sync` once pruned `google-crc32c` — which `stage2b_gcs.py` falls
+back away from by design — and the test checking that fallback against
+the real library became a skip. Nothing failed; the count moved by one,
+and nobody diffs counts. An absence has to announce itself rather than
+being inferred from a total.
+
+The dependency itself is now declared in the `dev` group, so it is
+present wherever the suite runs. It is deliberately not in `gpu`: this
+target is CI-invocable, and `tools/ci/ci_targets.py` forbids a dependency
+group in a CI-invocable recipe precisely because that would pull the
+cloud CLIs into a credential-free environment.
 
 The round trip is the only test that leaves this machine. It provisions
 a CPU runtime, writes an object to GCS from it, and reads that object
