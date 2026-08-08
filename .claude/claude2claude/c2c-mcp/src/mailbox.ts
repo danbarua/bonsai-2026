@@ -321,12 +321,32 @@ export const NO_REPLY_SLUG = "no-reply";
  * implementations that drift (CLAUDE.md principle 16). One function, both
  * call sites.
  */
+export function isFromNoReply(filename: string): boolean {
+  const raw = parseFromSlugFromFilename(filename);
+  if (raw === undefined) return false;
+  if (raw === NO_REPLY_SLUG) return true;
+  // A same-second collision appends `-2`, `-3`... to the END of the whole
+  // filename. When there is no `--to-` segment -- which is every broadcast,
+  // and webhook deliveries are broadcasts -- that counter lands inside the
+  // from-slug, so `--from-no-reply-2.md` parses as the sender "no-reply-2".
+  // Measured, not hypothetical: three deliveries in one second archived two
+  // of themselves. CI sends bursts, so this is the common case, not an edge.
+  //
+  // Only stripped when no `--to-` is present; with an addressee the counter
+  // attaches to the to-slug instead and the from-slug is already clean. The
+  // accepted trade is that a real session named `no-reply-<digits>` would be
+  // treated as the reserved sender. `no-reply-bot` and anything else
+  // non-numeric is unaffected.
+  if (!filename.includes("--to-") && raw.replace(/-\d+$/, "") === NO_REPLY_SLUG) return true;
+  return false;
+}
+
 export async function retireMessage(
   filePath: string,
   archiveDir: string,
   filename: string,
 ): Promise<void> {
-  if (parseFromSlugFromFilename(filename) === NO_REPLY_SLUG) {
+  if (isFromNoReply(filename)) {
     await fs.unlink(filePath);
     return;
   }

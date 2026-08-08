@@ -139,6 +139,24 @@ check "no-reply-bot is archived like any other sender" \
   "$(ls -1 "$ARCHIVE" | grep -c -- '--from-no-reply-bot')" "1"
 
 echo
+echo "== a burst in one second still deletes every message =="
+
+# sendMessage resolves same-second collisions with a `-2`, `-3` suffix at the
+# END of the filename. With no `--to-` segment that counter lands inside the
+# from-slug, so `--from-no-reply-2.md` parses as the sender "no-reply-2" and
+# an exact match would archive it. Found this way: three webhook deliveries
+# in one second archived two of themselves. CI sends bursts, so this is the
+# common case rather than an edge.
+call code2code-send '{"instance":"no-reply","content":"burst one"}' >/dev/null
+call code2code-send '{"instance":"no-reply","content":"burst two"}' >/dev/null
+call code2code-send '{"instance":"no-reply","content":"burst three"}' >/dev/null
+check "three collided filenames are waiting" "$(count_md "$MAILBOX")" "3"
+BEFORE_ARCHIVE="$(count_md "$ARCHIVE")"
+call code2code-inbox '{"as":"reader"}' >/dev/null
+check "burst drains the mailbox" "$(count_md "$MAILBOX")" "0"
+check "and none of the burst reached archive/" "$(count_md "$ARCHIVE")" "$BEFORE_ARCHIVE"
+
+echo
 if [[ "$FAILURES" -eq 0 ]]; then
   echo "== $PASS_COUNT passed, 0 failed =="
 else
