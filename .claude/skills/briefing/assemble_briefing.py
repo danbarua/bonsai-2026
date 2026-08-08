@@ -353,6 +353,32 @@ def tokens_of(text: str) -> list[str]:
     return [t for t in found if not (t.lower() in seen or seen.add(t.lower()))]
 
 
+def branch_names(root: Path) -> set[str]:
+    """Every branch name, derived from git.
+
+    A branch name is not evidence, for the same reason a session name is not:
+    it names a PLACE work happened, not the thing that changed. Merge commits
+    are the acute case -- "Merge remote-tracking branch 'origin/stage2b' into
+    infra-tooling" is auto-generated text mentioning two branches and
+    describing no change at all, and three of them were offered as candidates
+    for closing a loop about a failing test.
+    """
+    try:
+        out = run_git(["branch", "-a", "--format=%(refname:short)"], cwd=root)
+    except RuntimeError:
+        return set()
+    names: set[str] = set()
+    for ln in out.splitlines():
+        ln = ln.strip()
+        if not ln:
+            continue
+        # `origin/stage2b` also yields `stage2b`; both appear in prose.
+        names.add(ln.lower())
+        if "/" in ln:
+            names.add(ln.rsplit("/", 1)[1].lower())
+    return names
+
+
 def session_names(root: Path) -> set[str]:
     """Every session name the mesh has ever used, derived from filenames.
 
@@ -375,6 +401,22 @@ def session_names(root: Path) -> set[str]:
     return names
 
 
+def _mentions(token: str, haystack: str) -> bool:
+    """Does `haystack` mention `token` as a whole identifier?
+
+    Naked substring matching offered `2fbe6e2` as closing a loop about
+    pointer resolution because its body contains "a reconcil**er** this file
+    does not own" and the loop said `reconcile`. Same shape would match
+    `infra` inside "infrastructure".
+
+    Boundaries are hand-rolled rather than `\\b`, because tokens here contain
+    `.` and `/` (`ci_targets.py`, `tools/ci/publish_review.sh`) where `\\b`
+    asserts in the wrong places.
+    """
+    pat = re.escape(token.lower())
+    return re.search(rf"(?<![\w-]){pat}(?![\w-])", haystack) is not None
+
+
 def join_loops(
     loops: list[Loop], commits: list[Commit], names: set[str] | None = None
 ) -> None:
@@ -392,7 +434,7 @@ def join_loops(
             if tok.lower() in names:
                 loop.name_tokens.append(tok)
                 continue
-            hits = [c for c in commits if tok.lower() in c.haystack]
+            hits = [c for c in commits if _mentions(tok, c.haystack)]
             if not hits:
                 continue
             # Rarity is the evidence -- see MAX_ABS_HITS. Both bounds apply:
@@ -740,7 +782,9 @@ def main() -> int:
             if _CLOSED_RE.search(b):
                 continue
             loops.append(Loop(text=b, tokens=tokens_of(b)))
-        join_loops(loops, commits, session_names(root))
+        # Actors and places, not things changed: neither is evidence that a
+        # commit closed a loop, and both are derived rather than listed.
+        join_loops(loops, commits, session_names(root) | branch_names(root))
         for l in loops:
             tree_evidence(root, l)
 
