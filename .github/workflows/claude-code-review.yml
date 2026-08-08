@@ -1,41 +1,46 @@
 name: Claude Vacuous-Test Review
 
-# INVOKED, never automatic. Two reasons, both about cost rather than taste.
+# Reviews changed TESTS for the failure this project has catalogued most:
+# a test that passes for a reason unrelated to what it names.
 #
-# This project pushes directly to shared branches -- roughly twenty times to
-# `stage2b` in a single session -- so a push trigger would re-review the same
-# code repeatedly and emit near-identical reports on work in progress. Noise
-# gets ignored, and an ignored guard trains route-around, which is the exact
-# failure this repository spends its discipline avoiding. Paid for with
-# tokens, at that.
+# The scope of a review is a PULL REQUEST, never a commit range. Three
+# range-based designs were built here and all three failed the same way,
+# because the interface was wrong rather than the values:
 #
-# The `pull_request` trigger is kept because it costs nothing while no PRs
-# exist, and because the day one is opened is a moment where review is wanted
-# by definition.
+#   `HEAD~1..HEAD`          empty after a merge; reviewed nothing, went green
+#   free-text `a...b`       accepted a branch that does not exist, went green
+#   computed `main...HEAD`  bakes in a base this repository does not always use
 #
-# The value here is the PROMPT, not the schedule: it encodes what this
-# project's reviews are actually for, so invoking it is one command rather
-# than remembering to type all of the below. General-purpose review is
-# already available by mentioning @claude, via claude.yml.
+# All of it was reinvention. GitHub knows a PR's base, head and file list;
+# the action checks the branch out; `gh pr diff` and `gh pr view` read it
+# without a single git command. Restating that as git plumbing created an
+# interface that already existed and then needed validating for every way it
+# could be typed wrong. A PR number covers branch A into branch B, which is
+# the flexibility that mattered, and `gh pr view` fails loudly on a bad one.
+#
+# General-purpose review is available by mentioning @claude, via claude.yml.
+# The value here is the PROMPT: what this project's reviews are for.
 
+# NO `workflow_dispatch`, and its absence is the design.
+#
+# `track_progress` THROWS on any event other than pull_request/issues
+# (`src/modes/detector.ts:93`), so a dispatched run can only execute in agent
+# mode -- which supplies the prompt and no context whatsoever. That is
+# exactly the path that produced three misleading greens in one day. An entry
+# point that cannot carry the context the review depends on is not a
+# convenience; it is the failure, kept available.
+#
+# To re-run a review: use "Re-run all jobs" on the run itself. That replays
+# the original `pull_request` event, so the context comes back intact. A new
+# push re-triggers it anyway via `synchronize`.
 on:
-  workflow_dispatch:
-    inputs:
-      target:
-        # NO DEFAULT, deliberately. `HEAD~1..HEAD` was one, and it is EMPTY
-        # after a merge -- the merge commit's tree equals its parent's -- so
-        # the pre-filled value reviewed nothing and the run went green.
-        # Observed on run 31256572529. Any default risks that: a value the
-        # caller did not choose, reviewing a range that happens to be empty,
-        # reported as success. Required and unfilled forces one deliberate
-        # decision instead.
-        description: >-
-          Commit range or ref to review. Must be non-empty: e.g.
-          origin/main...HEAD for this branch's changes, or an explicit
-          a..b range. NOTE HEAD~1..HEAD is empty after a merge.
-        required: true
   pull_request:
-    types: [opened, ready_for_review, reopened]
+    types: [opened, synchronize, reopened, ready_for_review]
+    # Only when tests change. A vacuous-test review of a PR that touched no
+    # tests has nothing to say, and a report that says nothing still costs
+    # tokens and trains people to skim past it.
+    paths:
+      - "tests/**"
 
 jobs:
   vacuous-test-review:
@@ -48,70 +53,100 @@ jobs:
 
     steps:
       - name: Checkout repository
-        uses: actions/checkout@v4
+        uses: actions/checkout@v6
         with:
-          fetch-depth: 0  # a commit-range target needs history
+          # Shallow, per the action's own examples. Deep history was only
+          # needed to resolve commit ranges, and there are none now.
+          fetch-depth: 1
 
       - name: Review for vacuous tests
         id: review
         uses: anthropics/claude-code-action@v1
         with:
           claude_code_oauth_token: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
+          # Forces TAG mode, and that is the whole point rather than a
+          # progress-reporting preference.
+          #
+          # `src/modes/detector.ts`: supplying `prompt:` on a pull_request
+          # event selects AGENT mode, and `src/create-prompt/index.ts:468`
+          # makes agent mode `return context.prompt` -- literally the prompt
+          # and nothing else. No PR context is injected at all. That is why
+          # earlier versions of this workflow went hunting with git and gh:
+          # they were reconstructing, badly, context the action withholds in
+          # that mode and supplies for free in the other.
+          #
+          # `track_progress: true` forces tag mode for PR events
+          # (detector.ts:21), which injects <formatted_context>,
+          # <pr_or_issue_body>, <comments>, <review_comments> and
+          # <changed_files>, and appends this prompt as <custom_instructions>.
+          # Same instructions, all the context.
+          #
+          # Two limits of that context, both verified in the action's source
+          # and neither announced to the model at runtime:
+          #
+          #   * NO DIFFS. `PR_QUERY` (src/github/api/queries/github.ts:46)
+          #     selects only `path additions deletions changeType`. There is
+          #     no patch text anywhere. The SHA beside each path is a LOCAL
+          #     `git hash-object` of the working tree (fetcher.ts:493), not a
+          #     GitHub blob SHA -- useful for identity, useless for fetching.
+          #   * SILENT CEILINGS. `files(first: 100)` is unpaginated, so file
+          #     101 onward is dropped without a word. And when a PR's diff is
+          #     too large GitHub returns null for the file list, which renders
+          #     as "No files changed" (fetcher.ts:427) -- indistinguishable,
+          #     from inside the model, from a PR that touched nothing.
+          #
+          # The second is why `publish_review.sh` asks GitHub for the changed
+          # files independently and fails on the contradiction. A review that
+          # says "no tests changed" because the list arrived empty must not
+          # be able to close the loop on its own.
+          track_progress: true
           # Puts the Claude Code Report in the step summary. The action's own
-          # mechanism, used in preference to anything hand-rolled: the first
-          # version of this workflow asked the PROMPT to write a review file,
-          # which is prompt-dependent and produces nothing at all if the model
-          # simply does not comply. `display_report` and `execution_file`
-          # below are produced by the action regardless of what the model
-          # does, which is the difference between a mechanism and a request.
+          # mechanism, in preference to anything hand-rolled: an earlier
+          # version asked the PROMPT to write a review file, which is
+          # prompt-dependent and produces nothing if the model does not
+          # comply. This is produced regardless of what the model does.
           display_report: true
           # A machine-checkable record of what the review DID, separate from
-          # what it concluded. `files_examined` is the field that matters:
-          # it makes "this review examined nothing" a schema-validated fact
-          # rather than something inferred from the absence of prose.
+          # what it concluded. `files_examined` is the field that matters: it
+          # makes "this review examined nothing" a schema-validated fact
+          # rather than an inference from missing prose.
           #
-          # Note carefully what is gated on it. The build fails when the
-          # review produced no result -- an absence -- and never on what the
-          # review found. Findings stay advisory, because an LLM verdict that
-          # can turn a build red is the failure mode this repository has
-          # spent the most effort avoiding. Deterministic checks gate; this
-          # reports.
-          # Without this the review is blindfolded. Measured on run
-          # 31255640813: TWELVE permission denials, every one a Bash call it
-          # needed to read its own diff -- `gh pr view`, `gh pr diff`,
-          # `git fetch refs/pull/N/head`, `git log --parents` -- retried
-          # across 25 turns and $0.96 before it found another route. On a
-          # runner there is nobody to approve, so "requires approval" means
-          # denied, silently.
-          #
-          # The consequence is worse than waste. Had that PR contained test
-          # files, the review could have reported `files_examined: []` and
-          # the publisher would have failed it for examining nothing -- a red
-          # build blamed on the review when the cause was this config.
-          #
-          # Read-only and enumerated rather than blanket Bash. A reviewer
-          # needs to SEE the diff; it has no business writing, pushing, or
-          # running the suite.
-          #
-          # The prompt forbids all three -- but only since the run that
-          # measured this comment wrong. It previously claimed the prompt
-          # covered running the suite when the prompt named only the other
-          # two, and the model spent five of that run's denials attempting
-          # exactly the uncovered one. A comment asserting a prohibition it
-          # had not checked, in the file whose subject is claims nobody
-          # checked.
+          # Note what is gated on it. The build fails when the review
+          # produced no result -- an absence -- and never on what it found.
+          # Findings stay advisory, because an LLM verdict that can turn a
+          # build red is the failure mode this repository has spent the most
+          # effort avoiding. Deterministic checks gate; this reports.
           claude_args: |
-            --allowed-tools 'Read,Grep,Glob,Bash(git diff:*),Bash(git diff-tree:*),Bash(git log:*),Bash(git show:*),Bash(git fetch:*),Bash(git rev-parse:*),Bash(git merge-base:*),Bash(git ls-tree:*),Bash(gh pr view:*),Bash(gh pr diff:*)'
-            --json-schema '{"type":"object","properties":{"no_tests_changed":{"type":"boolean","description":"True if the diff contained no test files at all"},"files_examined":{"type":"array","items":{"type":"string"},"description":"Every test file actually read, by path"},"findings":{"type":"array","items":{"type":"object","properties":{"file":{"type":"string","description":"Path of the file CONTAINING the test -- not the file the test examines. These differ whenever a test inspects another file, which most of this suite does."},"test":{"type":"string","description":"Name of the test function, as written in that file"},"category":{"type":"string","description":"VACUOUS_TESTS.md taxonomy letter, or none"},"what_would_have_to_change":{"type":"string","description":"What would have to change for this test to fail; say nothing if the answer is nothing"}},"required":["file","test","category","what_would_have_to_change"]}},"summary":{"type":"string"}},"required":["no_tests_changed","files_examined","findings","summary"]}'
+            --allowed-tools 'Read,Grep,Glob,mcp__github_comment__update_claude_comment,mcp__github_inline_comment__create_inline_comment'
+            --json-schema '{"type":"object","properties":{"no_tests_changed":{"type":"boolean","description":"True if the PR changed no test files at all"},"files_examined":{"type":"array","items":{"type":"string"},"description":"Every test file actually read, by path"},"findings":{"type":"array","items":{"type":"object","properties":{"file":{"type":"string","description":"Path of the file CONTAINING the test -- not the file the test examines. These differ whenever a test inspects another file, which most of this suite does."},"test":{"type":"string","description":"Name of the test function, as written in that file"},"category":{"type":"string","description":"VACUOUS_TESTS.md taxonomy letter, or none"},"what_would_have_to_change":{"type":"string","description":"What would have to change for this test to fail; say nothing if the answer is nothing"}},"required":["file","test","category","what_would_have_to_change"]}},"summary":{"type":"string"}},"required":["no_tests_changed","files_examined","findings","summary"]}'
           prompt: |
-            Review the changed tests in ${{ github.event.inputs.target || format('the pull request {0}', github.event.pull_request.number) }}.
+            Review the changed TESTS in this pull request for vacuity.
+
+            EVERYTHING YOU NEED IS ALREADY IN YOUR CONTEXT. The changed files
+            are listed in `<changed_files>`, one per line, with change type,
+            line counts and blob SHA. The PR branch is checked out in the
+            working directory. So: take the test paths from
+            `<changed_files>`, and READ THEM from the working tree.
+
+            Do not run git. Do not run gh. You have no Bash tool, and this is
+            deliberate rather than an oversight -- three earlier versions of
+            this workflow reconstructed the changed-file list with git
+            plumbing, and each one was broken in a different way while
+            reporting success. Ignore the general instruction above about
+            comparing against `origin/<base>`: this checkout is shallow, that
+            ref is not here, and you do not need a diff.
+
+            You do not need one because VACUITY IS A PROPERTY OF THE TEST AS
+            WRITTEN, not of the change. A test that cannot fail could not
+            fail before the diff either. Read the test; ask what would make
+            it fail. The diff only tells you WHICH tests to read.
 
             Read docs/VACUOUS_TESTS.md FIRST. It is this project's catalogue
             of tests that passed for reasons unrelated to what they named,
             and its taxonomy is the specification for this review. Take the
             categories and the count from the document itself -- it grows,
             and this prompt deliberately states neither. A generic code
-            review is not what is wanted here and is already available by
+            review is not what is wanted and is already available by
             mentioning @claude.
 
             For every test added or modified, answer one question in writing:
@@ -129,7 +164,9 @@ jobs:
               evaluating a decision (category A). The precedent: a test for a
               missing halt asserted `halt_reasons.append(...)` appeared in the
               source, which survives the guarding branch being disabled by
-              `if False:`. It was green against broken code.
+              `if False:`. It was green against broken code. A comment
+              satisfies a substring search, so this shape hides behind
+              deleted-but-commented calls.
             - a narrowing verified with the broader form (category F): an
               explicit list checked by running the glob it narrows.
             - a normaliser between the test and the mechanism (category F,
@@ -140,10 +177,21 @@ jobs:
               component that nothing reaches is not enforced.
             - an assertion that passes on an EMPTY extraction. If a set, list
               or match could be empty, is there a guard that says so?
+            - a SHADOWED assertion: in a multi-assertion test, one that no
+              input can reach because an earlier assertion always fails first.
+              It has never been demonstrated, whatever the test's colour.
 
             Also flag any test that would pass if its fixture were replaced by
             a trivially different one, and any assertion whose failure message
             would not tell a reader what broke.
+
+            DO NOT RUN THE TEST SUITE, and do not treat a green suite as
+            evidence about any test you are reviewing. This is the review's
+            central premise rather than a resource limit: every test in the
+            catalogue PASSED. A vacuous test passes for a reason unrelated to
+            what it names, so running it can only confirm what is already
+            known and can actively mislead. Read it and reason about what
+            would make it fail.
 
             COMMENT ONLY. Do not modify files, do not push, do not approve or
             request changes. This review advises; the deterministic checks in
@@ -151,40 +199,26 @@ jobs:
             an LLM verdict wearing a green badge is the failure mode this
             repository has spent the most effort learning to avoid.
 
-            DO NOT RUN THE TEST SUITE, and do not treat a green suite as
-            evidence about any test you are reviewing. This is the review's
-            central premise rather than a resource limit: every test in the
-            catalogue PASSED. A vacuous test is one that passes for a reason
-            unrelated to what it names, so running it can only tell you what
-            is already known and can actively mislead. Read it and reason
-            about what would make it fail. The runner denies these commands
-            in any case, and earlier runs spent turns rediscovering that.
+            PUBLISH by updating your comment. Put a finding where it belongs:
+            an inline comment on the offending test, so the next reader meets
+            it at the code rather than in a report they must cross-reference.
+            Keep the summary comment for the overview.
 
-            OPEN YOUR REPORT by naming every test file you actually read. A
-            report that does not say what it examined cannot be told apart
-            from one that examined nothing, and that is the failure this
-            review exists to catch -- so it must not be the failure the
-            review itself commits.
+            OPEN YOUR REPORT by naming every test file you actually read, and
+            state how many test files appear in `<changed_files>`. You can
+            count them exactly -- they are listed. A report that does not say
+            what it examined cannot be told apart from one that examined
+            nothing, and a report covering some of the changed tests must not
+            describe its result as covering the pull request.
 
-            If the changed files contain no tests, say so in one line and
-            stop -- and if the range itself is EMPTY, say that instead and
-            distinguish the two. "No tests changed" and "no files changed at
-            all" are different facts, and the second usually means the range
-            was wrong rather than the code clean.
-
-            Prefer one Bash call per command. A compound line joined with `;`
-            cannot be verified against the tool allowlist and will be denied
-            as a whole, even when every part of it would be permitted alone.
+            If `<changed_files>` contains no test files, say so in one line
+            and stop.
 
       # The review is worthless if its findings are invisible. On a manual
-      # run there is no PR to comment on, and the action hides the SDK's
-      # output by default, so without this a green run and a real review look
-      # identical from outside -- exactly the confusion documented in
-      # docs/proposals/CI_CLOUDBUILD.md after the first firing.
-      # `display_report` above handles the readable case. This step handles
-      # the case that has actually happened twice: the job reports success
-      # and publishes nothing. It announces that absence rather than letting
-      # a green badge stand in for a review.
+      # run there is no PR comment thread in view, and a green run and a real
+      # review look identical from outside. `display_report` handles the
+      # readable case; this handles the case that has actually happened
+      # twice -- the job reports success and publishes nothing.
       - name: Announce it if nothing was published
         if: always()
         # `structured_output` is the schema-validated JSON. `execution_file`
@@ -195,6 +229,12 @@ jobs:
         # shell line.
         env:
           STRUCTURED_OUTPUT: ${{ steps.review.outputs.structured_output }}
+          PR_NUMBER: ${{ github.event.pull_request.number }}
+          # `gh` needs this to ask GitHub what actually changed. That second,
+          # independent source is the entire point of the step: it is what
+          # catches a review reporting "no tests changed" because the file
+          # list it was handed came back empty.
+          GH_TOKEN: ${{ github.token }}
         run: bash tools/ci/publish_review.sh "$STRUCTURED_OUTPUT"
 
       - name: Keep the execution record

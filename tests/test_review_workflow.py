@@ -213,27 +213,89 @@ def test_the_prompt_still_points_at_the_catalogue(text):
         "specification and the count check above passes for the wrong reason")
 
 
-def test_the_review_is_pre_approved_to_read_its_own_diff(text):
+def _allowlist(text: str) -> str:
+    """The quoted tool allowlist, under either flag spelling.
+
+    The action's examples write `--allowedTools`; this workflow writes
+    `--allowed-tools`, which is the spelling with EVIDENCE behind it here --
+    it is what took permission denials from twelve to four on run
+    31255640813. Accepting only one spelling would make this helper return
+    nothing the day someone adopts the other, and a test that cannot find
+    the allowlist reports "no allowlist" rather than "the allowlist is
+    wrong". Those need different fixes.
+
+    A missing allowlist is a REAL failure and still fails here -- but as
+    itself, not disguised as a content problem.
+    """
+    match = re.search(r"--allowed-?[Tt]ools\s+'([^']*)'", text)
+    assert match, (
+        "no tool allowlist found under either spelling. On a runner there is "
+        "nobody to approve, so 'requires approval' means denied silently, "
+        "and the review cannot read the PR at all")
+    return match.group(1)
+
+
+def test_the_review_can_read_files_and_publish(text):
     """A runner has nobody to approve, so "requires approval" means denied.
 
-    Measured on run 31255640813: twelve permission denials, all Bash, every
-    one an attempt to read the diff -- `gh pr view`, `gh pr diff`,
-    `git fetch refs/pull/N/head`, `git log --parents` -- retried across 25
-    turns before the review found another route. It happened to succeed. Had
-    that PR contained tests it could have reported examining nothing, and the
-    publisher would have failed the build for a reason that was really this
-    config.
+    Twelve denials on run 31255640813 and seven on 93106991131, all of them
+    the review trying to reach context it had not been given. It needs two
+    capabilities and no more: READ the checked-out files, and PUBLISH what it
+    found. The changed-file list arrives in `<changed_files>`, so nothing
+    needs to fetch it.
+
+    Publishing is the one people forget. In tag mode the report IS the
+    comment: without `update_claude_comment` the review runs, costs money,
+    and says nothing anyone can see.
     """
-    assert "--allowed-tools" in text, (
-        "no tool allowlist: the review will be denied Bash on a runner and "
-        "cannot read its own diff")
-    allowed = re.search(r"--allowed-tools\s+'([^']*)'", text)
-    assert allowed, "--allowed-tools is present but not readable as a quoted list"
-    listed = allowed.group(1)
-    for needed in ("git diff", "git log", "gh pr diff"):
+    listed = _allowlist(text)
+    for needed in ("Read", "mcp__github_comment__update_claude_comment"):
         assert needed in listed, (
-            f"`{needed}` is not pre-approved; it was denied on the first real "
-            f"run and is how the review sees what changed")
+            f"`{needed}` is not pre-approved. Without Read it cannot examine "
+            f"a test; without the comment tool it cannot publish, and a "
+            f"review nobody can read is indistinguishable from none")
+
+
+def test_track_progress_is_on(text):
+    """The single line the whole design rests on.
+
+    `src/modes/detector.ts`: supplying `prompt:` on a pull_request event
+    selects AGENT mode, and `src/create-prompt/index.ts` makes agent mode
+    return the prompt AND NOTHING ELSE -- no `<changed_files>`, no PR body,
+    no comments. `track_progress: true` forces TAG mode, which injects all of
+    it and appends the prompt as `<custom_instructions>`.
+
+    Delete this one line and the workflow still runs, still costs money, and
+    still reports success, while the review is blind to the PR and the prompt
+    tells it to read a `<changed_files>` block that is not there. Nothing
+    else in this file would notice, which is exactly why it is pinned.
+    """
+    doc = yaml.safe_load(text)
+    steps = _steps(text)
+    review = [s for s in steps
+              if "claude-code-action" in str(s.get("uses") or "")]
+    assert review, "the review step is gone"
+    assert review[0].get("with", {}).get("track_progress") is True, (
+        "track_progress is not enabled, so this workflow runs in AGENT mode "
+        "and the model receives the prompt with no PR context whatsoever -- "
+        "silently, and with the prompt still referring to <changed_files>")
+    assert doc  # the file parsed at all
+
+
+def test_the_review_does_not_reach_for_git(text):
+    """The context is already in GitHub.
+
+    Every commit-range design here failed by reconstructing, with git
+    plumbing, what the platform already knows -- a PR's base, head and file
+    list. An allowlist granting git invites that back, and the prompt now
+    says not to. Both directions matter: the allowlist must not offer it and
+    the prompt must not need it.
+    """
+    listed = _allowlist(text)
+    assert "git " not in listed and "git)" not in listed, (
+        f"git is pre-approved again: {listed!r}. A PR's diff comes from "
+        f"`gh pr diff`; reaching for git inside a GitHub Action is the "
+        f"reinvention that produced three broken range designs")
 
 
 def test_the_review_is_not_granted_write_access(text):
@@ -244,9 +306,7 @@ def test_the_review_is_not_granted_write_access(text):
     choosing to obey -- the same request-instead-of-mechanism error that put
     a path where JSON belonged earlier today.
     """
-    allowed = re.search(r"--allowed-tools\s+'([^']*)'", text)
-    assert allowed, "no allowlist to check"
-    listed = allowed.group(1)
+    listed = _allowlist(text)
     for forbidden in ("Write", "Edit", "git push", "git commit"):
         assert forbidden not in listed, (
             f"`{forbidden}` is pre-approved for a review that must only "
@@ -362,6 +422,23 @@ def test_harmless_changes_do_not_change_the_verdict(text, mutate, why):
     """The other direction: scoping must not have made the check brittle. A
     guard that fires on innocent edits gets routed around."""
     test_the_publisher_receives_structured_output_not_a_file_path(mutate(text))
+
+
+@pytest.mark.parametrize("mutate,expected,why", [
+    (lambda t: _mutate(t, "          track_progress: true\n", ""),
+     "not enabled",
+     "the line removed entirely -- the workflow still parses, still runs, "
+     "still reports success, and the review goes blind"),
+    (lambda t: _mutate(t, "track_progress: true", "track_progress: false"),
+     "not enabled",
+     "flipped to false, which is the action's own default and therefore "
+     "where this lands if anyone 'tidies' an explicit setting"),
+])
+def test_losing_track_progress_is_caught(text, mutate, expected, why):
+    """The guard, seen failing. Its absence has no runtime symptom at all --
+    no error, no warning, just a review that cannot see the pull request."""
+    with pytest.raises(AssertionError, match=re.escape(expected)):
+        test_track_progress_is_on(mutate(text))
 
 
 def test_the_review_is_advisory_and_says_so(text):

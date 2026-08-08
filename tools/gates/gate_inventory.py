@@ -265,6 +265,40 @@ def _resolve(reference: str, repo_root: Path) -> tuple[bool, str]:
 # enforcement would be, and no check in this file can tell the difference.
 # That one is enforced by a reviewer reading the classifications.
 #
+# It closes the loophole it names, and there are three. Reported by the
+# instance filling the inventory, in the order of how honest each feels while
+# you are making it:
+#
+#   1. reclassify a gate you cannot enforce -- named above, feels like
+#      cheating, and is the one people expect to be watched
+#   2. drop the clause to `not_binding` -- feels like judgement
+#   3. cite ADJACENT EVIDENCE -- feels like doing the work
+#
+# So, binding as the clause above:
+#
+#   A citation must discharge the clause AS WRITTEN, not a nearby claim. A
+#   real, passing test cited for an obligation it does not establish
+#   satisfies every mechanical check in this file.
+#
+# The third is the dangerous one, and no check here can see it. The paid
+# instance: a clause required that new per-image OOF MSEs reproduce the
+# fold-aggregates STORED BY earlier runs. An existing OOF cross-check pinned
+# the per-fold mean against a within-run recomputation on synthetic data --
+# real, passing, same subject, right-sounding name, and a different claim.
+# The whole point of the clause was pinning new machinery against numbers
+# this project already trusts, and the citation would have pinned it against
+# fresh expectations. `_resolve` confirms the reference EXISTS; existence was
+# never the question.
+#
+# Nothing was reclassified, the row was `binding_gate` correctly, the test
+# was genuine, and the reconciler would have reported nothing. It was caught
+# by a person reading what the cited test actually asserted and noticing the
+# docstring said "within-run" where the clause said "stored". This is the
+# same instrument as VACUOUS_TESTS' "a citation of a gate is not evidence of
+# a gate", turned on the inventory instead of on tests -- and naming the move
+# is most of the defence against it, because the person making it experiences
+# themselves as having found the test rather than as having lowered the bar.
+#
 # **Three kinds of binding, because a frozen protocol contains three kinds
 # of promise.** A single seven-field schema forces every clause with no
 # runtime decision into one of two lies -- `not_binding`, which is false for
