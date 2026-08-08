@@ -519,6 +519,16 @@ taxonomy G therefore applies to it with full force.
    nothing" from "the verifier never ran." These are the two readings that
    silently collapsed for the capture hooks, and the failure was invisible
    precisely because a clean result and an absent result look identical.
+
+   The invariant underneath is wider than this feature: **any system whose
+   success signal is silence cannot distinguish working from not-running.**
+   This project has now fixed it in three costumes — a payload without a
+   manifest is UNCOMMITTED rather than merely unverified
+   (`docs/MULTI_AGENT_PRACTICE.md`, pattern 13, "an artifact without
+   provenance is a claim without a source"); the `session_open` marker
+   (§3.5.1); and the capture canary, where a clean result and an absent one
+   were indistinguishable. One principle appearing three times, not three
+   lessons.
 3. **Its first named test case is the shape this project produced three
    times in one night: component correct, wiring absent.**
 
