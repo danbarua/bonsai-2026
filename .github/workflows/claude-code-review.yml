@@ -91,10 +91,18 @@ jobs:
           #
           # Read-only and enumerated rather than blanket Bash. A reviewer
           # needs to SEE the diff; it has no business writing, pushing, or
-          # running the suite, and the prompt already forbids all three.
+          # running the suite.
+          #
+          # The prompt forbids all three -- but only since the run that
+          # measured this comment wrong. It previously claimed the prompt
+          # covered running the suite when the prompt named only the other
+          # two, and the model spent five of that run's denials attempting
+          # exactly the uncovered one. A comment asserting a prohibition it
+          # had not checked, in the file whose subject is claims nobody
+          # checked.
           claude_args: |
             --allowed-tools 'Read,Grep,Glob,Bash(git diff:*),Bash(git diff-tree:*),Bash(git log:*),Bash(git show:*),Bash(git fetch:*),Bash(git rev-parse:*),Bash(git merge-base:*),Bash(git ls-tree:*),Bash(gh pr view:*),Bash(gh pr diff:*)'
-            --json-schema '{"type":"object","properties":{"no_tests_changed":{"type":"boolean","description":"True if the diff contained no test files at all"},"files_examined":{"type":"array","items":{"type":"string"},"description":"Every test file actually read, by path"},"findings":{"type":"array","items":{"type":"object","properties":{"file":{"type":"string"},"test":{"type":"string"},"category":{"type":"string","description":"VACUOUS_TESTS.md taxonomy letter, or none"},"what_would_have_to_change":{"type":"string","description":"What would have to change for this test to fail; say nothing if the answer is nothing"}},"required":["file","test","category","what_would_have_to_change"]}},"summary":{"type":"string"}},"required":["no_tests_changed","files_examined","findings","summary"]}'
+            --json-schema '{"type":"object","properties":{"no_tests_changed":{"type":"boolean","description":"True if the diff contained no test files at all"},"files_examined":{"type":"array","items":{"type":"string"},"description":"Every test file actually read, by path"},"findings":{"type":"array","items":{"type":"object","properties":{"file":{"type":"string","description":"Path of the file CONTAINING the test -- not the file the test examines. These differ whenever a test inspects another file, which most of this suite does."},"test":{"type":"string","description":"Name of the test function, as written in that file"},"category":{"type":"string","description":"VACUOUS_TESTS.md taxonomy letter, or none"},"what_would_have_to_change":{"type":"string","description":"What would have to change for this test to fail; say nothing if the answer is nothing"}},"required":["file","test","category","what_would_have_to_change"]}},"summary":{"type":"string"}},"required":["no_tests_changed","files_examined","findings","summary"]}'
           prompt: |
             Review the changed tests in ${{ github.event.inputs.target || format('the pull request {0}', github.event.pull_request.number) }}.
 
@@ -142,6 +150,15 @@ jobs:
             cloudbuild.yaml are what gate. Keeping those apart is deliberate --
             an LLM verdict wearing a green badge is the failure mode this
             repository has spent the most effort learning to avoid.
+
+            DO NOT RUN THE TEST SUITE, and do not treat a green suite as
+            evidence about any test you are reviewing. This is the review's
+            central premise rather than a resource limit: every test in the
+            catalogue PASSED. A vacuous test is one that passes for a reason
+            unrelated to what it names, so running it can only tell you what
+            is already known and can actively mislead. Read it and reason
+            about what would make it fail. The runner denies these commands
+            in any case, and earlier runs spent turns rediscovering that.
 
             OPEN YOUR REPORT by naming every test file you actually read. A
             report that does not say what it examined cannot be told apart

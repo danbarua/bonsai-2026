@@ -89,6 +89,31 @@ for path in "${READ_AT_RUNTIME[@]}"; do
   fi
 done
 
+# The working tree, against both refs.
+#
+# Added because the check reported "no workflow drift" while the branch that
+# was about to become main carried a different workflow. Both refs agreed
+# with each other and neither agreed with the file just edited -- a true
+# statement about the pair, read as a statement about the state of things.
+# Comparing exactly the two refs it was asked about is what a narrowing does;
+# the reassuring summary line is what made it misleading.
+for path in "${WORKFLOWS[@]}"; do
+  [ -f "$path" ] || continue
+  local_blob=$(git hash-object "$path")
+  a=$(blob "$REF_A" "$path")
+  b=$(blob "$REF_B" "$path")
+  if [ "$local_blob" != "$a" ] || [ "$local_blob" != "$b" ]; then
+    echo "  AHEAD $path here differs from the published copies"
+    echo "        working tree: $local_blob"
+    echo "        $REF_A: $a"
+    echo "        $REF_B: $b"
+    echo "        Both refs need this file before a dispatch or PR check"
+    echo "        reflects it. Until then the run uses the OLD workflow and"
+    echo "        still reports success."
+    fails=$((fails + 1))
+  fi
+done
+
 echo
 if [ "$fails" -eq 0 ]; then
   echo "no workflow drift"

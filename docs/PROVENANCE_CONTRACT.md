@@ -241,6 +241,62 @@ The negative list matters as much as the positive one. Capturing
 everything produces a log nobody reads, which is the same outcome as
 capturing nothing but with more disk.
 
+### 3.2a Numbers that ARRIVE rather than being generated
+
+Everything above assumes the number is born in this session, from something
+this session ran. A number that arrives from a peer has no local generator
+to capture, and capture cannot reach it: there is no script, no interpreter
+invocation, and no tool call in this session that produced it. The mesh read
+that delivered it is a tool call, but what it captures is the *delivery*,
+which §3.2's governing rule already says is the wrong thing to key on.
+
+So it falls outside capture entirely, and — this is the part that made it
+survive — it does not feel like scratch. An ephemeral script announces
+itself as ephemeral. A number in a colleague's message pattern-matches *a
+colleague told me*, which sits in no category this contract had.
+
+**The rule:**
+
+> A number that arrives from a peer has the provenance of its GENERATOR,
+> not of its SENDER. A mesh message is a sender.
+
+**At receipt.** A received number carries its generator or it carries
+nothing. Record, alongside the number, either the committed path that
+produces it or an explicit note that the generator is unknown. "From
+`<instance>`" is not provenance — `instance:` names a role, not a session,
+and a role cannot run code.
+
+**At use.** Citable only by naming the generator. If the generator cannot
+be named, the number is not a decision anchor, however plausible it looks,
+however long it has held, and however much the sender is trusted. The
+remedy is the same as everywhere else in this document: re-derive it from
+committed code. Never cite the message.
+
+**The prohibition that matters most is on the FRAME, not the number.** The
+paid instance: three figures splitting a clause corpus arrived by mesh
+message as an estimate, honestly offered, and were written into a source
+comment as *"measured over this project's record."* Nobody measured
+anything. The estimate was fine; the restatement manufactured a measurement,
+and a reader tracing the claim would land on a peer's artifact rather than a
+generator — the frame supplied an authority the number never had. It was
+caught only because its author later noticed the figures looked too clean
+and asked where they came from, of a document carrying their own number back
+to them. Neither party could see it: the sender could not recognise their
+output through the new frame, and the receiver had run nothing to check.
+
+Restating a received number in stronger epistemic terms than it arrived in
+is the defect, independent of whether the number is correct. Preserve the
+weakest frame in the chain: an estimate stays an estimate across any number
+of hops, and only a generator can promote it.
+
+**Why this section exists rather than a hook.** There is nothing to
+capture, so the mechanism is §4's checklist question, which now asks it.
+The failure is one of authorship at the moment of writing, and that is the
+only moment it is cheap to catch.
+
+*The rule and its framing are `stage2b-lead`'s, from the incident above,
+where they were the sender. The mechanics here are this document's.*
+
 ### 3.3 The record
 
 Append-only JSONL at
@@ -409,6 +465,13 @@ question the author answers at the moment of writing:
 >
 > If IN and the generator was ephemeral: the remedy is to promote it to
 > committed code. Not to cite the capture.
+>
+> **Did this number arrive from a peer?** (§3.2a) Then name its GENERATOR,
+> not its sender — a mesh message is a sender. If you cannot name one, it is
+> not a decision anchor. And check the frame you are about to write it into:
+> an estimate must still read as an estimate. Restating a received number in
+> stronger terms than it arrived in is the defect, whether or not the number
+> is right.
 
 **It never blocks.** `additionalContext` only; no `permissionDecision`,
 no exit 2. The author is writing a document at that moment, which is
