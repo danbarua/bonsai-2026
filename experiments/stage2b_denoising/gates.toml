@@ -148,3 +148,167 @@ with no consumer is a true and useful readiness statement."""
 enforcement = ""
 break_demonstrated = ""
 trigger = "manual"
+
+# =============================================================================
+# not_binding -- candidates that are prose about something else
+# =============================================================================
+#
+# THE FRICTIONLESS ESCAPE, named here so a reviewer can audit for it. A
+# `not_binding` row needs one field and produces zero findings, while every
+# binding kind demands six or seven and can fail. With 83 rows left and a red
+# readiness signal, this section is the path of least resistance, and no check
+# in `gate_inventory.py` can distinguish an honest disposition from a
+# convenient one -- the anti-gaming clause it quotes covers moving a clause
+# BETWEEN binding kinds, not dropping it out of them.
+#
+# So the reasons here are written to a fixed shape rather than freely: each
+# opens with the category of prose the sentence actually is --
+#
+#     NARRATION      a past incident, error, or how a decision was reached
+#     RATIONALE      why a choice was made; the argument behind a freeze
+#     RESULT         what a run or check measured
+#     PLAN           forward-looking sequencing or a recommendation
+#
+# -- and then says where the binding content lives, when the surrounding
+# passage has any. A reviewer scanning this section is looking for a reason
+# that fits none of those four shapes, or one whose "binds at X" pointer
+# names nothing. That is a cheaper audit than re-reading 89 sentences, which
+# is the point of constraining the shape at all.
+
+[not_binding.1aa42e6ea102]
+reason = """
+RESULT: reports the cross-architecture bit-reproducibility measurement made
+before any stage-3 artifact was written (Colab-to-Colab bit-exact, Mac-to-Mac
+bit-exact, <=3 ULP across architectures). It states what was measured, not
+what the system must do. The obligation the measurement was taken to satisfy
+-- disclose a post-lock execution change before acting on it -- binds at
+DESIGN.md's Review history."""
+
+[not_binding.24013b62d98c]
+reason = """
+RATIONALE: the argument that the cross-architecture difference cannot
+amplify -- the encoder is a contraction toward a fixed point, and the
+downstream solver's rtol=1e-6 sits eight orders above the difference. An
+analytic justification for why the measured result above is tolerable. It
+commits the system to nothing; the tolerance it justifies is the solver's,
+set elsewhere."""
+
+[not_binding.76afced21901]
+reason = """
+RATIONALE: why the scaler-centering tolerance has the anchor and exponent it
+has -- 1e-9 measured with a 12.7x margin, 0.5 chosen because the mechanism
+implies sqrt(n) and that upper-bounds the measured 0.405. The gate itself,
+with the formula this paragraph argues for, binds at DESIGN.md:345
+(eaa2db103093)."""
+
+[not_binding.ddc8d96d73d7]
+reason = """
+NARRATION: the Review history -- seven drafts, four ChatGPT rounds, the
+Fable-5 and Grok reviews, and each post-lock amendment in sequence. A record
+of how the document reached its current state. Every amendment it lists is
+binding where the amendment is WRITTEN (the grid extension at DESIGN.md:284
+and :664, the scaler tolerance at :345, ENCODER_STEPS at :144); this
+paragraph is the index to them, not a second statement of them."""
+
+[not_binding.93cd3bded6d5]
+reason = """
+RATIONALE: the textual and arithmetic case for reading 'full training' as
+60,000 -- DESIGN.md:479's explicit definition, :492's 48,000 = 0.8 x 60,000,
+and the counter-argument from role labels. The argument that produced
+Freeze 2; the population it argues for binds at STAGE3_PLAN.md:354
+(8bf414d720f2)."""
+
+[not_binding.ef1b61b7eac3]
+reason = """
+NARRATION: how the 54k-vs-60k question was decided -- Desktop withdrawing its
+recommendation, ChatGPT's independent agreement, and why it was resolved
+explicitly rather than by convenience. The decision binds at Freeze 2
+(8bf414d720f2); this records the process that reached it."""
+
+[not_binding.02dbbe96e032]
+reason = """
+NARRATION: the Q1 answer restated in the decisions summary. Same content as
+ef1b61b7eac3 one section later; binds at Freeze 2 (8bf414d720f2). Listed
+separately because it is a separate paragraph with its own id, and merging
+two ids under one disposition is exactly the id-collision failure
+check_ids_unique exists to refuse."""
+
+[not_binding.bef10704fe47]
+reason = """
+NARRATION: a past error traced to its origin -- briefing items 3 and 4
+contradicted each other because Desktop's first message described Phase A as
+'full 60,000-image encoding' when it was 54,000, and the audit scope was
+built on that. A record of how a defect entered and where; it imposes nothing
+on the system."""
+
+[not_binding.c6b46028d99b]
+reason = """
+NARRATION: what was lost in relay between reviewers -- two of three audit
+triggers dropped, a FINDINGS correction that reached nobody, two of four
+justification axes. A record of specific past omissions. Each item it names
+is REINSTATED somewhere binding (all three triggers at AUDIT_PROTOCOL.md:183,
+the four axes at COMPANION_PROTOCOLS.md:156); this is the list of what had to
+be put back, not the putting back."""
+
+[not_binding.983786ebaabb]
+reason = """
+NARRATION: 'I computed both readings from the stored artifacts' -- the
+working behind the tolerance, shown so the reading that was adopted can be
+distinguished from the one that was not. The tolerance it produced binds at
+Freeze 1 (7ff6b43436c6)."""
+
+[not_binding.fe7dddf03cdd]
+reason = """
+NARRATION: a superseded recommendation and why it was wrong -- exact zeros in
+a difference of two independently-computed aggregates are the symptom of
+cancellation, not evidence of agreement. Disclosed rather than deleted. What
+replaced it, the analytic bound, binds at Freeze 1 (7ff6b43436c6)."""
+
+[not_binding.c0af1bf62c60]
+reason = """
+NARRATION: discloses that Phase A ran from a dirty tree and states precisely
+what the recovered bytes do and do not establish. A disclosure of a
+provenance gap. The constraint it produces -- what may be CLAIMED about that
+run -- binds at Freeze 5 (0771659e4158), which is dispositioned as an
+obligation on the write-up rather than here."""
+
+[not_binding.958a90f98dc2]
+reason = """
+RESULT: reports a verification already performed -- Phase A's corruption RNG
+consumed official dataset indices, confirmed by recomputing epsilon_for under
+both hypotheses at rows 0 / 27000 / 53999, with the note that row 0 alone
+would have been vacuous. It reports 'No halt'. The halt condition it reports
+against is stated where the gate is, not here."""
+
+[not_binding.9866f9da1eb1]
+reason = """
+NARRATION: 'All four were adopted' -- records which of the reviewed options
+became freezes. An index line. Each of the four binds where it is written
+(Freeze 2, Q4, Freeze 1/Q3, Q5)."""
+
+[not_binding.f5e145d34109]
+reason = """
+RESULT: reports how much negative-path evidence already existed at the time
+of writing -- four of the reviewer's five demands covered by named tests,
+only stale-artifact refusal outstanding. A status report, now itself
+superseded: demand 5 was closed by the fingerprint refusal guards. The
+obligation to produce that evidence is the reviewer's demand, not this
+sentence."""
+
+[not_binding.2b3de08a8e87]
+reason = """
+PLAN: the seven-item work programme and its dependency order. Sequencing --
+what to build and in what order -- not a commitment the system must keep.
+Each item's own obligations bind where they are stated; item 4's protocol
+freezes, for instance, bind in AUDIT_PROTOCOL.md and COMPANION_PROTOCOLS.md
+rather than in this list of them."""
+
+[not_binding.6e3cd29f9310]
+reason = """
+PLAN: an implementation note for unbuilt Phase B work -- kappa_alpha needs
+s_max and s_min as absolute magnitudes, a ratio cannot be un-divided, and the
+per-fold fit object is discarded, so compute for all alphas and column-index
+after, or retain the fits. It recommends ('Recommend the former') rather than
+requiring. Note also that it says 'all nine alphas', written before the grid
+was extended to thirteen -- a sign of how much of this document is
+contemporaneous narration rather than standing obligation."""
