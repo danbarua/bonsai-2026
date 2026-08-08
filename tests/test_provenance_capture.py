@@ -99,6 +99,19 @@ SCRATCH = [
         "piped_into_remote_exec",
         "piped code never touches disk at all",
     ),
+    (
+        'BEFORE=$(wc -l < log); uv run python -c "print(1)"; echo done',
+        "inline_c",
+        "FIELD REPORT from stage2b-lead: scratch is rarely the first token "
+        "of a Bash call. Inspecting only tokens[0] missed this entirely "
+        "while the corpus's single-command entries all passed",
+    ),
+    (
+        'cd experiments && uv run python -c "print(1)"',
+        "inline_c",
+        "the same miss behind a `cd &&`, which is how half the commands in "
+        "this repo are written",
+    ),
 ]
 
 
@@ -172,6 +185,22 @@ NOT_SCRATCH = [
     (
         "ls /tmp",
         "an ephemeral DIRECTORY is not an ephemeral SCRIPT",
+    ),
+    (
+        "git commit -q -F - <<'EOF'\nFreeze the alpha-grid extension\n\nBody.\nEOF",
+        "FIELD REPORT from stage2b-lead: their commit message for 7879a4c "
+        "landed in a provenance blob. A heredoc says how text ARRIVES; what "
+        "consumes it decides whether it is scratch, and git is not an "
+        "interpreter. Already in git, so capturing it is pure noise",
+    ),
+    (
+        "gh pr create -F - <<'EOF'\nPR body prose\nEOF",
+        "the same defect's next victim -- any heredoc-fed tool (gh, jq -f -, "
+        "mail) would land prose in a store meant for code",
+    ),
+    (
+        "cat <<'EOF' > notes.md\njust some prose\nEOF",
+        "a heredoc redirected to a FILE runs no code at all",
     ),
 ]
 

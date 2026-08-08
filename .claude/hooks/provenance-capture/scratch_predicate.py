@@ -108,16 +108,59 @@ def _strip_wrappers(tokens: list[str]) -> list[str]:
     return out
 
 
-def _inline_code(tokens: list[str]) -> str | None:
-    """The argument to an interpreter's `-c`, if this is such a call."""
-    tokens = _strip_wrappers(tokens)
-    if not tokens:
-        return None
-    if Path(tokens[0]).name not in _INTERPRETERS:
-        return None
-    for i, token in enumerate(tokens[1:], start=1):
-        if token == "-c" and i + 1 < len(tokens):
-            return tokens[i + 1]
+def _command_portion(command: str) -> str:
+    """The command text, with any heredoc BODY removed.
+
+    Segmentation splits on `;`, `&&` and newlines, and a heredoc body is
+    arbitrary text full of both. Removing it first stops a line of Python
+    inside a heredoc from being mistaken for another shell command.
+    """
+    match = _HEREDOC_RE.search(command)
+    if not match:
+        return command
+    line_end = command.find("\n", match.end())
+    return command if line_end == -1 else command[:line_end]
+
+
+def _segments(command: str) -> list[str]:
+    """Individual commands within a compound shell invocation."""
+    return [s for s in re.split(r"\|\||&&|\||;|\n", _command_portion(command))
+            if s.strip()]
+
+
+def _resolved_program(segment: str) -> str | None:
+    """What this segment actually EXECUTES, after stripping wrappers.
+
+    The distinction the whole predicate turns on. `-c` and heredocs describe
+    how code ARRIVES; the program that consumes it decides whether any code
+    is being run at all. Keying on delivery produced both field-reported
+    bugs at once -- `uv run python -c` invisible because it was not the
+    first token, and `git commit -F - <<EOF` captured because a heredoc was
+    present at all.
+    """
+    tokens = _strip_wrappers(_tokens(segment))
+    return Path(tokens[0]).name if tokens else None
+
+
+def _consumes_code(command: str) -> bool:
+    """Does any part of this command feed text to an interpreter?"""
+    return any(_resolved_program(s) in _INTERPRETERS for s in _segments(command))
+
+
+def _inline_code(command: str) -> str | None:
+    """The argument to an interpreter's `-c`, anywhere in the command.
+
+    Every segment is checked, not just the first: scratch is rarely the
+    leading token of a real Bash call. It sits behind a `cd ... &&`, after a
+    variable assignment, or at the end of a `;`-chain.
+    """
+    for segment in _segments(command):
+        tokens = _strip_wrappers(_tokens(segment))
+        if not tokens or Path(tokens[0]).name not in _INTERPRETERS:
+            continue
+        for i, token in enumerate(tokens[1:], start=1):
+            if token == "-c" and i + 1 < len(tokens):
+                return tokens[i + 1]
     return None
 
 
@@ -213,15 +256,21 @@ def _classify(tool_name: str, tool_input: dict,
                            script_source="file_reference",
                            referenced_files=remote_files)
 
-    inline = _inline_code(tokens)
+    inline = _inline_code(command)
     if inline is not None:
         return Verdict(True, "inline_c", script_text=inline,
                        script_source="inline_c")
 
     body = _heredoc_body(command)
     if body is not None:
-        return Verdict(True, "heredoc", script_text=body,
-                       script_source="heredoc")
+        # A heredoc is only scratch if something EXECUTES it. `git commit
+        # -F -`, `gh pr create -F -` and `cat <<EOF > notes.md` all take
+        # heredocs and run no code; capturing them puts prose into a store
+        # meant for code, and in git's case duplicates what git already has.
+        if _consumes_code(command):
+            return Verdict(True, "heredoc", script_text=body,
+                           script_source="heredoc")
+        return Verdict(False, "heredoc_not_fed_to_an_interpreter")
 
     ephemeral = _ephemeral_paths(tokens)
     if ephemeral:

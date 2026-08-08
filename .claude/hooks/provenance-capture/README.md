@@ -75,13 +75,19 @@ ephemeral script". The mitigation is the corpus in
 is there. A new shape found in the wild gets a corpus entry *and* a rule,
 never a rule alone.
 
-## Hook registrations are read at session start
+## Hook registrations are loaded once per session
 
-**A session that was already running when these hooks landed captures
-nothing, silently, until it is restarted.** Confirmed live: after the merge
-to `stage2b` at `07a33a0`, a scratch command in an already-open session
-produced no record, while the same command in a freshly-started session
-produced a correct `open`/`close` pair.
+**A session that has neither been restarted nor had its config refreshed
+since these hooks landed captures nothing, silently.** Confirmed live:
+after the merge to `stage2b` at `07a33a0`, a scratch command in an
+already-open session produced no record, while the same command in a
+freshly-started session produced a correct `open`/`close` pair.
+
+A **config refresh is enough** — a full restart is not required. Verified
+in the field by `stage2b-lead`, whose session predates `07a33a0` and
+captures correctly after an in-session refresh. Worth stating precisely,
+because "restart" is the more expensive instruction and people skip
+expensive instructions.
 
 This matters more than an ordinary gotcha, because the failure is quiet in
 the worst direction. Nothing errors. The absence of a record is
@@ -90,11 +96,22 @@ scratch", so a long-running session can look like it is being captured when
 it never was — and the natural time to have a long-running session is
 during exactly the sustained work most worth capturing.
 
-If you need capture active in a session, restart it and confirm with:
+To confirm capture is live in a session, look for the **`session_open`
+marker** rather than for records of your own commands:
 
 ```bash
-ls .provenance/runs/<session_id>/
+grep -c session_open .provenance/runs/<session_id>/capture.jsonl
 ```
+
+Check the marker, not a canary command. An earlier version of this note
+suggested running a throwaway `python -c` and treating an empty directory
+as proof the hooks were dead. That was unsafe advice: at the time
+`uv run python -c` was not captured at all — this project's canonical
+invocation — so the check reported "not live" against perfectly live hooks.
+The predicate bug is fixed, but the lesson outlives it: **a canary tests
+the predicate and the wiring at once, and cannot tell you which one
+failed.** The marker tests only the wiring, which is the question being
+asked.
 
 `session_id` appears in every record, so an empty or missing directory
 after a known-scratch command means the hooks are not loaded in that

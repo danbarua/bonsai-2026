@@ -46,6 +46,14 @@ pytestmark = [
 SCRATCH = "uv run python -c \"print('live registration check')\""
 NOT_SCRATCH = "git status --short"
 
+# The over-capture stage2b-lead hit in the field: their commit message for
+# `7879a4c` landed in a provenance blob because the predicate keyed on
+# "heredoc present" without checking what consumed it. Their real command
+# was `git commit -q -F - <<'EOF'`; this uses a READ-ONLY git command so the
+# live test cannot create anything, while keeping the shape that mattered --
+# a heredoc handed to a non-interpreter.
+HEREDOC_TO_NON_INTERPRETER = "git log --oneline -1 <<'EOF'\nunused stdin\nEOF"
+
 
 def run_session(command: str, root: Path, timeout: int = 240):
     """One headless session that runs `command` once and stops."""
@@ -160,6 +168,30 @@ def test_ordinary_commands_produce_no_record_in_a_real_session(tmp_path):
     assert not captures, (
         "an ordinary command was captured -- the matcher or predicate is "
         "over-capturing, which would put unrelated work into a forensic log")
+
+
+def test_a_heredoc_to_a_non_interpreter_is_not_captured_live(tmp_path):
+    """Field-reported over-capture, pinned where the corpus could not see it.
+
+    `test_ordinary_commands_produce_no_record_in_a_real_session` uses
+    `git status`, which carries no heredoc -- so it proved git is declined
+    only when nothing else about the command looks interesting, and the
+    defect shipped underneath it. This is the same command class WITH the
+    feature that triggered the bug.
+    """
+    run_session(HEREDOC_TO_NON_INTERPRETER, tmp_path)
+    records = all_records(tmp_path)
+    markers = [r for r in records if r["phase"] == "session_open"]
+    captures = [r for r in records if r["phase"] != "session_open"]
+    print(f"\n[live] heredoc-to-git: {len(markers)} markers, "
+          f"{len(captures)} captures (expected 0)")
+    for record in captures:
+        print(f"[live] UNEXPECTED: {record.get('trigger_reason')} "
+              f"{(record.get('script') or {}).get('text', '')[:60]!r}")
+    assert markers, "hooks were not live; this test proves nothing"
+    assert not captures, (
+        "a heredoc fed to a non-interpreter was captured -- prose is "
+        "landing in a store meant for code")
 
 
 def test_the_live_check_is_not_vacuous(tmp_path):
