@@ -197,6 +197,16 @@ artifact does is the thing under test, and it cannot audit itself.
 The round requires the peer to be told what the tool is *supposed* to do
 (6b), or they can only report noise.
 
+**It does not require the peer to be looking for defects, and that is the
+practical part.** All three field-found defects surfaced while the peer was
+verifying something else they actually needed — capture working before a
+paid audit, then a consume chain before provisioning. None came from
+auditing the hooks. So the round is not "ask someone to review your tool";
+it is "put the tool in the path of someone pursuing a different outcome,
+and make sure they know what correct looks like." A peer with their own
+stake in an adjacent result is a better detector than a peer assigned to
+inspect yours.
+
 **Founding instance, and it is procedural rather than technical.** The
 paragraph in 6b above originally claimed the reporting instruction
 "converted a silent defect into a bug report." The author asked the
