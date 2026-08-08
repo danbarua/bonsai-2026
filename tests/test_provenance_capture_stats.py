@@ -81,6 +81,24 @@ def test_missing_log_directory_is_not_an_error(tmp_path):
     assert capture_stats.load(tmp_path) == []
 
 
+def test_session_filter_narrows_by_prefix(tmp_path):
+    """Answering "is capture live in THAT session" needs a prefix match --
+    session ids are UUIDs and nobody retypes one correctly."""
+    write_log(tmp_path, "abc12345-aaaa", [marker(), opened()])
+    write_log(tmp_path, "def67890-bbbb", [marker(), opened()])
+    assert len(capture_stats.load(tmp_path, "abc")) == 2
+    assert {r["_session"] for r in capture_stats.load(tmp_path, "abc")} \
+        == {"abc12345-aaaa"}
+
+
+def test_session_filter_matching_nothing_returns_empty_not_everything(tmp_path):
+    """The dangerous failure: a filter that silently falls back to
+    unfiltered would report another session's records as the one asked
+    about -- worse than reporting nothing, because it looks like an answer."""
+    write_log(tmp_path, "abc12345", [marker(), opened()])
+    assert capture_stats.load(tmp_path, "zzz") == []
+
+
 def test_unmarked_sessions_are_reported(tmp_path, capsys):
     """A session with records but no marker was capturing without a commit
     point -- the ambiguity the marker removes. It must be visible, not

@@ -29,11 +29,19 @@ from pathlib import Path
 REPO_ROOT = Path(__file__).resolve().parents[2]
 
 
-def load(root: Path):
-    """Every record across every run log under `root`."""
+def load(root: Path, session: str | None = None):
+    """Every record across every run log under `root`.
+
+    `session` narrows to one run directory, matched by prefix so a short
+    id fragment is enough. Narrowing exists for answering "is capture live
+    in THAT session, and what has it seen" during someone else's run --
+    the question a support role actually gets asked.
+    """
     records = []
     for log in sorted((root / ".provenance" / "runs").rglob("capture.jsonl")):
-        session = log.parent.name
+        if session and not log.parent.name.startswith(session):
+            continue
+        session_name = log.parent.name
         for line in log.read_text().splitlines():
             if not line.strip():
                 continue
@@ -41,7 +49,7 @@ def load(root: Path):
                 record = json.loads(line)
             except json.JSONDecodeError:
                 continue  # a partial final line from a killed process
-            record["_session"] = session
+            record["_session"] = session_name
             records.append(record)
     return records
 
@@ -112,10 +120,23 @@ def main(argv=None) -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--root", type=Path, default=REPO_ROOT,
                         help="repository root holding .provenance/runs/")
+    parser.add_argument("--session", default=None,
+                        help="narrow to one session id (prefix match)")
     args = parser.parse_args(argv)
-    records = load(args.root)
+    records = load(args.root, args.session)
     if not records:
-        print(f"no capture records under {args.root}/.provenance/runs/")
+        where = f"{args.root}/.provenance/runs/"
+        if args.session:
+            # Absence is the whole question when narrowing to one session,
+            # so say which reading applies rather than printing "no records"
+            # and letting the caller guess between them.
+            print(f"no records for session {args.session!r} under {where}\n"
+                  f"  -> either that session has captured nothing yet, or "
+                  f"the hooks are not loaded in it.\n"
+                  f"  -> a session with hooks loaded writes a session_open "
+                  f"marker immediately; no marker means not loaded.")
+        else:
+            print(f"no capture records under {where}")
         return 0
     report(records)
     return 0
