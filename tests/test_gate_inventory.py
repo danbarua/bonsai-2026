@@ -260,6 +260,48 @@ def test_a_name_only_mentioned_in_a_comment_does_not_satisfy_a_citation(tmp_path
     assert "unresolved_enforcement" in kinds(reconcile(clauses, inventory, tmp_path))
 
 
+@pytest.mark.parametrize("source,why", [
+    ("ALPHA_BAR = 0.5\n", "plain assignment"),
+    ("ALPHA_BAR: float = 0.5\n", "ANNOTATED assignment -- the form a frozen "
+                                 "constant most often takes in typed code, "
+                                 "and the one originally missed"),
+    ("ALPHA_BAR, BETA = 0.5, 1.0\n", "bound through a tuple"),
+    ("def ALPHA_BAR():\n    pass\n", "a function"),
+    ("class ALPHA_BAR:\n    pass\n", "a class"),
+])
+def test_every_binding_form_resolves_a_citation(tmp_path, source, why):
+    """A citation to a real definition must not report as unresolved.
+
+    The failure direction matters: a false `unresolved_enforcement` sends a
+    reader hunting a problem that does not exist, and erodes trust in every
+    true finding beside it. This repository uses annotated module constants,
+    including inside the reconciler itself, so the omission was live.
+    """
+    doc = write_doc(tmp_path, "# P\n\nALPHA_BAR is frozen at 0.5.\n")
+    (tmp_path / "g.py").write_text(source)
+    clauses = derive_clauses([doc], tmp_path)
+    inventory = {"reviewed": True, "binding_value": {clauses[0].clause_id:
+        value_row(enforcement="g.py::ALPHA_BAR")}}
+    found = kinds(reconcile(clauses, inventory, tmp_path))
+    assert "unresolved_enforcement" not in found, f"failed to resolve {why}"
+
+
+def test_a_merely_imported_name_does_not_satisfy_a_citation(tmp_path):
+    """Deliberate omission, stated as a choice rather than an oversight.
+
+    An enforcement citation should point at where the gate is defined. A
+    re-export would let one gate be cited from any module that happens to
+    import it, which is a citation that resolves without locating anything.
+    """
+    doc = write_doc(tmp_path, "# P\n\nALPHA_BAR is frozen at 0.5.\n")
+    (tmp_path / "g.py").write_text("from elsewhere import ALPHA_BAR\n")
+    clauses = derive_clauses([doc], tmp_path)
+    inventory = {"reviewed": True, "binding_value": {clauses[0].clause_id:
+        value_row(enforcement="g.py::ALPHA_BAR")}}
+    assert "unresolved_enforcement" in kinds(
+        reconcile(clauses, inventory, tmp_path))
+
+
 def test_a_mapping_without_break_evidence_is_a_finding(tmp_path):
     """"Gate cited, test cited" certifies spelling.
 

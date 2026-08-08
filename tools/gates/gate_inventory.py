@@ -170,23 +170,53 @@ def load_inventory(path: Path) -> dict:
 
 
 def _defines(path: Path, name: str) -> bool:
-    """Does `path` define `name` as a function, method or module constant?
+    """Does `path` define `name` as a function, class or module constant?
 
     Resolved from the AST rather than by substring, so a name appearing in
     a comment or a string cannot satisfy a citation.
+
+    **All four binding forms, and the omissions were a real defect.** The
+    first version handled `Assign` only, so `ALPHA_BAR: float = 0.5` and
+    `A, B = 1, 2` both failed to resolve -- and this repository uses
+    annotated module constants, including in this very file. A citation to
+    one would have reported `unresolved_enforcement`: a FALSE finding,
+    sending a reader to hunt a problem that does not exist, and eroding
+    trust in every true finding beside it.
+
+    Found by applying a peer's rule to this function rather than agreeing
+    with it: *checking the artifact is necessary and not sufficient -- know
+    what its fields mean before you reason from them.* This walk assumed it
+    knew what "defines a name" means in Python. It knew one of four ways.
+
+    Deliberately NOT counted as defining: a name merely IMPORTED here. An
+    enforcement citation should point at where the thing is defined, not at
+    a module that re-exports it, and a re-export would let one gate be
+    cited from anywhere that happens to import it.
     """
     try:
         tree = ast.parse(path.read_text(), filename=str(path))
     except (OSError, SyntaxError):
         return False
+
+    def binds(target: ast.expr) -> bool:
+        if isinstance(target, ast.Name):
+            return target.id == name
+        # `A, B = 1, 2` and `[A, B] = ...` bind through a sequence.
+        if isinstance(target, (ast.Tuple, ast.List)):
+            return any(binds(element) for element in target.elts)
+        return False
+
     for node in ast.walk(tree):
         if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef, ast.ClassDef)):
             if node.name == name:
                 return True
         if isinstance(node, ast.Assign):
-            for target in node.targets:
-                if isinstance(target, ast.Name) and target.id == name:
-                    return True
+            if any(binds(target) for target in node.targets):
+                return True
+        # `ALPHA_BAR: float = 0.5` -- the form a frozen constant most often
+        # takes in typed code, and the one originally missed.
+        if isinstance(node, ast.AnnAssign) and binds(node.target):
+            return True
     return False
 
 
