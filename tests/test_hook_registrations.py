@@ -31,6 +31,7 @@ HOOKS_DIR = REPO_ROOT / ".claude" / "hooks"
 # survive any future edit to the shared file.
 REQUIRED = [
     ("UserPromptSubmit", "c2c-mail/user-prompt-submit.sh"),
+    ("PostToolUse", "c2c-mail/post-tool-use.sh"),
     ("Stop", "c2c-mail/stop.sh"),
     ("SessionStart", "c2c-mail/session-start.sh"),
     ("PreToolUse", "c2c-mail/pre-c2c-mcp.sh"),
@@ -50,6 +51,10 @@ NOT_REGISTERED = {
         "the c2c hooks' own break-test runner, invoked by a human",
     "c2c-mail/test/pre-c2c-mcp.sh":
         "test fixture for the pre-c2c-mcp hook, not a registration",
+    "c2c-mail/test/bench-post-tool-use.sh":
+        "benchmark for the PostToolUse mail hook, invoked by a human; "
+        "committed so its numbers are reproducible rather than quoted "
+        "from a heredoc",
 }
 
 

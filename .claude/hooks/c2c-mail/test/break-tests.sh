@@ -295,6 +295,78 @@ check "Stop does NOT block on a code2code message addressed to someone else" "$A
 rm -rf "$TMP_ROOT/.claude/code2code"
 rm -f "$C2C_MAIL_SESSIONS_DIR/424242.json"
 
+# ============================================================
+echo "== (h) PostToolUse: announces mid-turn, and announces each message AT MOST ONCE =="
+# The debounce is the whole reason this hook can exist. PostToolUse fires on
+# every tool call, so a hook that re-announced the same waiting message would
+# bury the turn in duplicates and train the reader to skip it. Proven here
+# rather than asserted, because "it only notified once" is exactly the kind of
+# property that silently stops holding.
+reset_mailboxes
+export C2C_MAIL_ANNOUNCED_DIR="$TMP_ROOT/.announced"
+rm -rf "$C2C_MAIL_ANNOUNCED_DIR"
+ptu_stdin() { # $1 = session_id
+  echo '{"session_id":"'"$1"'","transcript_path":"/tmp/t.jsonl","cwd":"'"$TMP_ROOT"'","hook_event_name":"PostToolUse","tool_name":"Bash","tool_input":{"command":"ls"},"tool_response":{}}'
+}
+
+printf '<!-- from: claude-desktop -->\n\nbody must never leak\n' > "$INBOX_C2C/2026-01-08T00-00-00Z.md"
+
+PTU1="$(ptu_stdin sess-a | "$HOOKS_DIR/post-tool-use.sh")"
+check "PostToolUse exits 0 (notify, never block)" "$?" "0"
+check "first call announces the waiting message" "$(echo "$PTU1" | grep -c '2026-01-08T00-00-00Z.md')" "1"
+check "announcement is valid hookSpecificOutput JSON for PostToolUse" \
+  "$(echo "$PTU1" | python3 -c 'import json,sys; d=json.load(sys.stdin); print(d["hookSpecificOutput"]["hookEventName"])' 2>/dev/null)" \
+  "PostToolUse"
+check "announcement names the file, never its contents" "$(echo "$PTU1" | grep -c 'body must never leak')" "0"
+
+PTU2="$(ptu_stdin sess-a | "$HOOKS_DIR/post-tool-use.sh")"
+check "second call on the SAME message is silent (debounce has teeth)" "$(echo -n "$PTU2" | wc -c | tr -d ' ')" "0"
+PTU3="$(ptu_stdin sess-a | "$HOOKS_DIR/post-tool-use.sh")"
+check "third call still silent" "$(echo -n "$PTU3" | wc -c | tr -d ' ')" "0"
+
+echo "== (h-continued) a NEW message still announces, and does not drag the old one back =="
+printf '<!-- from: claude-desktop -->\n\nsecond\n' > "$INBOX_C2C/2026-01-08T00-01-00Z.md"
+PTU4="$(ptu_stdin sess-a | "$HOOKS_DIR/post-tool-use.sh")"
+check "new message IS announced" "$(echo "$PTU4" | grep -c '2026-01-08T00-01-00Z.md')" "1"
+check "already-announced message is NOT repeated alongside it" "$(echo "$PTU4" | grep -c '2026-01-08T00-00-00Z.md')" "0"
+
+echo "== (h-continued) debounce is per session -- a different session is told independently =="
+PTU5="$(ptu_stdin sess-b | "$HOOKS_DIR/post-tool-use.sh")"
+check "a different session still sees both messages" "$(echo "$PTU5" | grep -c '2026-01-08T00-0[01]-00Z.md')" "1"
+
+echo "== (h-continued) fail-open: no session_id, and an unwritable state dir, both exit 0 silently =="
+NOSESS_EXIT="$(echo '{"hook_event_name":"PostToolUse"}' | "$HOOKS_DIR/post-tool-use.sh" >/dev/null 2>&1; echo $?)"
+check "missing session_id exits 0 (fails open, announces nothing)" "$NOSESS_EXIT" "0"
+UNWRITABLE="$TMP_ROOT/unwritable-state"
+: > "$UNWRITABLE"   # a FILE where the hook wants a directory
+BADSTATE_EXIT="$(C2C_MAIL_ANNOUNCED_DIR="$UNWRITABLE/nested" ptu_stdin sess-c | C2C_MAIL_ANNOUNCED_DIR="$UNWRITABLE/nested" "$HOOKS_DIR/post-tool-use.sh" >/dev/null 2>&1; echo $?)"
+check "unwritable state dir exits 0 (fail-open, never blocks a tool call)" "$BADSTATE_EXIT" "0"
+
+echo "== (h-continued) addressing filter applies here too -- someone else's mail is not announced =="
+reset_mailboxes
+rm -rf "$C2C_MAIL_ANNOUNCED_DIR"
+mkdir -p "$TMP_ROOT/.claude/code2code/mailbox"
+# Same registry shape section (f) uses: the lookup keys on the sessionId
+# FIELD, not the filename. Writing a file without it fails resolution, the
+# hook falls open per its documented rule, and every addressing assertion
+# below would pass-by-announcing-everything. Caught by this test failing.
+cat > "$C2C_MAIL_SESSIONS_DIR/424242.json" <<'EOF'
+{"pid":424242,"sessionId":"test","name":"me-session","status":"idle"}
+EOF
+printf '<!-- from: claude-code · instance: other-session · to: someone-else -->\n\nnot for you\n' \
+  > "$TMP_ROOT/.claude/code2code/mailbox/2026-01-08T00-02-00Z-other--from-other--to-someone-else.md"
+PTU6="$(ptu_stdin test | env -u C2C_MAIL_WATCH_DIRS CLAUDE_PROJECT_DIR="$TMP_ROOT" "$HOOKS_DIR/post-tool-use.sh")"
+check "message addressed to someone else is NOT announced" "$(echo -n "$PTU6" | wc -c | tr -d ' ')" "0"
+printf '<!-- from: claude-code · instance: other-session · to: me-session -->\n\nfor you\n' \
+  > "$TMP_ROOT/.claude/code2code/mailbox/2026-01-08T00-03-00Z-other--from-other--to-me-session.md"
+PTU7="$(ptu_stdin test | env -u C2C_MAIL_WATCH_DIRS CLAUDE_PROJECT_DIR="$TMP_ROOT" "$HOOKS_DIR/post-tool-use.sh")"
+check "message addressed to me IS announced (filter has teeth in both directions)" \
+  "$(echo "$PTU7" | grep -c '2026-01-08T00-03-00Z')" "1"
+
+rm -rf "$TMP_ROOT/.claude/code2code" "$C2C_MAIL_ANNOUNCED_DIR" "$UNWRITABLE"
+rm -f "$C2C_MAIL_SESSIONS_DIR/424242.json"
+unset C2C_MAIL_ANNOUNCED_DIR
+
 echo
 echo "== $PASS_COUNT passed, $FAILURES failed =="
 exit $((FAILURES > 0))
