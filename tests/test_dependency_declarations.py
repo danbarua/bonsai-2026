@@ -39,6 +39,11 @@ FIRST_PARTY_ROOTS = (
     REPO_ROOT / "experiments",
     REPO_ROOT / "src",
     REPO_ROOT / "tools",
+    # The tests import their own helpers by bare name because pytest puts the
+    # test directory on sys.path -- `tests/_makefile.py` is imported as
+    # `_makefile` by six files. Omitting this root reports a first-party
+    # helper as an undeclared third-party package.
+    TESTS_DIR,
 )
 
 
@@ -164,6 +169,76 @@ def test_every_importorskip_names_a_declared_or_first_party_module():
         f"from a capability this machine does not have -- declare it in "
         f"pyproject.toml so it lives and dies with its group, or make the "
         f"import hard so its absence is a failure")
+
+
+def hard_imports(root: Path | None = None) -> dict[str, list[str]]:
+    """{module: [test files that import it unconditionally]}, from the AST.
+
+    `importorskip` says "this may legitimately be absent". A plain `import`
+    says "this must be here". The second is the stronger claim and was the
+    unguarded one.
+    """
+    import ast
+
+    found: dict[str, list[str]] = {}
+    for path in sorted((root or TESTS_DIR).glob("test_*.py")):
+        tree = ast.parse(path.read_text())
+        for node in ast.walk(tree):
+            if isinstance(node, ast.Import):
+                names = [alias.name for alias in node.names]
+            elif isinstance(node, ast.ImportFrom):
+                # `level > 0` is a relative import: first-party by definition.
+                if node.level or not node.module:
+                    continue
+                names = [node.module]
+            else:
+                continue
+            for name in names:
+                found.setdefault(name.split(".")[0], []).append(path.name)
+    return found
+
+
+def test_every_hard_import_in_the_tests_is_declared():
+    """A dependency imported unconditionally must be declared.
+
+    `equinox` was hard-imported by `tests/test_stage2b_cnn.py` and declared in
+    no dependency group -- it arrived only as a transitive of `diffrax`.
+    `uv sync --frozen` installed it, so nothing failed, and no local run could
+    ever have shown the gap because the developer's environment already had
+    it. A re-lock or an upstream drop was the exposure.
+
+    This is the stronger half of the guard above: `importorskip` at least
+    ANNOUNCES that a module may be missing. A plain import asserts it is
+    present and says so nowhere.
+    """
+    import sys
+
+    declared = declared_distributions()
+    offenders = {}
+
+    for module, files in sorted(hard_imports().items()):
+        if module in sys.stdlib_module_names or is_first_party(module):
+            continue
+        if _normalise(module) in declared:
+            continue
+        if distributions_providing(module) & declared:
+            continue
+        offenders[module] = sorted(set(files))
+
+    assert not offenders, (
+        f"hard-imported but undeclared third-party module(s): {offenders}. "
+        f"These are satisfied today only by luck -- a transitive of something "
+        f"else, or a stale environment. Declare them in pyproject.toml so they "
+        f"live and die with their group")
+
+
+def test_the_hard_import_scan_actually_finds_imports():
+    """Anti-vacuity: an AST walk that stopped working would go green."""
+    found = hard_imports()
+    assert len(found) > 10, (
+        f"the hard-import scan found only {sorted(found)}; the test suite "
+        "imports far more than that, so the walk is broken")
+    assert "pytest" in found, "pytest is imported by these tests; the scan missed it"
 
 
 def test_an_import_name_is_resolved_to_its_distribution_name():
