@@ -398,6 +398,37 @@ def test_full_tier_rejects_a_baseline_module_that_was_not_collected(report, base
     assert loose == 1
 
 
+def test_a_baseline_entry_that_ran_points_at_the_environment(report, baseline,
+                                                             capsys):
+    """The message must not accuse the baseline of being stale when the
+    ENVIRONMENT changed under it.
+
+    The live case, caught by reading before CI's first run: a Makefile target
+    gained `uv run --group gpu` to fix a local skip; cloudbuild.yaml invokes
+    that target, so the group installs in CI too, `google_crc32c` becomes
+    importable, and a test the baseline correctly records as skipped now
+    runs. Nothing about the baseline was wrong.
+
+    The old message said only "remove them from the baseline", which is the
+    one action that destroys a correct capability record to silence a
+    complaint about something else. Two layers between symptom and cause is
+    exactly when a guard has to name the cause.
+    """
+    path = report([("tests.test_a", "test_one", None)])
+    base = baseline(["tests.test_a::test_one"])
+    outcomes, totals = vacuity.parse_junit(path)
+    assert vacuity.check(outcomes, totals, vacuity.read_baseline(base),
+                         base) == 1
+    out = capsys.readouterr().out
+    assert "BEFORE EDITING THE BASELINE" in out, (
+        "the failure tells a reader to edit the baseline without warning "
+        "that the environment is the likelier cause")
+    assert "--group" in out and "cloudbuild" in out, (
+        "the message does not name the mechanism -- a CI-invoked Makefile "
+        "target acquiring a dependency group -- so a reader has to rediscover "
+        "it from two layers away")
+
+
 def test_full_tier_flag_does_not_fire_when_every_module_was_collected(report, baseline):
     path = report([("tests.test_a", "test_one", "no datasets"),
                    ("tests.test_b", "test_two", None)])
