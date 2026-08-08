@@ -2787,3 +2787,84 @@ def test_the_recovery_hint_is_not_offered_for_run_scoped_objects(bucket, tmp_pat
     with pytest.raises(gcs.ManifestMissingError) as excinfo:
         gcs.consume_validated(report, str(tmp_path / "r2.npz"), bucket=bucket)
     assert "discard_uncommitted" not in str(excinfo.value)
+
+
+# ---- run reports: a verdict must not be readable alone once annotated ----
+
+def _report_with(bucket, tmp_path, verdict="STAGE3_OK", run="20260808T014606Z"):
+    name = gcs.object_path(stage=3, condition=None, kind=f"stage3_report_{run}",
+                           ext="json", split="train")
+    local = tmp_path / "r.json"
+    local.write_text(json.dumps({"verdict": verdict, "timings": {}}))
+    gcs.upload_file(str(local), name, bucket=bucket)
+    return name
+
+
+def test_an_unannotated_report_reads_normally(bucket, tmp_path):
+    name = _report_with(bucket, tmp_path)
+    report, annotations = gcs.read_run_report(name, bucket=bucket)
+    assert report["verdict"] == "STAGE3_OK"
+    assert annotations == []
+
+
+def test_an_annotated_verdict_cannot_be_read_alone(bucket, tmp_path):
+    """The Stage 3 incident: STAGE3_OK meant "no such gate was implemented",
+    not "the gate cleared". A reader taking the verdict at face value is
+    wrong in the one direction that matters."""
+    name = _report_with(bucket, tmp_path)
+    ann = name.rsplit(".", 1)[0] + "_annotation.json"
+    gcs.upload_file(str(_write(tmp_path / "a.json", '{"correction": "..."}')),
+                    ann, bucket=bucket)
+    with pytest.raises(gcs.ReportVerdictSuperseded) as excinfo:
+        gcs.read_run_report(name, bucket=bucket)
+    assert "STAGE3_OK" in str(excinfo.value)
+    assert ann in str(excinfo.value)
+
+
+def test_existence_is_the_signal_not_the_annotation_text(bucket, tmp_path):
+    """Branching on a parsed field would make the guard depend on the
+    wording of a hand-written document. An annotation that says nothing
+    machine-readable at all must still stop the read."""
+    name = _report_with(bucket, tmp_path)
+    ann = name.rsplit(".", 1)[0] + "_annotation.json"
+    gcs.upload_file(str(_write(tmp_path / "a.json", '{"note": "see FINDINGS"}')),
+                    ann, bucket=bucket)
+    with pytest.raises(gcs.ReportVerdictSuperseded):
+        gcs.read_run_report(name, bucket=bucket)
+
+
+def test_the_opt_out_returns_both_rather_than_raising(bucket, tmp_path):
+    """For a caller that genuinely renders both -- a viewer, or these
+    tests. Named, greppable, and it still hands back the annotations."""
+    name = _report_with(bucket, tmp_path)
+    ann = name.rsplit(".", 1)[0] + "_annotation.json"
+    gcs.upload_file(str(_write(tmp_path / "a.json", "{}")), ann, bucket=bucket)
+    report, annotations = gcs.read_run_report(name, bucket=bucket,
+                                              raise_on_annotation=False)
+    assert report["verdict"] == "STAGE3_OK"
+    assert annotations == [ann]
+
+
+def test_multiple_annotations_all_surface(bucket, tmp_path):
+    """Append-only: a later annotation does not replace an earlier one, so
+    a reader must see every correction rather than the most recent."""
+    name = _report_with(bucket, tmp_path)
+    stem = name.rsplit(".", 1)[0]
+    for i in (1, 2):
+        gcs.upload_file(str(_write(tmp_path / f"a{i}.json", "{}")),
+                        f"{stem}_annotation_{i}.json", bucket=bucket)
+    _report, annotations = gcs.read_run_report(name, bucket=bucket,
+                                               raise_on_annotation=False)
+    assert len(annotations) == 2
+
+
+def test_an_annotation_on_a_DIFFERENT_run_does_not_bleed_across(bucket, tmp_path):
+    """Prefix matching must not let one run's correction silence another's
+    report -- or, worse, make a clean run look annotated."""
+    good = _report_with(bucket, tmp_path, run="20260101T000000Z")
+    other = _report_with(bucket, tmp_path, run="20260808T014606Z")
+    gcs.upload_file(str(_write(tmp_path / "a.json", "{}")),
+                    other.rsplit(".", 1)[0] + "_annotation.json", bucket=bucket)
+    report, annotations = gcs.read_run_report(good, bucket=bucket)
+    assert annotations == []
+    assert report["verdict"] == "STAGE3_OK"

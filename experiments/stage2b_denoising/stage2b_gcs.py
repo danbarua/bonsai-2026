@@ -1911,6 +1911,78 @@ def discard_uncommitted(object_name, *, bucket, allow_test_split=False):
     return True
 
 
+ANNOTATION_SUFFIX = "_annotation"
+
+
+def annotation_names_for(report_object_name, *, bucket, allow_test_split=False):
+    """Every annotation object attached to a run report, sorted.
+
+    Annotations are append-only: a report may accumulate more than one, and
+    none of them replaces another. Naming is `<report>_annotation[...].json`
+    so a bucket listing shows them directly beneath the report."""
+    _check_object_path_allowed(report_object_name, allow_test_split)
+    stem = str(report_object_name).rsplit(".", 1)[0]
+    return sorted(b.name for b in bucket.list_blobs(prefix=stem + ANNOTATION_SUFFIX))
+
+
+class ReportVerdictSuperseded(ValueError):
+    """A run report's verdict has been annotated and must not be read alone."""
+
+
+def read_run_report(report_object_name, *, bucket, allow_test_split=False,
+                    raise_on_annotation=True):
+    """THE way to read a run report. Returns `(report, annotations)`.
+
+    ## Why a reader exists at all
+
+    A run report carries a `verdict` field, and a reader that takes it at
+    face value can be wrong in the one direction that matters. Stage 3's
+    amended-grid run reported `STAGE3_OK` while two conditions selected the
+    grid floor -- the condition DESIGN.md names as a HALT and the driver did
+    not implement. The verdict recorded that no such gate existed, not that
+    one was evaluated and cleared.
+
+    That report is annotated. But an annotation nobody reads corrects
+    nothing, and at the time of writing **no code read report verdicts at
+    all** -- so this guards the consumer written next month rather than one
+    that exists today. That is deliberate: a derived guard covers the
+    driver an agent writes with no memory of this incident, which is the
+    same argument that put the AST walk in `test_stage2b_gcs_makefile.py`.
+
+    ## Why EXISTENCE is the machine signal
+
+    The annotation's *presence* is what this branches on, not any field
+    inside it. Parsing prose for a superseded flag would make the guard
+    depend on the wording of a document written by hand under time
+    pressure, which is exactly the fragility being corrected. An annotation
+    exists only because someone found the verdict misleading enough to say
+    so; that fact alone is sufficient and cannot be defeated by phrasing.
+
+    `raise_on_annotation=False` returns them instead of raising, for a
+    caller that genuinely wants to render both -- a report viewer, or this
+    project's own tests. It is the named opt-out, and it greps."""
+    local = None
+    import tempfile
+    with tempfile.TemporaryDirectory() as tmp:
+        local = os.path.join(tmp, "report.json")
+        download_file(report_object_name, local, bucket=bucket,
+                      allow_test_split=allow_test_split, verify_content=False)
+        with open(local, "r", encoding="utf-8") as handle:
+            report = json.load(handle)
+
+    annotations = annotation_names_for(report_object_name, bucket=bucket,
+                                       allow_test_split=allow_test_split)
+    if annotations and raise_on_annotation:
+        raise ReportVerdictSuperseded(
+            f"{report_object_name!r} reports verdict "
+            f"{report.get('verdict')!r}, and carries {len(annotations)} "
+            f"annotation(s): {annotations}. The verdict MUST NOT be read on "
+            f"its own -- an annotation exists because someone found it "
+            f"misleading. Read the annotation(s), then call again with "
+            f"raise_on_annotation=False if you still want the raw report.")
+    return report, annotations
+
+
 def consume_validated(object_name, local_path, *, bucket, expected_fingerprint=None,
                       policy=None, allow_test_split=False, verify_content=True,
                       require_manifest=True):
