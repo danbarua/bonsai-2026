@@ -324,6 +324,48 @@ def test_gate_locked_constants():
     assert gate.ABS_CONV_EPS == 1e-12
 
 
+def test_the_module_default_abs_conv_eps_decides_a_real_verdict():
+    """ABS_CONV_EPS must be pinned by a VERDICT, not only by equality.
+
+    Found while filling this clause's inventory row. Moving the constant
+    from 1e-12 to 1e-9 -- three orders, out of the observed float64 dust
+    band (1e-14..1e-16) and up toward the smallest meaningful measured
+    final-Delta anywhere in this project (2.177e-07) -- failed exactly one
+    test: `test_gate_locked_constants`, which asserts the literal equals
+    itself. No gate outcome changed anywhere in the suite.
+
+    The tests above DO exercise the escape, but they pass `abs_conv_eps`
+    explicitly, so they pin the mechanism and say nothing about the
+    module-level value the production path actually uses. That gap is the
+    difference `gates.toml`'s `binding_value` schema names: causal
+    evidence on the PRODUCTION value's propagation, not on the constant.
+
+    So this asserts the frozen value's own consequence. Medians at 1e-11
+    sit ABOVE 1e-12 and BELOW 1e-9: at the locked value the escape must
+    not fire, and at a loosened one it would. The rho here is deliberately
+    far above threshold, so the escape is the only thing that could pass
+    it.
+    """
+    below_1e9_above_1e12 = [1e-11] * 11
+    clean = [1e-13] * 11        # genuinely at dust, well under either eps
+    result = gate.evaluate_rho_gate(clean, below_1e9_above_1e12)
+
+    assert result["rho"] > gate.RHO_THRESHOLD, (
+        "fixture must fail the ratio test, or the escape is not what is "
+        "being measured")
+    assert result["absolute_convergence"] is False, (
+        "at the locked 1e-12 a 1e-11 median is NOT numerical dust")
+    assert result["passed"] is False
+
+    # And the same data at a loosened eps: the escape fires and the
+    # verdict flips. This is the half that makes the assertion above a
+    # claim about the VALUE rather than about the fixture.
+    loosened = gate.evaluate_rho_gate(clean, below_1e9_above_1e12,
+                                      abs_conv_eps=1e-9)
+    assert loosened["absolute_convergence"] is True
+    assert loosened["passed"] is True
+
+
 def test_gate_rejects_mismatched_shapes():
     with pytest.raises(ValueError):
         gate.evaluate_rho_gate(np.zeros(10), np.zeros(11))
