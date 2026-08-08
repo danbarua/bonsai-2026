@@ -34,6 +34,7 @@ from assemble_briefing import (  # noqa: E402
     join_loops,
     read_commits,
     section,
+    session_names,
     tokens_of,
     tree_evidence,
     _CLOSED_RE,
@@ -170,6 +171,79 @@ def test_the_join_searches_changed_paths_not_just_messages() -> None:
     loop = Loop(text="about `publish_review.sh`", tokens=["publish_review.sh"])
     join_loops([loop], commits)
     assert [c.short for _, c in loop.matches] == ["hit"]
+
+
+# --------------------------------------------------------------------------
+# Session names are never join evidence.
+# --------------------------------------------------------------------------
+
+
+def _mesh(root: Path, names: list[str]) -> None:
+    d = root / ".claude" / "code2code" / "archive"
+    d.mkdir(parents=True)
+    for n in names:
+        (d / f"2026-08-08T10-00-00Z-{n}--from-{n}.md").write_text("x")
+    (d / "2026-08-08T10-00-01Z-a--from-a--to-b.md").write_text("x")
+
+
+def test_session_names_are_derived_from_filenames(tmp_path: Path) -> None:
+    """Derived from the corpus, never hand-listed. A list would miss the next
+    session to join the mesh, and miss it silently (principle 21)."""
+    _mesh(tmp_path, ["stage2b-lead", "infra", "test-briefings"])
+    assert session_names(tmp_path) == {
+        "stage2b-lead", "infra", "test-briefings", "a", "b",
+    }
+
+
+def test_a_session_name_is_never_a_candidate_even_as_a_unique_hit(
+    tmp_path: Path,
+) -> None:
+    """The defect a cold consumer found within an hour of shipping: in a
+    3-commit window `stage2b-lead` matched a commit that merely mentioned
+    them and was offered as a candidate on two unrelated loops.
+
+    Rarity alone cannot catch this and never could. On a long window a
+    session name is common and gets suppressed; on a SHORT window it hits
+    once, looks rare, and is promoted -- so the small-window fix that stopped
+    unique hits being discarded is exactly what exposed it.
+    """
+    _mesh(tmp_path, ["stage2b-lead"])
+    commits = [
+        _commit("aaa", "unrelated"),
+        _commit("bbb", "Give /briefing an entry point",
+                body="offered to stage2b-lead"),
+        _commit("ccc", "also unrelated"),
+    ]
+    loop = Loop(text="x `stage2b-lead` y", tokens=["stage2b-lead"])
+    join_loops([loop], commits, session_names(tmp_path))
+    assert loop.matches == []
+    assert loop.name_tokens == ["stage2b-lead"]
+
+
+def test_a_loop_named_only_by_sessions_is_NOT_CHECKED(tmp_path: Path) -> None:
+    """Nothing searchable was searched, so it must not sit under "searched,
+    nothing matched" -- the same distinction kept everywhere else here."""
+    _mesh(tmp_path, ["infra"])
+    loop = Loop(text="`infra` owes a thing", tokens=["infra"])
+    join_loops([loop], [_commit("aaa", "infra work")], session_names(tmp_path))
+    assert loop.checked is False
+
+
+def test_a_real_identifier_still_joins_alongside_an_excluded_name(
+    tmp_path: Path,
+) -> None:
+    """Excluding names must not suppress the rest of the loop's tokens."""
+    _mesh(tmp_path, ["stage2b-lead"])
+    commits = [_commit(f"c{i}", f"unrelated {i}") for i in range(3)]
+    commits.append(_commit("hit", "fix ci_targets.py"))
+    loop = Loop(
+        text="`stage2b-lead` on `ci_targets.py`",
+        tokens=["stage2b-lead", "ci_targets.py"],
+    )
+    join_loops([loop], commits, session_names(tmp_path))
+    assert [c.short for _, c in loop.matches] == ["hit"]
+    assert loop.name_tokens == ["stage2b-lead"]
+    assert loop.checked is True
 
 
 # --------------------------------------------------------------------------

@@ -56,6 +56,10 @@ Two bounds worth knowing:
   current.
 - A token matching many commits is discarded as non-discriminating. Rarity is
   the evidence.
+- **Session names are never evidence** and are excluded outright. Peers name
+  each other constantly; a commit and a loop sharing a name says nothing. The
+  roster is derived from the archive's filenames, so a new session is covered
+  the day it sends its first message.
 
 ## Read-only
 
