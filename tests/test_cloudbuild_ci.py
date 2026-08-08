@@ -493,10 +493,111 @@ def test_the_client_library_being_installed_is_caught():
     assert any("--group gpu" in p for p in found), found
 
 
+# Cloud client modules `stage2b_gcs` imports that `CLIENT_LIBRARIES` need
+# NOT name, each with the reason it is safe to omit. Both ship inside
+# `google-cloud-storage`, so they cannot be present while the module the
+# guard does check is absent -- checking them would add no detection.
+#
+# An exemption is a claim, so it is tested: `test_every_exemption_is_still
+# _imported` fails when one names something no longer imported, which is how
+# a stale exemption stops hiding a gap it no longer describes.
+_COVERED_BY_STORAGE = {
+    "google_crc32c": "vendored with google-cloud-storage; cannot be present "
+                     "independently of it",
+    "google.api_core": "a google-cloud-storage dependency, installed with it",
+}
+
+
+def _is_covered(module: str, watched) -> bool:
+    """Is `module` accounted for by a watched library or a named exemption?
+
+    Coverage runs BOTH ways along the package path, and that is not
+    leniency. `from google.cloud import storage` yields the parent
+    `google.cloud` as well as `google.cloud.storage`; a parent cannot be
+    importable while its child is absent, so watching the child covers it.
+    Likewise a submodule of a watched package ships with that package.
+    """
+    for lib in tuple(watched) + tuple(_COVERED_BY_STORAGE):
+        if module == lib or module.startswith(f"{lib}.") or lib.startswith(f"{module}."):
+            return True
+    return False
+
+
+def _cloud_imports(path) -> set[str]:
+    """Cloud client modules `stage2b_gcs` actually imports, from its AST.
+
+    Parsed, not grepped. The previous version of this check asserted
+    `"google.cloud" in source` -- satisfied by a COMMENT, which is category A
+    in docs/VACUOUS_TESTS.md and the exact shape incidents #17 and #20 were.
+    """
+    import ast
+    tree = ast.parse(path.read_text())
+    found = set()
+    for node in ast.walk(tree):
+        if isinstance(node, ast.Import):
+            for alias in node.names:
+                found.add(alias.name)
+        elif isinstance(node, ast.ImportFrom) and node.module:
+            for alias in node.names:
+                found.add(f"{node.module}.{alias.name}")
+            found.add(node.module)
+    return {m for m in found
+            if m.startswith("google.") or m.startswith("google_")}
+
+
+GCS_MODULE = REPO_ROOT / "experiments" / "stage2b_denoising" / "stage2b_gcs.py"
+
+
 def test_the_client_library_list_names_what_stage2b_actually_imports():
-    """`stage2b_gcs` imports `google.cloud.storage` lazily. If that module
-    path ever changes, this guard would pass while the library was present
-    and importable under its new name."""
-    source = (REPO_ROOT / "experiments" / "stage2b_denoising" / "stage2b_gcs.py").read_text()
-    assert "google.cloud" in source
-    assert any(lib.startswith("google.cloud") for lib in credentials.CLIENT_LIBRARIES)
+    """The guard must watch the module the code really imports.
+
+    Reported by the vacuous-test review on PR #23, correctly. The old version
+    made two INDEPENDENT assertions -- that `"google.cloud"` appeared
+    somewhere in the source, and that some entry of `CLIENT_LIBRARIES` began
+    with `google.cloud` -- and never compared them. The import could move to
+    `google.cloud.bigquery` while the list still said `storage` and both held.
+
+    Now derived, so the next cloud import is covered on the day it is
+    written rather than whenever someone remembers this list.
+    """
+    imported = _cloud_imports(GCS_MODULE)
+    assert imported, (
+        "no cloud imports found in stage2b_gcs.py at all. Either the file "
+        "moved or the AST walk stopped matching -- and an empty derived set "
+        "makes every check below pass over nothing")
+    uncovered = {m for m in imported
+                 if not _is_covered(m, credentials.CLIENT_LIBRARIES)}
+    assert not uncovered, (
+        f"stage2b_gcs.py imports {sorted(uncovered)}, which "
+        f"assert_no_cloud_credentials.CLIENT_LIBRARIES does not name and no "
+        f"exemption covers. A build could install that library and construct "
+        f"a live client while the credential guard reported a clean "
+        f"environment")
+
+
+def test_every_exemption_is_still_imported():
+    """The other direction. An exemption naming a module the code no longer
+    imports is an exemption hiding nothing -- and the next reader takes it as
+    evidence the case was considered."""
+    imported = _cloud_imports(GCS_MODULE)
+    stale = {m for m in _COVERED_BY_STORAGE if m not in imported}
+    assert not stale, (
+        f"exemptions name modules stage2b_gcs.py no longer imports: "
+        f"{sorted(stale)}. Remove them rather than leaving them to look "
+        f"like considered decisions")
+
+
+def test_the_import_scan_is_not_satisfied_by_a_comment():
+    """The break the old check would have failed. A file whose only mention
+    of the library is prose must yield nothing."""
+    import tempfile
+    import pathlib
+    with tempfile.TemporaryDirectory() as tmp:
+        decoy = pathlib.Path(tmp) / "decoy.py"
+        decoy.write_text(
+            "# we used to use google.cloud.storage here\n"
+            'DOC = "google.cloud.storage"\n'
+            "import os\n")
+        assert _cloud_imports(decoy) == set(), (
+            "a comment and a string literal were read as imports, which is "
+            "the substring failure this check replaced")

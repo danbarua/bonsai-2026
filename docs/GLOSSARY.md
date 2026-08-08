@@ -116,7 +116,7 @@ definitions rather than assumed from familiarity:
   (structured-transformation) strength metric, defined in
   `src/bonsai/stats/permutation.py` -- see
   `experiments/stage1b2_structured_transformation/FINDINGS.md` for its
-  exact definition. First appears in `stage1b_pilot/FINDINGS.md`; also the
+  exact definition. First appears in `experiments/stage1b_pilot/FINDINGS.md`; also the
   endpoint Stage 1D (below) uses to compare T against matched controls --
   T sits in a tight cluster with all four, no detectable advantage for
   learned wiring on this endpoint specifically (a different, narrower

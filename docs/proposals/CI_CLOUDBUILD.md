@@ -32,7 +32,24 @@ merging.
 Two GitHub Actions workflows already exist (`.github/workflows/claude.yml`,
 `claude-code-review.yml`). Both invoke Claude Code -- review on pull
 requests and `@claude` mentions. Neither runs pytest, and neither fires on
-a push to a branch. They do not overlap with this.
+a push to a branch, so they do not overlap with what this build does.
+
+They are, however, a **second CI surface holding live credentials**, and a
+reader inventorying "what does CI hold" should not stop at the previous
+sentence. Both carry `secrets.CLAUDE_CODE_OAUTH_TOKEN`, and
+`tools/ci/publish_review.sh` shells out to `gh pr diff` with the workflow's
+GitHub token. Detail is out of scope here; the existence is not.
+
+**Colab is out of scope for this document and is not documented anywhere
+else either**, which is worth saying rather than leaving as a silence.
+Three specific unknowns: how `mighty-colab` authenticates to Colab (no
+token, config path or login command appears anywhere in this repository --
+a new machine discovers this by failing); what a session costs (the Makefile
+says "bills while running" in a dozen help strings and never states a rate,
+budget or quota); and the remote install lines, which pin `equinox` in two
+places and leave `equinox`, `optax` and `google-cloud-storage` unpinned in
+three others. None of these blocks CI, which cannot reach Colab by
+construction. All three block a second person setting up a machine.
 
 ## What runs
 
@@ -100,6 +117,33 @@ or write would fail at the point it tried.
 `tools/ci/assert_no_cloud_credentials.py` runs before the suite and fails
 the build if either capability appears -- the day someone adds the library
 or mounts a key, rather than whenever it is next noticed.
+
+Precisely, it asserts two things and only two: that
+`google.cloud.storage` is not importable, and that
+`BONSAI_GCS_CREDENTIALS`, `GOOGLE_APPLICATION_CREDENTIALS` and
+`CLOUDSDK_AUTH_ACCESS_TOKEN` are all unset. The third is the one a reader
+would never guess and the one that matters most in a container: it is what a
+`gcloud auth`-primed base image would carry. The check is truthiness-based,
+so an empty-string value passes -- deliberately, since that is how a
+variable reads when it has been explicitly cleared.
+
+**What is ASSERTED versus what is merely OBSERVED**, because the difference
+decides how a failure reads. Nothing asserts that `claude` and
+`mighty-colab` are off `PATH`, that `datasets/` is absent, or that the
+gitignored caches are missing. Those are inferred from the skip set matching
+`ci_skip_baseline.txt`. So if a future base image ships either CLI, the
+build fails as *"a baseline entry that ran"* -- correct direction, wrong
+apparent cause, because that message reads as a stale baseline rather than
+as an environment that gained a capability. `check_suite_not_vacuous.py`
+now names that possibility in the failure text for exactly this reason.
+
+The same coupling runs the other way and is worth stating plainly: a target
+that acquires `--group gpu` installs `google-cloud-storage`, which trips the
+capability assertion above. That is why `make test` and `make stage2b-test`
+stay capability-free and `make test-capabilities` exists separately. **A
+target means the same thing locally and in CI**; a flag that widened one
+environment and not the other would silently end "green here means green
+there", which is the only reason to run the suite locally at all.
 
 **An allowlist, derived rather than hand-written.**
 `tools/ci/ci_targets.py` names three invocable targets -- `test`,
@@ -347,7 +391,28 @@ because `mighty-colab` is not installed. Both are in the baseline.
 
 ## What a human has to create in GCP
 
-None of this exists. Nothing below has been run.
+None of the CI resources exist. Nothing in the numbered list below has been
+run.
+
+0. **What already exists, and is not in any other document.** The GCP
+   project is **`bonsai-504422`**, hardcoded as `GCS_PROJECT` at
+   `experiments/stage2b_denoising/stage2b_gcs.py:168` and passed as the
+   default `project=` to every client this repository constructs. The
+   science bucket is **`bonsai-2026-stage2b-cache`** (public-read via an
+   anonymous `objectViewer` grant), defined at `stage2b_gcs.py:179` and
+   duplicated as a Makefile default, with the two asserted equal rather than
+   trusted. A second, historical bucket, `bonsai-2026-stage2a-cache`, is read
+   anonymously over HTTPS by Stage 2A scripts and needs no credential at all.
+
+   Cloud Build triggers must be created **in that same project**, or the
+   `decide` step's `gcloud builds list` reads a history that is not the one
+   the deadline rule is about.
+
+   Two things a human needs that this repository does NOT record anywhere:
+   the **location** of either bucket -- an irreversible create-time decision
+   -- and the **IAM role** the developer's service account holds on the
+   science bucket. Only the prohibition on granting CI a role is written
+   down. Both must be read off the live project.
 
 1. **Connect the repository.** Cloud Build → Repositories → connect
    `danbarua/bonsai-2026` via the GitHub App. The source must be a git
@@ -511,6 +576,37 @@ skips and pass every subsequent build vacuously. Regenerate from a CI run's
 report, or from a run in a checkout with the same capabilities removed.
 
 ## Known soft spots
+
+- **Numeric tolerances have never been evaluated on x86, and this is the
+  most likely first-build failure.** The FAST tier -- every push -- runs
+  `tests/test_stage2b_ridge.py`, whose JAX-SVD-against-sklearn equivalence
+  gate holds a max absolute difference to 1e-8, and `tests/test_stage2b_cnn.py`'s
+  float32 forward-pass assertions. Both are in `STAGE2B_TEST_FILES`. This
+  project has already measured ARM-vs-x86 divergence in the encoder, and
+  `stage2b_cnn.py` records a measured 1.058e-04 CPU-vs-GPU divergence that
+  motivated its matmul-precision setting. A tolerance failure here is
+  **invisible to the vacuity check**, which compares skip identities and
+  nothing else: it presents as a plain red test with no hint that the
+  platform is the cause. Read a first-build numeric failure as a
+  measurement, not as a flake, and not as a defect in the code under test.
+- **`equinox` is imported but not declared.**
+  `experiments/stage2b_denoising/stage2b_cnn.py` and
+  `tests/test_stage2b_cnn.py` both hard-import it; it reaches the
+  environment only as a transitive of `diffrax`/`lineax`/`optimistix`.
+  `uv sync --frozen` installs the whole locked tree, so CI is green today --
+  the exposure is a re-lock or an upstream dependency drop, which is exactly
+  the failure `pyproject.toml` declares `pyyaml` to avoid. Two things make
+  it worse than the `google-crc32c` incident that motivated the guard:
+  `equinox` has no pure-Python fallback and no baseline skip entry, so it
+  fails hard rather than going quiet; and `tests/test_dependency_declarations.py`
+  cannot see it, because that guard's AST walk covers `pytest.importorskip`
+  call sites only and a bare `import equinox as eqx` is not one. That test
+  is also absent from `STAGE2B_TEST_FILES`, so it does not run in the fast
+  tier at all.
+- **`--write-baseline` rewrites skip REASONS as well as keys.** Several
+  current entries embed an absolute developer worktree path, so a
+  CI-regenerated baseline produces a large diff in text the checker ignores
+  (it strips at the first `#`). Review the keys; the reasons are commentary.
 
 - **`BRANCH_NAME` on a Pub/Sub-invoked build is unverified.** If it is
   empty, the poll fails loudly every 15 minutes rather than dispatching to

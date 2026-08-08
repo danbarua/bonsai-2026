@@ -124,6 +124,35 @@ if [ -n "${PR_NUMBER:-}" ] && command -v gh >/dev/null 2>&1; then
   fi
 fi
 
+# TRUNCATION, which is the empty-list failure's harder sibling.
+#
+# `PR_QUERY` fetches `files(first: 100)` unpaginated, so on a PR with more
+# than 100 changed files the model's `<changed_files>` stops at exactly 100
+# and says nothing about it. Measured on PR #23: 142 files changed, 34 of
+# them under `tests/`, and all three reviews reported "17 test files" -- the
+# cut falling precisely between `tests/test_provenance_capture.py` and
+# `tests/test_provenance_capture_hook.py`. Twenty-seven test files were
+# dropped from the prompt, and each review then described its result as
+# covering the pull request.
+#
+# Harder than the empty case because the report looks entirely healthy: a
+# plausible denominator, real files examined, findings that are genuinely
+# findings. Nothing in it is false except the scope it implies.
+#
+# The whole-PR file count is the only signal, and it comes from GitHub
+# rather than from the review -- the same second-source rule as everywhere
+# else here.
+if [ -n "${PR_NUMBER:-}" ] && command -v gh >/dev/null 2>&1; then
+  n_all=$(gh pr diff "$PR_NUMBER" --name-only 2>/dev/null | grep -c . || true)
+  if [ "${n_all:-0}" -ge 100 ]; then
+    fail "This pull request changes ${n_all} files. The review's file list is
+capped at 100 and unpaginated, so it was TRUNCATED -- silently, with no
+marker the model could see. Its stated scope covers the files it was shown,
+not the pull request. Split the PR, or review the remainder another way. Do
+not read this result as covering everything that changed."
+  fi
+fi
+
 # The contradiction. Two sources, one says nothing changed, the other names
 # files. Whichever is wrong, the review did not cover this PR.
 if [ "$no_tests" = "true" ] && [ "${n_changed:-0}" -gt 0 ]; then
