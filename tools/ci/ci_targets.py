@@ -83,11 +83,44 @@ _MAKE_INVOCATION = re.compile(r"^\s*make\s+((?:-[^\s]+\s+)*)([A-Za-z0-9_.-]+)",
                               re.MULTILINE)
 
 
+# Targets a test-runner derivation finds but CI deliberately does not run.
+# Each needs a reason, and a check below asserts each still exists and is
+# still a test runner -- an entry for something that changed shape is an
+# exemption concealing the thing it was written to excuse.
+NOT_RUN_IN_CI: dict[str, str] = {
+    "stage2a-test": "subsumed by `test`, which collects the same files; "
+                    "running both would double the build for no coverage",
+    "stage2b-test": "subsumed by `test` in the full tier, and invoked "
+                    "directly as the fast tier",
+}
+
+
 def spending_targets(recipes: dict[str, str] | None = None) -> set[str]:
     """Targets whose own recipe text reaches billable infrastructure."""
     recipes = _makefile.recipes() if recipes is None else recipes
     return {name for name, body in recipes.items()
             if any(marker in body for marker in SPEND_MARKERS)}
+
+
+def test_runner_targets(recipes: dict[str, str] | None = None) -> set[str]:
+    """Targets whose recipe runs pytest and nothing else.
+
+    **Derived, and that is the point.** An allowlist answers "may CI run
+    this?" and fails safe: forget to add a target and nothing spends. But it
+    fails UNSAFE in the other direction -- forget to add a new `stage3-test`
+    and CI silently never runs that suite, which is under-coverage wearing a
+    green badge, and the same shape as `STAGE2B_TEST_FILES`.
+
+    So the safe set is derived from the same recipe text the spending set
+    is, and `check` requires every derived test runner to be either invoked
+    by the build config or dispositioned in `NOT_RUN_IN_CI` with a reason.
+    A new suite is therefore covered on the day it is written, or visibly
+    unclassified -- never silently absent.
+    """
+    recipes = _makefile.recipes() if recipes is None else recipes
+    return {name for name, body in recipes.items()
+            if _ALLOWED_RECIPE_REQUIRES in body
+            and not any(token in body for token in _ALLOWED_RECIPE_FORBIDS)}
 
 
 def make_invocations(text: str) -> set[str]:
@@ -140,6 +173,33 @@ def check(config_path: Path, allowlist: frozenset[str] = CI_INVOCABLE_TARGETS,
                 f"{config_path.name} mentions spending target(s) {named}. This check "
                 f"reads raw text and cannot tell a comment from a command, so name "
                 f"them in docs/proposals/CI_CLOUDBUILD.md instead.")
+
+        # The under-coverage direction. A derived test runner that CI neither
+        # invokes nor explicitly declines is a suite nobody runs -- silent,
+        # and indistinguishable from a suite that passes.
+        unrun = sorted(test_runner_targets(recipes) - invoked - set(NOT_RUN_IN_CI))
+        if unrun:
+            problems.append(
+                f"target(s) {unrun} run pytest but are neither invoked by "
+                f"{config_path.name} nor listed in NOT_RUN_IN_CI with a reason. A "
+                f"new test suite that CI never runs is under-coverage with a green "
+                f"badge -- disposition it either way, but do not leave it silent.")
+
+    # Dispositions must still describe something real, in both respects: the
+    # target exists, and it is still a test runner. An entry for a target
+    # that became a driver would excuse exactly the thing worth catching.
+    runners = test_runner_targets(recipes)
+    for name, reason in NOT_RUN_IN_CI.items():
+        if not reason:
+            problems.append(f"NOT_RUN_IN_CI entry `{name}` carries no reason.")
+        if name not in recipes:
+            problems.append(
+                f"NOT_RUN_IN_CI names `{name}`, which is not a Makefile target.")
+        elif name not in runners:
+            problems.append(
+                f"NOT_RUN_IN_CI declines `{name}` as a test runner, but its recipe "
+                f"no longer looks like one -- the exemption now conceals whatever "
+                f"it became.")
 
     return problems
 

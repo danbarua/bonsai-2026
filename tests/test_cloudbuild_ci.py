@@ -129,6 +129,61 @@ def test_a_new_billing_target_on_the_allowlist_is_caught(tmp_path):
     assert any("billable infrastructure" in p for p in problems), problems
 
 
+def test_a_new_test_suite_that_ci_never_runs_is_caught(tmp_path, monkeypatch):
+    """The under-coverage direction, and the one an allowlist cannot see.
+
+    An allowlist answers "may CI run this?" and fails safe -- forget a
+    target and nothing spends. It fails UNSAFE the other way: add
+    `stage3-test` tomorrow, forget the allowlist, and CI silently never runs
+    that suite. Under-coverage wearing a green badge, which is the shape of
+    `STAGE2B_TEST_FILES`. So the safe set is derived from recipe text and a
+    derived runner must be invoked or dispositioned.
+    """
+    recipes = dict(SYNTHETIC_RECIPES)
+    recipes["stage3-test"] = "\tcd $(REPO_ROOT) && uv run pytest tests/x.py -v\n"
+    config = tmp_path / "cloudbuild.yaml"
+    config.write_text("steps:\n  - args:\n      - |\n        make test\n")
+    monkeypatch.setattr(ci_targets, "NOT_RUN_IN_CI", {})
+    problems = ci_targets.check(
+        config, allowlist=frozenset({"test"}), recipes=recipes)
+    assert any("stage3-test" in p and "neither invoked" in p
+               for p in problems), problems
+
+
+def test_a_new_test_suite_that_is_explicitly_declined_is_not_caught(
+        tmp_path, monkeypatch):
+    """Non-vacuity for the case above: it would pass on a check that
+    complained about every derived runner unconditionally."""
+    recipes = dict(SYNTHETIC_RECIPES)
+    recipes["stage3-test"] = "\tcd $(REPO_ROOT) && uv run pytest tests/x.py -v\n"
+    config = tmp_path / "cloudbuild.yaml"
+    config.write_text("steps:\n  - args:\n      - |\n        make test\n")
+    monkeypatch.setattr(ci_targets, "NOT_RUN_IN_CI",
+                        {"stage3-test": "covered by `test`"})
+    problems = ci_targets.check(
+        config, allowlist=frozenset({"test"}), recipes=recipes)
+    assert not any("stage3-test" in p for p in problems), problems
+
+
+def test_declining_a_target_that_stopped_being_a_test_runner_is_caught(
+        tmp_path, monkeypatch):
+    """An exemption concealing whatever the target became.
+
+    The same rule the registration guard applies to its own exemptions: an
+    entry for something that changed shape excuses exactly the thing worth
+    catching.
+    """
+    recipes = dict(SYNTHETIC_RECIPES)
+    recipes["stage3-test"] = "\t$(MIGHTY_COLAB) exec -f driver.py\n"
+    config = tmp_path / "cloudbuild.yaml"
+    config.write_text("steps:\n  - args:\n      - |\n        make test\n")
+    monkeypatch.setattr(ci_targets, "NOT_RUN_IN_CI",
+                        {"stage3-test": "covered by `test`"})
+    problems = ci_targets.check(
+        config, allowlist=frozenset({"test"}), recipes=recipes)
+    assert any("no longer looks like one" in p for p in problems), problems
+
+
 def test_a_build_config_invoking_an_unlisted_target_is_caught(tmp_path):
     config = tmp_path / "cloudbuild.yaml"
     config.write_text("steps:\n  - args:\n      - |\n        make touch-bucket\n")
