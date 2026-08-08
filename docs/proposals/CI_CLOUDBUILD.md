@@ -1,9 +1,27 @@
 # CI on Google Cloud Build
 
-A proposal. `cloudbuild.yaml` and the guards under `tools/ci/` exist in the
-tree; no trigger, service account, or GCP resource has been created, and
-nothing here has run on Cloud Build. The trigger configuration a human must
-create is in "What a human has to create", below.
+**Status: ADOPTED, and superseded in part. Kept for its reasoning, not as a
+description of what runs.**
+
+The design here was built. `infra/` creates the GCP resources with Terraform,
+and CI gates pull requests into `stage2b-ci` today. For what actually exists
+and how it is configured, read `infra/triggers.tf`, `infra/README.md` and
+`.claude/skills/github/SKILL.md` — those are current; this document is not.
+
+Two things here were **overtaken by measurement** and are wrong if read as
+instructions:
+
+- The 15-minute **poll** is gone. It inferred "work has reached a coherent
+  point" from elapsed time; merging into `stage2b-ci` declares it instead.
+  Cloud Scheduler, Pub/Sub and the dispatch half of the `decide` step went
+  with it.
+- The claim that CI here **is not a merge gate** predates `stage2b-ci`, a
+  branch whose whole purpose is to be one. The checkpoint trigger fires on
+  `pull_request` precisely so a required status check can report on the PR.
+
+What remains worth reading is the section below on what a green build does
+and does not mean — that argument is unchanged and is the reason the gate
+inventory exists alongside the test runner.
 
 ## The limit, first, because a green build will otherwise be read as more
 
