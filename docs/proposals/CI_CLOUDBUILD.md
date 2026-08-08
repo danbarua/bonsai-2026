@@ -86,6 +86,17 @@ by pull request, so the vacuous-test review sees the diff),
 only thing that catches an undeclared dependency, which this repository
 currently has — and `bonsai-ci-manual`.
 
+**Three branches, and releases come from the checkpoint.** `stage2b` takes
+the traffic; a PR into `stage2b-ci` is the checkpoint, where the review and
+the full suite both run; `main` is released from `stage2b-ci`, never
+directly from `stage2b`. A PR straight from `stage2b` to `main` has had
+neither, which is what PR #23 was before this branch existed.
+
+The review's `pull_request` trigger is scoped to `branches: [stage2b-ci]`
+for the same reason the CI triggers are not per-push: reviewing every PR
+re-reads work nobody has declared coherent, and repeats itself across the
+pushes in between.
+
 ## What runs
 
 `cloudbuild.yaml` has four steps: `decide`, `spend-guard`, `verify`,

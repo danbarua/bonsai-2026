@@ -256,6 +256,30 @@ def test_the_review_can_read_files_and_publish(text):
             f"review nobody can read is indistinguishable from none")
 
 
+def test_the_review_only_fires_on_prs_into_the_checkpoint_branch(text):
+    """Scope, pinned, because widening it is silent and expensive.
+
+    `branches` on a `pull_request` trigger filters the BASE. Without it the
+    review fires on every pull request in the repository — including
+    stage2b into main, where the work has already passed the checkpoint and
+    reviewing it again is the repetition this design exists to remove.
+
+    Deleting the filter produces no error and no red build. It produces more
+    reviews, each costing minutes and dollars, and the only signal is a
+    billing line.
+    """
+    doc = yaml.safe_load(text)
+    trigger = (doc.get(True) or doc.get("on") or {}).get("pull_request") or {}
+    assert trigger.get("branches") == ["stage2b-ci"], (
+        f"the review's base-branch filter is {trigger.get('branches')!r}, "
+        f"not ['stage2b-ci']. Without it every PR in the repository gets a "
+        f"review, silently")
+    assert trigger.get("paths") == ["tests/**"], (
+        f"the path filter is {trigger.get('paths')!r}; a vacuous-test review "
+        f"of a PR that changed no tests has nothing to say and still costs "
+        f"tokens")
+
+
 def test_track_progress_is_on(text):
     """The single line the whole design rests on.
 
