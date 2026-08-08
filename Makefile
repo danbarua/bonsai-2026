@@ -325,7 +325,7 @@ STAGE2B_TEST_FILES := tests/test_stage2b_corruption.py tests/test_stage2b_encode
 
 .PHONY: stage2b-test
 stage2b-test:  ## Run the Stage 2B test suite (fast only; the Colab round trip is excluded)
-	cd $(REPO_ROOT) && uv run --group gpu pytest $(STAGE2B_TEST_FILES) -m "not slow" -rs -q
+	cd $(REPO_ROOT) && uv run pytest $(STAGE2B_TEST_FILES) -m "not slow" -rs -q
 
 # The round trip is the only Stage 2B test that leaves this machine: it
 # provisions a real Colab CPU runtime, writes an object to GCS from it,
@@ -371,9 +371,41 @@ stage2b-test-roundtrip:  ## Real Colab+GCS round trip -- provisions a CPU runtim
 	cd $(REPO_ROOT) && $(GCS_ENV) \
 		uv run --group gpu pytest tests/test_stage2b_gcs_roundtrip.py -m slow -s
 
+# A TARGET MEANS THE SAME THING EVERYWHERE. `test` and `stage2b-test` run
+# capability-free, locally and in CI alike, so "green here" and "green in
+# CI" are the same claim. That is the whole value of running them locally,
+# and a flag that widened one environment and not the other would quietly
+# remove it.
+#
+# It is also what keeps `tools/ci/ci_skip_baseline.txt` meaningful: the
+# baseline is a set of skips measured against ONE capability profile, and a
+# second profile needs a second baseline nobody can state the environment
+# for.
+#
+# The optional capabilities get their own target below, where the
+# requirement is DECLARED by the name a person chose rather than acquired as
+# a side effect of a flag on a target CI also invokes.
 .PHONY: test
 test:  ## Run the whole default suite (every stage, slow reproduction checks excluded)
 	cd $(REPO_ROOT) && uv run pytest tests/ -m "not slow" -rs -q
+
+# Everything `test` runs, plus the optional cloud capabilities installed.
+#
+# The one test this exists for is
+# `test_crc32c_agrees_with_google_crc32c_where_it_is_installed`, which pins
+# the pure-Python CRC32C fallback against the library GCS actually uses. It
+# `importorskip`s `google_crc32c`, so it is SILENT when the group is absent
+# -- and a skip is not a failure. Without a target that guarantees the
+# group, that cross-check runs nowhere and the guard is dead code.
+#
+# CI does NOT invoke this, deliberately: `tools/ci/assert_no_cloud_credentials.py`
+# fails the build when `google.cloud.storage` is importable, and installing
+# the group would trip it. Read that as the two facts agreeing rather than
+# conflicting -- CI is credential-free by design, and this target is for a
+# machine that already has the capability.
+.PHONY: test-capabilities
+test-capabilities:  ## Run the default suite with the optional cloud group installed
+	cd $(REPO_ROOT) && uv run --group gpu pytest tests/ -m "not slow" -rs -q
 
 ##@ Stage 2B verification against real infrastructure
 
