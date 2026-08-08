@@ -237,6 +237,10 @@ gcp-*-key.json
 .claude/code2code/mailbox/
 .claude/code2code/archive/
 
+# work-and-mail-loop skill: per-session iteration logs, one file per
+# /rename name. Ephemeral scratch, not durable project record.
+.claude/logs/work-and-mail-loop/
+
 # Node.js dependencies (c2c-mcp server)
 node_modules/
 .claude/claude2claude/c2c-mcp/dist-proxy/

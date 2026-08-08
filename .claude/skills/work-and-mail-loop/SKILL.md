@@ -56,3 +56,20 @@ Stop looping and end your turn with a clear summary addressed to Dan
 - You hit an error you cannot resolve in one iteration, a guard fires,
   or two successive iterations produce zero progress (no new mail, no
   work advanced) — an idle loop is noise, end it
+
+## Reporting
+
+One line per iteration, appended to `.claude/logs/work-and-mail-loop/<your-session-name>.log`
+(repo-root-relative, gitignored, create the file and its parent
+directory if they don't exist yet). Fixed shape, so a log is
+diffable/greppable across sessions without per-session format drift:
+
+```
+iter N | mail: <in> in / <out> out | work: <one-line summary of what advanced> | <anything surprising, or "nothing surprising">
+```
+
+This is a per-session file, not a shared one — each session's `/rename`
+name picks its own log, so concurrent loops never contend for the same
+file. There is deliberately no cross-session log aggregation here;
+if that's ever needed, build it by reading each session's file, not by
+writing to a shared one.
