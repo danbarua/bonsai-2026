@@ -1,7 +1,7 @@
 # Stage 2B binding-clause inventory.
 #
-# Reviewer requirement 4 (c2gpt archive 2026-08-08T08:24:30Z §5, scoped by
-# 2026-08-08T10:24:39Z §II-III). Reconciled by tools/gates/gate_inventory.py.
+# Reviewer requirement 4 (ruling of 2026-08-08, §5; scope settled by the
+# follow-up ruling §II-III). Reconciled by tools/gates/gate_inventory.py.
 #
 #     make stage2b-gate-inventory
 #
@@ -13,47 +13,6 @@
 # by any check in this file: "a clause cannot be moved from binding_gate to
 # another kind merely because enforcement is absent." Several rows below are
 # deliberately failing for exactly that reason.
-#
-# PROVENANCE OF THE AUTHORITY THIS FILE RESTS ON. The scope of the whole
-# inventory -- the 89-clause corpus, the three kinds, the discharge
-# semantics -- comes from the two rulings cited above, quoted from the
-# c2gpt archive, which is the primary record within this system. Transport
-# is MIXED: `c2gpt-send` takes `from` as a routing parameter, so a
-# connector write and a human paste are byte-identical in the archive, and
-# most replies came by paste.
-#
-# Split the consequence, because only one half is affected:
-#
-#   * AUTHORITY is unaffected, and the package should claim it confidently.
-#     Every relay had the authorizing human in the loop by construction --
-#     a pasted ruling is not a weaker ruling, it is the authorization
-#     pathway working.
-#   * FIDELITY to the Reviewer's original text is attested by the relaying
-#     human, not by the channel. This file does not claim byte-exactness
-#     with what the Reviewer typed.
-#
-# What was mechanically checked, as of 2026-08-08, over all 37 archive
-# files by tools/mailbox/check_transit_integrity.py (pinned by
-# tests/test_archive_fidelity.py, which prints the file count): no file
-# ends mid-clause, and no numbered section sequence skips. Zero findings.
-#
-# STATE THE STRENGTH EXACTLY. A clean run clears detectable TRANSIT LOSS.
-# It does not establish fidelity. Nothing inside a file can prove it
-# matches what was sent -- only a transport-attested channel could, and
-# this one is not one. "No findings" therefore means "none of the three
-# ways a truncated ruling betrays itself is present", and nothing more.
-#
-# The reason two of those three checks exist is worth recording:
-# citation resolution alone is blind
-# to the loss of a section NOTHING references -- which is the final section
-# of a ruling by construction, and where qualifications live. The live
-# example is in the file this inventory's scope depends on most:
-# 10-24-39Z's closing paragraph licenses NOT building an automated prose
-# checker for the 54 claims. Nothing references it. Clipped in transit, every
-# internal citation would still resolve, the file would end on §III looking
-# complete, and the work it forbids would have been built in the belief that
-# the ruling required it. A missing licence does not leave a gap you notice;
-# it creates work you invent.
 
 reviewed = false   # set true only when a human has read every row
 

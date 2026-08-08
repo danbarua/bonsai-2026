@@ -1,63 +1,50 @@
 """Each transit-integrity heuristic, shown to fire on what it watches.
 
-`tools/mailbox/check_transit_integrity.py` returns zero findings over both
+`check_transit_integrity.py`, beside this file, returns zero findings over both
 real archives, and a check that has only ever returned zero is
 indistinguishable from a check that cannot return anything else.
 
-**Why the tests are here and the tool is there.** Two implementations of
-this existed for about twenty minutes — one specifying the checks, one
-implementing them — which is the drift risk this project spends its time
-removing, one level up. The implementation that survived is the one with
-measured false-positive rates behind its defaults and three defects found
-by breaking it. What it did not have was tests. So: one tool, one test
-file, and the fixture in `test_a_clip_inside_inline_code_is_caught` is the
-real defect that killed the duplicate's terminator set.
+**Why this lives beside the mailboxes and not in `tests/`.** It used to be
+in `tests/`, and it had no business there. That directory verifies
+documented scientific claims — a FINDINGS number, a construction's
+byte-exact match against a historical artifact. This file tests a mailbox
+truncation heuristic for the agent-to-agent comms channel. Dan's ruling,
+when a skip from it failed a CI build:
 
-Tier 1 throughout: synthetic fixtures. The real-archive scan is separate
-and skips when the archive is absent, because both archives are local-only.
+    our internal agent-to-agent comms tool has NOTHING TO DO with
+    science. We don't care about that in CI.
+
+The first fix attempted was a CI skip-baseline entry, which would have
+gone green while asserting the c2gpt archive is a capability CI is
+expected to lack — i.e. that it belongs in CI's world. The second was to
+move only the archive-scanning case out and leave these behind. Both were
+scoped to the symptom. The whole file was in the wrong tree.
+
+So it sits with the mail it is about, under `.claude/claude2claude/`,
+and no make target or CI build collects it. The mechanism by which
+reviews reach this project is not part of the science.
+
+Tier 1 throughout: synthetic fixtures, no capability required. The
+real-archive scan is the make target, not a test — see the note at the
+foot of this file.
 """
 from __future__ import annotations
 
 import importlib.util
-import subprocess
 import sys
 from pathlib import Path
 
-import pytest
-
-REPO_ROOT = Path(__file__).resolve().parents[1]
-MODULE = REPO_ROOT / "tools" / "mailbox" / "check_transit_integrity.py"
+MODULE = Path(__file__).resolve().parent / "check_transit_integrity.py"
 
 
-def _mailbox_root() -> Path:
-    """Resolve the checkout that actually holds the mailboxes.
-
-    Agents work in worktrees under `.claude/worktrees/`, and a worktree's
-    own `.claude/claude2gpt/archive/` is created EMPTY -- the directories
-    are tracked, their contents are gitignored and local-only. So the
-    mailbox lives in the main checkout, which `--git-common-dir` finds
-    (its parent) and `parents[1]` does not.
-    """
-    try:
-        out = subprocess.run(
-            ["git", "rev-parse", "--git-common-dir"],
-            cwd=REPO_ROOT, capture_output=True, text=True, check=True,
-        ).stdout.strip()
-    except (OSError, subprocess.CalledProcessError):
-        return REPO_ROOT
-    common = Path(out)
-    if not common.is_absolute():
-        common = (REPO_ROOT / common).resolve()
-    return common.parent
-
-
-C2GPT_ARCHIVE = _mailbox_root() / ".claude" / "claude2gpt" / "archive"
-
-# Guard on CONTENT, not on the directory. `is_dir()` is true for the empty
-# archive a worktree checkout creates, so the skip did not fire there and
-# the test failed with "0 files scanned" instead of skipping -- the
-# directory's presence reading as the data's presence.
-_HAVE_C2GPT = C2GPT_ARCHIVE.is_dir() and any(C2GPT_ARCHIVE.glob("*.md"))
+# The archive-path resolution that used to live here moved with the scan
+# it served, to `make c2c-archive-check`. It is worth stating what it had
+# to handle, since the make target inherits the same problem: agents work
+# in worktrees, and a worktree's own `.claude/claude2gpt/archive/` is
+# created EMPTY -- the directories are tracked, their contents gitignored
+# and local-only. So the mailbox lives in the main checkout, which
+# `git rev-parse --git-common-dir` finds (its parent) and a relative path
+# from the worktree does not.
 
 spec = importlib.util.spec_from_file_location("_transit_integrity", MODULE)
 transit = importlib.util.module_from_spec(spec)
@@ -208,28 +195,16 @@ def test_citation_resolution_is_not_a_default(tmp_path):
     assert any("citation" in f for f in on), on
 
 
-@pytest.mark.skipif(not _HAVE_C2GPT,
-                    reason="the c2gpt archive is local-only, not committed")
-def test_the_reviewer_archive_has_no_transit_tells():
-    """The number quoted in `experiments/stage2b_denoising/gates.toml`.
-
-    That file's provenance note states the scan covered every archive file
-    with zero findings. Principle 24: the number anchors a durable record,
-    so it is reproducible from committed code rather than from the heredoc
-    that first produced it.
-
-    REPORTS its evidence rather than only asserting — for a check whose
-    normal output is "0", how many files were examined is most of what a
-    reader needs. And the assertion it does NOT make is the point: a clean
-    run means no DETECTABLE transit loss. Nothing in a file can prove it
-    matches what was sent; only a transport-attested channel could, and
-    this one is not.
-    """
-    count, findings = transit.scan([C2GPT_ARCHIVE], DEFAULTS)
-    print(f"\nc2gpt archive files scanned: {count}")
-    for finding in findings:
-        print(f"  {finding}")
-    assert count >= 30, (
-        f"only {count} files scanned; the archive should hold the full "
-        f"c2gpt history")
-    assert findings == []
+# ---- the real-archive scan is the make target, not a test ------------
+#
+# `make c2c-mailbox-check` runs these tests and then scans the real
+# archives. It is not a pytest case, because a pytest case would be
+# collected by `make test` and would skip wherever the archives are
+# absent -- which is every CI machine, since the mailboxes are gitignored
+# and local-only.
+#
+# Nothing is lost by it not being a test. The anti-vacuity guard that its
+# `count >= 30` assertion provided lives in the tool, which exits 2 on an
+# empty scan rather than reporting a clean result, and exits 1 on
+# findings. Principle 24 is satisfied by the generator being committed
+# code either way.

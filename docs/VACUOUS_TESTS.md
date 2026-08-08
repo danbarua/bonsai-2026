@@ -335,7 +335,7 @@ the blind spot: **verify the END of a load-bearing document explicitly,
 because the check that finds missing middles cannot find a missing end.**
 Two heuristics do it — terminal completeness (the file ends on a sentence
 terminator) and ordinal continuity (numbered sections do not skip) — and
-they are the defaults in `tools/mailbox/check_transit_integrity.py` while
+they are the defaults in `.claude/claude2claude/mailbox-tools/check_transit_integrity.py` while
 citation resolution is opt-in, on measurement: over 37 archive files it
 produced 28 findings, all legitimate cross-document references.
 

@@ -353,5 +353,5 @@ The channel's other exposure is *fidelity*: most c2gpt rulings arrived by
 hand-paste because the connector was unavailable, and a paste can clip a
 clause while the result still reads complete. Knowing who wrote something
 tells you nothing about whether it arrived whole — which is why the
-mitigation is `tools/mailbox/check_transit_integrity.py` rather than a
+mitigation is `.claude/claude2claude/mailbox-tools/check_transit_integrity.py` rather than a
 provenance field.
