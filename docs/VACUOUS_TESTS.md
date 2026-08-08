@@ -50,6 +50,8 @@ claim the rest of this repository's discipline exists to prevent.
 | 26 | 08-08 | `8fd8aa7` | Not a vacuous test — a guard working, recorded because who it caught is the point. The draft of category J stated a literal count of this catalogue's own incidents, and `test_catalogue_counts.py` rejected it: the guard against the catalogue quantifying itself in prose, firing on its own author, inside the commit adding a category about checks that answer the wrong question. It then fired a *second* time on the row you are reading, which first quoted the offending phrase verbatim | the guard, on the person who wrote it, twice |
 | 27 | 08-08 | `b38e669` | `FIRST_PARTY_ROOTS` listed `experiments/`, `src/` and `tools/` but not `tests/`, so the new hard-import guard reported `tests/_makefile.py` — imported by six test files — as an undeclared third-party package. The roots answered a narrower question than the one asked | it fired on its first real run |
 | 28 | 08-08 | session | `stage2b_ridge.FOLD_SEED` — DESIGN.md's locked `random_state=42` — was pinned only by tests that read the seed from the module and asserted a downstream record equalled it. Moving it 42 → 43 failed nothing: 92 passed. `N_SPLITS` 5 → 4 failed four tests in the same sweep, so the gap was this constant specifically | building the gate inventory |
+| 29 | 08-08 | session | DESIGN.md's intercept-aware ridge MUST — "center targets within the training fold and restore the intercept from the general expression, not assume it away" — had no test that fails when it is undone. The `mean(Y)` shortcut the design explicitly refuses passed 93/93; so did dropping the target centering entirely. On centered X the two forms are algebraically identical, and every fixture standardized X first | building the gate inventory |
+| 30 | 08-08 | session | `test_corpus_constants` pins `EXPECTED_REF_IDX == 363` and `ENCODER_STEPS == 1200`, and both halts that CONSUME them — the gauge-node refusal in `step1b_topologies`, the step-count refusal in `step3_encoded_input` — had no test at all. `if False:` on either left the pin green. An equality pin notices a literal edit and is blind to its consumer being deleted, which is the failure that costs an A100 run | building the gate inventory |
 
 Two near-misses belong here too, because they were caught *before* becoming
 tests:
@@ -136,9 +138,32 @@ was real code that would work — but the whole-payload digest ran earlier
 and caught every corruption the test could inject, so the per-array check
 was never reached. Deleting it broke nothing.
 
-**E. The fixture cannot discriminate.** The row-0 near-miss, and #19. The
-test runs, the assertion is evaluated, and it would pass under the
-hypothesis being rejected as well as the one being confirmed.
+**E. The fixture cannot discriminate.** The row-0 near-miss, #19, and
+#29 — which is the category in its strongest form and worth reading
+before writing a fixture that "matches production."
+
+DESIGN.md requires the ridge solve to centre targets within the training
+fold and restore the intercept from `b = y_mean - x_mean @ W`, and names
+the `mean(Y)` shortcut as the thing not to do. Both halves could be
+deleted with the suite green. On centred X they are not merely hard to
+tell apart — they are algebraically the same: `x_mean @ W` is zero, and
+`U.T @ ones` is zero, so the intercept term and the target-centring term
+both vanish. Every fixture standardized X first, faithfully, because
+production does.
+
+**A fixture that mirrors production cannot test a requirement that exists
+so the code will not depend on production's invariants.** That is the
+whole point of the locked general form: it must stay correct if the
+scaler is ever applied differently, and the only way to check it is to
+break the invariant on purpose (`check_centered=False`, features with a
+deliberate offset). Realism in a fixture is not free, and this is what it
+costs.
+
+The row-0 near-miss is the same shape read forwards: official index 0
+equals fit-local 0, so testing that row alone confirms both hypotheses.
+Rows 27000 and 53999 exist because somebody asked which rows could
+DISAGREE. The test runs, the assertion is evaluated, and it would pass
+under the hypothesis being rejected as well as the one being confirmed.
 
 **#19 is the form to watch for, because it is the one that looks like
 coverage.** DESIGN.md's ridge equivalence gate has two conditions —
@@ -456,6 +481,20 @@ self-referential pin is **worse than weak, it is inert**: it fails under
 no edit at all. And it reads as the more rigorous of the two, because
 parameterising on the constant instead of hardcoding it is ordinarily
 good practice. Here it is what removes the test.
+
+Three levels, in the order they should be reached for, because most
+"locked constant" tests land on the middle one and stop:
+
+1. **self-referential pin** — blind to every change, and reads as the
+   most rigorous of the three;
+2. **equality pin** — notices the literal being edited, blind to the
+   consumer being deleted;
+3. **verdict test** — notices both.
+
+The gap that costs a run sits at level 2. #30 is the example:
+`EXPECTED_REF_IDX == 363` and `ENCODER_STEPS == 1200` were pinned, and
+both halts consuming them could be replaced with `if False:` while the
+pins stayed green.
 
 The remedy is the one thing parameterisation forbids: one side must be
 the frozen literal, transcribed from the document that froze it, and the

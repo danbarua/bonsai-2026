@@ -83,13 +83,20 @@ const MAX_WEBHOOK_BYTES = positiveIntEnv("C2C_WEBHOOK_MAX_BYTES", 25 * 1024 * 10
  * timingSafeEqual, never `==` -- GitHub's own documentation calls this out.
  * It throws on a length mismatch, so lengths are compared first.
  */
-function verifiedAsGithub(body: Buffer, signature: string): boolean {
-  if (!GITHUB_SECRET) return false;
+type VerifyResult = "ok" | "no-secret" | "malformed-header" | "digest-mismatch";
+
+function verifiedAsGithub(body: Buffer, signature: string): VerifyResult {
+  // A reason, not a boolean. "rejected" alone cannot tell an unset secret
+  // from a wrong one, and those have completely different fixes -- the
+  // operator is left rerunning the delivery to learn nothing again. The
+  // reason names the failure without echoing any of the attacker's bytes.
+  if (!GITHUB_SECRET) return "no-secret";
+  if (!signature.startsWith("sha256=")) return "malformed-header";
   const expected = `sha256=${crypto.createHmac("sha256", GITHUB_SECRET).update(body).digest("hex")}`;
   const a = Buffer.from(expected, "utf8");
   const b = Buffer.from(signature, "utf8");
-  if (a.length !== b.length) return false;
-  return crypto.timingSafeEqual(a, b);
+  if (a.length !== b.length) return "malformed-header";
+  return crypto.timingSafeEqual(a, b) ? "ok" : "digest-mismatch";
 }
 
 // Hop-by-hop headers (RFC 7230 6.1) never get forwarded across a proxy leg.
@@ -184,7 +191,15 @@ const server = http.createServer((clientReq, clientRes) => {
     },
   );
 
+  // Set when THIS proxy decides to reject, so the deliberate destroy below
+  // is not reported as an upstream failure. Without it every rejection
+  // logged a second, misleading line -- "upstream error ... socket hang up"
+  // -- describing a backend that was never contacted, and tried to write a
+  // 502 body after the 401 had already been sent.
+  let rejectedHere = false;
+
   proxyReq.on("error", (err) => {
+    if (rejectedHere) return;
     console.error(`[c2c-proxy] upstream error for ${clientReq.method} ${clientReq.url}: ${err.message}`);
     if (!clientRes.headersSent) {
       clientRes.writeHead(502, { "content-type": "text/plain" });
@@ -213,6 +228,7 @@ const server = http.createServer((clientReq, clientRes) => {
   if (typeof signature === "string") {
     void readCappedBody(clientReq).then((body) => {
       if (!body) {
+        rejectedHere = true;
         proxyReq.destroy();
         if (!clientRes.headersSent) {
           // `connection: close` because the rest of the oversized body was
@@ -222,11 +238,19 @@ const server = http.createServer((clientReq, clientRes) => {
         clientRes.end("Payload too large", () => clientReq.destroy());
         return;
       }
-      if (!verifiedAsGithub(body, signature)) {
+      const verdict = verifiedAsGithub(body, signature);
+      if (verdict !== "ok") {
+        rejectedHere = true;
         proxyReq.destroy();
-        // Deliberately identical for a bad signature and a missing secret:
-        // a caller learns nothing about which it was.
-        console.error(`[c2c-proxy] rejected unverified GitHub delivery for ${clientReq.url}`);
+        // The LOG names the reason; the RESPONSE does not. An operator needs
+        // to tell an unset secret from a wrong one -- those have different
+        // fixes -- while a caller learns nothing either way. Body size is
+        // included because a signature failing on the right secret usually
+        // means the bytes changed in transit, and the length is the first
+        // thing worth comparing against GitHub's own delivery record.
+        console.error(
+          `[c2c-proxy] rejected GitHub delivery for ${clientReq.url}: ${verdict} (${body.length} bytes)`,
+        );
         if (!clientRes.headersSent) clientRes.writeHead(401, { "content-type": "text/plain" });
         clientRes.end("Unauthorized");
         return;

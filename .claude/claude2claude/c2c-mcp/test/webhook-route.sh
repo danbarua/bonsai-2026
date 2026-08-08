@@ -124,6 +124,26 @@ CODE=$(curl -s -o /dev/null -w '%{http_code}' -X POST "$BASE/webhook" \
 check "accepted as a local caller" "$CODE" "202"
 
 echo
+echo "== an unfinished workflow_run is not delivered =="
+
+# GitHub sends workflow_run three times per run: requested, in_progress,
+# completed. `conclusion` is null until the last one, so without this filter
+# subscribing produces three messages per run, two of them reporting
+# "conclusion: ?" about a run that has not finished.
+BEFORE=$(count_md "$MAILBOX")
+for ACTION in requested in_progress; do
+  curl -s -o /dev/null -X POST "$BASE/webhook" \
+    -H 'Content-Type: application/json' -H 'X-GitHub-Event: workflow_run' \
+    --data-binary "{\"action\":\"$ACTION\",\"repository\":{\"full_name\":\"r/r\"},\"workflow_run\":{\"id\":1,\"conclusion\":null}}"
+done
+check "requested and in_progress write nothing" "$(count_md "$MAILBOX")" "$BEFORE"
+
+curl -s -o /dev/null -X POST "$BASE/webhook" \
+  -H 'Content-Type: application/json' -H 'X-GitHub-Event: workflow_run' \
+  --data-binary '{"action":"completed","repository":{"full_name":"r/r"},"workflow_run":{"id":1,"conclusion":"success"}}'
+check "completed IS delivered" "$(count_md "$MAILBOX")" "$((BEFORE + 1))"
+
+echo
 echo "== comment events are gated on the AUTHOR, before anything is written =="
 
 # The repository is public, so anyone with a GitHub account can comment.
