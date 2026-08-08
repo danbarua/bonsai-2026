@@ -400,6 +400,40 @@ None of this exists. Nothing below has been run.
 7. **Notifications.** A break is only useful if it reaches the loop. Cloud
    Build → Pub/Sub `cloud-builds` topic → whatever the loops read.
 
+## First-run protocol: treat the first green as suspect
+
+Standing requirement set by the orchestrator on 2026-08-08, and the reason
+is this project's own recent record rather than caution in general. **A
+first-ever pass on a never-exercised path is the presence-shaped failure
+surface**: the build report would be correct in form and unverified in what
+it attests, which is exactly the shape of the capture record that reported
+a remote execution nobody performed.
+
+So the first Cloud Build execution is a **measurement, not a formality**,
+and four things must happen before either this or the GitHub workflow moves
+out of the built-not-verified column.
+
+1. **The report states what actually executed** — suites by name, not a
+   bare pass. A green result records that assertions held; it does not
+   record that the right things ran. `-rs` and the unconditional reason
+   dump already do this for skips, and the same standard applies to what
+   was collected.
+2. **The anti-vacuity check is proven live, in the CI context.** Remove a
+   suite from the derived set, watch the build fail, restore it. The guard
+   has been broken where it was written; it has not been seen to fail where
+   it runs, and those are different claims. This is the rule the rest of
+   the repository already applies to guards, applied to the environment
+   rather than to the code.
+3. **"Fails closed" graduates from design claim to observed behaviour** by
+   watching one deliberate failure actually close. It is currently asserted
+   in this document and nowhere demonstrated.
+4. **The same applies to the GitHub review workflow** on its first firing.
+
+Until all four are done, both are catalogued as **built, not verified** —
+and the distinction is the point. Neither has ever run; the suite itself
+has only ever run on macOS/ARM, so even the baseline this build compares
+against is a claim about a platform CI does not use.
+
 ## Bootstrapping the baseline, and the one measurement nobody has taken
 
 `tools/ci/ci_skip_baseline.txt` was measured on macOS/ARM, Python 3.14.6,
