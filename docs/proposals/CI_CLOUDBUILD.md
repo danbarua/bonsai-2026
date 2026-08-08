@@ -110,7 +110,37 @@ Stage 2B.
 
 Two layers, in this order.
 
-**Capability absence, which needs no list.** No credential is mounted, no
+**The default identity is not capability-free, and the guard cannot see
+it.** Measured on the live project rather than assumed:
+
+```
+$ gcloud projects get-iam-policy bonsai-504422
+roles/cloudbuild.builds.builder  545167512937@cloudbuild.gserviceaccount.com
+
+$ gcloud iam roles describe roles/cloudbuild.builds.builder
+... storage.objects.create, storage.objects.delete, storage.objects.update,
+    storage.buckets.create, cloudbuild.builds.create ...
+```
+
+This is an old project, so the legacy default Cloud Build service account
+still exists and still holds that role AT PROJECT LEVEL — which means on
+`bonsai-2026-stage2b-cache`. **A trigger created without an explicit
+`service_account` runs as that identity**: able to overwrite or delete
+research artifacts, and able to create arbitrary builds.
+
+`assert_no_cloud_credentials.py` cannot detect this. It reads three
+environment variables and tries to import `google.cloud.storage`. A Cloud
+Build service-account credential is served by the **metadata server** — no
+variable, no import — and the `decide` step runs a `cloud-sdk` image that
+has `gcloud` and `apt-get`. The capability-absence assertion passes while
+the capability is present, which is today's recurring shape: a check correct
+about what it measures, read as an answer to a different question.
+
+The second source that does not share that blind spot is `infra/`, where
+every trigger names an explicit, least-privilege service account. That is
+why the Terraform is load-bearing rather than convenience.
+
+**Capability absence, for what remains.** No credential is mounted, no
 CI service account holds a role on `bonsai-2026-stage2b-cache`, and
 `google-cloud-storage` is not installed. A target that tried to provision
 or write would fail at the point it tried.
@@ -390,6 +420,16 @@ it names, and that instruction is unchanged by CI existing.
 because `mighty-colab` is not installed. Both are in the baseline.
 
 ## What a human has to create in GCP
+
+**This is now `infra/`, and the list below is what it encodes.** Read it for
+the reasoning; run `terraform -chdir=infra plan` for the current truth. The
+click-list is kept because it says WHY each resource exists, which HCL
+records only as a comment — but it is no longer the procedure. `infra/README.md`
+is the procedure, and it is four commands of which one needs a browser.
+
+The single step Terraform cannot perform: a GitHub App installation has no
+API, so authorising Cloud Build against `danbarua/bonsai-2026` is a human
+clicking Install, once. Everything after that is `terraform apply`.
 
 None of the CI resources exist. Nothing in the numbered list below has been
 run.
