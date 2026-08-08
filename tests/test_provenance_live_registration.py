@@ -94,11 +94,36 @@ def test_a_registered_hook_fires_in_a_real_session(tmp_path):
         "the script text did not survive the round trip through the harness")
 
 
+def test_a_real_session_writes_its_commit_point(tmp_path):
+    """The marker that makes absence diagnostic, verified where it counts.
+
+    A `session_open` record proves capture was live for that session, so
+    every later absence becomes an inference about the predicate rather
+    than an unanswerable question. Verified live rather than only against
+    synthetic stdin, because the whole point of the marker is to witness a
+    property of the REGISTRATION -- the thing synthetic tests cannot see.
+    """
+    run_session(SCRATCH, tmp_path)
+    markers = [r for r in all_records(tmp_path) if r["phase"] == "session_open"]
+    for marker in markers:
+        print(f"\n[live] marker source={marker['source']} "
+              f"v{marker['hook_version']} git={marker['git']['commit'][:8]} "
+              f"dirty={marker['git']['dirty']}")
+    assert markers, (
+        "a real session wrote no session_open marker -- either SessionStart "
+        "is not registered, or the marker is broken. Without it an empty "
+        "capture log is ambiguous, which is the defect it exists to remove.")
+    assert markers[0]["hook_version"]
+    assert markers[0]["git"]["commit"]
+
+
 def test_both_phases_are_written_and_can_be_joined(tmp_path):
     """`open` and `close` come from two separate hook invocations in two
     separate processes. If they cannot be joined the log is unreadable."""
     run_session(SCRATCH, tmp_path)
-    records = all_records(tmp_path)
+    # The session marker is deliberately excluded: it belongs to the session,
+    # not to any tool call, and carries no tool_use_id to join on.
+    records = [r for r in all_records(tmp_path) if r["phase"] != "session_open"]
     phases = {r["phase"] for r in records}
     assert phases == {"open", "close"}, f"expected both phases, got {phases}"
     ids = {r["tool_use_id"] for r in records}
@@ -117,11 +142,22 @@ def test_ordinary_commands_produce_no_record_in_a_real_session(tmp_path):
     """
     proc = run_session(NOT_SCRATCH, tmp_path)
     records = all_records(tmp_path)
+    markers = [r for r in records if r["phase"] == "session_open"]
+    captures = [r for r in records if r["phase"] != "session_open"]
     print(f"\n[live] ordinary command exit={proc.returncode}, "
-          f"{len(records)} records (expected 0)")
-    for record in records:
+          f"{len(markers)} markers, {len(captures)} captures (expected 0)")
+    for record in captures:
         print(f"[live] UNEXPECTED: {record.get('command')}")
-    assert not records, (
+
+    # The marker is what turns this from a weak test into a strong one.
+    # Without it, "no capture records" would also be satisfied by a session
+    # in which the hooks never loaded -- the exact ambiguity the marker was
+    # added to remove. Asserting it here means this test now distinguishes
+    # "hooks were live and the predicate declined" from "hooks were absent".
+    assert markers, (
+        "no session marker -- hooks were not live, so this test proves "
+        "nothing about whether ordinary commands are excluded")
+    assert not captures, (
         "an ordinary command was captured -- the matcher or predicate is "
         "over-capturing, which would put unrelated work into a forensic log")
 

@@ -52,6 +52,10 @@ from scratch_predicate import is_scratch  # noqa: E402
 # for the life of the session; the log's job is to stay readable.
 OUTPUT_BLOB_MAX = 2_000_000
 
+# Bumped whenever the record schema or the predicate's rule set changes, so
+# a log can be read by a reader that knows which shape to expect.
+HOOK_VERSION = "1.1.0"
+
 # Version lookups shell out, so they are cached per session and time-boxed.
 # A hook that hangs is a hook that gets removed.
 VERSION_TIMEOUT_S = 2
@@ -209,8 +213,52 @@ def append(directory: Path, record: dict) -> None:
         fh.write(json.dumps(record) + "\n")
 
 
+def session_open_record(payload: dict) -> dict:
+    """The commit point for a session's capture log.
+
+    Written at `SessionStart`, before any tool call. Its purpose is to make
+    ABSENCE diagnostic instead of ambiguous, which is the defect the rest of
+    this hook could not fix on its own: with only per-call records, an empty
+    log has two readings -- "nothing was scratch" and "the hooks were never
+    loaded" -- and no way to tell them apart. Hook registrations are read at
+    session start, so the second reading is real and silent.
+
+    With a marker, the question "was this session captured?" is answerable
+    from data. Its presence means capture was live; its absence is positive
+    evidence the hooks were not loaded. Every later record in the directory
+    is then anchored to a session known to have been capturing, so a scratch
+    command with no record becomes a real inference about the predicate
+    rather than a hope.
+
+    The design is `stage2b-lead`'s, and it is the same move as the manifest
+    in their transport layer: a payload with no manifest is UNCOMMITTED, not
+    "probably fine." The sidecar exists so that absence means something
+    definite.
+
+    Recording the commit HERE as well as per-call also makes a mid-session
+    merge visible in the data -- which is precisely the event that produced
+    the silent gap in the first place.
+    """
+    return {
+        "capture_id": f"{datetime.now(timezone.utc):%Y%m%dT%H%M%SZ}-session",
+        "phase": "session_open",
+        "session_id": payload.get("session_id"),
+        "ts_utc": _now(),
+        "cwd": payload.get("cwd"),
+        "source": payload.get("source"),  # startup | resume | clear | compact
+        "git": git_state(payload.get("cwd")),
+        "hook_version": HOOK_VERSION,
+    }
+
+
 def handle(payload: dict) -> dict | None:
     """Build the record for one event, or None if this call isn't scratch."""
+    if (payload.get("hook_event_name") or "") == "SessionStart":
+        directory = run_dir(payload)
+        record = session_open_record(payload)
+        append(directory, record)
+        return record
+
     tool_name = payload.get("tool_name") or ""
     tool_input = payload.get("tool_input") or {}
     verdict = is_scratch(tool_name, tool_input)

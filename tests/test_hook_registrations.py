@@ -34,6 +34,7 @@ REQUIRED = [
     ("Stop", "c2c-mail/stop.sh"),
     ("SessionStart", "c2c-mail/session-start.sh"),
     ("PreToolUse", "c2c-mail/pre-c2c-mcp.sh"),
+    ("SessionStart", "provenance-capture/capture.sh"),
     ("PreToolUse", "provenance-capture/capture.sh"),
     ("PostToolUse", "provenance-capture/capture.sh"),
     ("PostToolUseFailure", "provenance-capture/capture.sh"),

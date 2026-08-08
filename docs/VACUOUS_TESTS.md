@@ -6,7 +6,7 @@ would stay green if the thing it guards were deleted.
 
 This project has produced them repeatedly enough that the pattern is worth
 recording as its own artifact rather than as scattered commit messages.
-Fifteen incidents are catalogued below with dates and SHAs, spanning
+Sixteen incidents are catalogued below with dates and SHAs, spanning
 2026-08-04 to 2026-08-08 and two model generations. Every one was written
 by an AI agent — mostly me — and every one was caught, which is the more
 useful half of the record: the catching has a method, and the method is
@@ -37,6 +37,7 @@ claim the rest of this repository's discipline exists to prevent.
 | 13 | 08-07 | session | `STAGE2B_TEST_FILES` (a narrowing) verified by running `pytest tests/` (the broader form) — two missing files ran anyway, suite green | review |
 | 14 | 08-07 | `a73c5cd` | Generation-pin test asserted on `download_file` directly; removing the pin from `consume_validated` left it green | deliberate breakage |
 | 15 | 08-08 | `2184644` | Three fail-open tests for the provenance capture hook ran it through a shell wrapper ending in unconditional `exit 0`, which masks any exit code from the Python layer beneath | deliberate breakage |
+| 16 | 08-08 | `4b1a23b` | The capture hook's whole test suite drove `capture.py` directly and asserted nothing about whether `.claude/settings.json` causes it to run — registrations load at session start, so an already-running session captured nothing, silently | live firing |
 
 Two near-misses belong here too, because they were caught *before* becoming
 tests:
@@ -53,7 +54,7 @@ tests:
 
 ---
 
-## Taxonomy — six ways a test comes out empty
+## Taxonomy — seven ways a test comes out empty
 
 Sorted roughly by how hard each is to see by reading.
 
@@ -116,11 +117,41 @@ Generalised: **any catch-all, default return, or unconditional exit between
 the test and the mechanism is a candidate normaliser**, and every test
 routed through one is blind to everything beneath it.
 
+**G. The implementation is tested; the wiring is not.** #16, and a
+generalisation of A rather than an instance of it. Every test for the
+provenance capture hook drove `capture.py` with synthetic stdin — correctly,
+thoroughly, including fail-open and record schema — and not one asserted
+that `.claude/settings.json` causes it to run. Hook registrations are read
+at session start, so a session already open when the hooks landed captured
+nothing. Nothing errored, and an absent record is indistinguishable from
+"correctly classified as not scratch", so the log looked healthy.
+
+Stated generally: **a test that drives a component directly proves the
+component and asserts nothing about its registration — and registration is
+the half that silently changes when someone edits a shared config file.**
+
+This is CLAUDE.md principle 16 (a component verified field-by-field can
+still feed a wrong result if the glue around it does something else) with
+one twist that matters for how it is caught: here the glue is
+*configuration*, not code, and configuration has no import graph to walk.
+The derive-don't-list trick that works elsewhere in this repo has nothing
+to enumerate when the property is "a process read this file at startup."
+
+Two fixes, and the second is the better one. A live test spawning a real
+headless session (`tests/test_provenance_live_registration.py`) samples the
+wiring mechanically. But the deeper fix — `stage2b-lead`'s — is to make the
+system *say so at runtime*: a `session_open` marker written at
+`SessionStart` turns absence from ambiguous into diagnostic. With a marker,
+"no records" has one reading instead of two, and every later absence
+becomes a real inference about the predicate. It is the same move as a
+manifest beside a payload: the sidecar exists so that absence means
+something definite.
+
 ---
 
 ## What actually catches them
 
-**Deliberate breakage, eight of fifteen.** Break what the guard watches;
+**Deliberate breakage, eight of sixteen.** Break what the guard watches;
 observe the specific expected failure. The corollary in CLAUDE.md
 principle 21 states it as: *a guard you have not seen fail is not yet a
 guard.* Incident #10 is the clearest demonstration — the break fired
@@ -212,6 +243,12 @@ looked for. That is an encouraging shape for a problem to have.
    default return, or an unconditional exit between the test and the
    mechanism is a *normaliser*: every test routed through it is blind to
    everything beneath, and no input can make it fail.
+9. **Test the wiring, not only the component.** Where behaviour depends on
+   registration in a config file, a direct test of the implementation
+   proves nothing about whether it runs. Prefer making the system emit
+   positive evidence at runtime — a marker whose absence is diagnostic —
+   over a static check, since configuration has no import graph to derive
+   from.
 
 ## Related
 

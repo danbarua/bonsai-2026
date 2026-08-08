@@ -126,6 +126,61 @@ def test_fail_open_is_not_vacuous(tmp_path):
     assert len(records(tmp_path)) == 1, "healthy path wrote no record"
 
 
+# --- the session marker: absence made diagnostic ---------------------------
+
+def session_payload(session: str = "s1", source: str = "startup") -> dict:
+    return {"hook_event_name": "SessionStart", "session_id": session,
+            "cwd": str(REPO_ROOT), "source": source}
+
+
+def test_session_start_writes_a_commit_point(tmp_path):
+    """The marker exists so that an empty log has ONE reading, not two.
+
+    Without it, "no records" means either "nothing was scratch" or "the
+    hooks were never loaded" -- and since registrations are read at session
+    start, the second is real and silent. The marker's presence is what
+    makes every later absence an inference about the predicate instead of a
+    hope.
+    """
+    run_hook(session_payload(), tmp_path)
+    (record,) = records(tmp_path)
+    assert record["phase"] == "session_open"
+    assert record["source"] == "startup"
+    assert record["hook_version"]
+    assert set(record["git"]) == {"commit", "branch", "dirty"}
+    print(f"\n[capture] session marker: {record['capture_id']} "
+          f"v{record['hook_version']} git={record['git']['commit'][:8]}")
+
+
+def test_the_marker_anchors_later_records_in_the_same_log(tmp_path):
+    """A marker in a different file would anchor nothing."""
+    run_hook(session_payload(), tmp_path)
+    run_hook(pre_payload(), tmp_path)
+    phases = [r["phase"] for r in records(tmp_path)]
+    assert phases == ["session_open", "open"]
+
+
+def test_the_marker_records_the_commit_at_session_start(tmp_path):
+    """Session-start commit vs per-call commit is what makes a MID-SESSION
+    merge visible in the data -- the exact event that produced the silent
+    capture gap this marker exists to close."""
+    run_hook(session_payload(), tmp_path)
+    run_hook(pre_payload(), tmp_path)
+    marker, call = records(tmp_path)
+    assert marker["git"]["commit"] and call["git"]["commit"]
+    # Same commit here, but both are recorded independently, which is the
+    # property that lets a reader detect when they differ.
+    assert "commit" in marker["git"] and "commit" in call["git"]
+
+
+def test_a_session_marker_is_not_confused_for_a_tool_call(tmp_path):
+    """SessionStart carries no tool_input; running it through the scratch
+    predicate would classify nothing and write nothing."""
+    run_hook(session_payload(), tmp_path)
+    (record,) = records(tmp_path)
+    assert "trigger_reason" not in record and "script" not in record
+
+
 # --- what gets captured ----------------------------------------------------
 
 def test_scratch_writes_an_open_record_with_the_script(tmp_path):

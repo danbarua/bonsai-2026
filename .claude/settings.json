@@ -31,6 +31,15 @@
             "command": "\"$CLAUDE_PROJECT_DIR\"/.claude/hooks/c2c-mail/session-start.sh"
           }
         ]
+      },
+      {
+        "matcher": "",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "\"$CLAUDE_PROJECT_DIR\"/.claude/hooks/provenance-capture/capture.sh"
+          }
+        ]
       }
     ],
     "PreToolUse": [
