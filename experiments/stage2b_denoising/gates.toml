@@ -1,0 +1,150 @@
+# Stage 2B binding-clause inventory.
+#
+# Reviewer requirement 4 (c2gpt archive 2026-08-08T08:24:30Z §5, scoped by
+# 2026-08-08T10:24:39Z §II-III). Reconciled by tools/gates/gate_inventory.py.
+#
+#     make stage2b-gate-inventory
+#
+# THREE KINDS, because a frozen protocol contains three kinds of promise and
+# forcing them into one shape produces either a false `not_binding` or an
+# invented field. See the tool's module docstring.
+#
+# ANTI-GAMING, quoted from the ruling and enforced by a reviewer rather than
+# by any check in this file: "a clause cannot be moved from binding_gate to
+# another kind merely because enforcement is absent." Several rows below are
+# deliberately failing for exactly that reason.
+
+reviewed = false   # set true only when a human has read every row
+
+# =============================================================================
+# binding_gate -- runtime decision obligations
+# =============================================================================
+
+[binding_gate.9d4b9ec0ba99]
+# "HALT for review if any production condition selects 1e-6."
+enforcement = "experiments/stage2b_denoising/run_ladder_stage3.py::floor_halt_reason"
+production_reachability = """
+run_ladder_stage3.py::step7_ridge calls floor_halt_reason once per condition
+inside compute_cv, and appends to out["halt_reasons"]; main() raises
+Stage3Halt when that list is non-empty. Reached via the sole production
+entry point `make stage2b-ladder-stage3` -> mighty-colab exec -f
+run_ladder_stage3.py. No second entry path exists: the driver is executed
+only by that target."""
+input_wiring = """
+`cv["alpha"]` from stage2b_ridge.cross_validate_alpha (the selected alpha
+under the frozen 5-fold procedure), and `alphas` = stage2b_ridge.ALPHA_GRID
+as recorded in the run's fingerprint config. Provenance: both appear in
+ridge_cv_g13_88edf9ac.json, whose manifest records the producing commit."""
+decision_consequence = """
+Stage3Halt raised in main(), which sets verdict=STAGE3_FAIL, prints the
+FAIL sentinel and exits non-zero; the make target additionally requires
+STAGE3_OK on stdout. The run stops before the report step's OK path."""
+test = "tests/test_stage2b_ladder_stage3.py::test_selecting_the_grid_floor_is_a_halt"
+break_demonstrated = """
+Two directions, both observed. (a) `if float(alpha) != float(alphas.min())`
+-> `if True` (i.e. never halt, the state the 2026-08-08 run shipped in):
+test_selecting_the_grid_floor_is_a_halt FAILS. (b) -> `if False` (halt on
+everything): test_an_interior_alpha_does_not_halt and
+test_the_ceiling_is_recorded_but_does_not_halt FAIL. Additionally the whole
+group FAILS against commit 817ac08 -- the exact driver that produced the
+report -- which imports cleanly with step7_ridge intact, so the failure is
+the absent gate rather than a broken module."""
+trigger = "ci-fast"
+
+[binding_gate.a2f535ba3406]
+# The write-once invariant: force=True on a LINEAGE artifact refuses.
+enforcement = "experiments/stage2b_denoising/stage2b_gcs.py::ensure_artifact"
+production_reachability = """
+Every artifact-producing step of every ladder driver goes through
+ensure_artifact; the refusal is raised BEFORE `produce` runs, so it cannot
+be reached only after computation. run_ladder_stage3.py's ensure_npz /
+ensure_json / ensure_text wrappers are the only artifact writers in the
+stage-3 driver, and each delegates to it."""
+input_wiring = """
+`name` from gcs.object_path (stage/condition/kind/ext/split), classified by
+artifact_class against RUN_SCOPED_KIND_PREFIXES; `force` from the call
+site, False everywhere in run_ladder_stage3.py (asserted by
+test_the_driver_never_forces_an_overwrite)."""
+decision_consequence = "WriteOnceViolation raised before produce() executes."
+test = "tests/test_stage2b_gcs.py::test_an_orphan_payload_closes_every_ordinary_route"
+break_demonstrated = """
+`if force and artifact_class(name) == LINEAGE:` -> `if False:` (break
+`preproduce`): test_an_orphan_payload_closes_every_ordinary_route FAILS,
+and its `produced == []` assertion is what catches it -- the broken version
+recomputes the step before refusing, burning the GPU time the pre-produce
+check exists to protect."""
+trigger = "ci-fast"
+
+[binding_gate.f3bbc791e7c6]
+# "no Stage 2B test-side result is accessed during stages 1-3"
+enforcement = "experiments/stage2b_denoising/stage2b_gcs.py::_check_object_path_allowed"
+production_reachability = """
+Called by object_path on construction AND re-checked inside every transport
+function (upload_file, download_file, ensure_artifact, consume_validated,
+read_manifest, publish_manifest, delete_prefix, discard_uncommitted), so a
+caller that assembles a name string by hand rather than via object_path is
+still refused. That double-check is the reachability claim: there is no
+path to bytes that bypasses it."""
+input_wiring = """
+`name` (any object path reaching the transport) and `allow_test_split`,
+which defaults False at every call site in run_ladder_stage3.py -- asserted
+by test_the_driver_never_names_the_test_split, which also greps the driver
+for the literal 'testsplit' and 'allow_test_split'."""
+decision_consequence = "PermissionError raised; no bytes transferred."
+test = "tests/test_stage2b_gcs.py::test_discard_uncommitted_refuses_the_test_split"
+break_demonstrated = """
+Observed while writing that test: constructing the name via object_path
+raises inside object_path BEFORE the function under test is called, so the
+first version passed without exercising the guard at all. Rewritten to
+build the name with allow_test_split=True and pass it without, which routes
+the refusal through _check_object_path_allowed in the function under test;
+the message changes from 'refusing to touch a Stage 2B TEST-side object' to
+'it lies under the Stage 2B test-split root', confirming which guard
+fired."""
+trigger = "ci-fast"
+
+# -- deliberately FAILING rows: the gate is documented and unenforced --------
+#
+# These are the anti-gaming clause in practice. Each is a real runtime
+# obligation whose enforcement does not exist, because the audit driver has
+# not been written. They stay `binding_gate` and fail readiness; moving them
+# to another kind to make the inventory green is precisely what the ruling
+# forbids.
+
+[binding_gate.2a762b10c185]
+# AUDIT_PROTOCOL: "Mismatch gates halt automatically."
+enforcement = ""            # UNWRITTEN -- no audit driver exists
+production_reachability = ""
+input_wiring = ""
+decision_consequence = ""
+test = ""
+break_demonstrated = ""
+trigger = "manual"
+
+[binding_gate.0570557b8fa8]
+# AUDIT_PROTOCOL: "All six pairwise comparisons must be covered."
+enforcement = ""            # UNWRITTEN
+production_reachability = ""
+input_wiring = ""
+decision_consequence = ""
+test = ""
+break_demonstrated = ""
+trigger = "manual"
+
+# =============================================================================
+# binding_value -- frozen configuration obligations
+# =============================================================================
+
+[binding_value.b682b6af449a]
+# AUDIT_PROTOCOL: "Safety factor M = 100, frozen here, before any audit result."
+value = "M = 100 (AUDIT_PROTOCOL.md, 'Safety factor')"
+production_consumers = ""   # the audit driver is unwritten
+status = "pending_consumer"
+pending_reason = """
+AUDIT_PROTOCOL.md freezes M=100 for the audit driver, which has not been
+written. production_consumers is not unknown -- it is empty, and stays empty
+until that driver exists. Reported rather than papered over: a frozen value
+with no consumer is a true and useful readiness statement."""
+enforcement = ""
+break_demonstrated = ""
+trigger = "manual"
