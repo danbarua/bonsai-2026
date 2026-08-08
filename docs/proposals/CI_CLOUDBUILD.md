@@ -26,8 +26,26 @@ Work on this repository runs in supervised loops across several agents.
 A break that lands on `stage2b` between loops sits there until a human
 notices -- which, on the night that motivated this, was after a sleep. The
 design goal is that breaks surface *inside* the work loops, on a cadence
-the loops can act on. It is not general hygiene, and it is not a gate on
-merging.
+the loops can act on. It is not general hygiene.
+
+**Nothing gates `stage2b`, and everything gates the branches above it.**
+That distinction was originally written here as a flat "not a gate on
+merging", which was true when `stage2b` was the only branch CI touched and
+became misleading the moment `stage2b-ci` existed:
+
+- `stage2b` takes ~46 pushes a day from agents who have already run the
+  suite locally. Gating it would block the working branch mid-flight, for a
+  result its author already has. Nothing is required there.
+- `stage2b-ci` exists for no other purpose than to check a batch. Requiring
+  a green build to merge into it is what the branch IS -- the name is the
+  specification. A checkpoint you may merge into while red is not a
+  checkpoint.
+- `main` is the released artifact and receives only from `stage2b-ci`.
+
+The general principle the flat version was reaching for still holds and is
+narrower than it looked: **an LLM verdict must not gate a build.** The
+vacuous-test review advises; `cloudbuild.yaml`'s deterministic checks are
+what a required status check may point at.
 
 Two GitHub Actions workflows already exist (`.github/workflows/claude.yml`,
 `claude-code-review.yml`). Both invoke Claude Code -- review on pull
