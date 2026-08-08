@@ -70,7 +70,6 @@ function makeSharedChannel(id: string, dirName: string): Channel {
 }
 
 export const CHANNELS = {
-  c2c: makeChannel("c2c", "claude2claude"),
   c2gpt: makeChannel("c2gpt", "claude2gpt"),
   code2code: makeSharedChannel("code2code", "code2code"),
 } as const;

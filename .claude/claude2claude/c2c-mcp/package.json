@@ -1,6 +1,6 @@
 {
   "name": "c2c-mcp",
-  "version": "0.7.0",
+  "version": "0.8.0",
   "description": "Local HTTP MCP server for the claude2claude / claude2gpt filesystem mailboxes",
   "scripts": {
     "build": "tsc -p tsconfig.json",

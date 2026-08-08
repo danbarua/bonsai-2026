@@ -7,14 +7,11 @@ mediates a shared, mutable, multi-reader mailbox. Every item below is
 grounded in something that actually went wrong in one session on
 2026-08-07, not a hypothetical.
 
-`c2c-send`/`c2c-inbox` (referenced throughout the incidents below, since
-they were the tools live when these were found) are deprecated as of
-0.7.0 in favor of `code2code-*` -- see README.md's Tools section for
-current status and why they're still registered rather than removed.
-The incidents themselves are left as originally written; the mechanism
-they document (staleness, `updatedInput` semantics, auto-injection)
-applies identically to whichever tool a given session is actually
-using.
+**`c2c-send`/`c2c-inbox` no longer exist** -- the claude2claude channel
+was removed at 0.8.0. The incidents below still name them, deliberately:
+they are the record of what happened, and renaming them to today's tools
+would falsify it. What they document is a property of the mechanism, not
+of the channel, and applies identically to `code2code-*` and `c2gpt-*`.
 
 ## There are (at least) three distinct connection paths — never assume "the server" means one of them
 
@@ -105,52 +102,37 @@ mismatch costs a mis-consumed message.
 
 ## A server upgrade does not upgrade sessions already attached to it -- and this is invisible from either side alone
 
-The version-bump check above answers "is the *server* current." It does
-NOT answer "does *my session* see what the server now offers" -- a
-different question, confirmed independently by two separate sessions
-the same night, via two different methods:
-
-1. This session's own `c2c-inbox`/`c2c-send` connection kept a STALE
-   cached tool schema (missing the `instance` parameter) even after the
-   live server had already been rebuilt and restarted at a newer
-   version -- a `/mcp` reconnect fixed it.
-2. `stage2b-lead`, reached via the new `code2code` channel, independently
-   hit the same class of staleness from the *reader* side and diagnosed
-   it more precisely: querying the server's own `tools/list` directly
-   showed `as` present on `c2c-inbox`, while that session's own attached
-   schema lacked it entirely -- meaning its consuming reads had been
-   running in broadcast mode (no `as` to pass) the whole time, unable to
-   protect against exactly the mis-consume incident documented above.
-   Reconnecting fixed it, and also revealed the `code2code-*` tools were
-   invisible to that session outright before then -- not a missing
-   parameter, a missing tool family.
+The version bump above answers "is the *server* current." It does not
+answer "does *my session* see what the server offers" -- a different
+question, and never trust that the two are the same claim.
 
 **The MCP tool contract is pinned per client AT CONNECTION TIME, not
-polled continuously.** A session that connected before a server upgrade
-keeps running the OLD contract indefinitely, with no error, no warning,
-and no visible difference in how the tool call is issued -- until it's
-called and either rejects with a validation error (if a field the
-caller doesn't know about became required) or silently omits a safety
-parameter the caller never knew to pass. What makes this nasty, in
-`stage2b-lead`'s framing: **the operator sees the feature deployed, the
-attached session sees a schema without it, and both are looking at the
-truth simultaneously.** There is no single vantage point from which the
-mismatch is visible -- it only shows up by comparing the two.
+polled.** A session that connected before an upgrade keeps the OLD
+contract indefinitely: no error, no warning, no visible difference in
+how the call is issued. It surfaces only when the call either rejects
+on a field the caller doesn't know became required, or silently omits
+a safety parameter the caller never knew to pass.
 
-**The cheap self-check, from the reader side**: a session can detect
-its own staleness by checking whether a parameter it expects (`as` on
-`c2c-inbox`) is actually present in ITS OWN attached tool schema, not
-by trusting that the server having the feature means the session does
-too. If it's missing, that session's consuming reads are running in
-whatever the safe-but-permissive fallback is for that gap (broadcast
-mode here) -- worth surfacing rather than assuming current behavior.
+What makes it nasty, in `stage2b-lead`'s framing: **the operator sees
+the feature deployed, the attached session sees a schema without it,
+and both are looking at the truth.** No single vantage point shows the
+mismatch; it appears only by comparing the two.
 
-This is a *different* failure mode from the "corrected incident" two
-sections up (that one was about the wrong root cause being blamed for
-a real mis-consume; this one is about a schema gap that's real and
-detectable, just invisible without deliberately comparing both sides).
-Both point at the same underlying fact: never trust that "the feature
-is live" and "my connection reflects the feature" are the same claim.
+Confirmed twice the same night, from both sides. This session's own
+connection kept a stale schema (missing `instance`) after the server
+was already rebuilt at a newer version. `stage2b-lead` hit it from the
+reader side and diagnosed it more precisely: the server's `tools/list`
+showed `as` present while their attached schema lacked it -- so their
+consuming reads had been running in broadcast mode the whole time,
+unable to protect against the mis-consume documented above.
+Reconnecting fixed both, and also revealed `code2code-*` had been
+invisible to that session outright -- not a missing parameter, a
+missing tool family.
+
+**The cheap self-check, from the reader side**: look for a parameter
+you expect in your OWN attached schema, rather than trusting that the
+server having a feature means you do. If it's absent, your reads are
+running on whatever permissive fallback covers that gap.
 
 ## Preflight-check the port before starting anything
 

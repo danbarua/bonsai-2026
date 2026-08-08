@@ -73,9 +73,9 @@ c2c_watch_dirs() {
     printf '%s\n' $C2C_MAIL_WATCH_DIRS
     return
   fi
+  # code2code only. The claude2claude channel was removed at 0.8.0 -- every
+  # party on it had a better route once Desktop joined the mesh directly.
   local d
-  d="${CLAUDE_PROJECT_DIR:-.}/.claude/claude2claude/inbox"
-  [ -d "$d" ] && printf '%s\n' "$d"
   d="${CLAUDE_PROJECT_DIR:-.}/.claude/code2code/mailbox"
   [ -d "$d" ] && printf '%s\n' "$d"
 }

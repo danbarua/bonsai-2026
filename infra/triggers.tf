@@ -51,7 +51,7 @@ locals {
 # has not had a full run. Derived, not tracked by hand.
 resource "google_cloudbuild_trigger" "checkpoint" {
   name            = "bonsai-ci-checkpoint"
-  description     = "Full suite on the ${var.checkpoint_branch} checkpoint. Linux/x86, clean checkout."
+  description     = "Full suite on PRs into ${var.checkpoint_branch}. Gates the merge."
   location        = "global"
   filename        = "cloudbuild.yaml"
   service_account = google_service_account.ci_runner.id
@@ -59,8 +59,30 @@ resource "google_cloudbuild_trigger" "checkpoint" {
   github {
     owner = var.github_owner
     name  = var.github_repo
-    push {
+
+    # PULL_REQUEST, not push, and the difference is the whole point.
+    #
+    # A push trigger fires AFTER the merge, so it can never gate it: a
+    # required status check has to report on the PR itself. As a push
+    # trigger this told you a batch was broken only once the batch was
+    # already on the checkpoint branch -- which is backwards for a branch
+    # whose entire purpose is to be checked before you accept it.
+    #
+    # Observed on PR #28 (stage2b -> stage2b-ci, 18 files): the review fired,
+    # no build did, and the project still held exactly one build from hours
+    # earlier.
+    #
+    # `branch` here filters the BASE, the same semantics the review
+    # workflow's `branches:` uses.
+    pull_request {
       branch = "^${var.checkpoint_branch}$"
+
+      # Build on every PR event rather than waiting for a `/gcbrun` comment.
+      # The comment gate exists to stop untrusted contributors running
+      # arbitrary CI; this repository has one human and his agents, so it
+      # would only mean the gate silently never fires and the required check
+      # never reports -- which blocks the merge forever, for no safety.
+      comment_control = "COMMENTS_DISABLED"
     }
   }
 

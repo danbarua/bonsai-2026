@@ -1,18 +1,17 @@
 # c2c-mcp
 
-A local HTTP MCP server exposing the claude2claude and claude2gpt
-filesystem mailboxes as MCP tools, instead of requiring a client-side
-skill (`.claude/skills/c2c/SKILL.md`) or filesystem connector to
-implement the protocol itself. Any MCP-capable client that can reach
-`http://127.0.0.1:8765/mcp` gets `c2c-send`/`c2c-inbox` and
+A local HTTP MCP server exposing the code2code and claude2gpt filesystem
+mailboxes as MCP tools, instead of requiring a client-side skill or
+filesystem connector to implement the protocol itself. Any MCP-capable
+client that can reach `http://127.0.0.1:8765/mcp` gets `code2code-*` and
 `c2gpt-send`/`c2gpt-inbox` as ordinary tool calls.
 
-Message format and directory conventions (`inbox/` → `outbox/` →
-`archive/`, the `<!-- from: <sender> · <timestamp> -->` header, oldest-
-first ordering) match the existing protocol documented in
-`.claude/claude2claude/DESKTOP_PROTOCOL.md` and
-`.claude/skills/c2c/SKILL.md` -- this server is a second
-implementation of the same mailbox convention, not a different one.
+Message format and directory conventions: a
+`<!-- from: <sender> · <timestamp> · instance: <name> · to: <name> -->`
+header, filenames that carry the sender and addressee as slug tags,
+oldest-first ordering, and read messages moved to `archive/`. The
+addressee is matched as a slug, not an exact string, so the case a name
+is typed in never decides whether mail arrives.
 
 Read `DEVELOPMENT_PRACTICES.md` before making changes here -- the
 version-bump-before-restart discipline referenced throughout this
@@ -22,129 +21,105 @@ produced them.
 
 ## Tools
 
-Each channel has an internal ("code-side") set of roles and one
-external peer role, and the directories are named from the code side
-(matching the existing protocol docs): `outbox/` is what a code-side
-role writes and the peer (`claude-desktop` or `chatgpt`) reads;
-`inbox/` is the reverse. Both `-send` and `-inbox` take an identity
-argument that decides which directory they touch -- neither tool has
-a silent default for "which side am I," since that ambiguity is
-exactly what caused a real bug here once (see git log).
+There are two channel shapes.
 
-c2c's code side is `claude-code` alone (its peer, `claude-desktop`, is
-the OTHER party on this channel). c2gpt's code side is BOTH
-`claude-code` and `claude-desktop` -- either may message ChatGPT
-directly, sharing the same `outbox/`/`inbox/`; `chatgpt` is the sole
-peer. This isn't symmetric with c2c: on c2gpt, `claude-desktop` is a
-code-side role, not the peer -- the intended mail topology overall is
-ChatGPT <-> Claude Desktop <-> Claude Code (Desktop relays into
-`claude2claude/` for Code's benefit), but Code and Desktop can each
-also reach ChatGPT directly on `claude2gpt/` without going through
-each other first.
+**c2gpt is two-sided.** Its code side is both `claude-code` and
+`claude-desktop` -- either may message ChatGPT directly -- and `chatgpt`
+is the sole peer. Directories are named from the code side: `outbox/`
+is what a code-side role writes and the peer reads, `inbox/` the
+reverse. Both tools take an identity argument that decides which
+directory they touch; neither has a silent default for "which side am
+I", because that ambiguity caused a real bug here once (see git log).
+
+**code2code is flat.** Every party is a Claude Code session, so there
+is no peer role and no split: `mailbox/` is a single shared directory
+written and read by everyone.
 
 | Tool | Channel dir | Roles | Effect |
 |---|---|---|---|
-| `c2c-send` **(deprecated)** | `.claude/claude2claude/` | `claude-code`, `claude-desktop` | `{ sender, content }` -- `claude-code` writes `outbox/`, `claude-desktop` writes `inbox/` |
-| `c2c-inbox` **(deprecated)** | `.claude/claude2claude/` | `claude-code`, `claude-desktop` | `{ reader, archive? }` -- `claude-code` reads `inbox/`, `claude-desktop` reads `outbox/` |
 | `c2gpt-send` | `.claude/claude2gpt/` | `claude-code`, `claude-desktop`, `chatgpt` | `{ sender, content }` -- `claude-code`/`claude-desktop` (either) write `outbox/`, `chatgpt` writes `inbox/` |
 | `c2gpt-inbox` | `.claude/claude2gpt/` | `claude-code`, `claude-desktop`, `chatgpt` | `{ reader, archive? }` -- `claude-code`/`claude-desktop` (either) read `inbox/`, `chatgpt` reads `outbox/` |
 | `code2code-send` | `.claude/code2code/` | none -- always `claude-code` | `{ instance, content, to? }` -- writes `mailbox/` |
 | `code2code-inbox` | `.claude/code2code/` | none -- always `claude-code` | `{ as, archive? }` -- reads `mailbox/` |
 | `code2code-archive` | `.claude/code2code/` | none | `{ filename }` -- moves one named file to `archive/` unconditionally |
 
-`c2c-send`/`c2c-inbox` are deprecated as of 0.7.0, superseded by
-`code2code` now that Claude Desktop participates in that mesh directly
-as its own identity rather than via this channel's fixed peer role.
-They're still registered, not removed: the channel may have in-flight
-threads that only reach Desktop through it (Desktop can't poll and
-only reads via `c2c-inbox`), and this server can't be restarted without
-interrupting other sessions mid-work (see `DEVELOPMENT_PRACTICES.md`).
-Don't build new traffic on `c2c-send`/`c2c-inbox` -- use `code2code-*`,
-or `c2gpt-*` for anything that actually needs to reach ChatGPT. `c2gpt`
-itself is unaffected -- ChatGPT isn't a Claude Code session and has no
-way to join `code2code`.
+The `c2c` channel (claude2claude, Code <-> Desktop) was **removed at
+0.8.0**. Claude Desktop joined the `code2code` mesh directly as its own
+identity, which left c2c with no traffic and no remaining role: Desktop
+now uses `code2code-*` to reach Claude Code, and `c2gpt-*` to reach
+ChatGPT. Its `.claude/claude2claude/{inbox,outbox,archive}/` directories
+are kept on disk as history and are read by nothing here.
 
-`code2code` is a different shape from `c2c`/`c2gpt`: every party is a
-Claude Code session, so there's no peer role and no `outbox`/`inbox`
-split -- `mailbox/` is a SINGLE shared directory, both written and read
-by every session. `instance` (send) and `as` (inbox) are therefore
-REQUIRED, not optional: there's no non-Code peer to fall back to an
-unidentified sender/reader for, and a PreToolUse hook auto-injects both
-so a well-behaved caller never has to pass them explicitly (see
-`.claude/hooks/c2c-mail/pre-c2c-mcp.sh`). Because the mailbox is shared,
-a session's own unaddressed broadcast is automatically excluded from
-its own `code2code-inbox` reads (so it can never consume its own
-just-sent announcement before anyone else sees it) -- which also means
-that broadcast can never be archived by a normal read from the sender
-either. `code2code-archive` is the deliberate escape hatch for that:
-pass the exact filename to retract/clean up a stale broadcast (or any
-other message) directly, no addressing rules applied.
+Because code2code has no peer to fall back on, `instance` (send) and
+`as` (inbox) are **required**, not optional. A PreToolUse hook
+auto-injects both (`.claude/hooks/c2c-mail/pre-c2c-mcp.sh`), so a
+caller normally never passes them.
+
+The shared directory has one consequence worth knowing: a session's own
+unaddressed broadcast is excluded from its own `code2code-inbox` reads,
+so it can't consume its announcement before anyone else sees it -- which
+also means a normal read can never archive it. `code2code-archive` is
+the escape hatch: pass an exact filename to retract or clean up any
+message, no addressing rules applied.
 
 `-send`'s `content` is just the message body; the header comment is
 generated from `sender` and the current UTC time. A same-second
 filename collision gets a `-2`, `-3`, ... suffix rather than
 overwriting anything.
 
-Pass `instance` on `-send` when `sender` is `"claude-code"` to say
-*which* Claude Code session sent it (its `/rename`-set name, e.g. from
-`code-sessions` -- never the raw `session_id`, an opaque GUID not
-useful to a reader). `.claude/hooks/c2c-mail/pre-c2c-mcp.sh` resolves
-and surfaces this session's own name as `additionalContext` right
-before every c2c-mcp tool call, specifically so it can be passed here.
-`instance` shows up three places: the exact name in the header comment
-(`· instance: <name>`), a slugified version appended to the *filename*
-itself (`2026-08-07T21-30-00Z-c2c-implementation.md`, spaces and other
-non-filename characters collapsed to hyphens) so a reader can filter
-by sender with a plain `ls`/glob without opening any files, and in
-`-inbox`'s response (both the `(instance: <name>)` text annotation and
-`structuredContent`). Omit it and nothing changes from before this
-field existed -- no `instance:` in the header, no slug in the
-filename.
+### Identity and addressing
 
-Pass `to` on `-send` to address a message to one specific reader (e.g.
-a `/rename`-set Claude Code session name from `code-sessions`). It's
-written to the header as `· to: <name>` (exact, unslugified) AND,
-slugified, to the filename as a `--to-<slug>` tag -- a DOUBLE hyphen,
-distinct from `instance`'s single-hyphen suffix, so the two can never
-collide even when both are present on the same message
-(`2026-08-07T21-30-00Z-c2c-implementation--to-reader-b.md`). Omitted
-(the default), a message is a broadcast any reader may consume,
-matching the exact behavior before addressing existed.
+Names throughout are `/rename`-set session names (see `code-sessions`),
+never the raw `session_id` -- an opaque GUID that tells a reader
+nothing.
 
-Pass `as` on `-inbox` to say who's reading (again, the reader's own
-`/rename`-set name). It only changes behavior on a *consuming* read
-(`archive: true`, the default): a message addressed to a DIFFERENT
-name is skipped entirely -- left in place, unarchived, for its real
-addressee -- rather than being silently consumed by whoever happened
-to call `-inbox` first. Filtering checks the filename's `--to-<slug>`
-tag first (no file read needed); a message with no such tag (broadcast,
-or sent before this filename convention existed) falls back to the
-header's `to:` field, so nothing already in a mailbox needs migrating.
-A peek (`archive: false`) always returns everything regardless of
-addressing, since peeking doesn't consume anything. Omitting `as`
-entirely preserves the exact pre-addressing behavior: every message
-visible and archivable, including ones addressed to someone else.
+`instance` on `-send` says **who sent it**. It appears as the exact
+name in the header, as a slug appended to the filename after the
+timestamp, and in `-inbox`'s response. The filename slug lets a reader
+filter by sender with a plain `ls` glob, opening nothing.
 
-`-inbox`'s `archive` (default `true`) moves each returned message to
-`archive/` after reading, matching the existing c2c protocol (both
-sides archive what they read, since Desktop's filesystem connector can
-move but not delete). Pass `archive: false` to peek without consuming
--- useful for checking what's sitting unread in either direction
-without disturbing it.
+`to` on `-send` says **who it's for**. Exact in the header, slugified
+into the filename as a `--to-<slug>` tag -- a *double* hyphen, so it
+can never be confused with `instance`'s single-hyphen suffix even when
+both are present:
 
-A fifth tool, `code-sessions`, isn't channel-scoped: it takes no
-arguments and lists Claude Code sessions on this machine whose working
-directory is under this repo (the main checkout or any
-`.claude/worktrees/*`), reading the CLI's own local session registry
-(`~/.claude/sessions/*.json`, not any mailbox) rather than anything
-this server writes itself. Each entry has the session's `/rename`-set
-name, its `cwd`, last-known status, and whether its process is still
-actually alive (checked directly via a zero-signal `kill` probe, not
-just trusted from a possibly-stale file) -- useful for a peer deciding
-which named session a mailbox message should be addressed to.
-`CLAUDE_SESSIONS_DIR` overrides the registry location (used by
-`test/code-sessions.sh` to point at a throwaway directory instead of
-real global state).
+```
+2026-08-07T21-30-00Z-c2c-implementation--to-reader-b.md
+         timestamp   └ instance slug    └ addressee tag
+```
+
+Omit `to` and the message is a broadcast any reader may consume.
+
+`as` on `-inbox` says **who's reading**, and only matters on a
+consuming read (`archive: true`, the default): a message addressed to
+someone else is skipped and left in place for its real addressee,
+rather than being eaten by whoever called `-inbox` first. Matching uses
+the filename tag when present and falls back to the header's `to:`
+field otherwise, so nothing already in a mailbox needs migrating.
+Both sides are compared as slugs, so the case a name was typed in
+never decides whether mail arrives.
+
+A peek (`archive: false`) returns everything regardless of addressing,
+since it consumes nothing -- useful for seeing what's sitting unread
+without disturbing it. Read messages move to `archive/` rather than
+being deleted, because Claude Desktop's filesystem connector can move
+files but not delete them.
+
+### `code-sessions`
+
+Not channel-scoped: it takes no arguments and lists the Claude Code
+sessions on this machine working under this repo (main checkout or any
+`.claude/worktrees/*`). It reads the CLI's own session registry
+(`~/.claude/sessions/*.json`), not any mailbox.
+
+Each entry gives the session's `/rename`-set name, `cwd`, last-known
+status, and whether the process is **actually alive** -- probed with a
+zero-signal `kill` rather than trusted from a possibly-stale file. Use
+it to find the name to address a message to, instead of guessing one.
+
+`CLAUDE_SESSIONS_DIR` overrides the registry location, so
+`test/code-sessions.sh` can point at a throwaway directory instead of
+real global state.
 
 ## Build & run
 
@@ -172,20 +147,10 @@ server/transport pair, since every tool call here is a self-contained
 filesystem read or write with nothing to keep alive between calls.
 
 **Bump `package.json`'s `version` before restarting with fresh
-changes.** `/health` and the MCP `initialize` handshake's
-`serverInfo.version` both report it live (`PKG_VERSION` in
-`mailbox.ts`, read from `package.json` at startup, not hardcoded --
-see git history for why: an earlier hardcoded version string meant a
-restart with new code silently kept reporting the old number). A
-version bump is the fast, unambiguous way to tell "this process is
-actually running what I just built" from "this process didn't
-actually restart" or "this connection is going through a stale cached
-route" -- exactly the ambiguity that once led to a real mis-consumed
-message on a different Claude Code session's mailbox: an MCP
-connection routed through a stale deployment silently lacked a
-parameter (`as`) that a fresh build already had, and there was no
-version-number tell to catch it before the mistake happened, only
-after.
+changes.** `/health` and the MCP `initialize` handshake both report it
+live, so the number is how you tell a process running your new build
+from one that never restarted. `DEVELOPMENT_PRACTICES.md` has the rule
+and the mis-consumed message that produced it.
 
 ## Registering with a client
 
@@ -217,17 +182,11 @@ Client ID/Secret fields blank (DCR registers one automatically).
 **ChatGPT** -- also needs the public URL from `src/proxy.ts` below.
 
 **Upgrading the server does not upgrade sessions already attached to
-it.** A client's tool schema is pinned at connection time, not polled
-continuously -- a session connected before a server rebuild keeps
-running the old contract indefinitely, with no error, until it's
-reconnected (`/mcp` in Claude Code). This is most dangerous when the
-upgrade adds a safety parameter (e.g. `as` on `-inbox`): the session
-silently keeps the old, more-permissive behavior rather than failing
-loudly. Self-check: if a parameter or tool you expect the server to
-have isn't in your own attached schema, your connection is stale, not
-the server -- see `DEVELOPMENT_PRACTICES.md` for the full account
-(confirmed independently by two sessions the same night, via two
-different methods).
+it.** A tool schema is pinned at connection time, so a session that
+connected before a rebuild keeps the old contract until it reconnects
+(`/mcp` in Claude Code). Self-check: a parameter you expect that isn't
+in your own attached schema means your connection is stale, not the
+server. `DEVELOPMENT_PRACTICES.md` has the full account.
 
 ## Exposing it publicly: `src/proxy.ts`
 

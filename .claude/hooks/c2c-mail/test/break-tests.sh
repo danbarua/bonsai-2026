@@ -132,7 +132,7 @@ check "Stop's block reason does NOT contain the body marker" "$(echo "$STOP_LEAK
 check "...but DOES still name the file" "$(echo "$STOP_LEAK_CHECK" | grep -c '2026-01-03T00-00-00Z.md')" "1"
 
 # ============================================================
-echo "== (e) default watch dir is claude2claude/inbox ONLY -- other channels are NOT auto-watched =="
+echo "== (e) default watch dir is code2code/mailbox ONLY -- other channels are NOT auto-watched =="
 # Deliberately unset the override for this section: proving the default
 # does NOT reach beyond claude2claude/inbox is the entire point, so this
 # must NOT be told where to look via C2C_MAIL_WATCH_DIRS.
@@ -161,13 +161,9 @@ check "claude2gpt/inbox is NOT watched by default" \
 check "a hypothetical third channel is NOT watched by default either" \
   "$(echo "$NO_GLOB_OUT" | grep -c '2026-01-04T00-01-00Z.md')" "0"
 
-echo "== (e-continued) ...but claude2claude/inbox IS watched (sanity: this isn't watching nothing at all) =="
-printf '<!-- from: claude-desktop -->\n\nthis one IS claude-codes business\n' \
-  > "$INBOX_C2C/2026-01-04T00-02-00Z.md"
-STILL_WATCHED_OUT="$(env -u C2C_MAIL_WATCH_DIRS CLAUDE_PROJECT_DIR="$TMP_ROOT" "$HOOKS_DIR/user-prompt-submit.sh" <<< "$UPS_STDIN")"
-check "claude2claude/inbox is still watched by default" \
-  "$(echo "$STILL_WATCHED_OUT" | grep -c '2026-01-04T00-02-00Z.md')" "1"
-
+# The "this isn't watching nothing at all" sanity check now lives in (e2),
+# which asserts code2code/mailbox IS watched. claude2claude was the only
+# other default and was removed with the channel.
 rm -rf "$TMP_ROOT/.claude/claude2gpt" "$TMP_ROOT/.claude/claude2slack"
 
 echo "== (e2) code2code/mailbox IS watched by default -- a different case from claude2gpt, not an exception to it =="
