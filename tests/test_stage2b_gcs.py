@@ -2758,3 +2758,32 @@ def test_discard_uncommitted_refuses_the_test_split(bucket, tmp_path):
     name = gcs.object_path(allow_test_split=True, **TEST_ARGS)
     with pytest.raises(PermissionError, match="test-split root"):
         gcs.discard_uncommitted(name, bucket=bucket)
+
+
+def test_the_orphan_refusal_names_its_own_recovery(bucket, tmp_path):
+    """An operator meets this state as a traceback, not as a design doc.
+
+    The orphan case is the opaque one: every route out is closed by
+    design, and `discard_uncommitted` is the only thing that clears it. If
+    the error does not name it, the reader has no way from here to learn
+    it exists."""
+    obj, _ = _orphaned(bucket, tmp_path)
+    with pytest.raises(gcs.ManifestMissingError) as excinfo:
+        gcs.consume_validated(obj, str(tmp_path / "x.npz"), bucket=bucket)
+    message = str(excinfo.value)
+    assert "discard_uncommitted" in message
+    assert obj in message
+    # both readings offered, because they are indistinguishable from here
+    assert "PRE-CONTRACT" in message and "UNCOMMITTED" in message
+    assert "require_manifest=False" in message
+
+
+def test_the_recovery_hint_is_not_offered_for_run_scoped_objects(bucket, tmp_path):
+    """A RUN_SCOPED object is not create-once and never has this problem,
+    so pointing at the orphan recovery there would be noise that trains
+    people to reach for it in the wrong place."""
+    report = gcs.object_path(**REPORT_ARGS)
+    gcs.upload_file(_npz_artifact(tmp_path, name="r.npz"), report, bucket=bucket)
+    with pytest.raises(gcs.ManifestMissingError) as excinfo:
+        gcs.consume_validated(report, str(tmp_path / "r2.npz"), bucket=bucket)
+    assert "discard_uncommitted" not in str(excinfo.value)

@@ -546,8 +546,28 @@ def _device_peak_bytes(mods):
     return stats.get("peak_bytes_in_use")
 
 
-def step2b_sizing_probe(mods, record, n_total=EXPECTED_N):
+def step2b_sizing_probe(mods, bucket, record, fp, n_total=EXPECTED_N):
     """One condition, one fold, BOTH legs -- before anything expensive runs.
+
+    ## The measurement is published BEFORE the halt is raised
+
+    Order is load-bearing, not stylistic. The probe's numbers used to live
+    only in the run record, which is written at teardown -- so a session
+    that died after measuring and before finishing lost the measurement
+    entirely, and the next run had to re-measure on a metered GPU. That is
+    the "an unwritten result does not survive" failure this stage already
+    has a lesson about, and it came within minutes of costing us the Phase
+    B numbers when the launcher was killed mid-run.
+
+    So the artifact lands first and the halt is raised second. A probe that
+    HALTS is exactly the case where its evidence matters most -- it is the
+    measurement someone will want to argue with -- and it would otherwise
+    be the case most likely to lose it.
+
+    The artifact is RUN_SCOPED by construction: its kind starts with
+    `probe`, nothing consumes it, and it is never a parent. It carries the
+    run id so a resumed attempt records its own measurement rather than
+    displacing its predecessor's.
 
     ## Why the matrix is synthetic
 
@@ -586,6 +606,17 @@ def step2b_sizing_probe(mods, record, n_total=EXPECTED_N):
     proj, reasons = evaluate_probe(measured, time.time() - _RUN_T0)
     record["sizing_probe"] = {"measured": measured, **proj, "halted": bool(reasons),
                               "reasons": reasons}
+
+    # Durable BEFORE the halt -- see this function's docstring for why the
+    # ordering is the point rather than an implementation detail.
+    kind = f"probe_sizing_{record['run']['run_id']}"
+    try:
+        ensure_json(mods, bucket, _obj(mods, kind, "json"),
+                    lambda: record["sizing_probe"], fingerprint=fp)
+    except Exception as exc:                    # noqa: BLE001 - never mask the halt
+        say(f"sizing probe: FAILED to publish its measurement "
+            f"({type(exc).__name__}: {exc}); continuing to the verdict")
+
     say("sizing probe projections: JAX "
         f"{proj['jax_projected_s']:.0f}s (x{PROBE_JAX_SVD_COUNT}) + sklearn "
         f"{proj['sklearn_projected_s']:.0f}s (x{PROBE_SKLEARN_FIT_COUNT}) = ridge "
@@ -1289,7 +1320,7 @@ def main():
         # run after evolution and feature extraction could not stop the run
         # from paying for them.
         with timed_step("2b_sizing_probe", record["timings"]):
-            step2b_sizing_probe(mods, record)
+            step2b_sizing_probe(mods, bucket, record, fp)
 
         with timed_step("3_encoded_input", record["timings"]):
             encoded, encoded_name = step3_encoded_input(mods, bucket, corpus, corr,

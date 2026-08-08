@@ -1951,13 +1951,37 @@ def consume_validated(object_name, local_path, *, bucket, expected_fingerprint=N
     manifest = read_manifest(object_name, bucket=bucket, allow_test_split=allow_test_split)
     if manifest is None:
         if require_manifest:
+            # Two very different situations produce this state, and the
+            # recovery differs, so the error names both rather than leaving
+            # an operator to infer which one they are looking at from a
+            # traceback. Without this the orphan case is especially opaque:
+            # every route out is closed by design, and the one function
+            # that clears it is not mentioned anywhere the reader is
+            # looking.
+            recovery = ""
+            if artifact_class(object_name) == LINEAGE:
+                recovery = (
+                    f"\n\nTwo things produce this state:\n"
+                    f"  (a) PRE-CONTRACT HISTORY -- written before the fingerprint "
+                    f"contract existed (ladder stages 1 and 2). Pass "
+                    f"require_manifest=False at this call site, deliberately, with a "
+                    f"comment naming the rung.\n"
+                    f"  (b) AN UNCOMMITTED PAYLOAD -- a session died between the "
+                    f"payload write and the sidecar write, so these bytes were never "
+                    f"committed and no consumer may accept them. Every ordinary route "
+                    f"out is closed by design: this consume refuses, a create fails "
+                    f"its precondition, and force=True raises WriteOnceViolation. "
+                    f"Clear it with discard_uncommitted({object_name!r}), which "
+                    f"refuses anything carrying a manifest, then re-run.\n"
+                    f"If you did not expect either, find out which it is before "
+                    f"choosing -- (a) and (b) look identical from here.")
             raise ManifestMissingError(
                 f"{object_name!r} exists but carries no manifest at "
                 f"{manifest_object_name(object_name)!r}. Under the fingerprint "
                 f"contract an artifact without recorded provenance is refused: an "
                 f"object merely existing is never sufficient evidence that it is "
                 f"resumable. Pass require_manifest=False, deliberately, only for "
-                f"artifacts written before the contract existed.")
+                f"artifacts written before the contract existed." + recovery)
         downloaded = False
         if not os.path.isfile(local_path):
             download_file(object_name, local_path, bucket=bucket,

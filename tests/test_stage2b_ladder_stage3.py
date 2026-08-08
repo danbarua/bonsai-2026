@@ -436,3 +436,56 @@ def test_the_test_file_is_in_the_stage2b_list():
     """`STAGE2B_TEST_FILES` is a narrowing, and verifying a narrowing with
     the broader form (`pytest tests/`) proves nothing about it."""
     assert "tests/test_stage2b_ladder_stage3.py" in _make_var("STAGE2B_TEST_FILES")
+
+
+# ---- the probe's measurement must survive its own halt ----
+
+def test_probe_publishes_its_measurement_before_raising_the_halt(driver, tree):
+    """The ordering is the point, not a style choice.
+
+    The probe's numbers used to live only in the run record, written at
+    teardown -- so a session dying after measuring lost the measurement and
+    the next run re-measured on a metered GPU. A HALTING probe is exactly
+    the case where the evidence matters most and would otherwise be the
+    case most likely to lose it.
+
+    Asserted structurally, by source order within the function, because the
+    property is "the write happens first" and no return value exposes it."""
+    fn = next(n for n in ast.walk(tree)
+              if isinstance(n, ast.FunctionDef) and n.name == "step2b_sizing_probe")
+
+    publish_lines = [n.lineno for n in ast.walk(fn)
+                     if isinstance(n, ast.Call) and isinstance(n.func, ast.Name)
+                     and n.func.id == "ensure_json"]
+    halt_lines = [n.lineno for n in ast.walk(fn)
+                  if isinstance(n, ast.Raise)]
+
+    assert publish_lines, "the probe publishes no artifact at all"
+    assert halt_lines, "the probe has no halt path"
+    assert min(publish_lines) < min(halt_lines), (
+        "the probe raises its halt before publishing its measurement, so a "
+        "halting run loses the very evidence the halt should be argued from")
+
+
+def test_probe_artifact_is_run_scoped_and_carries_the_run_id(driver):
+    """Nothing consumes it and it is never a parent, so RUN_SCOPED is
+    right. The run id is what stops a resumed attempt displacing its
+    predecessor's measurement."""
+    import stage2b_gcs as gcs
+    kind = "probe_sizing_20260808T000000Z"
+    name = gcs.object_path(stage=3, condition=None, kind=kind, ext="json",
+                           split="train")
+    assert gcs.artifact_class(name) == gcs.RUN_SCOPED
+    assert "probe_sizing_" in name
+
+
+def test_probe_publication_failure_never_masks_the_halt(driver, tree):
+    """A bucket problem must not turn a halting probe into a passing one.
+    The publish is wrapped; the halt is not inside that wrapper."""
+    fn = next(n for n in ast.walk(tree)
+              if isinstance(n, ast.FunctionDef) and n.name == "step2b_sizing_probe")
+    for handler in [n for n in ast.walk(fn) if isinstance(n, ast.Try)]:
+        raises_inside = [n for n in ast.walk(handler) if isinstance(n, ast.Raise)]
+        assert not raises_inside, (
+            "the halt is raised inside the try/except that guards publication, "
+            "so a publish failure would swallow it")
