@@ -51,6 +51,7 @@ claim the rest of this repository's discipline exists to prevent.
 | 27 | 08-08 | `b38e669` | `FIRST_PARTY_ROOTS` listed `experiments/`, `src/` and `tools/` but not `tests/`, so the new hard-import guard reported `tests/_makefile.py` — imported by six test files — as an undeclared third-party package. The roots answered a narrower question than the one asked | it fired on its first real run |
 | 28 | 08-08 | session | `stage2b_ridge.FOLD_SEED` — DESIGN.md's locked `random_state=42` — was pinned only by tests that read the seed from the module and asserted a downstream record equalled it. Moving it 42 → 43 failed nothing: 92 passed. `N_SPLITS` 5 → 4 failed four tests in the same sweep, so the gap was this constant specifically | building the gate inventory |
 | 29 | 08-08 | session | DESIGN.md's intercept-aware ridge MUST — "center targets within the training fold and restore the intercept from the general expression, not assume it away" — had no test that fails when it is undone. The `mean(Y)` shortcut the design explicitly refuses passed 93/93; so did dropping the target centering entirely. On centered X the two forms are algebraically identical, and every fixture standardized X first | building the gate inventory |
+| 30 | 08-08 | session | `test_corpus_constants` pins `EXPECTED_REF_IDX == 363` and `ENCODER_STEPS == 1200`, and both halts that CONSUME them — the gauge-node refusal in `step1b_topologies`, the step-count refusal in `step3_encoded_input` — had no test at all. `if False:` on either left the pin green. An equality pin notices a literal edit and is blind to its consumer being deleted, which is the failure that costs an A100 run | building the gate inventory |
 
 Two near-misses belong here too, because they were caught *before* becoming
 tests:
@@ -480,6 +481,20 @@ self-referential pin is **worse than weak, it is inert**: it fails under
 no edit at all. And it reads as the more rigorous of the two, because
 parameterising on the constant instead of hardcoding it is ordinarily
 good practice. Here it is what removes the test.
+
+Three levels, in the order they should be reached for, because most
+"locked constant" tests land on the middle one and stop:
+
+1. **self-referential pin** — blind to every change, and reads as the
+   most rigorous of the three;
+2. **equality pin** — notices the literal being edited, blind to the
+   consumer being deleted;
+3. **verdict test** — notices both.
+
+The gap that costs a run sits at level 2. #30 is the example:
+`EXPECTED_REF_IDX == 363` and `ENCODER_STEPS == 1200` were pinned, and
+both halts consuming them could be replaced with `if False:` while the
+pins stayed green.
 
 The remedy is the one thing parameterisation forbids: one side must be
 the frozen literal, transcribed from the document that froze it, and the
