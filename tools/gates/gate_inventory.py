@@ -63,7 +63,13 @@ _CANDIDATE_MARKERS = (
     ("REQUIRED", re.compile(r"\brequire[ds]?\b", re.I)),
     ("LOCKED", re.compile(r"\block(?:ed|s)?\b", re.I)),
     ("FROZEN", re.compile(r"\bfrozen\b|\bfreeze[sd]?\b", re.I)),
-    ("CANNOT", re.compile(r"\bcannot\b|\bcan not\b|\bmay not\b", re.I)),
+    # "may not" is the obvious form; "NO metric MAY be added" and "may only"
+    # are the ones that slipped. Found by a fixture written for an unrelated
+    # test, which is a fair indication of how many more forms this record
+    # uses that nobody has thought of -- and the reason disposition, not
+    # detection, is what the coverage floor rests on.
+    ("CANNOT", re.compile(r"\bcannot\b|\bcan not\b|\bmay not\b|"
+                          r"\bno\s+\w+\s+may\b|\bmay only\b", re.I)),
     ("SHALL", re.compile(r"\bshall\b", re.I)),
     ("FORBIDDEN", re.compile(r"\bforbidden\b|\bnot permitted\b|\bprohibit", re.I)),
     ("ONLY", re.compile(r"\bonly ever\b|\bthe one place\b|\bexactly one\b", re.I)),
@@ -258,6 +264,19 @@ _REQUIRED_BY_KIND["binding_claim"] = {
     "discharged_in": "where in the write-up this promise is kept, so a "
                      "reader can check it before the package goes out",
 }
+
+# Optional on `binding_claim`: a note that future tooling could plausibly
+# enforce this one -- a doc-diff lint for "no metric added after results
+# exist", say. It records a possibility so it is not lost.
+#
+# **It changes nothing.** A tagged row is still listed as unenforceable,
+# still requires `discharged_in`, and is still discharged by a person. The
+# constraint is deliberate: a tag that quietly promoted a row out of the
+# human-reads-this list would convert "somebody must check this" into "the
+# tool checks this" in everyone's head, which is worse than no tag at all,
+# and a half-built lint firing on some cases is exactly how that happens.
+# Same reason a `manual` trigger is reported rather than fatal.
+_OPTIONAL_BY_KIND = {"binding_claim": ("mechanizable_candidate",)}
 
 
 def check_ids_unique(clauses: list[Clause]) -> list[Finding]:

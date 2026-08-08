@@ -333,6 +333,27 @@ def test_unenforceable_promises_are_listed_not_netted_into_coverage(tmp_path):
     assert gate_inventory.coverage(clauses, inventory) == (1, 1)
 
 
+def test_tagging_a_claim_mechanizable_does_not_promote_it_out_of_the_list(tmp_path):
+    """The tag records a possibility. It must not discharge anything.
+
+    A tag that quietly moved a row out of the human-reads-this list would
+    convert "somebody must check this" into "the tool checks this" in
+    everyone's head -- worse than no tag, and exactly how a half-built lint
+    firing on some cases does its damage.
+    """
+    doc = write_doc(
+        tmp_path, "# P\n\nNo metric may be added after results exist.\n")
+    clauses = derive_clauses([doc], tmp_path)
+    inventory = {"reviewed": True, "binding_claim": {clauses[0].clause_id: {
+        "discharged_in": "FINDINGS.md",
+        "mechanizable_candidate": "a doc-diff lint could compare metric "
+                                  "lists across commits"}}}
+    assert reconcile(clauses, inventory, tmp_path) == []
+    still_listed = gate_inventory.unenforceable(clauses, inventory)
+    assert [c.clause_id for c in still_listed] == [clauses[0].clause_id], (
+        "a mechanizable tag removed the row from the unenforceable listing")
+
+
 def test_a_gate_row_is_not_listed_as_unenforceable(tmp_path):
     """Non-vacuity for the case above: it would pass on an `unenforceable`
     that returned every clause."""
