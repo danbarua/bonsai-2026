@@ -570,6 +570,21 @@ taxonomy G therefore applies to it with full force.
    string. Reconciliation catches absent gates and says nothing about
    present-but-unreachable ones.
 
+   **A mapped test must be proven to fail without its gate.** "Gate cited,
+   test cited" certifies *spelling*. The concrete precedent: the first test
+   written for the missing-halt defect grepped the source for
+   `halt_reasons.append(...)`, which survives when the branch guarding it
+   is disabled by `if False:` — green against the broken code, and it would
+   have passed on exactly the artifact that failed. A reconciliation that
+   cannot distinguish a real gate from a named one does not discharge what
+   it was asked for.
+
+   This is a deliberate cost, not a free win: a break-test per gate is real
+   work, and it is the reason this requirement is stated rather than
+   assumed. It is the same rule the rest of this repository already applies
+   to guards — a guard you have not seen fail is not yet a guard — applied
+   to the mapping rather than to the code.
+
 ### 5.4 Break-tests are part of the definition
 
 A guard you have not seen fail is not yet a guard. Each of these is a test
