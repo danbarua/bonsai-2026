@@ -65,8 +65,8 @@ def build_annotation(run_id):
                              split=SPLIT)
     return {
         "annotates": report,
-        # THE machine-decidable field. The reviewer standard (c2gpt archive
-        # 2026-08-08T08:56:03Z) requires "an unambiguous machine-readable
+        # THE machine-decidable field. The Reviewer's standard requires
+        # "an unambiguous machine-readable
         # supersession/correction field such that automated consumers cannot
         # continue treating the old STAGE3_OK verdict as current without
         # explicitly ignoring the correction... make current validity

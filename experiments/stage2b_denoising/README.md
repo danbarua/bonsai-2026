@@ -5,16 +5,20 @@ evolution, on top of the same already-dynamically-encoded local phase
 state, improve single-step denoising prediction error relative to the
 unevolved encoded state alone? The design is locked (`DESIGN.md`).
 
-**Status: feasibility ladder stages 1 and 2 complete; stage 3 Phase A
-complete, Phase B not written.** Stage 1 (n=1,000) and stage 2 (n=5,000)
-have both run end to end on Colab A100s. Stage 3's Phase A encoded all
-60,000 official training images on local CPU and is the first Stage 2B
-artifact published with provenance attached; the 54,000 images its
-54,000-image predecessor covered reproduced bit-exactly.
-`FINDINGS.md` carries every result,
-including stage 1's first honest FAIL and the disclosed post-lock
-amendment it produced. No confirmatory statistic has been computed on the
-test split, and none may be before the Stage 4 gate.
+**Status lives in `FINDINGS.md`. It is not restated here.**
+
+It used to be, and it drifted: this header read "Phase B not written" for
+a day after Phase B had run twice. A cold-read audit found the same fact
+asserted in three documents, three ways, with only `FINDINGS.md` correct
+— so the fix is not a better sentence here, it is one authority and
+pointers everywhere else. Restating mutable state is how the copies come
+to disagree, and the newest commit is not the most current claim: the
+file holding the older statement had the *later* commit date, because
+that commit touched unrelated lines.
+
+Two standing facts that are not status, and so belong here: no
+confirmatory statistic has been computed on the test split, and none may
+be before the Stage 4 gate.
 
 Read `DESIGN.md` first — it is the authoritative spec for every constant,
 gate and statistical rule this code implements, and it was locked through
@@ -187,10 +191,14 @@ existed; nothing in them may change once a result has been seen):
   package's five demanded negative paths: which test evidences each, what
   that test asserts, where the deliberate breakage that confirmed a guard
   is recorded, and where coverage is narrower than the demand.
-  Stale-artifact refusal is the one demand not yet green: its mechanism is
-  built and tested, but no driver consumes through `consume_validated`
-  yet, and the table says so rather than counting the mechanism as
-  adoption.
+  Which demands are covered is stated THERE, not here. This paragraph
+  used to name stale-artifact refusal as the one outstanding demand and
+  outlived that by a day -- the same restating-mutable-state defect as
+  the status header above.
+
+  The standing rationale, which is not status and does not drift:
+  coverage is reported as narrower than the demand where it is narrower,
+  rather than counting a built mechanism as adoption.
 
 **Diagnostics** (not part of the locked pipeline; convention of Stage
 2A's `diagnose_*.py` scripts — investigate, change nothing themselves):
@@ -236,9 +244,10 @@ make stage2b-test    # the fast suite -- no network, no cloud
 ```
 
 Ladder targets get added as each rung is actually driven, not written
-speculatively. Stage 1 has them: `stage2b-stage-inputs` puts KMNIST in
-the bucket once, and `stage2b-ladder-stage1` runs the rung. Later rungs
-have none yet.
+speculatively. `stage2b-stage-inputs` puts KMNIST in the bucket once;
+`stage2b-ladder-stage1`, `-stage2` and `-stage3` run their rungs. The
+Makefile is the list -- this paragraph said "later rungs have none yet"
+while two of them existed.
 
 ## Cloud execution: scripts, not notebooks
 
