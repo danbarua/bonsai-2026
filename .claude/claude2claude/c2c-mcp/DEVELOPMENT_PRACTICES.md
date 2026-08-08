@@ -7,6 +7,15 @@ mediates a shared, mutable, multi-reader mailbox. Every item below is
 grounded in something that actually went wrong in one session on
 2026-08-07, not a hypothetical.
 
+`c2c-send`/`c2c-inbox` (referenced throughout the incidents below, since
+they were the tools live when these were found) are deprecated as of
+0.7.0 in favor of `code2code-*` -- see README.md's Tools section for
+current status and why they're still registered rather than removed.
+The incidents themselves are left as originally written; the mechanism
+they document (staleness, `updatedInput` semantics, auto-injection)
+applies identically to whichever tool a given session is actually
+using.
+
 ## There are (at least) three distinct connection paths — never assume "the server" means one of them
 
 1. **Direct local**: a CLI session's `.mcp.json` `http` entry pointing
