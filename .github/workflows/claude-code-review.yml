@@ -67,7 +67,24 @@ jobs:
           # can turn a build red is the failure mode this repository has
           # spent the most effort avoiding. Deterministic checks gate; this
           # reports.
+          # Without this the review is blindfolded. Measured on run
+          # 31255640813: TWELVE permission denials, every one a Bash call it
+          # needed to read its own diff -- `gh pr view`, `gh pr diff`,
+          # `git fetch refs/pull/N/head`, `git log --parents` -- retried
+          # across 25 turns and $0.96 before it found another route. On a
+          # runner there is nobody to approve, so "requires approval" means
+          # denied, silently.
+          #
+          # The consequence is worse than waste. Had that PR contained test
+          # files, the review could have reported `files_examined: []` and
+          # the publisher would have failed it for examining nothing -- a red
+          # build blamed on the review when the cause was this config.
+          #
+          # Read-only and enumerated rather than blanket Bash. A reviewer
+          # needs to SEE the diff; it has no business writing, pushing, or
+          # running the suite, and the prompt already forbids all three.
           claude_args: |
+            --allowed-tools 'Read,Grep,Glob,Bash(git diff:*),Bash(git log:*),Bash(git show:*),Bash(git fetch:*),Bash(git rev-parse:*),Bash(gh pr view:*),Bash(gh pr diff:*)'
             --json-schema '{"type":"object","properties":{"no_tests_changed":{"type":"boolean","description":"True if the diff contained no test files at all"},"files_examined":{"type":"array","items":{"type":"string"},"description":"Every test file actually read, by path"},"findings":{"type":"array","items":{"type":"object","properties":{"file":{"type":"string"},"test":{"type":"string"},"category":{"type":"string","description":"VACUOUS_TESTS.md taxonomy letter, or none"},"what_would_have_to_change":{"type":"string","description":"What would have to change for this test to fail; say nothing if the answer is nothing"}},"required":["file","test","category","what_would_have_to_change"]}},"summary":{"type":"string"}},"required":["no_tests_changed","files_examined","findings","summary"]}'
           prompt: |
             Review the changed tests in ${{ github.event.inputs.target || format('the pull request {0}', github.event.pull_request.number) }}.
