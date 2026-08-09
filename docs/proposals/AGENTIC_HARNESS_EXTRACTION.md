@@ -106,9 +106,18 @@ the defensible figure is **38 evidenced rows**, not 42.
 ## 4. What the ordering says
 
 Every guard built *ahead* of use is UNPAID. The PAID rows are dominated by
-peers using tools on real work and outside readers reading records. On this
-evidence it is the **ordering** that paid, not the tooling: build in response
-to an incident, and the same component lands differently.
+peers using tools on real work and outside readers reading records.
+
+An earlier draft concluded: "it is the ordering that paid, not the tooling."
+That overclaims — it converts a correlation with implementation order into a
+mechanism, and this review has no way to discriminate the two. The defensible
+statement:
+
+> In this 72-hour window, observed payoff is concentrated in controls
+> introduced or exercised in response to concrete incidents. Prospectively
+> built controls have not yet demonstrated comparable payoff.
+
+That is weaker than "build reactively" and it is what the evidence supports.
 
 ## 5. Extraction spec
 
@@ -175,6 +184,10 @@ provenance probes (measurements of one harness version; the emitters lift) ·
 2. **Anti-vacuity exit-code contract** (exit 2 on zero candidates derived,
    exit 1 on any finding) — must precede any guard, because it fixes what
    "green" means and cannot be retrofitted across guards already written.
+   **Reconciles with §6's "build only after a defect proves it":** define the
+   generic exit-code *convention* up front; do not build a dedicated
+   anti-vacuity *scanner* until the hazard manifests. A convention costs a
+   paragraph and cannot be retrofitted; a scanner costs a component and can.
 3. Scope regex — before its three consumers, which must agree.
 4. Review output JSON schema — before the publisher; the schema is its
    contract.
@@ -202,6 +215,35 @@ Flagged by the extraction agent, adjudicated against the ledger:
 `triage_candidates.py` · `ci_targets.py` (cites principle twice; its "caught"
 example is hypothetical) · `gate_inventory.py`'s trichotomy · the 100%
 coverage floor and 24 finding kinds. None of these cite an incident.
+
+### 5h. One design choice NOT to carry forward: content-derived identity
+
+Raised by external review as a challenge rather than a refinement, and
+accepted.
+
+Sections 5d and 5e both note that clause ids are `sha256` of normalised
+clause text, and treat that as a constraint to work within — "freeze the
+schema early, because rewording orphans a mapping." That accepts the premise.
+The premise is the defect.
+
+**Using mutable prose as identity conflates two jobs.** Identity should answer
+"which obligation is this?" and survive an editorial reword. Content hashing
+should answer "has this text changed since it was dispositioned?" and fire
+loudly when it does. This project's design makes the first job depend on the
+second, so improving a sentence silently destroys its disposition — and the
+lesson a naive reader takes from that is "don't reword protocol documents,"
+which is the wrong adaptation.
+
+**The greenfield form:** give each obligation a stable explicit id, assigned
+once and never derived. Store the normalised-text hash *alongside* it as a
+separate field. A reword then produces a visible "text changed, disposition
+needs re-confirmation" finding instead of an orphan. This is strictly more
+information than the current scheme and costs one column.
+
+This supersedes, for a new project, the "freeze the schema shape early"
+advice in §5e.5 — that advice remains correct *for this repository*, where
+89 rows already carry content-derived ids and changing the scheme now is its
+own migration.
 
 ## 6. Greenfield: what to define up front
 
@@ -247,7 +289,7 @@ formats, not software.**
 
 | Component | Trigger |
 |---|---|
-| Anti-vacuity check | First time a suite passes with everything skipped *and* a claim is drawn from it |
+| Anti-vacuity *scanner* (the convention goes in on day 1 — §5e.2) | First time a suite passes with everything skipped *and* a claim is drawn from it |
 | Deliberate breakage tests | First time a guard a *result depended on* is found unable to fail |
 | Doc-count tests | A second prose-count error reaching a science record. Cheaper: stop putting literal counts in prose |
 | Dependency pinning guards | First time a dependency change moves a numeric result |
@@ -257,8 +299,12 @@ formats, not software.**
 
 The **agent mail mesh** and the **80,253 words of process docs** (32
 docs-only commits) appear nowhere in the ledger. Absence from a ledger is
-weaker evidence than an UNPAID verdict — but unmeasured apparatus at that
-cost is, by default, unjustified.
+weaker evidence than an UNPAID verdict.
+
+Precisely: **the burden of justification has not been met** — which is not the
+same as demonstrated waste, and over a three-day window the distinction is
+load-bearing. The claim is that apparatus at this cost should carry a
+measurement and currently carries none, not that it is known to be worthless.
 
 ## 7. Vocabulary
 
@@ -281,10 +327,15 @@ exit-code contract at dependency-order position 2. Both are right, and
 together they are the cleanest vocabulary finding here: **the mechanism earned
 its place; the coined noun is inflation.** Nothing keys on the word.
 
-**Undefined but relied upon.** `adjacent evidence` — zero definitions, five to
-six uses, all in `gates.toml`; a cold reader must guess whether "adjacent"
-means a different clause, module, or claim, and guessing "different module"
-fills two deliberately empty rows and flips readiness green. Highest-risk gap.
+**Undefined but relied upon — these are harness defects, not nomenclature
+complaints.** `adjacent evidence` is an **uncontrolled input to a decision
+procedure**: zero definitions, five to six uses, all in `gates.toml`; a cold
+reader must guess whether "adjacent" means a different clause, module, or
+claim, and guessing "different module" fills two deliberately empty rows and
+flips readiness from failing to passing. Highest-risk gap. It and the
+`break_demonstrated` collision below are filed as tasks #26 and #25 **as
+defects**. The second is the more serious on reflection: it undermines the one
+evidentiary field §6.3 identifies as the most transferable mechanism here.
 Then the status values `pending_consumer`/`pending_package`/`not_applicable`,
 defined only in divider comments — `pending_package` fails readiness while
 `not_applicable` passes, so a wrong guess silently downgrades an obligation.
@@ -342,8 +393,49 @@ anywhere.
 
 What would distinguish the readings: **a persisted log of blocked-then-
 corrected events, retaining the pre-correction text.** It does not exist here.
-Until it does, every efficacy claim about this apparatus — including the
-negative ones in this document — is untestable in both directions.
+
+An earlier draft ended "every efficacy claim about this apparatus is
+untestable in both directions." That is too broad, and it discounts the
+ledger this document spent its length building. Several narrow effects are
+directly evidenced and stand:
+
+- `review_delta.sh` caused four catalogued defects and caught none.
+- Provenance capture produced at least one incorrect provenance record, which
+  was then relied upon.
+- External review detected specified errors in committed dispositions.
+- `break_demonstrated` elicitation exposed two latent failures that review
+  missed.
+- The spend and transit-integrity guards did not encounter their hazards in
+  the observed window.
+
+What is untestable is the **counterfactual net-prevention effect**: how many
+defects would have occurred without the apparatus, including any deterred
+before they took observable form. That single quantity is unmeasured, and it
+is the one on which "was the apparatus worth it" turns.
+
+## 9. What this establishes, and what it does not
+
+Stated narrowly, because the broad version was wrong twice already.
+
+**This document does not establish that an agentic-research harness is
+useless.** It establishes four narrower things:
+
+1. The present harness was **massively overbuilt relative to its demonstrated
+   three-day value**.
+2. Several sophisticated controls **created their own failure surface** — two
+   of them net-negative in defects within the observation window.
+3. The highest observed returns came from **independent reading, real-world
+   use, and forcing claim-makers to produce causal evidence**.
+4. The **counterfactual preventive value of the remaining machinery is
+   unmeasured**, and nothing here was instrumented to measure it.
+
+The greenfield implication is therefore not "no tooling." It is: **start with
+provenance conventions, evidence-bearing claims, explicit obligations, and
+independent review; instrument prevented failures; then earn automation
+incrementally from observed failure modes.**
+
+That conclusion survives the taxonomy correction in §2, which the original
+"humans good, guards bad" framing did not.
 
 ---
 
@@ -423,9 +515,13 @@ People did. Specifically:
 - someone using a tool for real and noticing it misbehave
 - an author going back and re-checking their own claim
 
-Every tool built *before* anyone needed it scored zero. Every tool that came
-*after* a real problem scored something. On this evidence it is the **timing**
-that mattered, not the tools.
+Every tool built *before* anyone needed it scored zero.
+
+I first wrote "so it is the timing that mattered, not the tools." That claims
+more than we know — it treats an observed pattern as an explanation. The
+careful version: in these three days, the things that paid off were the ones
+built or used in response to an actual problem. The things built in advance
+have not paid off *yet*. That is a description, not a rule.
 
 ## An important thing I got wrong the first time
 
@@ -453,9 +549,15 @@ kept alongside what the person was about to write. This project has no such
 record. Of the last 100 automated runs, six failed, and all six were the
 checking tools failing on themselves. None of them stopped a piece of science.
 
-So: **every claim about whether this tooling was worth it — including the
-critical ones in this document — is currently untestable.** That is the
-honest position.
+I first wrote that this makes *every* claim about the tooling untestable.
+That went too far and threw away the evidence this document spent its length
+gathering. Plenty is directly known: one tool caused four problems and found
+none; another wrote down a false record that someone then quoted; outside
+readers found specific errors; one form field exposed two broken checks.
+
+What we genuinely cannot measure is the only question that settles the whole
+argument: **how many mistakes would have happened without any of it.** That
+number is unknown, and nothing here was built to find out.
 
 ## The words the team invented
 
@@ -514,8 +616,11 @@ cost four problems.
 
 Two large things do not appear in the evidence at all: the messaging system
 the agents use to talk to each other, and the 80,000 words of process
-documentation. Not appearing is weaker evidence than scoring badly. But
-something that expensive and that unmeasured is, by default, unjustified.
+documentation. Not appearing is weaker evidence than scoring badly.
+
+The precise complaint is that nobody has shown these are worth their cost —
+not that they have been shown to be waste. Over three days those are very
+different statements, and only the first is supported.
 
 ## If you want to reuse any of this elsewhere
 
@@ -528,6 +633,15 @@ A few need real work. One has the build system baked into it. One depends on
 a private form whose shape must be decided early, because the project
 identifies each entry by a fingerprint of its own text — reword an entry
 later and the link to it breaks.
+
+**That last part is a mistake worth not repeating.** Naming a thing by its own
+wording means you cannot improve the wording without losing track of the
+thing. A new project should give each entry a plain label that never changes,
+and keep the fingerprint of the text in a separate column. Then rewording
+produces a useful warning — "this text changed, check the decision still
+holds" — instead of silently breaking the link. The cost is one extra column.
+The current design teaches people not to improve their own documents, which
+is the wrong lesson to build in.
 
 And one warning is recorded rather than hidden: the automated review currently
 re-runs on every single change, at about $1.28 a time. That is a known
