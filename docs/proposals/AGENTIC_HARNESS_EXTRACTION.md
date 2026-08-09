@@ -441,7 +441,7 @@ That conclusion survives the taxonomy correction in §2, which the original
 
 # The same document, in plain English
 
-Nothing new is claimed here. This is sections 1–8 again, for a reader who has
+Nothing new is claimed here. This is sections 1–9 again, for a reader who has
 not worked on this project. Where the version above uses a word this team
 invented, this version says what it means.
 
@@ -472,9 +472,14 @@ one working from evidence rather than opinion.
 
 ## What we found
 
-**A catalogue of 42 mistakes.** In six of them, something written down and
-saved was actually wrong. In one, a tool caught a wrong thing before it got
-saved. The other 35 were real problems that never affected any result.
+**A catalogue of 42 entries, of which 38 count.** The review set itself a
+rule: no entry counts unless you can point at the exact change that fixed it.
+Four entries fail that rule, so they are left in the catalogue but kept out of
+every conclusion drawn from it.
+
+Of the 38 that count: in six, something written down and saved was actually
+wrong. In one, a tool caught a wrong thing before it got saved. The other 31
+were real problems that never affected any result.
 
 **The most useful thing in this review:** the two most complicated tools the
 team built caused more problems than they found. One of them, a tool for
