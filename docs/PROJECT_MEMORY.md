@@ -399,11 +399,15 @@ before the result).
 The full feasibility ladder ran to completion: stages 1-2, Phase A/B of
 stage 3, and stage 4, the one locked confirmatory evaluation on the
 official 10,000-image KMNIST test corpus. `T` (the learned topology,
-runtime-evolved) is the unique winner: the primary test (evolution vs.
+runtime-evolved) is the unique winner among the ridge-based,
+phase-representation conditions: the primary test (evolution vs.
 pre-evolution) is entirely below zero (95% CI [-0.0046, -0.0043]), the
 denoising gate against the identity baseline also passes, and `T`
 outperforms all three control graphs after Holm correction in both
-prespecified families. Full account below and in
+prespecified families. **Not established: that `T` is the best
+condition overall** -- the CNN, a separate model class tested against
+nothing here, has a numerically lower mean MSE. Full account, including
+that comparison, below and in
 `experiments/stage2b_denoising/FINDINGS.md`'s stage-4 section.**
 `experiments/stage2b_denoising/DESIGN.md` -- seven drafts, four external
 review rounds plus an adversarial blind-spot review and an outsider peer
@@ -627,9 +631,20 @@ so the "actual denoising" claim is licensed, not just relative
 improvement); both prespecified Holm-corrected families (three controls
 vs. `pre_evolution`; six pairwise among the four evolved graphs) reject
 uniformly favorably for `T`; `one_graph_wins.unique_winner = "T"` --
-`DESIGN.md`'s named watched-for outcome #2, realized. Raw-pixel ridge and
-the identity baseline sit within rounding of each other (0.198856 vs.
-0.198856), so named outcome #5 (raw pixel dominating) did not obtain.
+`DESIGN.md`'s named watched-for outcome #2, realized -- **among the
+ridge-based, phase-representation conditions specifically**, the
+comparison the statistics families and `one_graph_wins` actually run.
+Raw-pixel ridge and the identity baseline sit within rounding of each
+other (0.198856 vs. 0.198856), so named outcome #5 (raw pixel dominating)
+did not obtain. **Not established: that `T` is the best-performing
+condition overall.** The CNN -- a categorically different, nonlinear
+model class, in neither statistics family, never tested against `T` or
+any ridge condition -- has a LOWER mean clipped MSE than `T` (0.063069
+vs. 0.065623, ~3.9% relative, CNN winning on 5,814/10,000 images); a
+descriptive-only paired bootstrap computed post hoc puts that gap's CI at
+[-0.00276, -0.00235], entirely favoring the CNN, offered as a magnitude
+estimate only, not a locked result. "T is the unique winner" names the
+winner within its own comparison, not across model classes.
 **Caveat carried forward from Phase B's amendment, restated because it
 still applies**: `T` and `lattice` both refit at their stage-3
 grid-floor alpha (`1e-6`, unre-selected, per the driver's frozen

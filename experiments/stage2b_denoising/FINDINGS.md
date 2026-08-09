@@ -1212,10 +1212,33 @@ throughout this file and this driver, per DESIGN.md's own framing -- the
 CNN is in neither statistics family and is not part of the inference this
 section's verdict rests on.
 
+**Stated plainly, because "T is the unique winner" above is easy to
+over-read: the CNN's mean MSE is LOWER (better) than `T`'s, not higher.**
+`T`'s mean clipped MSE (recovered from the identity-gate contrast:
+identity's 0.198856 minus the gate's observed mean 0.133233) is
+**0.065623**; the CNN's is **0.063069** -- a difference of 0.002554
+(~3.9% relative) in the CNN's favor, the CNN winning on 5,814 of 10,000
+images against `T`'s 4,186. `DESIGN.md` never places the CNN in either
+statistics family or in any named watched-for outcome, so no corrected,
+locked test exists between it and `T` or any ridge condition --
+`one_graph_wins`'s verdict is scoped to the four ridge-based evolved-graph
+conditions only, and correctly says nothing about the CNN. A
+**descriptive-only** paired bootstrap computed after the fact for this
+write-up (20,000 resamples, `seed=42`, NOT part of the locked design, not
+Holm-corrected, not a second confirmatory family) puts the CNN-minus-T
+gap's 95% CI at **[-0.00276, -0.00235]**, entirely below zero -- offered
+as a magnitude estimate, not a second locked verdict. The honest claim
+this section supports is narrower than "T is the best model overall": `T`
+is established as the best-performing condition **among the ridge-based,
+phase-representation conditions**, via the locked procedure; a
+categorically different, nonlinear model class does numerically better on
+the same corpus and was never tested against it.
+
 ## Descriptive baselines, official test corpus
 
 | condition | mean clipped MSE |
 |---|---:|
+| `T` (recovered from the identity-gate contrast) | 0.065623 |
 | `raw_505` | 0.198856 |
 | `raw_784` | 0.198856 |
 | rescaled identity (`clip(x_t_clip / sqrt(0.5), 0, 1)`) | 0.246952 |
@@ -1294,4 +1317,12 @@ results were not part of this evaluation and were not required to be, per
 needs; and INFRA's still-open finding that the CNN has no stated consumer
 in `DESIGN.md`'s own text, which this result treats as settled in the
 "descriptive comparator" reading rather than resolving the ambiguity
-INFRA named.
+INFRA named -- sharpened by this section's own descriptive finding that
+the CNN's mean MSE is numerically lower than `T`'s, since a design that
+gave the CNN a stated consumer would have had to reckon with that
+directly rather than reporting it as a footnote. **"T is the unique
+winner" names the winner among the ridge-based, phase-representation
+conditions -- the comparison `DESIGN.md`'s statistics families and
+`one_graph_wins` actually run. It is not a claim that `T` is the
+best-performing condition in this file, and the CNN's descriptive number
+says it is not.**
