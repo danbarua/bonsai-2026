@@ -498,12 +498,19 @@ PINNED_SHA256 = {
 }
 
 
-def parent_map(mods, bucket, names):
-    """`{object_name: payload_sha256}` for a set of parents. Mirrors
-    `run_ladder_stage3.py::parent_map` exactly."""
+def parent_map(mods, bucket, names, *, allow_test_split=False):
+    """`{object_name: payload_sha256}` for a set of parents.
+
+    Unlike `run_ladder_stage3.py::parent_map` -- which this is otherwise a
+    straight copy of -- every parent here IS a test-side object, so this
+    takes the same opt-in every other test-side accessor in this file
+    takes, rather than defaulting to it silently. `read_manifest` gates on
+    the object path regardless of who constructed it or when; a name built
+    through `_obj_test` still needs the opt-in threaded to THIS call."""
     out = {}
     for name in names:
-        manifest = mods.gcs.read_manifest(name, bucket=bucket)
+        manifest = mods.gcs.read_manifest(name, bucket=bucket,
+                                          allow_test_split=allow_test_split)
         digest = (manifest or {}).get("payload_sha256")
         if digest is None:
             local = local_path_for(name)
@@ -647,7 +654,7 @@ def step2_test_corruption(mods, bucket, corpus, fp, corpus_name):
 
     corr, _ = ensure_npz(mods, bucket, _obj_test(mods, "corruption_test", "npz"),
                          compute, fingerprint=fp, allow_test_split=True,
-                         parents=parent_map(mods, bucket, (corpus_name,)))
+                         parents=parent_map(mods, bucket, (corpus_name,), allow_test_split=True))
 
     n = corpus["images_01"].shape[0]
     for k in (0, n // 2, n - 1):
@@ -1061,9 +1068,15 @@ def step10_descriptive(final_ridge, cnn_final, rescaled_mse, diag):
 
 
 def step11_report(mods, bucket, record):
-    official_name = _obj_test(mods, "official_result", "json")
-    refuse_if_official_result_exists(mods, bucket, official_name)
-
+    """The per-run report is written every time, success or failure --
+    that history is what a debugging pass reads. The OFFICIAL result is
+    not: DESIGN.md's primary test is "evaluated once", and a run that
+    halted before reaching `step9_inference` evaluated nothing. Writing
+    `official_result` unconditionally would let a halted, pre-inference
+    attempt occupy the one-shot slot and permanently block every
+    subsequent, possibly-correct attempt with `refuse_if_official_result_exists`
+    -- which is exactly what happened on this driver's own first real
+    run, caught within the same session it was found in."""
     def compute_json():
         return record
 
@@ -1077,14 +1090,21 @@ def step11_report(mods, bucket, record):
                   str(record.get("verdict", FAIL_SENTINEL))]
         return "\n".join(lines) + "\n"
 
-    ensure_json(mods, bucket, official_name, compute_json, allow_test_split=True)
-    ensure_text(mods, bucket, _obj_test(mods, "official_result", "txt"), compute_text,
-               allow_test_split=True)
-
     kind = f"stage4_report_{record['run']['run_id']}"
     ensure_json(mods, bucket, _obj_test(mods, kind, "json"), compute_json,
                allow_test_split=True)
     ensure_text(mods, bucket, _obj_test(mods, kind, "txt"), compute_text,
+               allow_test_split=True)
+
+    if record.get("verdict") != OK_SENTINEL:
+        say(f"official result NOT written: verdict is {record.get('verdict')!r}, "
+            f"not {OK_SENTINEL!r}. Per-run report above carries the failure.")
+        return
+
+    official_name = _obj_test(mods, "official_result", "json")
+    refuse_if_official_result_exists(mods, bucket, official_name)
+    ensure_json(mods, bucket, official_name, compute_json, allow_test_split=True)
+    ensure_text(mods, bucket, _obj_test(mods, "official_result", "txt"), compute_text,
                allow_test_split=True)
 
 
@@ -1173,12 +1193,13 @@ def main():
             corr = step2_test_corruption(mods, bucket, corpus, fp, corpus_name)
             corr_name = _obj_test(mods, "corruption_test", "npz")
 
-        encode_parents = parent_map(mods, bucket, (corr_name,))
+        encode_parents = parent_map(mods, bucket, (corr_name,), allow_test_split=True)
         with timed_step("3_encode_test", record["timings"]):
             theta0_505 = step3_encode_test(mods, bucket, corr, topo, fp, encode_parents)
             encoded_name = _obj_test(mods, f"encoded_test_s{ENCODER_STEPS}", "npz")
 
-        evo_parents = parent_map(mods, bucket, (encoded_name, corpus_name))
+        evo_parents = parent_map(mods, bucket, (encoded_name, corpus_name),
+                                 allow_test_split=True)
         with timed_step("4_test_evolution", record["timings"]):
             evolved = step4_test_evolution(mods, bucket, theta0_505, topo, record, fp,
                                            evo_parents)
@@ -1187,20 +1208,23 @@ def main():
         for graph in mods.conditions.EVOLVED_GRAPHS:
             theta_name = _obj_test(mods, "theta_T", "npz",
                                    condition=mods.conditions.path_segment(graph))
-            feature_parents[graph] = parent_map(mods, bucket, (theta_name,))
+            feature_parents[graph] = parent_map(mods, bucket, (theta_name,),
+                                                allow_test_split=True)
         with timed_step("5_test_features", record["timings"]):
             features_test, Y_test = step5_test_features(
                 mods, bucket, theta0_505, evolved, topo, corr, corpus, ref_idx, fp,
                 feature_parents)
 
-        ridge_parents = parent_map(mods, bucket, (corpus_name, corr_name))
+        ridge_parents = parent_map(mods, bucket, (corpus_name, corr_name),
+                                   allow_test_split=True)
         with timed_step("6_test_ridge", record["timings"]):
             final_ridge = step6_test_ridge(mods, bucket, features_test, Y_test, topo,
                                            fp, ridge_parents)
 
         with timed_step("7_test_cnn", record["timings"]):
             cnn_final, cnn_reproduction = step7_test_cnn(
-                mods, bucket, topo, fp, parent_map(mods, bucket, (corpus_name, corr_name)))
+                mods, bucket, topo, fp, parent_map(mods, bucket, (corpus_name, corr_name),
+                                                allow_test_split=True))
             record["cnn"] = cnn_reproduction
 
         with timed_step("8_identity_baselines", record["timings"]):

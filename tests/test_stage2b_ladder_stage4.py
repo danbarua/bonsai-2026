@@ -216,6 +216,7 @@ def test_train_side_reads_never_pass_the_literal_opt_in(tree):
     test_side_functions = {
         "object_path", "ensure_artifact", "ensure_npz", "ensure_json",
         "ensure_text", "corrupt_corpus", "consume_validated", "object_exists",
+        "parent_map",
     }
     for node in ast.walk(tree):
         if not (isinstance(node, ast.keyword) and node.arg == "allow_test_split"
@@ -301,6 +302,89 @@ def test_grid_tag_matches_stage_three_bit_for_bit():
     stage4 = importlib.import_module("run_ladder_stage4")
     grid = (1e-6, 1e-5, 1e-4, 1e-3, 1e-2, 1e-1, 1.0, 10.0, 1e2, 1e3, 1e4, 1e5, 1e6)
     assert stage3.grid_tag(grid) == stage4.grid_tag(grid)
+
+
+# ---- parent_map forwards allow_test_split -- regression for the first
+# real run's actual failure: `read_manifest` refused a test-side parent
+# because parent_map never threaded the opt-in through to it. ----
+
+class _StubGCSManifest:
+    def __init__(self):
+        self.calls = []
+
+    def read_manifest(self, name, *, bucket, allow_test_split=False):
+        self.calls.append((name, allow_test_split))
+        return {"payload_sha256": "deadbeef"}
+
+
+def test_parent_map_forwards_allow_test_split(driver):
+    mods = types_namespace(driver, gcs=_StubGCSManifest())
+    driver.parent_map(mods, bucket=object(), names=("x",), allow_test_split=True)
+    assert mods.gcs.calls == [("x", True)]
+
+
+def test_parent_map_defaults_to_no_opt_in(driver):
+    """The default stays False -- a future train-side caller of parent_map
+    must ask for the opt-in explicitly rather than inherit it."""
+    mods = types_namespace(driver, gcs=_StubGCSManifest())
+    driver.parent_map(mods, bucket=object(), names=("x",))
+    assert mods.gcs.calls == [("x", False)]
+
+
+# ---- the official result is written only on a genuine OK verdict --
+# regression for the first real run's second actual failure: a halted,
+# pre-inference attempt wrote `official_result` anyway, which then
+# permanently blocked every subsequent attempt via
+# `refuse_if_official_result_exists`. ----
+
+class _StubGCSReport:
+    def __init__(self, exists=False):
+        self._exists = exists
+        self.written_kinds = []
+
+    def object_path(self, *, kind, **_kwargs):
+        return kind
+
+    def object_exists(self, name, *, bucket, allow_test_split=False):
+        return self._exists
+
+    def ensure_artifact(self, name, local_path, *, produce, bucket, fingerprint=None,
+                        parents=None, allow_test_split=False, force=False):
+        produce(local_path)
+        self.written_kinds.append(name)
+        return _StubResult(local_path)
+
+
+class _StubResult:
+    def __init__(self, local_path):
+        self.local_path = local_path
+
+    def summary(self):
+        return "stub"
+
+
+def _report_record(verdict):
+    return {"run": {"run_id": "20260101T000000Z", "head_sha": "abc123"},
+            "timings": {}, "verdict": verdict, "halt_reason": None}
+
+
+def test_official_result_is_not_written_on_a_failed_run(driver, tmp_path, monkeypatch):
+    monkeypatch.setattr(driver, "local_path_for",
+                        lambda name: str(tmp_path / name.replace("/", "__")))
+    gcs = _StubGCSReport(exists=False)
+    mods = types_namespace(driver, gcs=gcs)
+    driver.step11_report(mods, bucket=object(), record=_report_record(driver.FAIL_SENTINEL))
+    assert "official_result" not in gcs.written_kinds
+    assert any(k.startswith("stage4_report_") for k in gcs.written_kinds)
+
+
+def test_official_result_is_written_on_a_successful_run(driver, tmp_path, monkeypatch):
+    monkeypatch.setattr(driver, "local_path_for",
+                        lambda name: str(tmp_path / name.replace("/", "__")))
+    gcs = _StubGCSReport(exists=False)
+    mods = types_namespace(driver, gcs=gcs)
+    driver.step11_report(mods, bucket=object(), record=_report_record(driver.OK_SENTINEL))
+    assert "official_result" in gcs.written_kinds
 
 
 # ---- refusal to re-run the official result ----
