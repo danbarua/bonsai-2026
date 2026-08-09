@@ -17,6 +17,7 @@ exist only to make that state impossible to mistake for success.
 """
 import importlib.util
 import sys
+import tomllib
 from pathlib import Path
 
 import pytest
@@ -47,6 +48,41 @@ def write_doc(tmp_path: Path, text: str = DOC, name: str = "DESIGN.md") -> Path:
     path.write_text(text)
     return path
 
+
+# A complete, valid review attestation for fixtures. Replaces the old
+# `"reviewed": True`, which was one key; the attestation is five, and a
+# fixture that half-fills it should fail like a real inventory would.
+# `inventory_sha256` is unchecked here because these tests call `reconcile`
+# without the raw text -- staleness has its own tests, below.
+REVIEWED_TOML = (
+    '[semantic_review]\n'
+    'inventory_sha256 = "' + "0" * 64 + '"\n'
+    'reviewer = "fixture"\n'
+    'scopes = ["not_binding", "superseded", "canonical_clause", "binding_claim"]\n'
+    'findings = 0\n'
+    'findings_resolved = 0\n'
+)
+
+def write_inventory(path, body):
+    """Write rows plus a correctly-hashed attestation, attestation LAST.
+
+    The order matters and is not cosmetic: `inventory_digest` hashes
+    everything ABOVE the `[semantic_review]` line, so an attestation written
+    first signs an empty body. Written that way at first, and
+    `stale_semantic_review` caught it.
+    """
+    path.write_text(body + REVIEWED_TOML.replace(
+        "0" * 64, gate_inventory.inventory_digest(body)))
+    return path
+
+
+REVIEWED = {"semantic_review": {
+    "inventory_sha256": "0" * 64,
+    "reviewer": "the Reviewer, for this fixture",
+    "scopes": ["not_binding", "superseded", "canonical_clause", "binding_claim"],
+    "findings": 0,
+    "findings_resolved": 0,
+}}
 
 def kinds(findings):
     return sorted(f.kind for f in findings)
@@ -107,7 +143,7 @@ def test_clause_id_survives_reflowing_but_not_rewording(tmp_path):
 def test_an_unmapped_clause_is_a_finding(tmp_path):
     """The incident this exists for: a frozen HALT with no implementation."""
     clauses = derive_clauses([write_doc(tmp_path)], tmp_path)
-    findings = reconcile(clauses, {"reviewed": True, "binding_gate": {}}, tmp_path)
+    findings = reconcile(clauses, {**REVIEWED, "binding_gate": {}}, tmp_path)
     assert kinds(findings) == ["undispositioned_candidate", "undispositioned_candidate"]
 
 
@@ -180,7 +216,7 @@ def test_a_fully_dispositioned_document_produces_no_findings(tmp_path):
     (tmp_path / "gate.py").write_text("def verify_digest():\n    return True\n")
     (tmp_path / "test_gate.py").write_text("def test_digest():\n    pass\n")
     clauses = derive_clauses([doc], tmp_path)
-    inventory = {"reviewed": True,
+    inventory = {**REVIEWED,
                  "binding_gate": {c.clause_id: complete_row() for c in clauses}}
     assert reconcile(clauses, inventory, tmp_path) == []
 
@@ -364,7 +400,7 @@ def test_every_binding_form_resolves_a_citation(tmp_path, source, why):
     doc = write_doc(tmp_path, "# P\n\nALPHA_BAR is frozen at 0.5.\n")
     (tmp_path / "g.py").write_text(source)
     clauses = derive_clauses([doc], tmp_path)
-    inventory = {"reviewed": True, "binding_value": {clauses[0].clause_id:
+    inventory = {**REVIEWED, "binding_value": {clauses[0].clause_id:
         value_row(enforcement="g.py::ALPHA_BAR")}}
     found = kinds(reconcile(clauses, inventory, tmp_path))
     assert "unresolved_enforcement" not in found, f"failed to resolve {why}"
@@ -380,7 +416,7 @@ def test_a_merely_imported_name_does_not_satisfy_a_citation(tmp_path):
     doc = write_doc(tmp_path, "# P\n\nALPHA_BAR is frozen at 0.5.\n")
     (tmp_path / "g.py").write_text("from elsewhere import ALPHA_BAR\n")
     clauses = derive_clauses([doc], tmp_path)
-    inventory = {"reviewed": True, "binding_value": {clauses[0].clause_id:
+    inventory = {**REVIEWED, "binding_value": {clauses[0].clause_id:
         value_row(enforcement="g.py::ALPHA_BAR")}}
     assert "unresolved_enforcement" in kinds(
         reconcile(clauses, inventory, tmp_path))
@@ -447,7 +483,7 @@ def test_a_frozen_value_is_not_asked_for_a_decision_consequence(tmp_path):
     doc = write_doc(tmp_path, "# P\n\nALPHA_BAR is frozen at 0.5.\n")
     (tmp_path / "t.py").write_text("def test_alpha():\n    pass\n")
     clauses = derive_clauses([doc], tmp_path)
-    inventory = {"reviewed": True, "binding_value": {clauses[0].clause_id: value_row()}}
+    inventory = {**REVIEWED, "binding_value": {clauses[0].clause_id: value_row()}}
     assert reconcile(clauses, inventory, tmp_path) == []
 
 
@@ -461,7 +497,7 @@ def test_a_process_promise_needs_no_code_fields_at_all(tmp_path):
     doc = write_doc(
         tmp_path, "# P\n\nThe control must never be reported as random.\n")
     clauses = derive_clauses([doc], tmp_path)
-    inventory = {"reviewed": True, "binding_claim": {clauses[0].clause_id: claim_row()}}
+    inventory = {**REVIEWED, "binding_claim": {clauses[0].clause_id: claim_row()}}
     assert reconcile(clauses, inventory, tmp_path) == []
 
 
@@ -476,7 +512,7 @@ def test_unenforceable_promises_are_listed_not_netted_into_coverage(tmp_path):
     doc = write_doc(
         tmp_path, "# P\n\nThe control must never be reported as random.\n")
     clauses = derive_clauses([doc], tmp_path)
-    inventory = {"reviewed": True, "binding_claim": {clauses[0].clause_id: claim_row()}}
+    inventory = {**REVIEWED, "binding_claim": {clauses[0].clause_id: claim_row()}}
     listed = gate_inventory.unenforceable(clauses, inventory)
     assert [c.clause_id for c in listed] == [clauses[0].clause_id]
     # And it still counts as dispositioned -- the point is that it is
@@ -495,7 +531,7 @@ def test_tagging_a_claim_mechanizable_does_not_promote_it_out_of_the_list(tmp_pa
     doc = write_doc(
         tmp_path, "# P\n\nNo metric may be added after results exist.\n")
     clauses = derive_clauses([doc], tmp_path)
-    inventory = {"reviewed": True, "binding_claim": {clauses[0].clause_id: claim_row(
+    inventory = {**REVIEWED, "binding_claim": {clauses[0].clause_id: claim_row(
             negative_attestation="checked all of FINDINGS.md and the tables",
             mechanizable_candidate="a doc-diff lint could compare metric "
                                    "lists across commits")}}
@@ -517,7 +553,7 @@ def test_a_frozen_value_with_no_consumer_yet_fails_readiness(tmp_path):
     doc = write_doc(tmp_path, "# P\n\nM is frozen at 100 for the audit.\n")
     (tmp_path / "t.py").write_text("def test_m():\n    pass\n")
     clauses = derive_clauses([doc], tmp_path)
-    inventory = {"reviewed": True, "binding_value": {clauses[0].clause_id:
+    inventory = {**REVIEWED, "binding_value": {clauses[0].clause_id:
         value_row(status="pending_consumer",
                   pending_reason="the audit driver is unwritten",
                   production_consumers="none yet")}}
@@ -528,7 +564,7 @@ def test_a_frozen_value_with_no_consumer_yet_fails_readiness(tmp_path):
 def test_pending_consumer_without_a_reason_is_also_a_finding(tmp_path):
     doc = write_doc(tmp_path, "# P\n\nM is frozen at 100 for the audit.\n")
     clauses = derive_clauses([doc], tmp_path)
-    inventory = {"reviewed": True, "binding_value": {clauses[0].clause_id:
+    inventory = {**REVIEWED, "binding_value": {clauses[0].clause_id:
         value_row(status="pending_consumer", production_consumers="none yet")}}
     assert "unreasoned_pending_consumer" in kinds(
         reconcile(clauses, inventory, tmp_path))
@@ -539,7 +575,7 @@ def test_an_enforced_value_is_not_flagged(tmp_path):
     doc = write_doc(tmp_path, "# P\n\nALPHA_BAR is frozen at 0.5.\n")
     (tmp_path / "t.py").write_text("def test_alpha():\n    pass\n")
     clauses = derive_clauses([doc], tmp_path)
-    inventory = {"reviewed": True,
+    inventory = {**REVIEWED,
                  "binding_value": {clauses[0].clause_id: value_row()}}
     found = kinds(reconcile(clauses, inventory, tmp_path))
     assert "value_has_no_production_consumer" not in found
@@ -551,7 +587,7 @@ def test_an_unresolved_claim_fails_readiness(tmp_path):
     ships in."""
     doc = write_doc(tmp_path, "# P\n\nThe scope statement is required.\n")
     clauses = derive_clauses([doc], tmp_path)
-    inventory = {"reviewed": True, "binding_claim": {
+    inventory = {**REVIEWED, "binding_claim": {
         clauses[0].clause_id: claim_row(status="unresolved")}}
     assert "unresolved_claim" in kinds(reconcile(clauses, inventory, tmp_path))
 
@@ -561,7 +597,7 @@ def test_not_applicable_without_a_reason_is_a_finding(tmp_path):
     Without a reason tied to it, it is an escape hatch."""
     doc = write_doc(tmp_path, "# P\n\nThe scope statement is required.\n")
     clauses = derive_clauses([doc], tmp_path)
-    inventory = {"reviewed": True, "binding_claim": {
+    inventory = {**REVIEWED, "binding_claim": {
         clauses[0].clause_id: claim_row(status="not_applicable")}}
     assert "unreasoned_not_applicable" in kinds(
         reconcile(clauses, inventory, tmp_path))
@@ -575,7 +611,7 @@ def test_a_negative_obligation_needs_an_attestation_over_the_output_set(tmp_path
     doc = write_doc(
         tmp_path, "# P\n\nThe control must never be reported as random.\n")
     clauses = derive_clauses([doc], tmp_path)
-    inventory = {"reviewed": True, "binding_claim": {
+    inventory = {**REVIEWED, "binding_claim": {
         clauses[0].clause_id: claim_row(
             obligation="must never be reported as a random sample")}}
     assert "missing_negative_attestation" in kinds(
@@ -587,7 +623,7 @@ def test_a_positive_obligation_does_not_need_one(tmp_path):
     demanded an attestation from every claim row."""
     doc = write_doc(tmp_path, "# P\n\nAn honest scope statement is required.\n")
     clauses = derive_clauses([doc], tmp_path)
-    inventory = {"reviewed": True, "binding_claim": {
+    inventory = {**REVIEWED, "binding_claim": {
         clauses[0].clause_id: claim_row(
             obligation="the write-up carries an honest scope statement")}}
     assert "missing_negative_attestation" not in kinds(
@@ -599,7 +635,7 @@ def test_counts_are_reported_per_kind_with_no_aggregate_percentage(tmp_path):
     dilute or inflate executable coverage."""
     doc = write_doc(tmp_path)
     clauses = derive_clauses([doc], tmp_path)
-    inventory = {"reviewed": True,
+    inventory = {**REVIEWED,
                  "binding_claim": {clauses[0].clause_id: claim_row()}}
     counts = gate_inventory.counts_by_kind(clauses, inventory)
     assert counts["binding_claim"] == 1
@@ -615,7 +651,7 @@ def test_a_gate_row_is_not_listed_as_unenforceable(tmp_path):
     that returned every clause."""
     doc = write_doc(tmp_path, "# P\n\nThe driver MUST verify the digest.\n")
     clauses = derive_clauses([doc], tmp_path)
-    inventory = {"reviewed": True,
+    inventory = {**REVIEWED,
                  "binding_gate": {clauses[0].clause_id: complete_row()}}
     assert gate_inventory.unenforceable(clauses, inventory) == []
 
@@ -642,7 +678,7 @@ def test_an_unreviewed_inventory_cannot_pass_however_complete_it_looks(tmp_path)
     clauses = derive_clauses([doc], tmp_path)
     complete_but_undeclared = {
         "binding_gate": {c.clause_id: complete_row() for c in clauses}}
-    assert "unreviewed_inventory" in kinds(
+    assert "no_semantic_review" in kinds(
         reconcile(clauses, complete_but_undeclared, tmp_path))
 
 
@@ -686,8 +722,7 @@ def test_a_clean_reconciliation_exits_zero(tmp_path):
     (tmp_path / "g.py").write_text("def f():\n    pass\n")
     (clause,) = derive_clauses([doc], tmp_path)
     inventory = tmp_path / "gates.toml"
-    inventory.write_text(
-        'reviewed = true\n'
+    write_inventory(inventory,
         f'[binding_gate."{clause.clause_id}"]\n'
         f'enforcement = "g.py::f"\n'
         f'production_reachability = "called by the stage3 driver"\n'
@@ -720,7 +755,7 @@ def test_a_claim_whose_package_does_not_exist_yet_is_not_asked_to_invent_one(tmp
     fields that cannot be answered."""
     doc = write_doc(tmp_path, CLAIM_DOC)
     (clause,) = derive_clauses([doc], tmp_path)
-    inventory = {"reviewed": True, "binding_claim": {clause.clause_id: claim_row(
+    inventory = {**REVIEWED, "binding_claim": {clause.clause_id: claim_row(
         status="pending_package",
         pending_reason="the Stage 2B readiness package is not assembled yet",
         discharged_in=None, evidence=None)}}
@@ -738,7 +773,7 @@ def test_pending_package_without_a_reason_is_also_a_finding(tmp_path):
     that switches off two required fields and asserts nothing."""
     doc = write_doc(tmp_path, CLAIM_DOC)
     (clause,) = derive_clauses([doc], tmp_path)
-    inventory = {"reviewed": True, "binding_claim": {clause.clause_id: claim_row(
+    inventory = {**REVIEWED, "binding_claim": {clause.clause_id: claim_row(
         status="pending_package", discharged_in=None, evidence=None)}}
     assert "unreasoned_pending_package" in kinds(
         reconcile([clause], inventory, tmp_path))
@@ -751,7 +786,7 @@ def test_pending_package_still_fails_readiness(tmp_path):
     (clause,) = derive_clauses([doc], tmp_path)
     inventory = tmp_path / "gates.toml"
     inventory.write_text(
-        'reviewed = true\n'
+        REVIEWED_TOML +
         f'[binding_claim."{clause.clause_id}"]\n'
         'locator = "P.md#reporting"\n'
         'obligation = "results carry the seed"\n'
@@ -769,7 +804,7 @@ def test_a_discharged_claim_still_must_say_where_and_show_evidence(tmp_path):
     doc = write_doc(tmp_path, CLAIM_DOC)
     (clause,) = derive_clauses([doc], tmp_path)
     for missing in ("discharged_in", "evidence"):
-        inventory = {"reviewed": True, "binding_claim": {
+        inventory = {**REVIEWED, "binding_claim": {
             clause.clause_id: claim_row(**{missing: None})}}
         assert f"missing_{missing}" in kinds(
             reconcile([clause], inventory, tmp_path)), (
@@ -783,9 +818,9 @@ def test_pending_package_is_distinct_from_unresolved(tmp_path):
     which."""
     doc = write_doc(tmp_path, CLAIM_DOC)
     (clause,) = derive_clauses([doc], tmp_path)
-    unresolved = reconcile([clause], {"reviewed": True, "binding_claim": {
+    unresolved = reconcile([clause], {**REVIEWED, "binding_claim": {
         clause.clause_id: claim_row(status="unresolved")}}, tmp_path)
-    pending = reconcile([clause], {"reviewed": True, "binding_claim": {
+    pending = reconcile([clause], {**REVIEWED, "binding_claim": {
         clause.clause_id: claim_row(status="pending_package",
                                     pending_reason="no package yet",
                                     discharged_in=None,
@@ -894,7 +929,7 @@ def test_a_superseded_clause_names_its_successor_and_the_amendment(tmp_path):
     the thing it required stopped being required -- so the history is
     recorded rather than flattened into a discharge that was never true."""
     _, old, new = _two_clauses(tmp_path)
-    inventory = {"reviewed": True, "binding_claim": {
+    inventory = {**REVIEWED, "binding_claim": {
         old.clause_id: claim_row(
             status="superseded", discharged_in=None, evidence=None,
             superseded_by=new.clause_id,
@@ -913,7 +948,7 @@ def test_a_supersession_with_no_successor_is_a_deletion_with_manners(tmp_path):
     """Without this the status is strictly worse than `discharged`: it
     retires an obligation and names nothing that carries what survived."""
     _, old, new = _two_clauses(tmp_path)
-    inventory = {"reviewed": True, "binding_claim": {
+    inventory = {**REVIEWED, "binding_claim": {
         old.clause_id: claim_row(
             status="superseded", discharged_in=None, evidence=None,
             superseded_by="0" * 12,
@@ -928,7 +963,7 @@ def test_a_successor_that_is_itself_superseded_is_refused(tmp_path):
     rule at all: without it, "redefine the meaning later" is available by
     superseding the successor."""
     _, old, new = _two_clauses(tmp_path)
-    inventory = {"reviewed": True, "binding_claim": {
+    inventory = {**REVIEWED, "binding_claim": {
         old.clause_id: claim_row(
             status="superseded", discharged_in=None, evidence=None,
             superseded_by=new.clause_id, amendment_locator="DESIGN.md, A"),
@@ -944,7 +979,7 @@ def test_superseded_still_fails_readiness(tmp_path):
     """A superseded clause is not a closed one. Somebody must still confirm
     the amendment was validly made, and that judgement is a reviewer's."""
     _, old, new = _two_clauses(tmp_path)
-    inventory = {"reviewed": True, "binding_claim": {
+    inventory = {**REVIEWED, "binding_claim": {
         old.clause_id: claim_row(
             status="superseded", discharged_in=None, evidence=None,
             superseded_by=new.clause_id, amendment_locator="DESIGN.md, A",
@@ -969,7 +1004,7 @@ def test_a_duplicate_row_is_exempt_from_the_field_contract(tmp_path):
     evidence for both. Demanding it twice would invite two divergent
     accounts of one obligation."""
     _, canonical, restatement = _two_clauses(tmp_path)
-    inventory = {"reviewed": True, "binding_claim": {
+    inventory = {**REVIEWED, "binding_claim": {
         canonical.clause_id: claim_row(),
         restatement.clause_id: {
             "locator": "P.md#restated",
@@ -985,7 +1020,7 @@ def test_a_duplicate_pointing_at_nothing_is_an_undispositioned_obligation(tmp_pa
     """The failure the exemption would otherwise create: a row that carries
     no evidence AND names no row that does."""
     _, canonical, restatement = _two_clauses(tmp_path)
-    inventory = {"reviewed": True, "binding_claim": {
+    inventory = {**REVIEWED, "binding_claim": {
         canonical.clause_id: claim_row(),
         restatement.clause_id: {
             "locator": "P.md#restated", "obligation": "restates it",
@@ -1001,7 +1036,7 @@ def test_a_chain_of_duplicates_is_refused(tmp_path):
     ends up citing something nobody walked to."""
     doc = write_doc(tmp_path, "# P\n\nA MUST a.\n\nB MUST b.\n\nC MUST c.\n")
     a, b, c = derive_clauses([doc], tmp_path)
-    inventory = {"reviewed": True, "binding_claim": {
+    inventory = {**REVIEWED, "binding_claim": {
         a.clause_id: claim_row(),
         b.clause_id: {"locator": "P#b", "obligation": "b", "status": "discharged",
                       "canonical_clause": a.clause_id},
@@ -1016,7 +1051,7 @@ def test_a_duplicate_does_not_double_count_coverage(tmp_path):
     """The Reviewer's phrase was "avoid double-counting coverage". One
     obligation's evidence must not report as two enforced rows."""
     _, canonical, restatement = _two_clauses(tmp_path)
-    inventory = {"reviewed": True, "binding_claim": {
+    inventory = {**REVIEWED, "binding_claim": {
         canonical.clause_id: claim_row(),
         restatement.clause_id: {
             "locator": "P#r", "obligation": "restates it", "status": "discharged",
@@ -1036,7 +1071,7 @@ def test_a_child_obligation_is_anchored_to_its_parent_not_orphaned(tmp_path):
     doc = write_doc(tmp_path, CLAIM_DOC)
     (parent,) = derive_clauses([doc], tmp_path)
     child_id = "a1b2c3d4e5f6"
-    inventory = {"reviewed": True, "binding_claim": {
+    inventory = {**REVIEWED, "binding_claim": {
         parent.clause_id: claim_row(),
         child_id: claim_row(obligation="one of the paragraph's obligations",
                             parent_clause=parent.clause_id),
@@ -1049,7 +1084,7 @@ def test_a_child_whose_parent_is_dispositioned_nowhere_is_a_finding(tmp_path):
     check, which is the shape `pending_package` needed a reason to avoid."""
     doc = write_doc(tmp_path, CLAIM_DOC)
     (parent,) = derive_clauses([doc], tmp_path)
-    inventory = {"reviewed": True, "binding_claim": {
+    inventory = {**REVIEWED, "binding_claim": {
         parent.clause_id: claim_row(),
         "a1b2c3d4e5f6": claim_row(obligation="an orphan child",
                                   parent_clause="0" * 12),
@@ -1063,7 +1098,7 @@ def test_one_id_cannot_hold_two_dispositions_across_kinds(tmp_path):
     candidate mints."""
     doc = write_doc(tmp_path, CLAIM_DOC)
     (clause,) = derive_clauses([doc], tmp_path)
-    inventory = {"reviewed": True,
+    inventory = {**REVIEWED,
                  "binding_claim": {clause.clause_id: claim_row()},
                  "not_binding": {clause.clause_id: {"reason": "NARRATION: no"}}}
     assert "duplicate_inventory_id" in kinds(
@@ -1078,7 +1113,7 @@ def test_a_superseded_clause_is_reported_not_silently_retired(tmp_path):
     the same shape as `not_applicable` passing silently, one column over.
     """
     _, old, new = _two_clauses(tmp_path)
-    inventory = {"reviewed": True, "binding_claim": {
+    inventory = {**REVIEWED, "binding_claim": {
         old.clause_id: claim_row(
             status="superseded", discharged_in=None, evidence=None,
             superseded_by=new.clause_id, amendment_locator="DESIGN.md, A",
@@ -1102,7 +1137,7 @@ def test_a_superseded_negative_obligation_is_not_asked_to_attest(tmp_path):
     doc = write_doc(tmp_path, "# P\n\nArtifacts MUST NEVER be round-tripped.\n\n"
                               "Artifacts MUST use the verified transport.\n")
     old, new = derive_clauses([doc], tmp_path)
-    inventory = {"reviewed": True, "binding_claim": {
+    inventory = {**REVIEWED, "binding_claim": {
         old.clause_id: claim_row(
             obligation="artifacts are NEVER round-tripped through local upload",
             status="superseded", discharged_in=None, evidence=None,
@@ -1125,7 +1160,7 @@ def test_a_duplicate_cannot_claim_a_stronger_status_than_its_canonical(tmp_path)
     have objected had they carried `discharged`.
     """
     _, canonical, restatement = _two_clauses(tmp_path)
-    inventory = {"reviewed": True, "binding_claim": {
+    inventory = {**REVIEWED, "binding_claim": {
         canonical.clause_id: claim_row(status="unresolved"),
         restatement.clause_id: {
             "locator": "P#r", "obligation": "restates it",
@@ -1139,10 +1174,94 @@ def test_a_duplicate_matching_its_canonical_is_accepted(tmp_path):
     """The other direction, without which the check above could refuse
     every duplicate and still look correct."""
     _, canonical, restatement = _two_clauses(tmp_path)
-    inventory = {"reviewed": True, "binding_claim": {
+    inventory = {**REVIEWED, "binding_claim": {
         canonical.clause_id: claim_row(),
         restatement.clause_id: {
             "locator": "P#r", "obligation": "restates it",
             "status": "discharged", "canonical_clause": canonical.clause_id},
     }}
     assert kinds(reconcile([canonical, restatement], inventory, tmp_path)) == []
+
+
+# --- the review attestation ------------------------------------------------
+
+def test_the_attestation_expires_when_a_reviewed_row_changes(tmp_path):
+    """The property that makes an attestation worth more than a boolean.
+
+    `reviewed = true` said nothing about WHAT was reviewed or WHEN, so once
+    set it kept meaning "reviewed" across every later edit. Hashing the
+    body makes it expire on the next change to the rows it covered.
+    """
+    doc = write_doc(tmp_path, CLAIM_DOC)
+    (clause,) = derive_clauses([doc], tmp_path)
+    body = (f'[binding_claim."{clause.clause_id}"]\n'
+            'locator = "P.md#reporting"\n'
+            'obligation = "results carry the seed"\n'
+            'status = "discharged"\n'
+            'discharged_in = "FINDINGS.md"\n'
+            'evidence = "quoted: the seed is 42"\n')
+    inventory = write_inventory(tmp_path / "gates.toml", body)
+    text = inventory.read_text()
+    parsed = tomllib.loads(text)
+    assert kinds(gate_inventory.check_semantic_review(parsed, text)) == []
+
+    edited = text.replace("the seed is 42", "the seed is 43")
+    assert "stale_semantic_review" in kinds(
+        gate_inventory.check_semantic_review(tomllib.loads(edited), edited))
+
+
+def test_the_attestation_must_cover_every_non_machine_decidable_scope(tmp_path):
+    """The Reviewer's ruling names four: not_binding, superseded,
+    canonical_clause, binding_claim. An attestation that omits one leaves
+    exactly the judgements review exists for."""
+    review = {"semantic_review": {
+        "inventory_sha256": "x" * 64, "reviewer": "r",
+        "scopes": ["not_binding"], "findings": 0, "findings_resolved": 0}}
+    findings = gate_inventory.check_semantic_review(review)
+    assert "unreviewed_semantic_scope" in kinds(findings)
+    assert "binding_claim" in findings[0].detail
+
+
+def test_an_attestation_with_open_findings_is_not_a_sign_off():
+    review = {"semantic_review": {
+        "inventory_sha256": "x" * 64, "reviewer": "r",
+        "scopes": list(gate_inventory._SEMANTIC_SCOPES),
+        "findings": 12, "findings_resolved": 9}}
+    assert "unresolved_review_findings" in kinds(
+        gate_inventory.check_semantic_review(review))
+
+
+def test_a_half_filled_attestation_fails_like_a_row_would():
+    """Five fields, not one. The boolean's whole defect was being a single
+    bit that could be flipped without saying anything."""
+    findings = gate_inventory.check_semantic_review({"semantic_review": {}})
+    assert kinds(findings).count("incomplete_semantic_review") == len(
+        gate_inventory._SEMANTIC_REVIEW_FIELDS)
+
+
+def test_the_digest_ignores_the_attestation_but_not_a_prose_mention(tmp_path):
+    """Anchored to the table header, not to the bare string.
+
+    `gates.toml` MENTIONS `[semantic_review]` in prose above the table, and
+    splitting on the first occurrence hashed a prefix -- the attestation
+    reported itself stale on the run that wrote it.
+    """
+    body = "# a comment mentioning [semantic_review] inline\nkey = 1\n"
+    with_block = body + '[semantic_review]\nreviewer = "r"\n'
+
+    # The block itself is excluded...
+    assert gate_inventory.inventory_digest(with_block) == \
+           gate_inventory.inventory_digest(body)
+
+    # ...and content AFTER the prose mention is still covered. This is the
+    # assertion that does the work, and the first version of this test
+    # lacked it: comparing two digests that a bare `split` truncates
+    # IDENTICALLY passes under the bug, because both sides lose the same
+    # suffix. Caught by break-confirmation -- disabling the anchor failed
+    # nothing -- which is the guard-you-have-not-seen-fail rule catching the
+    # test written to enforce it.
+    changed = body.replace("key = 1", "key = 2")
+    assert gate_inventory.inventory_digest(body) != \
+           gate_inventory.inventory_digest(changed), (
+        "a row after the inline mention does not affect the digest, so the "
+        "attestation signs a prefix of what it claims to cover")

@@ -21,7 +21,9 @@
 # deliberately failing for exactly that reason. It is stated here rather
 # than per-kind because it is the one rule that governs all of them.
 
-reviewed = false   # set true only when a human has read every row
+# The review attestation lives at the END of this file, in
+# `[semantic_review]`, and is a signature over everything above it rather
+# than a boolean. See that block for why.
 
 # =============================================================================
 # binding_gate -- runtime decision obligations
@@ -1397,34 +1399,36 @@ pre-marked, because a discharge written before the field exists is the thing
 this row is being corrected for."""
 
 [binding_claim.9b52d6ca717b]
-# NARROWED at Reviewer Part B's instruction, and the narrowing is
-# evidentiary rather than convenient. The clause's third sentence -- "full
-# suite green before each commit" -- is deliberately absent from the
-# normalized obligation below: this project never established persistent
-# per-commit test logs, so for commits already made there is no record that
-# could substantiate it. The Reviewer's framing was "either substantiate it
-# from records or narrow the normalized obligation to what can actually be
-# established", and there are no such records.
+# NARROWED, THEN UN-NARROWED. My first correction dropped "full suite green
+# before each commit" from the obligation because no per-commit logs exist,
+# and the Reviewer caught it as the SAME semantic-direction error they had
+# just corrected in A5 and B10:
 #
-# What remains is weaker and checkable: the break-evidence half is
-# discharged by artifacts anyone can re-read. A subordinate sentence nobody
-# can verify should not ride along inside a discharge the rest of the clause
-# earns.
+#   "Absence of evidence cannot determine what the source clause required
+#   ... Do not narrow the canonical obligation merely to fit the available
+#   evidence."
 #
-# Worth recording HOW this text ended up here rather than in `obligation`:
-# it was in `obligation` first, and `missing_negative_attestation` fired --
-# the word "cannot", inside explanatory prose, read to the guard as a
-# prohibition needing an attestation. Correctly. `obligation` holds the
-# normalized obligation; rationale goes in a comment.
+# Third time in one round, from three directions: A4 said the obligation
+# lived elsewhere, A5 said implementation decided bindingness, and this said
+# missing records did. Each time the source text was the thing I did not
+# consult.
+#
+# So I read it. `STAGE3_PLAN.md:265`, section `## Verification`, in a
+# document whose own status line calls it "committed plan of record". The
+# sentence is grammatically parallel to the two beside it -- "Every new
+# guard confirmed by...", "Payload comparison verified by...", "Full suite
+# green before each commit" -- all bare participial commitments in a plan's
+# verification section. NORMATIVE, not a report of what had happened.
+#
+# It therefore stays in the obligation and becomes a child that is
+# UNRESOLVED: historically unverifiable, which is a state, not a deletion.
 locator = "STAGE3_PLAN.md, section 'Verification'"
 obligation = """
 Every new guard confirmed by breaking what it watches and observing the
 specific expected failure -- not by observing a green suite. Payload
 comparison verified by deliberately perturbing one array."""
-status = "discharged"
-discharged_in = """
-The `break_demonstrated` field of every substantiated row in this file, and
-`NEGATIVE_PATH_EVIDENCE.md`'s "Deliberate breakage" subsections."""
+status = "unresolved"
+discharged_in = "See the three child rows; this parent holds the paragraph, not the evidence."
 evidence = """
 Each break is stated with the edit made and the specific tests that flipped
 red -- e.g. `if force and artifact_class(name) == LINEAGE:` -> `if False:`
@@ -1842,6 +1846,73 @@ separately inventoried and discharged (5de8c56be1a5). Whether replacing
 "entirely in the cloud" with "through the verified transport" preserved
 what the freeze was for is the question a reviewer must answer, and it is
 open."""
+trigger = "manual"
+
+[binding_claim.337672c877cd]
+parent_clause = "9b52d6ca717b"
+locator = "STAGE3_PLAN.md, section 'Verification', first sentence"
+obligation = """
+Every new guard is confirmed by breaking what it watches and observing the
+SPECIFIC EXPECTED FAILURE -- not by observing a green suite."""
+status = "discharged"
+discharged_in = """
+The `break_demonstrated` field of every substantiated row in this file, and
+`NEGATIVE_PATH_EVIDENCE.md`'s "Deliberate breakage" subsections."""
+evidence = """
+Each break is stated with the edit made and the specific tests that flipped
+red -- e.g. `if force and artifact_class(name) == LINEAGE:` -> `if False:`
+failing test_an_orphan_payload_closes_every_ordinary_route on its
+`produced == []` assertion, and MEAN_X_TOL_EXPONENT 0.5 -> 0.66 failing six
+tests across the scaling family.
+
+Worth recording what the obligation caught rather than only that it was
+kept: filling `break_demonstrated` honestly is what exposed the ridge
+equivalence gate having no negative-path test at all (142 tests green under
+a hardcoded verdict) and the index-join guard being a source grep that
+stayed green while all three joins were replaced. Neither was found by
+review. The row that would not go in is the instrument."""
+trigger = "manual"
+
+[binding_claim.55b5222ff497]
+parent_clause = "9b52d6ca717b"
+locator = "STAGE3_PLAN.md, section 'Verification', second sentence"
+obligation = """
+Payload comparison is verified by deliberately perturbing ONE array."""
+status = "discharged"
+discharged_in = "tests/test_stage2b_fingerprint.py::test_array_manifest_detects_a_single_changed_value"
+evidence = """
+The test builds two payloads differing in a single value and asserts the
+per-array sha256 differs, which is the perturbation the clause names.
+`test_compare_array_manifests_separates_missing_extra_and_differing` covers
+the reporting side: a changed array is reported as differing rather than as
+missing, so a perturbation cannot be mistaken for an absent key."""
+trigger = "manual"
+
+[binding_claim.6d69999e116d]
+parent_clause = "9b52d6ca717b"
+locator = "STAGE3_PLAN.md, section 'Verification', third sentence"
+obligation = """
+The full suite is green before each commit."""
+status = "unresolved"
+# Unresolved, NOT removed, and the distinction is the Reviewer's:
+# "Lack of historical logs means it is unsubstantiated/unresolved, or
+# perhaps historically unverifiable. It cannot be deleted from the
+# obligation because evidence is missing."
+#
+# The state of the evidence: this project never established persistent
+# per-commit test logs, so for commits already made there is no record that
+# could substantiate or refute it. That is a fact about what can be shown,
+# and it has no bearing on what the plan required.
+#
+# It is also the one obligation in this file I know I have BREACHED. `ff5b74c`
+# went in on a red suite: the commit command piped `make stage2b-test` into
+# `tail`, so the shell saw tail's exit status and committed anyway. Caught
+# and fixed at `f55f522`. Recording it here rather than only in that commit
+# message, because an obligation whose single known violation lives in a
+# commit log is one a future reader cannot audit.
+#
+# Forward-verifiable from now: exit status is checked rather than the tail
+# of a pipe.
 trigger = "manual"
 
 [binding_value.6ff7b2b574d0]
@@ -2705,3 +2776,52 @@ after, or retain the fits. It recommends ('Recommend the former') rather than
 requiring. Note also that it says 'all nine alphas', written before the grid
 was extended to thirteen -- a sign of how much of this document is
 contemporaneous narration rather than standing obligation."""
+
+
+# =============================================================================
+# semantic_review -- who reviewed what, and over which bytes
+# =============================================================================
+#
+# REPLACES `reviewed = true`, on the Reviewer's ruling of 2026-08-09:
+#
+#   "I would not use a naked global `reviewed = true` boolean at all unless
+#   its meaning is extremely explicit. Prefer a versioned review attestation
+#   tied to the inventory commit/hash, recording the reviewed scope and
+#   outcome."
+#
+# The boolean's defect was not that it was unset. It was that it said
+# nothing about WHAT had been reviewed or WHEN, so once set it would have
+# kept meaning "reviewed" across every subsequent edit. `inventory_sha256`
+# is taken over everything ABOVE this block, so the attestation expires the
+# next time a row it covered changes -- which is the only property that
+# makes one worth having.
+#
+# It also replaces a requirement nobody upstream ever set. The boolean's
+# comment read "set true only when a human has read every row", and tracing
+# it found no such demand in any ruling: an agent invented a human
+# obligation, encoded it as a build-failing gate, and it was presented to
+# Dan as something owed. The Reviewer's answer was explicit -- there is no
+# requirement for anyone to read all 89 rows -- and that human review is FOR
+# the semantically non-machine-decidable dispositions, not for gate and
+# value rows that already carry causal break evidence.
+
+[semantic_review]
+inventory_sha256 = "948de81b5ac1661ec0b35909b1ba078e806b90a7f24dd7b64ed7eef447c062c1"
+reviewer = """
+ChatGPT (the Reviewer), rulings of 2026-08-08 (scope, three-way schema, six
+dimensions) and 2026-08-09 (Part A over the 27 not_binding dispositions,
+Part B over the 12 discharged claims, and the delta ruling accepting the
+A1/B10 supersession)."""
+scopes = ["not_binding", "superseded", "canonical_clause", "binding_claim"]
+findings = 12
+findings_resolved = 12
+outcome = """
+"Requirement 4 architecture: approved." The twelve findings of 2026-08-09
+are resolved, B2 last and by source semantics rather than by available
+evidence.
+
+WHAT THIS ATTESTATION DOES NOT SAY. Stage-4 readiness remains blocked,
+independently of this review, by the package-dependent rows that are
+unresolved and pending_package ON PURPOSE -- the audit driver does not
+exist, and no artifact they discharge into does either. A clean review is
+not a clean run, and this file still exits non-zero. Deliberately."""
