@@ -344,3 +344,191 @@ What would distinguish the readings: **a persisted log of blocked-then-
 corrected events, retaining the pre-correction text.** It does not exist here.
 Until it does, every efficacy claim about this apparatus — including the
 negative ones in this document — is untestable in both directions.
+
+---
+
+# The same document, in plain English
+
+Nothing new is claimed here. This is sections 1–8 again, for a reader who has
+not worked on this project. Where the version above uses a word this team
+invented, this version says what it means.
+
+## What happened
+
+A group of AI agents spent about three days working on a research project.
+Almost all of that time went into building tools to check their own work,
+rather than into the research.
+
+The numbers: 190 pieces of work were saved in that period. 17 of them touched
+the actual science. The other 173 were tools, tests, and documents about how
+to work. They also wrote roughly 80,000 words of process documentation, which
+is about the length of a novel.
+
+This document asks a simple question about all that tooling: **did any of it
+actually catch a mistake that mattered?**
+
+## How we checked
+
+Four AI reviewers were given the project cold. None of them had worked on it,
+so none of them had a reason to defend it. One built a list of every mistake
+the tools ever caught. One asked which tools would be useful on a different
+project. One looked at the private vocabulary the team invented. One asked
+what a sensible team would have built on day one.
+
+The one with the list of mistakes got the final say, because it was the only
+one working from evidence rather than opinion.
+
+## What we found
+
+**A catalogue of 42 mistakes.** In six of them, something written down and
+saved was actually wrong. In one, a tool caught a wrong thing before it got
+saved. The other 35 were real problems that never affected any result.
+
+**The most useful thing in this review:** the two most complicated tools the
+team built caused more problems than they found. One of them, a tool for
+recording how numbers were produced, wrote down that it had recorded
+something when it had not. Someone then quoted that false record. The other,
+a tool for spotting which test files changed, missed eight files that were
+deleted and gave a clean report over them. Neither tool ever caught anything.
+
+That finding is the one to keep. It does not depend on any judgement call
+about how mistakes were categorised.
+
+**A mistake I made, and had to correct.** My first summary said no automated
+check ever caught a genuinely wrong result, and that people caught all of
+them. That was unfair, and the unfairness was built into my own scoring.
+
+I had defined "a wrong result" as something already written down and saved.
+But automated checks run *before* things get saved. So they could never
+qualify, no matter how well they worked. I was comparing two groups that
+could not be scored the same way. It is the same kind of error this project
+catalogues, made inside a review of that kind of error.
+
+**A place where the project's own files corrected me.** I had written that a
+future team should build the simple list of things-to-check, but skip the
+detailed form that goes with it. Then I found a note in the project saying
+that one field on that form — the one asking "prove this check can actually
+fail" — is what exposed two broken checks that human review had missed. My
+advice would have thrown away the one part that worked.
+
+The two problems it found were still harmless, so this does not make the tool
+a success. But it moves the credit. What worked was **a form that forced a
+person to supply evidence**, not the software that read the form afterwards.
+
+## What actually caught the real mistakes
+
+People did. Specifically:
+
+- someone outside the work reading the records and disagreeing
+- someone using a tool for real and noticing it misbehave
+- an author going back and re-checking their own claim
+
+Every tool built *before* anyone needed it scored zero. Every tool that came
+*after* a real problem scored something. On this evidence it is the **timing**
+that mattered, not the tools.
+
+## An important thing I got wrong the first time
+
+"Never went off" is not the same as "useless."
+
+There is a check that stops the team from spending money by accident. It has
+never gone off. That is what success looks like for that kind of check — it
+means nobody has tried to overspend. My first draft suggested replacing it
+with a billing alert, which would tell you *after* the money is gone. That is
+worse, dressed up as a saving.
+
+So the scoring now separates three things: checks that ran and found only
+harmless problems; checks that never ran because the bad thing never
+happened; and checks nobody has ever exercised, where we honestly cannot
+tell.
+
+## A fair objection, which we cannot answer
+
+Someone could reasonably say: "the tools worked *so* well that mistakes never
+got made, so of course your list of caught mistakes is empty." That is a real
+possibility and this review cannot rule it out.
+
+To settle it you would need a record of every time a tool stopped something,
+kept alongside what the person was about to write. This project has no such
+record. Of the last 100 automated runs, six failed, and all six were the
+checking tools failing on themselves. None of them stopped a piece of science.
+
+So: **every claim about whether this tooling was worth it — including the
+critical ones in this document — is currently untestable.** That is the
+honest position.
+
+## The words the team invented
+
+Some of the invented terms do real work. Three labels for different kinds of
+commitment genuinely change what a person must write down. A word for "a test
+that was narrowed down" changed how two tools were built.
+
+Some are just new names for old ideas. "Checkpoint branch" is an integration
+branch. "Self-referential pin" is a test that checks a value equals itself.
+
+Two terms are relied on and defined nowhere at all. The worse one is
+"adjacent evidence." It appears five times, always as the reason a row in a
+file is left blank, and blank rows fail the project's own readiness check. A
+new reader has to guess what it means, and a wrong guess flips the project's
+status from "not ready" to "ready."
+
+One term is defined twice, differently, which is worse than not defining it.
+`break_demonstrated` means one thing in the first half of a file and another
+thing in the second half. The software only checks that the field is filled
+in, not which meaning was used.
+
+**And the finding that prompted this section.** The project keeps a glossary
+with a plain-English version alongside it. That plain-English version explains
+all 26 scientific terms and none of the 4 terms the agents invented for
+themselves. The vocabulary written for humans got translated. The vocabulary
+the agents wrote for their own use never did — and it is the half you need in
+order to touch the project's central file.
+
+This section exists because it would have been absurd to write that finding
+and not act on it.
+
+## What a new project should do on day one
+
+Four things, and none of them are software:
+
+1. **Never let a run announce success on its own say-so.** Every check it
+   claims to have passed must have a line showing what it actually measured.
+   No line means no pass. A run once reported success for a check that had
+   never been written.
+2. **Any claim with a number in it carries a link to where the number came
+   from.** Three of the six real mistakes were claims nobody could trace.
+3. **Keep a plain list of what the project has promised to check, with one
+   column that forces you to prove each check can fail.** Not the software
+   that reads the list — just the list and that one column.
+4. **Have someone who did not write the work read it.** This caught five of
+   the six real mistakes. It costs nothing and it beat every tool.
+
+## What to build later, if ever
+
+Most of the tooling should wait for a real problem to justify it. The
+document gives each one a trigger: build the check for "did all the tests
+quietly skip?" the first time all the tests quietly skip *and* somebody
+believes the result. Build the tool for comparing changed files only after
+the standard one proves insufficient — this project built it first, and it
+cost four problems.
+
+Two large things do not appear in the evidence at all: the messaging system
+the agents use to talk to each other, and the 80,000 words of process
+documentation. Not appearing is weaker evidence than scoring badly. But
+something that expensive and that unmeasured is, by default, unjustified.
+
+## If you want to reuse any of this elsewhere
+
+Eight of the tools would work in another project by changing exactly one
+setting each, and the document names which setting for each one. That naming
+is the point: if nobody can name the one thing that would have to change,
+nobody has actually checked that the tool is portable.
+
+A few need real work. One has the build system baked into it. One depends on
+a private form whose shape must be decided early, because the project
+identifies each entry by a fingerprint of its own text — reword an entry
+later and the link to it breaks.
+
+And one warning is recorded rather than hidden: the automated review currently
+re-runs on every single change, at about $1.28 a time. That is a known
+problem, not a feature, and it is already on the list to fix.
