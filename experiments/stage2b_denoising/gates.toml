@@ -1812,6 +1812,77 @@ what the freeze was for is the question a reviewer must answer, and it is
 open."""
 trigger = "manual"
 
+[binding_claim.9825d43dd6bf]
+parent_clause = "152fe49478d2"
+locator = "STAGE3_PLAN.md, 'Answers' -- Q5, module-first clause"
+obligation = """
+OOF per-image prediction support gets MODULE-FIRST treatment: implemented
+with its own tests before any audit driver calls it."""
+status = "discharged"
+discharged_in = "experiments/stage2b_denoising/stage2b_ridge.py::oof_per_image_mse and tests/test_stage2b_ridge.py"
+evidence = """
+`oof_per_image_mse` and `oof_clipped_mse_at_alpha` exist with ten dedicated
+tests -- coverage-is-a-partition, genuinely-out-of-sample, clipped-vs-raw
+distinctness, single-alpha agreement with the grid column, the recorded
+partition, reproducibility, and a partition guard shown to fire.
+
+The honest reading, stated because it weakens the discharge: no audit
+driver exists, so the ORDERING the clause requires held by construction
+rather than by discipline. Nobody was in a position to call the module
+early. That is compliance, but it is not evidence of restraint."""
+trigger = "manual"
+
+[binding_gate.1b53e78b7b8f]
+parent_clause = "152fe49478d2"
+canonical_clause = "9bc6f9e3808a"
+# The cross-check, restated in STAGE3_PLAN's Q5 answer and held in full at
+# 9bc6f9e3808a, where it is enforced by nothing. A `binding_gate` rather
+# than a claim because the obligation is a runtime comparison that must
+# halt, and a duplicate rather than a second empty gate row so the
+# unwritten-audit-driver backlog is not double-counted.
+#
+# This is the child that keeps the parent unresolved. Reviewer Part B: "A
+# within-run synthetic-data identity check is not evidence that the new OOF
+# machinery reproduces the previously stored production fold aggregates.
+# That is a different provenance claim."
+enforcement = ""
+production_reachability = ""
+input_wiring = ""
+decision_consequence = ""
+test = ""
+break_demonstrated = ""
+trigger = "manual"
+
+[binding_claim.aa2b99b9608f]
+parent_clause = "152fe49478d2"
+locator = "STAGE3_PLAN.md, 'Answers' -- Q5, closing sentence"
+obligation = """
+Full-refit in-sample MSE is DESCRIPTIVE ONLY and never feeds a trigger."""
+status = "pending_package"
+pending_reason = """
+No results write-up reports such a number yet, so the constraint has not
+been tested by anything. Reviewer Part B required it inventoried anyway:
+"The 'full-refit in-sample MSE is descriptive only' component also needs to
+appear in the package/reporting inventory if any such number is reported.
+It is a binding_claim, not discharged merely by the OOF implementation
+existing."
+
+That last clause is the correction. I had let the obligation ride along
+inside a discharge earned by the module's existence -- a reporting
+constraint cannot be satisfied by code that reports nothing yet."""
+negative_attestation = """
+The prohibited thing is an in-sample number FEEDING a trigger, which is a
+use rather than a mention, so the output set is every trigger evaluation in
+the audit write-up plus every number cited as its input. Reporting the
+figure is permitted and expected; what may not happen is a trigger whose
+input is the full-refit value.
+
+Checkable when the write-up exists, and not before: the three trigger
+conditions each name their own inputs at AUDIT_PROTOCOL.md:183, so an
+in-sample number appearing there is visible rather than needing to be
+inferred."""
+trigger = "manual"
+
 [binding_claim.b4af82150247]
 parent_clause = "16b4ff3b7017"
 locator = "COMPANION_PROTOCOLS.md, ABS_CONV_EPS justification axes, axis 3"
@@ -2043,26 +2114,23 @@ obligation = """
 OOF per-image predictions under the frozen folds get MODULE-FIRST
 treatment: implemented with their own tests BEFORE any audit driver calls
 them. Full-refit in-sample MSE is descriptive only."""
-status = "discharged"
-discharged_in = "experiments/stage2b_denoising/stage2b_ridge.py::oof_per_image_mse and tests/test_stage2b_ridge.py"
-evidence = """
-`oof_per_image_mse` and `oof_clipped_mse_at_alpha` exist with ten dedicated
-tests -- coverage-is-a-partition, genuinely-out-of-sample, clipped-vs-raw
-distinctness, single-alpha agreement with the grid column, the recorded
-partition, reproducibility, and a partition guard shown to fire. No audit
-driver exists, so the ordering the clause requires held by construction
-rather than by discipline, and that is the honest reading of this discharge.
-
-SCOPE, and this is the half that is NOT discharged here. The clause's
-built-in cross-check -- "the per-fold mean of the new per-image OOF MSEs
-must reproduce the already-stored fold-aggregate values" -- binds at
-9bc6f9e3808a and is enforced by nothing. tests/test_stage2b_ridge.py's OOF
-cross-check pins the per-fold mean against a within-run recomputation on
-synthetic data, which is a different claim from reproducing the aggregates
-STORED BY THE STAGE-1 AND STAGE-2 RUNS. Citing it for the cross-check would
-be discharge by adjacent evidence; citing it for module-first treatment,
-which is what this row does, is not."""
+status = "unresolved"
 trigger = "manual"
+# A composite. Reviewer Part B: "The row contains at least three
+# obligations ... So either split the row or leave it partially unresolved
+# until 9bc6f9e3808a is enforced against the actual stored artifacts. There
+# is no need to weaken the clause to make it green."
+#
+# Split rather than left partial, because "partially discharged" is not a
+# state this schema has and inventing one would be the escape hatch again.
+# Unresolved because 1b53e78b7b8f is: a composite cannot be more discharged
+# than its children.
+#
+# My original row named the gap correctly and still drew the wrong
+# conclusion from it -- I wrote the SCOPE paragraph explaining that the
+# stored-aggregate cross-check was not covered, then marked the row
+# discharged anyway. Naming a hole in prose is not the same as letting it
+# change the status.
 
 [binding_claim.23984119d253]
 locator = "DESIGN.md, section 'DESIGN STATUS' (document header)"
