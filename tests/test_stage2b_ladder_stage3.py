@@ -699,3 +699,101 @@ def test_the_floor_halt_would_have_fired_on_the_observed_run(driver):
                 "raw_505": 0.001, "raw_784": 0.001}
     would_halt = [c for c, a in observed.items() if a == min(grid)]
     assert sorted(would_halt) == ["T", "lattice"], would_halt
+
+
+# ---- the locked corpus constants, exercised as halts rather than pinned ----
+#
+# `test_corpus_constants` above asserts EXPECTED_REF_IDX == 363 and
+# ENCODER_STEPS == 1200. That is an equality pin: it fails when someone
+# edits the literal, and it says nothing about whether the driver would
+# stop on an artifact that disagrees with it. Both halts existed with no
+# test at all until these two -- found by the gate inventory, which asks
+# for causal evidence rather than a value comparison.
+
+
+def _fake_mods(**attrs):
+    """`mods` is a namespace of imported modules; only `gcs.object_path`
+    is reached by the steps below."""
+    class FakeGcs:
+        @staticmethod
+        def object_path(**kw):
+            return "obj"
+    return type("M", (), dict(gcs=FakeGcs, **attrs))()
+
+
+def _topology_npz(tmp_path, median, n_active=505):
+    import json
+    path = tmp_path / "topologies.npz"
+    np.savez(path, active_indices=np.arange(n_active),
+             summary_json=np.array(json.dumps({"nodes_T": {"median": median}})))
+    return str(path)
+
+
+def test_topology_reuse_halts_when_the_gauge_node_is_not_the_locked_one(
+        driver, tmp_path, monkeypatch):
+    """DESIGN.md locks `theta_ref` = node 363, T's median-weighted-degree
+    node. Stage 1's cached topologies are reused rather than rebuilt, so
+    the gauge arrives as data -- and a different graph would supply a
+    different reference node with nothing else in the run objecting."""
+    monkeypatch.setattr(driver, "consume_pinned",
+                        lambda *a, **k: _topology_npz(tmp_path, median=999))
+    with pytest.raises(driver.Stage3Halt, match="median-degree node is 999"):
+        driver.step1b_topologies(_fake_mods(), None)
+
+
+def test_topology_reuse_accepts_the_locked_gauge_node(driver, tmp_path,
+                                                      monkeypatch):
+    """The other direction, without which the halt above could be
+    unconditional and the test would still pass."""
+    monkeypatch.setattr(driver, "consume_pinned",
+                        lambda *a, **k: _topology_npz(tmp_path, median=363))
+    _, _, ref_idx = driver.step1b_topologies(_fake_mods(), None)
+    assert ref_idx == driver.EXPECTED_REF_IDX
+
+
+def _encoded_manifest(driver_module, **config):
+    base = {"encoder_steps": driver_module.ENCODER_STEPS,
+            "n_images": driver_module.EXPECTED_N}
+    base.update(config)
+    return {"payload_sha256": "d", "payload_generation": 1,
+            "fingerprint": {"config": base, "git": {"commit": "c"}}}
+
+
+def _driver_with_manifest(driver, monkeypatch, manifest):
+    class FakeGcs:
+        @staticmethod
+        def object_path(**kw):
+            return "encoded"
+
+        @staticmethod
+        def consume_validated(name, local, **kw):
+            return manifest, False
+    monkeypatch.setattr(driver, "local_path_for", lambda name: "/nonexistent")
+    return type("M", (), {"gcs": FakeGcs})()
+
+
+def test_encoded_input_halts_on_a_different_encoder_step_count(
+        driver, monkeypatch):
+    """Phase A's artifact carries the step count it was encoded at. The
+    150 -> 1200 amendment is the reason this matters: a stage-1-era encode
+    is a valid npz of the right shape, and only the config distinguishes
+    it."""
+    mods = _driver_with_manifest(
+        driver, monkeypatch, _encoded_manifest(driver, encoder_steps=150))
+    with pytest.raises(driver.Stage3Halt, match="encoder_steps=150"):
+        driver.step3_encoded_input(mods, None, None, None, {})
+
+
+def test_the_step_count_check_passes_before_the_image_count_check(
+        driver, monkeypatch):
+    """The negative direction for a step that cannot complete here.
+
+    A halt raised at the FIRST check would look identical whatever the
+    step count, so the locked value is shown to pass by breaking the NEXT
+    check instead: with the right step count and a wrong image count, the
+    message names images. That is only reachable if the step-count check
+    was evaluated and accepted."""
+    mods = _driver_with_manifest(
+        driver, monkeypatch, _encoded_manifest(driver, n_images=999))
+    with pytest.raises(driver.Stage3Halt, match="covers 999 images"):
+        driver.step3_encoded_input(mods, None, None, None, {})

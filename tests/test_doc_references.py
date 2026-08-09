@@ -30,8 +30,14 @@ import pytest
 
 REPO_ROOT = Path(__file__).resolve().parents[1]
 
-DOCS = sorted(REPO_ROOT.glob("docs/**/*.md")) + [
-    REPO_ROOT / "README.md", REPO_ROOT / "CLAUDE.md"]
+# Skill files are maps of the repository, so a dead reference in one is worse
+# than in ordinary prose: an agent follows it instead of looking. Globbed
+# rather than listed, so a new skill is covered on the day it is written.
+DOCS = (
+    sorted(REPO_ROOT.glob("docs/**/*.md"))
+    + sorted(REPO_ROOT.glob(".claude/skills/*/SKILL.md"))
+    + [REPO_ROOT / "README.md", REPO_ROOT / "CLAUDE.md"]
+)
 
 # A backticked token shaped like a repo path. Backticks are the filter that
 # keeps prose out: this repository writes paths in code spans, and a bare

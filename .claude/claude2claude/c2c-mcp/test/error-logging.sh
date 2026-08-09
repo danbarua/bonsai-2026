@@ -73,10 +73,10 @@ curl -s -o /dev/null -X POST "$BASE/mcp" -H 'Content-Type: application/json' \
   -d '{"jsonrpc":"2.0","id":1,"method":"tools/list","params":{}}'
 
 echo "== 2. valid tools/call =="
-call '{"name":"c2c-send","arguments":{"sender":"claude-code","content":"fine"}}'
+call '{"name":"code2code-send","arguments":{"instance":"session-a","content":"fine"}}'
 
 echo "== 3. missing sender: HTTP 200 but JSON-RPC isError -- must log as an error =="
-call '{"name":"c2c-send","arguments":{"content":"no sender"}}'
+call '{"name":"code2code-send","arguments":{"content":"no instance"}}'
 
 echo "== 4. unknown tool name -- must log as an error =="
 call '{"name":"does-not-exist","arguments":{}}'
@@ -100,10 +100,10 @@ check "valid tools/call logged to stdout" \
   "$(echo "$STDOUT_LOG" | grep -c 'POST /mcp -> 200 (method: tools/call)')" "1"
 
 echo "== error content: real detail, not just a generic marker =="
-check "missing-sender error in err.log with real detail" \
-  "$(echo "$ERR_LOG" | grep -c 'Invalid option: expected one of')" "1"
+check "missing-field error in err.log names the field, not just a marker" \
+  "$(echo "$ERR_LOG" | grep -c 'instance')" "1"
 check "...and NOT in stdout.log" \
-  "$(echo "$STDOUT_LOG" | grep -c 'Invalid option: expected one of')" "0"
+  "$(echo "$STDOUT_LOG" | grep -c 'isError')" "0"
 check "unknown-tool error in err.log with real detail" \
   "$(echo "$ERR_LOG" | grep -c 'does-not-exist not found')" "1"
 check "GET /mcp logged to err.log as HTTP 405" \

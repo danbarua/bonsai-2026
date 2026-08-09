@@ -18,13 +18,23 @@
 #     compares the skip SET against a measured, committed baseline and
 #     fails on any change in either direction.
 #
-# `_TIER` selects how much runs: `fast` on every push, `gated` from a
-# schedule under the idle-or-deadline rule, `full` unconditionally.
+# `_TIER` selects how much runs: `full` runs everything, `fast` runs the
+# `STAGE2B_TEST_FILES` narrowing, `gated` decides and dispatches without
+# running the suite at all.
+#
+# NO TRIGGER SETS `fast`. All three in `infra/` set `_TIER=full` -- the
+# per-push trigger this tier was written for was measured away (see
+# `infra/triggers.tf`), and nothing replaced it.
 
 substitutions:
-  # fast | full | gated. `gated` decides and dispatches; it never runs the
-  # suite itself, so a poll and a full run stay separable in build history.
-  _TIER: fast
+  # DEFAULTS TO `full`, and that direction is deliberate. A build started
+  # without a trigger substitution -- `gcloud builds submit` by hand, or a
+  # new trigger whose author forgets `_TIER` -- gets the WHOLE suite. When
+  # this defaulted to `fast` such a build silently ran a subset that
+  # excludes, among others, every test guarding CI itself: an unset
+  # variable chose a narrowing, and the result still reported success.
+  # An unattended default should fail toward more coverage, never less.
+  _TIER: full
   # Minutes of quiet on the branch before a gated poll dispatches.
   _IDLE_MINUTES: '10'
   # Minutes since the last successful full run after which a poll
@@ -178,7 +188,15 @@ steps:
 
         echo "=== preflight ==="
         apt-get update -qq
-        apt-get install -y -qq --no-install-recommends git make >/dev/null
+        # `jq` is not decoration: tests/test_review_delta.py runs the REAL
+        # tools/ci/review_delta.sh, which needs jq four times. Without it the
+        # script fails open to `mode=full` -- correct behaviour, safe
+        # direction, announced on stderr -- and every test pinning a specific
+        # mode goes red. Worse, the break-confirmation cannot distinguish the
+        # fixed script from the broken one, because both return `full`.
+        # tests/test_ci_image_dependencies.py derives this list rather than
+        # trusting it.
+        apt-get install -y -qq --no-install-recommends git make jq >/dev/null
 
         # The Makefile anchors every path on `git rev-parse --show-toplevel`.
         # Some Cloud Build source types deliver an archive with no .git at

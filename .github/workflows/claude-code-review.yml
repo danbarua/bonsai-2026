@@ -36,6 +36,23 @@ name: Claude Vacuous-Test Review
 on:
   pull_request:
     types: [opened, synchronize, reopened, ready_for_review]
+    # ONLY pull requests INTO the checkpoint branch. For `pull_request`,
+    # `branches` filters on the BASE -- the branch being merged into -- so
+    # this is "PRs targeting stage2b-ci", not "PRs from it".
+    #
+    # The review belongs at the checkpoint gate and nowhere else. That is
+    # the same argument the CI triggers are built on: a review of every PR
+    # re-reads work that has not reached a point anyone declared coherent,
+    # and repeats itself across the pushes in between. Merging stage2b into
+    # stage2b-ci is the moment someone asserts a batch is worth checking,
+    # and it is the moment the full suite runs -- so the review and the
+    # build now look at the same thing at the same time.
+    #
+    # Consequence worth stating: a PR from stage2b into main gets NO review.
+    # By then the work has already passed the checkpoint; reviewing it again
+    # at release is the repetition this design removed.
+    branches:
+      - stage2b-ci
     # Only when tests change. A vacuous-test review of a PR that touched no
     # tests has nothing to say, and a report that says nothing still costs
     # tokens and trains people to skim past it.

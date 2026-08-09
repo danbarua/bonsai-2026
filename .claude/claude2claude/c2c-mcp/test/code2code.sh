@@ -142,6 +142,34 @@ echo "== 10. code2code-archive on a nonexistent filename is a clean no-op, not a
 NOOP_OUT="$(call code2code-archive '{"filename":"2020-01-01T00-00-00Z-nobody.md"}' | text_of)"
 check "reports not found" "$(echo "$NOOP_OUT" | grep -c 'was not found')" "1"
 
+echo "== 11. case never decides whether mail arrives -- to: and as are matched as slugs =="
+# The incident, on this channel: a message addressed `to: INFRA` was
+# skipped by a reader calling with as="infra". Silent in both directions --
+# no error to the sender, nothing returned to the reader, the file left in
+# the mailbox looking delivered.
+#
+# Why folding case is right rather than fixing the names: slugify() folds
+# case for filename safety, so that message is written `--to-infra`, and
+# the filename is the cheapest thing an agent reads to learn who is around
+# -- a directory listing already in hand, against a code-sessions call it
+# has to think to make. Names get learned in the folded form and read back
+# in it.
+#
+# Worse here than on c2c: a consuming sweep skips a mis-cased message on
+# EVERY iteration, so a polling loop is most confident it has cleared its
+# inbox exactly when it has not.
+call code2code-send '{"instance":"session-a","content":"mixed case addressee","to":"SESSION-B"}' > /dev/null
+check "filename tag is folded even though to: was upper-case" \
+  "$(ls "$TMP_ROOT/.claude/code2code/mailbox" | grep -cE -- '--to-session-b\.md$')" "1"
+
+MIXED_WRONG="$(call code2code-inbox '{"as":"session-c"}' | text_of)"
+check "an unrelated session still does NOT consume it (match has teeth)" \
+  "$(echo "$MIXED_WRONG" | grep -c 'mixed case addressee')" "0"
+
+MIXED_RIGHT="$(call code2code-inbox '{"as":"session-b"}' | text_of)"
+check "lower-case session-b DOES receive mail addressed to SESSION-B" \
+  "$(echo "$MIXED_RIGHT" | grep -c 'mixed case addressee')" "1"
+
 echo
 echo "== $PASS_COUNT passed, $FAILURES failed =="
 exit $((FAILURES > 0))

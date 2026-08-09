@@ -104,11 +104,18 @@ def test_each_exemption_still_contributes_the_candidate_count_it_did():
     sys.path.insert(0, str(REPO_ROOT / "tools" / "gates"))
     from gate_inventory import derive_clauses
 
+    # README.md moved 21 -> 20 at `8ad0ddd`, which removed the status
+    # restatement from its header. Re-read before the number was changed,
+    # which is the whole protocol here: the exemption reads "orientation
+    # for a reader arriving cold ... restates none of their obligations
+    # bindingly", and that is MORE true after the edit, not less. The
+    # count fell because a candidate-generating paragraph left, not
+    # because the judgement changed.
     at_exemption_time = {
         "FINDINGS.md": 37,
         "NEGATIVE_PATH_EVIDENCE.md": 19,
         "PHASE_B_PLAN.md": 38,
-        "README.md": 21,
+        "README.md": 20,
     }
     assert set(at_exemption_time) == set(gate_corpus.EXEMPT), (
         "an exemption was added or removed without a candidate count")
@@ -180,3 +187,84 @@ def test_check_corpus_rejects_a_declared_document_that_is_gone(tmp_path):
     with pytest.raises(gate_corpus.CorpusDrift,
                        match=gate_corpus.PROTOCOL_DOCS[0]):
         gate_corpus.check_corpus(tmp_path)
+
+
+# ---- the inventory itself, not only the corpus it is derived against ----
+
+def _reconcile_the_real_inventory():
+    sys.path.insert(0, str(REPO_ROOT / "tools" / "gates"))
+    from gate_inventory import derive_clauses, reconcile
+
+    docs = [STAGE2B_DIR / name for name in gate_corpus.PROTOCOL_DOCS]
+    inventory = tomllib.loads((STAGE2B_DIR / "gates.toml").read_text())
+    return reconcile(derive_clauses(docs), inventory)
+
+
+def test_no_clause_in_the_real_corpus_is_left_undispositioned():
+    """`make stage2b-gate-inventory` is local and read-only, so nothing
+    runs it. That made the coverage figure an artifact of somebody
+    remembering.
+
+    Measured before writing this: deleting an entire dispositioned row
+    from `gates.toml` -- `binding_value.ca5c4da6d40e`, ~2,000 characters
+    -- left all 64 tests in this file and `test_gate_inventory.py` green.
+    The whole inventory could be emptied the same way. Every existing
+    test either drives the reconciler on synthetic input (the mechanism)
+    or derives candidate counts from the DOCUMENTS (the corpus); none
+    read the dispositions.
+
+    Asserts on the undispositioned count specifically, NOT on a clean
+    reconciliation. The run is expected to have findings -- rows pending
+    an audit driver that does not exist, and `reviewed = false`, which is
+    a human's flag and stays red until a human reads all 89 rows.
+    Requiring zero findings here would either fail permanently or invite
+    someone to flip `reviewed` to make a test pass, which is the one
+    thing that flag must never be worth doing.
+    """
+    undispositioned = [f for f in _reconcile_the_real_inventory()
+                       if f.kind == "undispositioned_candidate"]
+    assert not undispositioned, (
+        f"{len(undispositioned)} clause(s) in the frozen protocol documents "
+        f"carry no disposition: {[f.message[:70] for f in undispositioned]}")
+
+
+def test_the_inventory_still_holds_a_disposition_for_every_kind():
+    """Anti-vacuity for the guard above, and it needs a specific shape.
+
+    An empty `gates.toml` derives 89 candidates and reports 89
+    undispositioned, so the check above would catch it. What it would NOT
+    catch is the reconciler silently deriving nothing -- then there are no
+    candidates, no undispositioned ones, and the assertion passes over an
+    empty set. That is the failure `derive_clauses` warns about in its own
+    output ("NO CANDIDATES DERIVED -- the scan found nothing, which is not
+    the same as everything being dispositioned").
+    """
+    sys.path.insert(0, str(REPO_ROOT / "tools" / "gates"))
+    from gate_inventory import derive_clauses
+
+    inventory = tomllib.loads((STAGE2B_DIR / "gates.toml").read_text())
+    kinds = ("binding_gate", "binding_value", "binding_claim", "not_binding")
+    for kind in kinds:
+        assert inventory.get(kind), f"{kind} is empty or absent"
+
+    # Counted against the CORPUS, not against every row in the file. Child
+    # obligations mint their own ids and are additional rows rather than
+    # additional coverage -- the parent paragraph is what the corpus asked
+    # about. Written as a flat total first, which broke the moment the first
+    # composite was split: 95 rows, 89 candidates, and the honest number is
+    # neither of those on its own.
+    docs = [STAGE2B_DIR / name for name in gate_corpus.PROTOCOL_DOCS]
+    candidate_ids = {c.clause_id for c in derive_clauses(docs)}
+    answered = set()
+    for kind in kinds:
+        answered |= set(inventory.get(kind, {})) & candidate_ids
+    assert len(answered) == 89, (
+        f"the inventory answers {len(answered)} of 89 derived candidates; "
+        f"the corpus test pins the derivation, this pins that the inventory "
+        f"still answers it")
+
+    children = [cid for kind in kinds for cid, e in inventory.get(kind, {}).items()
+                if isinstance(e, dict) and e.get("parent_clause")]
+    assert set(children).isdisjoint(candidate_ids), (
+        "a child obligation collides with a corpus candidate id, so one "
+        "disposition covers two different things")

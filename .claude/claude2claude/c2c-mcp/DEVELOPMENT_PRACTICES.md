@@ -7,14 +7,11 @@ mediates a shared, mutable, multi-reader mailbox. Every item below is
 grounded in something that actually went wrong in one session on
 2026-08-07, not a hypothetical.
 
-`c2c-send`/`c2c-inbox` (referenced throughout the incidents below, since
-they were the tools live when these were found) are deprecated as of
-0.7.0 in favor of `code2code-*` -- see README.md's Tools section for
-current status and why they're still registered rather than removed.
-The incidents themselves are left as originally written; the mechanism
-they document (staleness, `updatedInput` semantics, auto-injection)
-applies identically to whichever tool a given session is actually
-using.
+**`c2c-send`/`c2c-inbox` no longer exist** -- the claude2claude channel
+was removed at 0.8.0. The incidents below still name them, deliberately:
+they are the record of what happened, and renaming them to today's tools
+would falsify it. What they document is a property of the mechanism, not
+of the channel, and applies identically to `code2code-*` and `c2gpt-*`.
 
 ## There are (at least) three distinct connection paths — never assume "the server" means one of them
 
@@ -105,52 +102,37 @@ mismatch costs a mis-consumed message.
 
 ## A server upgrade does not upgrade sessions already attached to it -- and this is invisible from either side alone
 
-The version-bump check above answers "is the *server* current." It does
-NOT answer "does *my session* see what the server now offers" -- a
-different question, confirmed independently by two separate sessions
-the same night, via two different methods:
-
-1. This session's own `c2c-inbox`/`c2c-send` connection kept a STALE
-   cached tool schema (missing the `instance` parameter) even after the
-   live server had already been rebuilt and restarted at a newer
-   version -- a `/mcp` reconnect fixed it.
-2. `stage2b-lead`, reached via the new `code2code` channel, independently
-   hit the same class of staleness from the *reader* side and diagnosed
-   it more precisely: querying the server's own `tools/list` directly
-   showed `as` present on `c2c-inbox`, while that session's own attached
-   schema lacked it entirely -- meaning its consuming reads had been
-   running in broadcast mode (no `as` to pass) the whole time, unable to
-   protect against exactly the mis-consume incident documented above.
-   Reconnecting fixed it, and also revealed the `code2code-*` tools were
-   invisible to that session outright before then -- not a missing
-   parameter, a missing tool family.
+The version bump above answers "is the *server* current." It does not
+answer "does *my session* see what the server offers" -- a different
+question, and never trust that the two are the same claim.
 
 **The MCP tool contract is pinned per client AT CONNECTION TIME, not
-polled continuously.** A session that connected before a server upgrade
-keeps running the OLD contract indefinitely, with no error, no warning,
-and no visible difference in how the tool call is issued -- until it's
-called and either rejects with a validation error (if a field the
-caller doesn't know about became required) or silently omits a safety
-parameter the caller never knew to pass. What makes this nasty, in
-`stage2b-lead`'s framing: **the operator sees the feature deployed, the
-attached session sees a schema without it, and both are looking at the
-truth simultaneously.** There is no single vantage point from which the
-mismatch is visible -- it only shows up by comparing the two.
+polled.** A session that connected before an upgrade keeps the OLD
+contract indefinitely: no error, no warning, no visible difference in
+how the call is issued. It surfaces only when the call either rejects
+on a field the caller doesn't know became required, or silently omits
+a safety parameter the caller never knew to pass.
 
-**The cheap self-check, from the reader side**: a session can detect
-its own staleness by checking whether a parameter it expects (`as` on
-`c2c-inbox`) is actually present in ITS OWN attached tool schema, not
-by trusting that the server having the feature means the session does
-too. If it's missing, that session's consuming reads are running in
-whatever the safe-but-permissive fallback is for that gap (broadcast
-mode here) -- worth surfacing rather than assuming current behavior.
+What makes it nasty, in `stage2b-lead`'s framing: **the operator sees
+the feature deployed, the attached session sees a schema without it,
+and both are looking at the truth.** No single vantage point shows the
+mismatch; it appears only by comparing the two.
 
-This is a *different* failure mode from the "corrected incident" two
-sections up (that one was about the wrong root cause being blamed for
-a real mis-consume; this one is about a schema gap that's real and
-detectable, just invisible without deliberately comparing both sides).
-Both point at the same underlying fact: never trust that "the feature
-is live" and "my connection reflects the feature" are the same claim.
+Confirmed twice the same night, from both sides. This session's own
+connection kept a stale schema (missing `instance`) after the server
+was already rebuilt at a newer version. `stage2b-lead` hit it from the
+reader side and diagnosed it more precisely: the server's `tools/list`
+showed `as` present while their attached schema lacked it -- so their
+consuming reads had been running in broadcast mode the whole time,
+unable to protect against the mis-consume documented above.
+Reconnecting fixed both, and also revealed `code2code-*` had been
+invisible to that session outright -- not a missing parameter, a
+missing tool family.
+
+**The cheap self-check, from the reader side**: look for a parameter
+you expect in your OWN attached schema, rather than trusting that the
+server having a feature means you do. If it's absent, your reads are
+running on whatever permissive fallback covers that gap.
 
 ## Preflight-check the port before starting anything
 
@@ -371,5 +353,107 @@ The channel's other exposure is *fidelity*: most c2gpt rulings arrived by
 hand-paste because the connector was unavailable, and a paste can clip a
 clause while the result still reads complete. Knowing who wrote something
 tells you nothing about whether it arrived whole — which is why the
-mitigation is `tools/mailbox/check_transit_integrity.py` rather than a
+mitigation is `.claude/claude2claude/mailbox-tools/check_transit_integrity.py` rather than a
 provenance field.
+
+## A trust header set CONDITIONALLY must be deleted unconditionally first
+
+`src/proxy.ts` forwards every client header that isn't hop-by-hop. Two
+headers it adds are the backend's only way to tell where a request came
+from, and they need opposite handling for the same reason.
+
+`x-c2c-via-proxy` is safe because it is overwritten on **every** request,
+always to `"1"`. A client sending its own copy cannot change the outcome.
+
+`x-c2c-verified` is set **only when a signature verified**. Overwriting
+does not apply — on the failure path there is nothing to write. So without
+an explicit `delete headers[VERIFIED_HEADER]` before the conditional set, a
+caller can simply send `x-c2c-verified: github` themselves, and it rides
+through `filteredHeaders` untouched into a backend that treats it as proof
+the proxy vouched for the request.
+
+The rule generalises past this file: **an unconditional overwrite is
+self-protecting, a conditional set is not.** Any header that means "this
+component checked something" belongs in the second category and needs the
+delete.
+
+Confirmed by removing the one line and watching `test/webhook-proxy.sh`'s
+forgery case report `expected [ABSENT], got [github]` — not by reading it.
+
+## The only component that can verify a signature is the one without a parser
+
+GitHub signs the raw request bytes. The natural place to check that looks
+like the backend route that handles the webhook, and that place cannot do
+it: `createMcpExpressApp` applies `express.json()` at app creation, so
+`req.body` is parsed before any route we add ever runs, and re-serialising a
+parsed body does not reproduce the signed bytes — key order, whitespace and
+unicode escaping all differ.
+
+`src/proxy.ts` is a pure `node:http` pipe with no body parser anywhere, so
+it still holds them. Verification lives there, and the backend consumes a
+verdict rather than re-deriving one.
+
+Two constraints follow, both non-obvious:
+
+- **Buffer only what you must.** Computing an HMAC needs the whole body, but
+  buffering everything breaks SSE and the MCP transport, whose correctness
+  on the far leg depends on unbuffered piping. Only requests carrying a
+  known signature header are buffered.
+- **Cap the buffer.** Reading an arbitrary body into memory to verify it is a
+  denial-of-service primitive. The cap defaults to GitHub's own 25 MB
+  delivery limit.
+
+And an implementation detail that cost a test cycle: rejecting an oversized
+body with `req.destroy()` tears down the socket before the 413 can be
+written, so the client sees no status at all (curl reports HTTP 000). Pause,
+answer, then close.
+
+## A same-second collision counter lands inside the `--from-` slug
+
+`sendMessage` resolves same-second filename collisions with a `-2`, `-3`
+suffix at the **end of the whole filename**. When a message has no `--to-`
+segment — every broadcast — that counter sits immediately after the sender
+slug, so `--from-no-reply-2.md` parses as the sender `no-reply-2`.
+
+Any exact-match test on the parsed sender therefore misses every message
+after the first within a given second. Measured: three webhook deliveries in
+one second, two of which archived themselves instead of being deleted. CI
+sends bursts, so this was the common case, not an edge one.
+
+`isFromNoReply` strips a trailing counter, and only when no `--to-` is
+present, because with an addressee the counter attaches to the to-slug and
+the from-slug is already clean. The accepted trade is documented at the call
+site: a real session named `no-reply-<digits>` would be treated as the
+reserved sender.
+
+The same hazard is latent in `excludeSelfSent`, which compares the parsed
+from-slug against the reader's own name — a session's own broadcast, if it
+collided, would not be recognised as its own.
+
+**Related, still unfixed:** that collision loop checks the mailbox only,
+never `archive/`. A same-second re-send from the same sender, after the
+first was archived, produces an identical filename and `fs.rename`
+overwrites the archived copy without complaint. Rare, but it is silent loss
+from the digest corpus.
+
+## Two files that must agree on a string literal need a test, not a comment
+
+`x-c2c-via-proxy` and `x-c2c-verified` are each defined as a bare literal in
+more than one file. That is deliberate: `src/proxy.ts` must keep its
+zero-dependency standalone build, so it cannot import a constant from
+`oauth.ts` or `index.ts` without dragging express's types onto a VM that has
+nothing but `node:http`.
+
+Renaming one copy and not the other fails **closed and silently** — the
+backend looks for a header the proxy no longer sets, every verified webhook
+401s, and it presents as a signing problem. `test/header-constants.sh`
+derives every definition from the sources and asserts each constant resolves
+to exactly one value, that it is still defined in at least two files (so the
+check cannot pass by agreeing with itself after a deletion), and that no
+source file inlines an `x-c2c-*` literal outside those definitions.
+
+That last assertion was written wrong the first time: it filtered grep
+output on the header VALUE, which excluded every hit and made the check
+vacuous. It passed against a deliberately inlined literal. Only
+break-testing surfaced it — a guard written to enforce principle 21, failing
+principle 10.

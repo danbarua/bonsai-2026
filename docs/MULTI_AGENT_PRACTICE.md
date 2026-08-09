@@ -15,14 +15,33 @@ hypothesis rather than a finding, it says so.
 
 | agent | role | sees |
 |---|---|---|
-| **Claude Code** (this repo) | implements, runs, commits | the filesystem, git, the shell, the cloud CLI |
+| **named Claude Code instances** (several, concurrent) | implement, run, commit — each owning a track | the filesystem, git, the shell, the cloud CLI |
 | **Claude Desktop** | consolidates review, relays between parties | the repo read-only, both message channels |
-| **ChatGPT** | adversarial reviewer | only what Desktop relays |
+| **ChatGPT** | adversarial reviewer | only what is relayed to it |
 | **subagents** | parallel work in git worktrees | an isolated copy of the repo |
+| **CI** (Cloud Build, GitHub Actions) | checks a declared batch, on another platform | a clean checkout, and nothing else |
 | **the human** | releases spend, breaks ties | everything, but not continuously |
 
-They communicate by files: `.claude/claude2claude/{inbox,outbox,archive}`.
-No shared memory, no shared context, no synchronous handoff.
+There is no longer a single "the Claude Code agent". Several run at once,
+each with a name set by `/rename`, each usually in its own git worktree, and
+they address each other by that name. A name is a routing hint, never a
+credential — see pattern 2b.
+
+They communicate by files, with no shared memory, no shared context and no
+synchronous handoff:
+
+| channel | path | shape |
+|---|---|---|
+| peer mesh | `.claude/code2code/mailbox/` | flat; each message addressed to one instance, and reading it consumes it |
+| reviewer | `.claude/claude2gpt/{inbox,outbox}/` | split, because the far end is a different product |
+
+**The asymmetry that decides how you wait.** A named Code instance polls its
+own mail and answers on its own. Desktop and ChatGPT cannot poll — they
+receive only when the human triggers them. So a message to a peer is a
+request that will be picked up, and a message to Desktop or ChatGPT is a
+message *parked* until a human moves it. Blocking on the second is waiting
+for something that cannot arrive by itself; say out loud that mail is waiting
+for a human relay instead of polling for a reply.
 
 ---
 
@@ -259,6 +278,32 @@ probably worth *more* for uninvested peers than their case showed.
 That is pattern 1 operating at the smallest grain it has — one
 paragraph. Had the author summarised instead of asking, the overstated
 version would be in this document now.
+
+### 6d. A batch is DECLARED coherent, never inferred from elapsed time
+
+Concurrent agents push constantly, and no push means "this is a good
+point to check". A shared branch that only a merge reaches is where a batch
+gets declared: merging into it asserts *this is worth checking on another
+platform, from clean*. Here that branch is `stage2b-ci`, and CI runs on
+pull requests into it.
+
+The first design polled every fifteen minutes, which inferred the same
+thing from the clock. Measured, the repository was taking ~46 pushes/day —
+so a per-push run cost about twice the free tier to re-answer a question
+every agent had already answered locally, minutes earlier and faster. What
+a cloud run genuinely adds is a different platform, a clean checkout, and a
+record. None of those change between one push and the next.
+
+Two consequences worth stating because both are easy to get backwards:
+
+- **Reach the branch by pull request, not a direct push.** A direct merge
+  skips the review and produces a green nobody read. The PR is what lets the
+  review fire on the diff and the build gate the merge at the same moment.
+- **What has not been checked is then derived, not tracked by hand:**
+  `git log stage2b-ci..stage2b` is exactly the work no full run has seen.
+
+Mechanics, which move faster than this document:
+`.claude/skills/github/SKILL.md`.
 
 ---
 
@@ -573,6 +618,7 @@ whether it mattered.
 4. Derive guard rails — the next agent has not read your list.
 4b. Concurrent sessions share a repo, not a view of it: fetch before pushing shared branches, announce before changing shared surface — and say what the change is supposed to do, or a peer can only recognise noise.
 4c. Have a peer USE an infra deliverable on real work before calling it done; the builder cannot see wiring gaps from inside the build.
+4d. A batch is declared coherent by merging into the checkpoint branch, never inferred from elapsed time — and reach that branch by pull request, or the green is one nobody read.
 5. Commit before you think you need to; the session may not end, it may stop.
 6. Tear down unconditionally, check the status, keep leak and verdict distinct.
 7. Require a sentinel *and* an exit code; break each half separately.

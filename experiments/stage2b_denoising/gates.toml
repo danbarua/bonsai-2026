@@ -1,65 +1,59 @@
 # Stage 2B binding-clause inventory.
 #
-# Reviewer requirement 4 (c2gpt archive 2026-08-08T08:24:30Z §5, scoped by
-# 2026-08-08T10:24:39Z §II-III). Reconciled by tools/gates/gate_inventory.py.
+# Reviewer requirement 4 (ruling of 2026-08-08, §5; scope settled by the
+# follow-up ruling §II-III). Reconciled by tools/gates/gate_inventory.py.
 #
 #     make stage2b-gate-inventory
 #
-# THREE KINDS, because a frozen protocol contains three kinds of promise and
-# forcing them into one shape produces either a false `not_binding` or an
-# invented field. See the tool's module docstring.
+# WHAT THE TERMS MEAN -- "binding clause", the three kinds, and what each
+# binds and on whom -- is in `docs/GLOSSARY.md`, not here. That vocabulary
+# is used in tasks, in mail, and by a reconciler this file does not own, so
+# it belongs where terms are defined rather than in one of its consumers.
+#
+# WHAT EACH KIND REQUIRES is at that kind's own section divider below, not
+# in this header. A reader filling a `binding_claim` row is already at the
+# binding_claim section; a contract at the top of the file is read once at
+# orientation and needed later, which is exactly when it is furthest away.
 #
 # ANTI-GAMING, quoted from the ruling and enforced by a reviewer rather than
 # by any check in this file: "a clause cannot be moved from binding_gate to
 # another kind merely because enforcement is absent." Several rows below are
-# deliberately failing for exactly that reason.
-#
-# PROVENANCE OF THE AUTHORITY THIS FILE RESTS ON. The scope of the whole
-# inventory -- the 89-clause corpus, the three kinds, the discharge
-# semantics -- comes from the two rulings cited above, quoted from the
-# c2gpt archive, which is the primary record within this system. Transport
-# is MIXED: `c2gpt-send` takes `from` as a routing parameter, so a
-# connector write and a human paste are byte-identical in the archive, and
-# most replies came by paste.
-#
-# Split the consequence, because only one half is affected:
-#
-#   * AUTHORITY is unaffected, and the package should claim it confidently.
-#     Every relay had the authorizing human in the loop by construction --
-#     a pasted ruling is not a weaker ruling, it is the authorization
-#     pathway working.
-#   * FIDELITY to the Reviewer's original text is attested by the relaying
-#     human, not by the channel. This file does not claim byte-exactness
-#     with what the Reviewer typed.
-#
-# What was mechanically checked, as of 2026-08-08, over all 37 archive
-# files by tools/mailbox/check_transit_integrity.py (pinned by
-# tests/test_archive_fidelity.py, which prints the file count): no file
-# ends mid-clause, and no numbered section sequence skips. Zero findings.
-#
-# STATE THE STRENGTH EXACTLY. A clean run clears detectable TRANSIT LOSS.
-# It does not establish fidelity. Nothing inside a file can prove it
-# matches what was sent -- only a transport-attested channel could, and
-# this one is not one. "No findings" therefore means "none of the three
-# ways a truncated ruling betrays itself is present", and nothing more.
-#
-# The reason two of those three checks exist is worth recording:
-# citation resolution alone is blind
-# to the loss of a section NOTHING references -- which is the final section
-# of a ruling by construction, and where qualifications live. The live
-# example is in the file this inventory's scope depends on most:
-# 10-24-39Z's closing paragraph licenses NOT building an automated prose
-# checker for the 54 claims. Nothing references it. Clipped in transit, every
-# internal citation would still resolve, the file would end on §III looking
-# complete, and the work it forbids would have been built in the belief that
-# the ruling required it. A missing licence does not leave a gap you notice;
-# it creates work you invent.
+# deliberately failing for exactly that reason. It is stated here rather
+# than per-kind because it is the one rule that governs all of them.
 
 reviewed = false   # set true only when a human has read every row
 
 # =============================================================================
 # binding_gate -- runtime decision obligations
 # =============================================================================
+#
+# Binds THE RUNNING PROGRAM. Something is evaluated, and something halts or
+# branches on the result. The only kind whose enforcement a machine can
+# check -- which is why it carries the most fields, and why an empty one
+# fails readiness rather than being reclassified.
+#
+# Every field required. Six dimensions plus scheduling:
+#
+#   enforcement              the executable predicate, `path/to/file.py::name`
+#   production_reachability  the production path(s) that reach it, INCLUDING
+#                            wrappers and orchestration. A correct predicate
+#                            production never invokes is not a gate.
+#   input_wiring             the concrete runtime values supplied, and their
+#                            provenance
+#   decision_consequence     the observable halt or branch on rejection.
+#                            Logging a failed predicate without preventing
+#                            continuation does not qualify unless the design
+#                            defines the gate as advisory.
+#   test                     the test, `path::name`
+#   break_demonstrated       evidence the test flips RED under a deliberate
+#                            local disable. A source grep, a symbol
+#                            reference, or a test that merely names the
+#                            predicate does not qualify -- see VACUOUS_TESTS
+#                            #17 and #20, both of which were exactly that.
+#   trigger                  what SCHEDULES the test (`ci-fast`, `manual`).
+#                            A separate axis from reachability: "somebody
+#                            runs it by hand" is reported, not failed;
+#                            "production never calls it" is a failure.
 
 [binding_gate.9d4b9ec0ba99]
 # "HALT for review if any production condition selects 1e-6."
@@ -354,7 +348,7 @@ trigger = "manual"
 #  pairwise order reversal.
 #
 # Two of these three were LOST IN RELAY once already (STAGE3_PLAN.md:118
-# records it: the briefing encoded only pairwise order reversal, and ChatGPT
+# records it: the briefing encoded only pairwise order reversal, and the Reviewer
 # re-listed all three live rather than stale). They are reinstated in the
 # frozen protocol and enforced nowhere, which is the state this row reports.
 enforcement = ""            # UNWRITTEN
@@ -364,6 +358,46 @@ decision_consequence = ""
 test = ""
 break_demonstrated = ""
 trigger = "manual"
+
+[binding_gate.352d90abe1f9]
+# Freeze 4 -- "atomic payload + manifest ... validity only when payload and
+#  manifest both exist and agree ... one central validated consume path ...
+#  raw download bypass mechanically prohibited or detected."
+enforcement = "experiments/stage2b_denoising/stage2b_gcs.py::consume_validated"
+production_reachability = """
+The one validated read path, and `ensure_artifact`'s SKIP branch IS a
+`consume_validated` call -- so a resumed step is validated by construction
+rather than by the driver remembering to check. Every artifact-producing
+step of every ladder driver goes through `ensure_artifact`. The opt-out is
+`require_manifest=False`, named and greppable, used only at call sites
+reading pre-contract artifacts and annotated with the rung at each."""
+input_wiring = """
+`object_name` from gcs.object_path; the manifest read from the sidecar,
+whose name derives from the payload's; `require_manifest` True by default at
+every call site the drivers use. The manifest is the COMMIT POINT, not a
+description: payload written under a generation precondition, that
+generation captured, sidecar written second recording it."""
+decision_consequence = """
+ManifestMissingError before any payload bytes move. A payload with no
+manifest is UNCOMMITTED -- which is the semantic for the crash window
+between the two writes, not merely a validity rule, so the refusal is the
+correct reading of a half-finished publish rather than a false alarm."""
+test = "tests/test_stage2b_gcs.py::test_a_payload_whose_manifest_never_landed_is_uncommitted"
+break_demonstrated = """
+`if require_manifest:` -> `if False:` inside consume_validated (an
+unmanifested payload is no longer refused): SIX tests FAIL, and the set is
+the evidence rather than the count. It includes
+test_ensure_artifact_refuses_to_resume_from_an_object_with_no_manifest --
+the RESUME path, which is the one that matters: a resumed run is exactly
+where an uncommitted payload would otherwise be consumed silently as though
+the step had finished. It also includes the two orphan-recovery tests, so
+the refusal's own recovery hint is pinned alongside the refusal.
+
+Produced for this row rather than cited from adjacent work.
+NEGATIVE_PATH_EVIDENCE.md's recorded breakage covers the closure checks and
+the teardown signal, not this guard -- citing it here would have been
+discharge by adjacent evidence, which reads exactly like a filled row."""
+trigger = "ci-fast"
 
 # -- deliberately FAILING rows: the gate is documented and unenforced --------
 #
@@ -393,9 +427,203 @@ test = ""
 break_demonstrated = ""
 trigger = "manual"
 
+[binding_gate.5d8386004c11]
+# DESIGN: "Automatic failures, REGARDLESS of rho or the absolute-convergence
+#  escape below: any non-finite encoded phase; any non-finite final-Delta.
+#  ... Exceedance halts the stage pending investigation."
+enforcement = "experiments/stage2b_denoising/stage2b_encoder_gate.py::evaluate_rho_gate"
+production_reachability = """
+run_ladder_stage1.py::step4_encoder_gate calls run_encoder_gate, which calls
+evaluate_rho_gate and attaches the encoded phases. Reached via the sole
+production entry point `make stage2b-ladder-stage1`. The verdict is cached
+as an artifact whose object name carries the step count
+(`encoder_gate_s{ENCODER_STEPS}`), so a step-count change cannot serve a
+stale verdict past the amendment that changed it.
+
+Note that the check is inside the module, not the driver: the driver reads
+`summary["passed"]` and `summary["failure_reasons"]`, so a caller cannot
+reach the gate without reaching the automatic failures."""
+input_wiring = """
+`delta_clean` / `delta_noisy` -- each image's final-iteration maximum
+absolute phase update, from the encoder at ENCODER_STEPS -- and
+`thetas_clean` / `thetas_noisy`, the encoded phases themselves, which the
+non-finite-PHASE check needs and which run_encoder_gate passes in. Both
+computed on the same 1,000 images, clean and noisy versions separately.
+
+SCOPE LIMITATION, from the module's own docstring and repeated here because
+it narrows what the row may be cited for: the non-finite-PHASE check sees
+only the coordinates the caller supplies. A non-finite phase OUTSIDE the
+active support is still caught, but by the non-finite final-Delta check
+rather than this one."""
+decision_consequence = """
+`automatic_failure` forces `passed = False` regardless of rho and regardless
+of the absolute-convergence escape, and run_ladder_stage1.py raises
+Stage1Halt("encoder gate: " + reasons). The verdict is written into the run
+report on BOTH branches, before the halt -- so a failing gate produces a
+record rather than only an exception."""
+test = "tests/test_stage2b_encoder_gate.py::test_absolute_convergence_escape_does_not_override_automatic_failure"
+break_demonstrated = """
+Both automatic failures disabled independently, each `if ... :` -> `if
+False:` in production:
+
+  non-finite final-Delta   test_gate_automatic_failure_on_non_finite_final_delta_despite_small_rho
+                           and test_gate_automatic_failure_on_infinite_final_delta FAIL.
+  non-finite encoded phase test_absolute_convergence_escape_does_not_override_automatic_failure
+                           and test_gate_automatic_failure_on_non_finite_encoded_phase_with_healthy_rho FAIL.
+
+Disjoint failure sets, which is what shows the two automatic failures are
+separately enforced rather than one standing in for both. The test named in
+`enforcement` is the one that pins the word REGARDLESS: it constructs a case
+where the absolute-convergence escape would otherwise pass the gate, and
+requires the automatic failure to win."""
+trigger = "ci-fast"
+
+[binding_gate.08442e7f450d]
+# STAGE3_PLAN: "A commit-keyed fingerprint would refuse legitimate cross-stage
+#  reuse. step1b_topologies deliberately consumes STAGE 1's topologies.npz, and
+#  stage_kmnist consumes IDX files staged under stage 1 -- both written under
+#  different commits and configs. Which fields participate must be selectable
+#  per artifact kind, or every stage-2/3 run refuses its own inputs."
+enforcement = "experiments/stage2b_denoising/stage2b_fingerprint.py::require_match"
+production_reachability = """
+`stage2b_gcs.py::consume_validated` (line 1793) and `ensure_artifact`'s
+consume path (line 2127) both call require_match with the call site's own
+policy. Those two are the only routes by which a fingerprinted artifact
+enters a run, and every ladder driver's reads go through one of them.
+
+The policy is chosen PER CALL SITE, not centrally, which is the clause's
+actual requirement: `STRICT` (format, source_manifest, config, git_commit)
+for anything a run generates itself, `CONTENT_ONLY` (format alone) for
+stage 1's topologies and staged KMNIST. A central widening would have made
+every artifact as permissive as the most permissive consumer."""
+input_wiring = """
+`recorded` = the manifest's `fingerprint` block as stored with the object;
+`expected` = the fingerprint this run computed from its own entrypoint,
+config and source closure; `policy` = the call site's, defaulting to STRICT
+so an omitted argument fails toward MORE checking, never less."""
+decision_consequence = """
+FingerprintMismatch raised, naming the object, the policy and every field
+that differed -- and raised BEFORE any payload bytes move, so a mismatch
+costs a metadata read rather than a download."""
+test = "tests/test_stage2b_fingerprint.py::test_content_only_policy_permits_a_different_producer"
+break_demonstrated = """
+Two directions, both observed, and they are what separate this row from a
+generic "the fingerprint is checked" claim:
+
+  `if mismatches:` -> `if False:` (refuse nothing): FIVE tests fail across
+  two files, three of them in tests/test_stage2b_gcs.py -- so the
+  production consume paths, not only the comparator, are shown to depend
+  on it. test_the_producer_is_verified_before_any_payload_bytes_move is
+  among them, which is the pre-download property.
+
+  CONTENT_ONLY's `fields=("format",)` widened to STRICT's four (i.e. the
+  per-kind selectability removed, which is the exact failure the clause
+  predicts): THREE tests fail --
+  test_content_only_policy_permits_a_different_producer,
+  test_cross_stage_reuse_under_content_only_is_permitted and
+  test_ensure_artifact_permits_cross_stage_reuse_under_content_only. A
+  stage-2/3 run would refuse its own stage-1 inputs, exactly as written."""
+trigger = "ci-fast"
+
+[binding_gate.b6e8be29a571]
+# AUDIT_PROTOCOL: "Either alpha regime triggers review. The alpha mechanism
+#  determines the INTERPRETATION of a reversal ... but it does not determine
+#  WHETHER review occurs."
+#
+# Deliberately separate from 12d7b0d5472d, which carries the three trigger
+# CONDITIONS. This clause binds the OR over regimes: a reversal seen under
+# fixed-alpha alone, or under reselected-alpha alone, is sufficient. Merged
+# into one row, the natural implementation -- check the conditions once, on
+# whichever regime the driver happens to compute first -- would satisfy the
+# merged row while silently halving its reach.
+#
+# The clause also records that the trigger is live rather than hypothetical:
+# stage-2 cross-validated contrasts already show both signs (T -2.30e-3 and
+# lattice -3.90e-3 improving; rewired +4.02e-3 and curr_random +2.38e-3
+# worsening). So this is not a gate guarding an unreachable branch.
+enforcement = ""            # UNWRITTEN -- the audit driver does not exist
+production_reachability = ""
+input_wiring = ""
+decision_consequence = ""
+test = ""
+break_demonstrated = ""
+trigger = "manual"
+
+[binding_gate.a375db47a337]
+# DESIGN: the hierarchical identity gate. "1. Primary: evolved_T vs.
+#  pre_evolution. 2. Only if primary succeeds: evolved_T vs. identity -- the
+#  denoising gate; NEVER rescues a failed primary. 3. Always reported
+#  independently: pre_evolution vs. identity, own paired bootstrap interval."
+#
+# A gate rather than a claim, and the distinction is the word "only": step 2
+# is CONDITIONAL on step 1's outcome, so something must evaluate step 1 and
+# branch. Written as a claim it would be discharged by a person noticing the
+# write-up did not overreach, which is a weaker thing than a driver that
+# cannot compute the step-2 comparison until step 1 has passed.
+#
+# Note that step 3's obligation is the opposite shape -- ALWAYS reported,
+# whatever steps 1 and 2 show -- and is the part most likely to be lost by an
+# implementation that treats the sequence as an early-exit ladder.
+enforcement = ""            # UNWRITTEN -- no statistics driver exists
+production_reachability = ""
+input_wiring = ""
+decision_consequence = ""
+test = ""
+break_demonstrated = ""
+trigger = "manual"
+
+[binding_gate.daf41844a257]
+# STAGE3_PLAN Q4: "static import closure UNION runtime closure, established
+#  before generation and revalidated after, every exclusion frozen and
+#  justified. Runtime-alone misses conditional, lazy and branch-specific
+#  imports."
+#
+# PARTIAL COVERAGE EXISTS AND IS NOT CITED AS ENFORCEMENT, deliberately.
+# run_ladder_stage3.py:329 raises Stage3Halt when a named module resolves
+# outside the pinned clone -- real, and a different claim: it checks the
+# ORIGIN of modules already known to matter, from a hand-written tuple
+# ("ridge", "corruption", "encoder_gate", "gcs", "partition", ...). That
+# tuple is a hand-maintained list standing in for a derived set, which is
+# principle 21 exactly, and the clause exists because the derived set is what
+# closes the omitted-helper failure mode. Citing the origin check here would
+# be discharge by adjacent evidence in the shape 9bc6f9e3808a names.
+#
+# Neither closure is computed anywhere today, so both halves are absent --
+# not one half satisfied.
+enforcement = ""            # UNWRITTEN -- no closure is computed
+production_reachability = ""
+input_wiring = ""
+decision_consequence = ""
+test = ""
+break_demonstrated = ""
+trigger = "manual"
+
 # =============================================================================
 # binding_value -- frozen configuration obligations
 # =============================================================================
+#
+# Binds A NUMBER, frozen in advance so it cannot be chosen later to suit a
+# result. Nothing rejects anything, so `decision_consequence` is not asked
+# for -- demanding one would be demanding fiction.
+#
+#   value                the authoritative source and the frozen value
+#   production_consumers EVERY consumer, or a proved common propagation
+#                        point. One consumer cited for a value read in four
+#                        places is a row covering a quarter of what it claims.
+#   enforcement          the pinning/identity test
+#   break_demonstrated   causal evidence the test fails when the PRODUCTION
+#                        value or its propagation is altered -- not when the
+#                        literal is edited, which tests that a constant
+#                        equals itself
+#   provenance_of_use    evidence the run actually USED the frozen value,
+#                        rather than that the value was frozen somewhere
+#   trigger              what schedules that test
+#   status               enforced | pending_consumer | unresolved
+#
+# `pending_consumer` is for a value frozen for code that does not exist yet
+# -- several here are frozen for the unwritten audit driver. It needs
+# `pending_reason` and it FAILS readiness. "Nothing consumes it yet" is a
+# true and useful statement; it is not a pass.
 
 [binding_value.b682b6af449a]
 # AUDIT_PROTOCOL: "Safety factor M = 100, frozen here, before any audit result."
@@ -501,9 +729,498 @@ coverage. The two documents that DO exist are the ones this row must sweep
 when the package lands; recording that scope now, before the writing, is
 what stops the sweep being defined afterwards to match what was written."""
 
+[binding_value.649bb190a18e]
+# DESIGN.md: "9,857 trainable parameters (computed: (1*32*9+32) +
+#  (32*32*9+32) + (32*1*9+1)) ... full-image MSE NEVER reported for this
+#  model ... CNN input receives no normalization beyond the locked clipping."
+value = """
+DESIGN.md's locked CNN architecture: 9,857 trainable parameters, biases
+enabled on every convolution, zero padding at k=3/p=1, linear final layer
+(no sigmoid), scope-matched masked active-support MSE for training and
+evaluation."""
+production_consumers = """
+stage2b_cnn.py::CONV_CHANNELS and EXPECTED_PARAM_COUNT, consumed by the
+Denoiser constructor's three Conv2d layers and by
+count_trainable_parameters. The single propagation point is CONV_CHANNELS
+-- all three layers derive their widths from it, so there is no second
+place a width could drift independently."""
+status = "enforced"
+enforcement = "tests/test_stage2b_cnn.py::test_parameter_count_is_exactly_9857"
+break_demonstrated = """
+CONV_CHANNELS 32 -> 33 with EXPECTED_PARAM_COUNT LEFT AT 9857 -- the
+propagation broken while the constant is untouched, which is the form this
+field asks for. FOUR tests fail, and the message is the evidence:
+"architecture has 10462 trainable parameters, DESIGN.md locks ...". The
+count is computed from the constructed model, so the test compares the
+frozen number against the thing built, not against itself.
+
+Note which tests fell: test_biases_are_enabled_on_every_convolution and
+test_per_layer_parameter_counts_match_the_design_arithmetic both fail too,
+because the arithmetic they check is per-layer and the widths moved. A
+single width change is visible in three independent readings of the
+architecture."""
+provenance_of_use = """
+Stage 2 trained the CNN against real data for the first time and reported
+best-of-three-seeds clipped validation MSE (0.0637 vs the identity
+baseline's 0.1998), recorded in FINDINGS.md; the model that produced it is
+the same constructor these constants govern, and the parameter-count
+assertion runs at construction."""
+trigger = "ci-fast"
+
+[binding_value.5908ac408624]
+# DESIGN.md: "ABS_CONV_EPS = 1e-12 ... 5+ orders below the smallest
+#  meaningful measured Delta (2.177e-07) and well above observed float64
+#  dust (1e-14 to 1e-16) ... It requires BOTH medians below it, not either."
+value = "ABS_CONV_EPS = 1e-12 (stage2b_encoder_gate.py:110)"
+production_consumers = """
+stage2b_encoder_gate.py::evaluate_rho_gate's `abs_conv_eps` parameter,
+defaulting to the module constant; run_encoder_gate passes no override, and
+the ladder drivers call run_encoder_gate. One propagation point, and the
+default is what production uses -- which is exactly what made the gap below
+possible."""
+status = "enforced"
+enforcement = "tests/test_stage2b_encoder_gate.py::test_the_module_default_abs_conv_eps_decides_a_real_verdict"
+break_demonstrated = """
+This row is the fourth defect the inventory has turned up, and the break is
+what found it.
+
+BEFORE: moving the assignment 1e-12 -> 1e-9 -- three orders, out of the
+observed dust band (1e-14..1e-16) and up toward the smallest meaningful
+measured final-Delta in the project (2.177e-07) -- failed EXACTLY ONE test,
+`test_gate_locked_constants`, which asserts the literal equals itself. No
+gate verdict changed anywhere. The escape WAS exercised by existing tests,
+but they pass `abs_conv_eps` explicitly, so they pin the mechanism and say
+nothing about the value production uses. That is precisely the distinction
+this schema's `break_demonstrated` names, and the pin failed it.
+
+AFTER: `test_the_module_default_abs_conv_eps_decides_a_real_verdict` puts
+medians at 1e-11 -- above 1e-12, below 1e-9 -- with rho far over threshold
+so the escape is the only thing that could pass the gate. At the locked
+value the escape must not fire and the gate must FAIL; at a loosened one it
+fires and the verdict flips. Confirmed: the same 1e-12 -> 1e-9 edit now
+fails two tests, and the behavioural one reports "at the locked 1e-12 a
+1e-11 median is NOT numerical dust".
+
+An error of my own worth recording, since it nearly hid the finding: the
+first break edited the DOCSTRING occurrence, because `replace(..., 1)` took
+the first match and the module docstring quotes the constant in backticks
+above the assignment. It reported 29 passed and I almost read that as the
+value being unpinned in a different way. First-match-is-not-the-one-you-
+want, in a break test, while hunting first-match bugs."""
+provenance_of_use = """
+The stage-1 re-run's gate PASSED at rho=0.0 exact, so the escape did not
+decide that verdict -- the ratio test did. The escape's own decisive case
+is the diagnosed S=600 point (FAIL at rho=17.76 with noisy's median at
+1.776e-14), recorded in DESIGN.md's amendment and
+diagnose_encoder_gate_failure.py. Stated plainly because it matters for
+what this row claims: the frozen value is pinned and reachable, and it has
+not yet been the thing that decided a production run."""
+trigger = "ci-fast"
+
+[binding_value.7946f9f0ccc3]
+# AUDIT_PROTOCOL: "Ridge MSE at both budgets is computed from out-of-fold
+#  per-image predictions under the frozen five-fold partition."
+value = """
+The prediction basis for the amendment audit: out-of-fold per-image
+predictions under StratifiedKFold(n_splits=5, shuffle=True,
+random_state=42), for pre_evolution and all four evolved conditions."""
+production_consumers = ""   # the audit driver is unwritten
+status = "pending_consumer"
+pending_reason = """
+`stage2b_ridge` HAS out-of-fold support and it is tested -- but the audit
+driver that would consume it under this protocol does not exist, so nothing
+production consumes this value yet. Naming the existing OOF code here would
+be discharge by adjacent evidence: the module having the capability is not
+the audit using it, and this clause is about the audit."""
+enforcement = ""
+break_demonstrated = ""
+trigger = "manual"
+
+[binding_value.1148ede15761]
+# AUDIT_PROTOCOL Freeze 3: fixed alpha vs reselected alpha, defined.
+value = """
+Fixed alpha := selected from the PRODUCTION 1,200-step representation, per
+condition, via the frozen five-fold procedure, then applied identically to
+both budgets' OOF fits. Reselected alpha := independent selection per
+budget by the same procedure."""
+production_consumers = ""   # the audit driver is unwritten
+status = "pending_consumer"
+pending_reason = """
+Frozen for the unwritten audit driver. Deliberately NOT merged with
+1837113c184a, which is STAGE3_PLAN's statement of the same freeze: they are
+separate sentences in separate documents with separate ids, and one
+disposition covering two is the collision check_ids_unique refuses."""
+enforcement = ""
+break_demonstrated = ""
+trigger = "manual"
+
+[binding_value.259d3b7f30fb]
+# AUDIT_PROTOCOL: "both regimes consume the THIRTEEN-decade grid."
+value = """
+Conforming amendment, disclosed: both alpha regimes search the amended
+thirteen-decade grid {1e-6 .. 1e6}. The protocol's own logic is unchanged --
+"the same frozen procedure" still means the frozen procedure -- what changed
+is which grid that procedure searches, at both budgets and for the
+production alpha alike."""
+production_consumers = ""   # the audit driver is unwritten
+status = "pending_consumer"
+pending_reason = """
+The grid itself IS in production (stage2b_ridge.ALPHA_GRID, thirteen values,
+and the Phase B re-run used it). What has no consumer is this clause's
+specific requirement -- that BOTH AUDIT REGIMES consume it -- because
+neither regime exists until the audit driver does. The distinction matters:
+the value is live, the obligation about how the audit uses it is not."""
+enforcement = ""
+break_demonstrated = ""
+trigger = "manual"
+
+[binding_value.1837113c184a]
+# STAGE3_PLAN Freeze 3: "Fixed := the alpha selected from the production
+#  1,200-step representation per condition via the frozen 5-fold procedure,
+#  applied identically to both budgets' OOF fits. Reselected := independent
+#  per budget."
+value = """
+The DEFINITION of fixed-alpha for the amendment audit: per condition, the
+alpha the frozen 5-fold procedure selects on the production 1,200-step
+representation, then applied unchanged to both budgets' OOF fits. Reselected
+alpha is chosen independently per budget. Both are reported, alongside the
+production alpha itself.
+
+Per-budget fold-fitted scalers are retained (production preprocessing), so
+fixed-alpha isolates THE EFFECT OF ALPHA RESELECTION -- not raw
+representation change. That narrowing is part of the frozen value: a row
+that recorded only "fixed vs. reselected" would license the stronger reading
+the plan explicitly refuses."""
+production_consumers = ""
+status = "pending_consumer"
+pending_reason = """
+STAGE3_PLAN's statement of the freeze that 1148ede15761 carries for
+AUDIT_PROTOCOL. Deliberately NOT merged with it, for the reason recorded
+there: separate sentences in separate documents with separate ids, and one
+disposition covering two is the collision check_ids_unique refuses. The two
+rows are expected to move together, and if they ever diverge that is a
+finding about the documents rather than about this file.
+
+No consumer for the same reason: neither budget's OOF fit exists until the
+audit driver does. `stage2b_ridge.oof_per_image_mse` and
+`oof_clipped_mse_at_alpha` are the machinery it will call -- built,
+tested, and not yet called by anything that implements this definition."""
+enforcement = ""
+break_demonstrated = ""
+trigger = "manual"
+
+[binding_value.ae2b8a6124e4]
+# DESIGN: "This level is frozen. Adjusting it because measured clip rates
+#  'look awkward' is post-hoc tuning this project refuses. Empirical clip
+#  rates are reported ... as confirmation against this table, not discovery."
+value = """
+The corruption level, `ALPHA_BAR = 0.5`. Frozen, and the freeze carries a
+second half that is easy to drop: the measured clip rates are CONFIRMATION
+against the design's analytical table, never an input to choosing the
+level. The direction of inference is part of the value."""
+production_consumers = """
+stage2b_corruption.py::ALPHA_BAR, the single propagation point. Every
+derived quantity reads it rather than restating a number:
+signal_coefficient / noise_coefficient take it as their argument's default,
+predicted_clip_rates and clip_rate_agreement default to it, and
+run_ladder_stage1.py::step3 calls clip_rate_agreement without overriding
+it. There is no second place a level could drift."""
+status = "enforced"
+enforcement = "tests/test_stage2b_corruption.py::test_analytical_rates_reproduce_the_design_table"
+break_demonstrated = """
+ALPHA_BAR 0.5 -> 0.6: TEN tests fail, and the set is the evidence rather
+than the count. It includes test_analytical_rates_reproduce_the_design_table
+and test_format_analytical_table_reproduces_design_md_rows -- both of which
+compare DERIVED rates against DESIGN.md's transcribed table, so they fail
+because the propagated consequence moved, not because a literal was edited.
+test_master_seed_and_alpha_bar_are_locked also fails, and on its own it
+would be the equality-pin shape this file distrusts; it is not on its own.
+
+Also fails: test_censoring_is_majority_at_every_clean_intensity, which is
+the design's actual scientific premise (~54% censoring) rather than any
+number transcribed from it."""
+provenance_of_use = """
+Stage 1 ran clip_rate_agreement on the real 1,000-image corpus and recorded
+the comparison in the run's report under `clip_rate_agreement`, with
+out-of-tolerance entries routed to `diagnostics.clip_rate_outside_tolerance`
+-- so the artifact records the confirmation direction the clause requires,
+not merely that a level was set."""
+trigger = "ci-fast"
+
+[binding_value.30b820786974]
+# DESIGN: the encoding pipeline. "Gauge: reference-node, theta_ref = node 363
+#  (T's median-weighted-degree node; Stage 2A's final locked choice).
+#  Features: circular embedding, 1008-dim, the two trivially-constant
+#  reference-node columns dropped deterministically ... Encoder RNG: seed 0
+#  per image, primary."
+value = """
+The gauge node, 363, and the feature dimension it implies: 2 x 505 - 2 =
+1008, the two dropped columns being the reference node's own cos/sin, which
+are constant by construction under a reference-node gauge. Encoder RNG seed
+0 per image.
+
+SCOPE. This row covers the three values above. The clause's remaining
+items are dispositioned elsewhere rather than bundled here, because one
+citation covering four values covers a quarter of what it claims: the
+per-training-fold StandardScaler regime binds at ccd85c56816e with the rest
+of the ridge configuration, and the inherited canonical-graph constants
+(fold seed 42; rewire seed 0; matched-sparsity seed 0) are Stage 2A's,
+consumed as data through stage 1's cached topologies rather than set here."""
+production_consumers = """
+run_ladder_stage3.py::EXPECTED_REF_IDX and EXPECTED_FEATURE_DIM, and the
+same pair in run_ladder_stage1.py and run_ladder_stage2.py -- three rungs,
+three declarations, deliberately not shared, since a driver that agreed with
+the others by import could not detect a rung encoded under a different
+gauge. EXPECTED_FEATURE_DIM is written as `2 * EXPECTED_N_ACTIVE - 2` in all
+three, so the support size is the single propagation point.
+
+The gauge is not set by the driver: it ARRIVES as data, in stage 1's cached
+topologies (`meta["nodes_T"]["median"]`), and the driver's role is to refuse
+an artifact that disagrees. stage2b_encoder_gate.py::ENCODER_SEED is the
+seed's single point, consumed by run_ladder_stage1.py::step4_encoder_gate."""
+status = "enforced"
+enforcement = "tests/test_stage2b_ladder_stage3.py::test_topology_reuse_halts_when_the_gauge_node_is_not_the_locked_one"
+break_demonstrated = """
+`if ref_idx != EXPECTED_REF_IDX:` -> `if False:` in the production driver:
+test_topology_reuse_halts_when_the_gauge_node_is_not_the_locked_one FAILS.
+Its partner test_topology_reuse_accepts_the_locked_gauge_node still passes,
+so the halt is shown conditional rather than unconditional.
+
+WHAT DID NOT FAIL is the finding. test_corpus_constants -- `assert
+driver.EXPECTED_REF_IDX == 363` -- passed on the broken driver, because the
+literal was untouched and the halt consuming it was gone. Until the test
+named in `enforcement` was written for this row, that pin was the only thing
+watching the gauge, and it watches the constant rather than the decision.
+Same stream as the FOLD_SEED finding recorded at ccd85c56816e, different
+mechanism: this one fails when the literal moves, and is blind to the halt
+being deleted."""
+provenance_of_use = """
+Phase A's encoded artifact (`encoded_train_s1200`) was produced against
+stage 1's topologies object, whose summary_json carries median=363; the
+stage-3 driver re-reads that same object under a pinned digest, so the
+gauge in the artifact and the gauge the driver checks are the same bytes."""
+trigger = "ci-fast"
+
+[binding_value.15648e761c31]
+# DESIGN post-lock amendment (2026-08-06): "ENCODER_STEPS raised 150 -> 1200,
+#  and the gate formula gains an absolute-convergence escape."
+value = """
+ENCODER_STEPS = 1200, replacing the pre-lock 150. The amendment's own
+disclosure is the reason the value binds rather than merely being a
+default: the gate's first execution on real majority-censored KMNIST FAILED
+honestly at rho=169.851 against a threshold of 10, and 1200 is the step
+count the investigation settled on. A run encoded at any other count is not
+the run the design describes."""
+production_consumers = """
+Two independent declarations, and the duplication is load-bearing:
+
+  stage2b_encoder_gate.py::ENCODER_STEPS   what the encoder RUNS at,
+      consumed by run_ladder_stage1.py::step4_encoder_gate, which also
+      interpolates it into the gate artifact's OBJECT NAME
+      (`encoder_gate_s{steps}`) so a step-count change mints a new object
+      rather than reusing a cached verdict computed at the old count.
+  run_ladder_stage3.py::ENCODER_STEPS      what Phase B EXPECTS its input to
+      have been encoded at, consumed by step3_encoded_input against the
+      artifact's recorded fingerprint config, and by _obj to name the object
+      it fetches.
+
+A shared constant would make the second check tautological. The producer and
+the consumer assert the same number independently, which is what lets the
+consumer detect a producer that changed."""
+status = "enforced"
+enforcement = "tests/test_stage2b_ladder_stage3.py::test_encoded_input_halts_on_a_different_encoder_step_count"
+break_demonstrated = """
+`if int(config.get("encoder_steps", -1)) != ENCODER_STEPS:` -> `if False:`
+in the production driver: test_encoded_input_halts_on_a_different_encoder_step_count
+FAILS. Its partner, test_the_step_count_check_passes_before_the_image_count_check,
+still passes -- and it is the reason this pair is a verdict rather than a
+raise: the step cannot complete locally, so the healthy direction is shown
+by breaking the NEXT check and observing that the message names images,
+which is only reachable if the step-count check was evaluated and accepted.
+
+test_corpus_constants passed on the broken driver, same as at 30b820786974."""
+provenance_of_use = """
+The Phase A artifact is named `encoded_train_s1200` and its manifest's
+fingerprint config records `encoder_steps: 1200`; the stage-3 driver reads
+that config and compares. The step-1 gate artifact for the superseded count
+(`encoder_gate_s150`) survives in the bucket as the historical record of the
+FAIL that produced the amendment -- so both counts are attested, and which
+one produced which result is answerable from object names alone."""
+trigger = "ci-fast"
+
+[binding_value.ccd85c56816e]
+# DESIGN: "One multi-output ridge, shared alpha across all 505 outputs, grid
+#  {1e-6 .. 1e6}, fit_intercept=True, inputs standardized per-fold, targets
+#  unstandardized. Tie: mean validation MSE within 1e-10 absolute; LARGER
+#  ALPHA WINS. Folds: StratifiedKFold(n_splits=5, shuffle=True,
+#  random_state=42), identical partition across all conditions."
+value = """
+The readout's frozen configuration: ALPHA_GRID's thirteen decade values,
+ALPHA_TIE_TOL = 1e-10 with the larger-alpha tie-break, N_SPLITS = 5, and
+FOLD_SEED = 42 -- one partition, identical across every condition.
+
+The tie-break DIRECTION is part of the value. "Within 1e-10, larger alpha
+wins" is a prospective commitment to the more-regularized model; reversed,
+it would select the less-regularized one on ties that are numerically
+meaningless, which is a choice made by looking at results."""
+production_consumers = """
+stage2b_ridge.py::ALPHA_GRID, ALPHA_TIE_TOL, N_SPLITS, FOLD_SEED. Four
+values, and per this section's own warning they are enumerated rather than
+covered by one citation:
+
+  ALPHA_GRID     default of svd_ridge_fit, cross_validate_alpha,
+                 oof_per_image_mse, sklearn_ridge_predict,
+                 ridge_equivalence_check
+  ALPHA_TIE_TOL  default of select_alpha, reached from cross_validate_alpha
+  N_SPLITS       default of cross_validate_alpha, oof_per_image_mse,
+                 oof_clipped_mse_at_alpha, ridge_equivalence_check
+  FOLD_SEED      the `random_state` default of the same four
+
+run_ladder_stage3.py::step7_ridge calls cross_validate_alpha without
+overriding any of them, so the module defaults ARE the production values."""
+status = "enforced"
+enforcement = "tests/test_stage2b_ridge.py::test_the_production_partition_is_the_one_the_design_locks"
+break_demonstrated = """
+Each of the four broken separately, in production, with the test literals
+untouched:
+
+  ALPHA_TIE_TOL 1e-10 -> 0.0   test_select_alpha_within_tolerance_tie_larger_alpha_wins
+                               fails on the VERDICT ("assert 10.0 == 100.0"):
+                               the tie stops being a tie and the smaller
+                               alpha wins. Also the equality pin, which
+                               would not have been enough alone.
+  N_SPLITS 5 -> 4              5 tests fail.
+  ALPHA_GRID (removed decade)  covered by 3043a89b2aae's own row.
+  FOLD_SEED 42 -> 43           1 test fails -- and this is a REPAIR, not a
+                               report. Before the test named in
+                               `enforcement` was written, 42 -> 43 passed
+                               92/92: every test read the seed from the
+                               module and asserted a downstream record
+                               equalled it, which is `x == x`. Distinct
+                               from the equality pins catalogued elsewhere
+                               and worse: an equality pin at least fails
+                               when the literal is edited, a
+                               self-referential one fails under no edit at
+                               all. VACUOUS_TESTS #28."""
+provenance_of_use = """
+ridge_cv_g13_88edf9ac.json records the Phase B re-run's selected alphas per
+condition under this grid and partition, and its manifest records the
+producing commit. The object name's `g13` is the thirteen-value grid, so
+the artifact's own identity carries which grid produced it."""
+trigger = "ci-fast"
+
+[binding_value.ca5c4da6d40e]
+# DESIGN: "Architecture (residual formulation, locked prospectively):
+#  x_hat_0 = x_t_clip + f_psi(x_t_clip)".
+#
+# Separate from 649bb190a18e, which carries the same block's PARAMETER
+# COUNT and layer properties. This row is the residual FORMULATION -- the
+# skip connection itself, which is what makes the 9,857 parameters model a
+# correction rather than a reconstruction. A width change and a dropped skip
+# are different failures and the second leaves the count intact.
+value = """
+The prediction is the clipped input plus a learned correction:
+`x_hat_0 = x_t_clip + f_psi(x_t_clip)`, locked prospectively -- i.e. before
+any measurement of whether the residual form helps."""
+production_consumers = """
+stage2b_cnn.py::Denoiser.__call__, the single site: `x + self.residual(x)`.
+The convolution stack is reached only through it, so there is no path that
+evaluates f_psi without the skip."""
+status = "enforced"
+enforcement = "tests/test_stage2b_cnn.py::test_residual_skip_connection_is_real"
+break_demonstrated = """
+`x + self.residual(x)` -> `self.residual(x)` (the skip dropped, every
+parameter and the 9,857 count untouched): THREE tests fail --
+test_residual_skip_connection_is_real, plus
+test_training_loss_is_raw_and_validation_metric_is_clipped and
+test_clipping_touches_the_prediction_and_never_the_target, both of which
+read the model's output and so see the formulation change independently.
+
+Worth recording that 649bb190a18e's break (CONV_CHANNELS 32 -> 33) does NOT
+fail these three, and this break does not fail its four. Two rows, two
+disjoint failure sets, over one paragraph of DESIGN.md."""
+provenance_of_use = """
+Stage 2's CNN development run reported best-of-three-seeds clipped
+validation MSE 0.0637 against the identity baseline's 0.1998 (FINDINGS.md).
+The model that produced it is this constructor; a non-residual model would
+have been a different architecture reported under the same name."""
+trigger = "ci-fast"
+
+[binding_value.2c7aaa2b46ea]
+# DESIGN: "Training, literal: batch 128, max 100 epochs, early-stopping
+#  patience 10 on clipped active-support validation MSE, min_delta=0.0 with
+#  strict `<` improvement, best checkpoint restored ... Three seeds (0,1,2)
+#  ... best-of-3 by clipped validation MSE, training-derived only."
+value = """
+BATCH_SIZE 128, MAX_EPOCHS 100, PATIENCE 10, MIN_DELTA 0.0 with strict `<`,
+SEEDS (0, 1, 2). The stopping RULE is as frozen as the numbers: min_delta
+zero plus strict improvement means an exact plateau does not reset patience,
+which is what makes "patience 10" a bounded claim rather than a
+configuration that can run to MAX_EPOCHS on a flat curve.
+
+The clause's closing constraint -- selection is training-derived only,
+official-test performance never inspected -- is NOT dispositioned here. It
+binds at f3bbc791e7c6, which gates test-side access in code."""
+production_consumers = """
+stage2b_cnn.py::BATCH_SIZE, MAX_EPOCHS, PATIENCE, MIN_DELTA, SEEDS,
+consumed by train_cnn's epoch loop and its early-stopping branch. SEEDS is
+consumed by the best-of-three caller rather than by train_cnn, which takes
+one seed -- the only one of the five with its propagation outside the
+training function."""
+status = "enforced"
+enforcement = "tests/test_stage2b_cnn.py::test_worsening_run_stops_after_patience_epochs_keeping_the_first_checkpoint"
+break_demonstrated = """
+Two of the five broken in production, both landing on the same VERDICT test
+rather than only on the constants pin:
+
+  PATIENCE 10 -> 3     test_worsening_run_stops_after_patience_epochs_keeping_the_first_checkpoint
+                       fails -- the run stops at a different epoch and the
+                       restored checkpoint changes.
+  MIN_DELTA 0.0 -> 1e-9  same test fails, and this is the more informative
+                       of the two: the epoch count is unchanged on a
+                       strictly-worsening curve, so what moves is the
+                       plateau behaviour the strict-`<` clause exists for.
+
+test_locked_optimizer_and_training_constants fails under both. It is an
+equality pin and is deliberately not cited as `enforcement` -- it is
+reported here because it fired, not because it would have been enough."""
+provenance_of_use = """
+Stage 2 trained under these constants and recorded the per-seed clipped
+validation MSEs and the selected checkpoint in its run report; FINDINGS.md
+carries the best-of-three figure. No stage-3 CNN run exists yet, so the
+provenance is stage 2's, at the 5,000-image development scale."""
+trigger = "ci-fast"
+
 # =============================================================================
 # binding_claim -- obligations on what may be CLAIMED
 # =============================================================================
+#
+# Binds WHAT MAY BE WRITTEN, not what the program does. No code path can
+# enforce these and pretending one could is the failure this inventory
+# exists to prevent. A person discharges them; the row records where.
+#
+#   locator      source document plus a STABLE locator -- a line number
+#                moves, a section or anchor does not
+#   obligation   the normalized obligation: what must or must not be
+#                claimed or done
+#   status       discharged | pending_package | not_applicable | unresolved
+#   discharged_in / evidence   required only when status = discharged. The
+#                evidence must point at an ARTIFACT, never at who checked
+#                it: an agent attribution is not reviewer-checkable, and a
+#                mesh `instance:` tag names a ROLE rather than a session.
+#
+# `pending_package` -- reviewed, binding, and not dischargeable because the
+# readiness package it discharges into does not exist. Needs
+# `pending_reason`; fails readiness. Distinct from `unresolved` on purpose:
+# unresolved wants a reviewer, pending_package wants an artifact, and a
+# reader who cannot tell which cannot triage the list.
+#
+# NEGATIVE ATTESTATION, required when the obligation is never/must-not
+# shaped. Pointing at one compliant paragraph cannot establish the
+# prohibited claim is absent from everywhere else, so the row states the
+# OUTPUT SET it ranges over. A positive obligation is discharged by showing
+# something; a negative one is violated by an absence, and absences do not
+# announce themselves.
 #
 # No code path can enforce these, and pretending one could is the failure the
 # whole requirement exists to prevent. They are discharged by a person reading
@@ -613,6 +1330,262 @@ single version of the package can evidence compliance. The check is the
 metric list at package time against the metric list frozen here, both
 directions, with the freeze commit named."""
 
+[binding_claim.37ae915f8e61]
+locator = "STAGE3_PLAN.md, section 'Acceptance-test shape-note, folded in'"
+obligation = """
+The regeneration spans two populations with different evidentiary status.
+The 54k arrays payload-compare bit-exact against the uploaded artifact; the
+6k arrays are NEW -- no prior artifact exists -- so they are fingerprinted
+at birth and their final-Delta tail computed alongside the full-60k tail.
+The acceptance report MUST STATE THAT SPLIT EXPLICITLY rather than letting
+one "regeneration passed" blur two different kinds of evidence."""
+status = "unresolved"
+discharged_in = """
+experiments/stage2b_denoising/results/stage3_regeneration_acceptance.json,
+top-level keys `fit_tail`, `validation_tail`, `fit_tail_crosscheck` and
+`alignment` -- produced by compare_stage3_regeneration.py. NOT yet a
+discharge; see the unresolved note below."""
+evidence = """
+The report does not carry one merged verdict. `fit_tail` and
+`validation_tail` are separate objects, and `fit_tail_crosscheck` exists
+only for the reproduced population -- there is no such key for the 6k,
+because there is nothing to cross-check them against, which is the
+evidentiary asymmetry the clause is about made structural rather than
+stated. `alignment` records the join as by official index.
+
+Pointed at the artifact rather than at who checked it: an agent attribution
+is not reviewer-checkable, and these keys are.
+
+UNRESOLVED, and the Reviewer's Part B correction is exactly right. The
+obligation says the acceptance report "must STATE that split explicitly".
+Separate JSON structures make the asymmetry STRUCTURAL, which is better
+engineering -- and a reader still has to INFER why only the 54k population
+carries a cross-check. The clause specifically prohibited making them infer
+it. Structure is not a statement.
+
+What closes it needs no recomputation: extend
+`compare_stage3_regeneration.py` to emit an explanatory field naming the two
+populations and why only one is payload-compared, then regenerate the report
+deterministically from the existing arrays. Left `unresolved` rather than
+pre-marked, because a discharge written before the field exists is the thing
+this row is being corrected for."""
+
+[binding_claim.9b52d6ca717b]
+# NARROWED at Reviewer Part B's instruction, and the narrowing is
+# evidentiary rather than convenient. The clause's third sentence -- "full
+# suite green before each commit" -- is deliberately absent from the
+# normalized obligation below: this project never established persistent
+# per-commit test logs, so for commits already made there is no record that
+# could substantiate it. The Reviewer's framing was "either substantiate it
+# from records or narrow the normalized obligation to what can actually be
+# established", and there are no such records.
+#
+# What remains is weaker and checkable: the break-evidence half is
+# discharged by artifacts anyone can re-read. A subordinate sentence nobody
+# can verify should not ride along inside a discharge the rest of the clause
+# earns.
+#
+# Worth recording HOW this text ended up here rather than in `obligation`:
+# it was in `obligation` first, and `missing_negative_attestation` fired --
+# the word "cannot", inside explanatory prose, read to the guard as a
+# prohibition needing an attestation. Correctly. `obligation` holds the
+# normalized obligation; rationale goes in a comment.
+locator = "STAGE3_PLAN.md, section 'Verification'"
+obligation = """
+Every new guard confirmed by breaking what it watches and observing the
+specific expected failure -- not by observing a green suite. Payload
+comparison verified by deliberately perturbing one array."""
+status = "discharged"
+discharged_in = """
+The `break_demonstrated` field of every substantiated row in this file, and
+`NEGATIVE_PATH_EVIDENCE.md`'s "Deliberate breakage" subsections."""
+evidence = """
+Each break is stated with the edit made and the specific tests that flipped
+red -- e.g. `if force and artifact_class(name) == LINEAGE:` -> `if False:`
+failing test_an_orphan_payload_closes_every_ordinary_route on its
+`produced == []` assertion, and MEAN_X_TOL_EXPONENT 0.5 -> 0.66 failing six
+tests across the scaling family.
+
+Worth recording what the obligation caught rather than only that it was
+kept: filling `break_demonstrated` honestly is what exposed the ridge
+equivalence gate having no negative-path test at all (142 tests green under
+a hardcoded verdict) and the index-join guard being a source grep that
+stayed green while all three joins were replaced. Neither was found by
+review. The row that would not go in is the instrument."""
+
+[binding_claim.6afc3010a1c1]
+locator = "STAGE3_PLAN.md, section 'What survives the correction'"
+obligation = """
+Convergence is declared by the reviewer, never the responder; and both
+inboxes are checked immediately before any consolidation send."""
+status = "discharged"
+discharged_in = "docs/MULTI_AGENT_PRACTICE.md, Part 1 rule 1"
+evidence = """
+Recorded there as a standing rule with its founding incident: a
+consolidating agent's briefing headed "Review has now CONVERGED" was
+substantially faithful to the archive and the convergence claim was false --
+a twelfth message arrived 111 seconds later contradicting three of its seven
+items. The rule and its corollary (check both inboxes immediately before
+consolidating) are stated as practice rather than as history.
+
+Discharged in a practice document rather than a package artifact because
+the obligation is on how agents coordinate, not on what the write-up may
+claim. That is the honest place for it, and the reason it is `discharged`
+now while most claims here are `pending_package`."""
+negative_attestation = """
+Scoped to consolidation sends -- any message summarising a review round and
+asserting it complete. The honest statement of what this attestation can
+and cannot be: the obligation is FORWARD-LOOKING over an open-ended set of
+future messages, so no sweep establishes absence for messages not yet sent.
+What can be attested is the two things that make a violation catchable:
+
+  (a) ONE known violation exists and is recorded rather than suppressed --
+      the "Review has now CONVERGED" briefing, contradicted 111 seconds
+      later, which is the founding incident in MULTI_AGENT_PRACTICE rule 1;
+  (b) the rule is recorded where the agents who could violate it read it,
+      which is what makes a future instance recognisable as a violation
+      rather than as ordinary summarising.
+
+That is weaker than the attestations on the write-up claims, and
+deliberately so. Those range over a finite artifact that will exist and can
+be swept. This one ranges over behaviour, and claiming a sweep of behaviour
+would be the fabricated-completeness failure the field exists to prevent."""
+
+[binding_claim.3043a89b2aae]
+locator = "DESIGN.md, section 'Alpha grid' -- 'Decade spacing is exact and frozen'"
+obligation = """
+Thirteen values, one per decade, NO interpolation and NO densification
+around an observed minimum, ever. A grid that may be refined near a minimum
+after the minimum has been seen has a stopping rule chosen by looking at
+results."""
+status = "discharged"
+discharged_in = "experiments/stage2b_denoising/stage2b_ridge.py::ALPHA_GRID"
+evidence = """
+ALPHA_GRID is thirteen literal decade values and there is no densification
+code path -- no refine step, no second grid, nothing that takes a selected
+alpha and searches near it. The one extension that has happened was the
+whole grid moving four decades DOWN under the frozen one-shot procedure,
+which preserved exact decade spacing and re-ran everything rather than
+splicing; `grid_tag()` derives the artifact name from a digest of the grid,
+so the amended run could not silently reuse the old results.
+
+Discharged rather than pending because this is a claim about what the CODE
+may do, not about what a write-up may say, and the code exists."""
+negative_attestation = """
+Scoped to every alpha the production ridge path can evaluate. The
+prohibited thing is a value not on the frozen decade grid reaching a fit,
+by any route -- a refinement pass, a hand-added point, a caller passing its
+own `alphas`.
+
+Two things make the absence checkable rather than asserted: `cross_validate_alpha`
+and `ridge_equivalence_check` both DEFAULT to ALPHA_GRID and the stage-3
+driver passes no override, and the run's own artifact records the grid it
+used, so a run on a different grid is visible in the record afterwards
+rather than only preventable beforehand. What is NOT established is that a
+future caller cannot pass its own list -- the parameter exists. That is a
+real gap and it is named here rather than papered over."""
+
+[binding_claim.4e826a51fe84]
+locator = "DESIGN.md, section 'Named possible outcomes'"
+obligation = """
+Five outcomes named in advance, including ones unflattering to the
+hypothesis (evolution does not help; the unevolved encoding carries most of
+the value; raw-pixel ridge dominates every phase-based condition). If
+observed, a coherent reportable dissociation -- a WATCHED OUTCOME, NOT A
+SUCCESS CRITERION. Success remains defined by the evolution-vs-encoded
+contrasts under the identity gate."""
+status = "pending_package"
+pending_reason = """
+Binds how the results are written up, and no results write-up exists. The
+confirmatory statistics have not been computed on the test split and may
+not be before the Stage 4 gate."""
+negative_attestation = """
+Scoped to the results write-up. The prohibited move is presenting one of
+these five as a success criterion the design met, when the design named it
+in advance precisely so it could not be claimed as one. Naming an outcome
+before seeing it is what makes it a prediction; describing it afterwards as
+what success looked like converts a pre-registration into a post-hoc story
+with no textual tell -- the sentence reads identically either way. So the
+attestation at package time is on the SUCCESS CRITERION as stated (the
+evolution-vs-encoded contrasts under the identity gate), checked to be
+unchanged from DESIGN.md, rather than on the prose about outcomes."""
+
+[binding_claim.ea9dc1d668e1]
+locator = "DESIGN.md, section 'Computational strategy'"
+obligation = """
+Colab/GCP is a compute RUNTIME for this implementation only, not a
+commitment about final deliverable format. Visuals/plots delivery format is
+an explicitly DEFERRED decision made once results exist. Do not treat
+notebook packaging as a pending or implied task at any point before then.
+GCS paths are implementation details; FINDINGS.md in-repo remains the record
+of note."""
+status = "discharged"
+discharged_in = """
+The absence of any notebook or delivery-format work item, and
+experiments/stage2b_denoising/FINDINGS.md as the record of note in
+practice."""
+evidence = """
+Every result to date -- both ladder rungs, Phase A, Phase B and its
+amended-grid re-run -- is recorded in FINDINGS.md in the repository, not in
+a notebook, and no task or plan item proposes packaging one. The clause is
+unusual in being satisfied by something NOT happening, which is why it is
+worth a row: an implied task that nobody started leaves no trace, so the
+only way to show it was declined is to have said so where the decision
+would have been made.
+
+SCOPE OF THE DISCHARGE, at Reviewer Part B's instruction: discharged
+THROUGH THE CURRENT PRE-STAGE-4 PACKAGE STATE, not absolutely. The
+obligation stays live until the deferred delivery-format decision becomes
+permissible, which is after results exist. That is not a defect in the
+row -- it is what a continuing negative obligation looks like when it is
+recorded honestly, and the alternative is a discharge that silently
+expires on the day the question becomes live.
+
+The attestation gets more expensive as Stage 4 approaches, for the same
+reason: that is exactly when a deliverable format becomes a real question
+and the deferral is easiest to forget was deliberate."""
+negative_attestation = """
+Scoped to the plan of record, the task queue, and PHASE_B_PLAN.md. The
+prohibited thing is notebook packaging appearing as pending or implied
+work. Checked: no such item exists in any of them. This attestation is
+cheap NOW and gets more expensive the closer Stage 4 comes, since that is
+when a deliverable format becomes a live question and the deferral is
+easiest to forget was deliberate."""
+
+[binding_claim.aec9fff59bbe]
+locator = "STAGE3_PLAN.md, section 'Consent'"
+obligation = """
+Execution through fingerprint implementation, Phase A regeneration, the
+amendment audit and Phase B is consented ONCE THOSE ARE COMMITTED. Mismatch
+gates halt automatically. Successful completion of planned steps creates NO
+additional discretionary review. Stage 4 stays blocked behind the package
+review and explicit release."""
+status = "discharged"
+discharged_in = "The execution record: FINDINGS.md's Phase A and Phase B sections, and the absence of any Stage 4 artifact."
+evidence = """
+Both halves held, and they pull in opposite directions, which is what makes
+the pair worth one row. Phase B ran without a fresh discretionary approval
+after its freezes were committed -- the consent was standing, as written,
+and nobody re-asked. And Stage 4 has NOT run: no test-side object has been
+read, written or named, and the gate stays closed pending the package
+review and Dan's explicit release.
+
+The clause is easy to satisfy in one direction only. An agent that treats
+every completed step as an opportunity to re-check has not honoured it
+either -- 'successful completion creates no additional discretionary
+review' is an obligation not to manufacture a checkpoint, and reading it as
+mere permission loses half of it."""
+negative_attestation = """
+Scoped to the Stage 2B test split. The prohibited thing is any test-side
+result generated or inspected before the Stage 4 gate. Established
+structurally rather than by inspection: `stage2b_gcs._check_object_path_allowed`
+refuses any test-split path at every transport function, not only at
+construction, so a caller assembling a name by hand is still refused -- and
+`test_the_driver_never_names_the_test_split` greps the driver for the
+literal `testsplit` and `allow_test_split`. Absence here is enforced by a
+gate rather than attested by a sweep, which is the strongest form this
+field takes."""
+
 [binding_claim.f18749c28dd0]
 locator = "COMPANION_PROTOCOLS.md, section 'Status'"
 obligation = """
@@ -718,17 +1691,523 @@ enforcement = ""
 break_demonstrated = ""
 trigger = "manual"
 
+[binding_claim.97abb4852e88]
+locator = "DESIGN.md, section 'Numerical precision' -- 'Stage-2 diagnostic (required)'"
+obligation = """
+Record `cond(standardized design matrix)` per condition, one line each.
+The clause states its own purpose: it "converts the float64-ridge
+motivation from inherited story to checked table" -- the design justifies
+float64 by Stage 2A's ~2e6 condition numbers and says the transfer to 2B's
+features is plausible, NOT established. Without the table the precision
+choice rests on an untested inheritance."""
+status = "discharged"
+discharged_in = "experiments/stage2b_denoising/FINDINGS.md, the per-condition mean fold cond(X) table"
+evidence = """
+run_ladder_stage2.py::step_ridge records `fold_cond` per condition per fold
+and prints one line each; FINDINGS.md carries the resulting table (mean fold
+cond(X) alongside the selected alpha, one row per condition).
+
+The numbers are taken from the production SVD's own singular values rather
+than a second `cond()` call, which matters for this obligation specifically:
+a separately-computed condition number would describe a matrix the solve
+never saw. tests/test_stage2b_ridge.py::test_fold_singular_values_reproduce_the_recorded_condition_ratio
+pins that identity, and the diagnostic is free from a decomposition the fit
+already computes -- so it cannot be dropped for cost."""
+trigger = "manual"
+
+[binding_claim.a4a1ef17d185]
+locator = "DESIGN.md, section 'Readout' -- 'Production implementation: direct JAX SVD-ridge, intercept-aware'"
+obligation = """
+Because `fit_intercept=True` and the 505 target columns are left
+unstandardized, the solve MUST center targets within the training fold and
+restore the intercept from the general expression -- "not assume it away".
+One of the three execution corrections required at design sign-off, so the
+prohibition on the `mean(Y)` shortcut is explicit rather than implied."""
+status = "discharged"
+discharged_in = "experiments/stage2b_denoising/stage2b_ridge.py::svd_ridge_fit"
+evidence = """
+`Y_tilde = Y - y_mean` centers within the fold; `b = y_mean - x_mean @ W`
+is the general expression. Both halves now have a test that fails when they
+are undone, which they did not have when this row was first written:
+
+  tests/test_stage2b_ridge.py::test_the_intercept_restores_the_target_mean_at_the_feature_mean
+  tests/test_stage2b_ridge.py::test_the_fit_is_equivariant_under_a_shift_of_the_targets
+
+DISCHARGED WITH A DEFECT DISCLOSED, because the discharge is younger than
+the clause. Both mutations -- the `mean(Y)` shortcut, and dropping the
+target centering entirely -- passed 93/93 before these tests existed. The
+cause is worth recording since it will recur: on CENTERED X the two forms
+are not merely hard to distinguish, they are algebraically identical.
+`x_mean @ W` is zero, and `U.T @ ones` is zero, so both the intercept term
+and the target-centering term vanish. Every fixture standardized X first --
+faithfully mirroring production -- and a fixture that mirrors production
+could therefore never have caught this. The tests deliberately break that
+invariant (`check_centered=False`, features with a large offset) to check
+the code does not depend on it, which is the whole point of the design
+locking the general form. VACUOUS_TESTS #29."""
+trigger = "ci-fast"
+
+[binding_claim.bf304d23aeaa]
+locator = "DESIGN.md, section 'Prediction-range handling'"
+obligation = """
+Primary MSE after deterministic clipping to [0,1], every condition; raw
+unclipped MSE as a secondary diagnostic; clipped-boundary fractions reported
+per condition. Selection criteria -- ridge alpha and CNN checkpoint -- use
+CLIPPED validation predictions; training losses remain RAW. "The distinction
+is locked, not left to implementation.""""
+status = "discharged"
+discharged_in = "experiments/stage2b_denoising/stage2b_ridge.py::mse_per_alpha and stage2b_cnn.py::train_cnn"
+evidence = """
+Both sides of the distinction are pinned, and by tests that read the
+behaviour rather than the spelling:
+
+  selection is clipped   mse_per_alpha defaults `clipped=True` and
+                         cross_validate_alpha selects from it;
+                         test_clipped_and_raw_mse_actually_differ shows the
+                         two are not the same number on the fixture, so
+                         "clipped" is a discriminating choice rather than a
+                         name.
+  training stays raw     tests/test_stage2b_cnn.py::test_training_loss_is_raw_and_validation_metric_is_clipped.
+  clipping is applied to the PREDICTION only
+                         test_clipped_per_image_mse_clips_prediction_not_target
+                         and test_clipping_touches_the_prediction_and_never_the_target.
+
+The last is the one that makes the discharge non-trivial: clipping the
+target as well would leave every headline number looking reasonable while
+quietly changing what the task is."""
+trigger = "ci-fast"
+
+[binding_claim.4e0f03367b9f]
+# WAS "discharged AS AMENDED" until the Reviewer's Part B ruling, which is
+# the sharpest correction of the round: "The original obligation was not
+# discharged. It was amended/superseded before the relevant execution ...
+# Otherwise 'discharged as amended' allows any violated frozen clause to
+# appear green merely by redefining its meaning later."
+#
+# That is exactly right and it was my error, not a wording preference. The
+# clause says generation, features and statistics run ENTIRELY in the cloud
+# environment. Stage 3 does not do that. Calling it discharged asserted
+# compliance with a requirement the run did not meet.
+locator = "DESIGN.md, section 'Computational strategy', closing paragraph"
+obligation = """
+Generation, features and statistics run in the cloud environment; artifacts
+are pushed to GCS from within it and NEVER round-tripped through local
+upload. The parenthetical states what the prohibition is for: Stage 2A's
+242MB-vs-~6-15MB Colab upload limit, already hit once."""
+status = "superseded"
+superseded_by = "5de8c56be1a5"
+amendment_locator = """
+DESIGN.md, post-lock amendment of 2026-08-06 (before ladder stage 3):
+"stage 3 runs in two phases, and the encode phase runs locally". Disclosed
+in the frozen document itself and listed in its Review history, so the
+amendment predates the execution it licensed rather than explaining it
+afterwards."""
+pending_reason = """
+Recorded as superseded rather than discharged, and it stays a finding: the
+amendment's VALIDITY is a reviewer's judgement, not mine. What can be shown
+is that it was disclosed in advance and that the successor obligation is
+separately inventoried and discharged (5de8c56be1a5). Whether replacing
+"entirely in the cloud" with "through the verified transport" preserved
+what the freeze was for is the question a reviewer must answer, and it is
+open."""
+trigger = "manual"
+
+[binding_claim.b4af82150247]
+parent_clause = "16b4ff3b7017"
+locator = "COMPANION_PROTOCOLS.md, ABS_CONV_EPS justification axes, axis 3"
+obligation = """
+The axis to write up for the encoder implementation is the relationship
+between the contraction residual's decay and the threshold: at which step
+count the residual first crosses 1e-12, and whether the escape is therefore
+describing CONVERGENCE or describing the FLOAT64 FLOOR.
+
+That disjunction is the obligation's substance. The two readings license
+different claims about what the absolute-convergence escape means, and the
+protocol requires the write-up to say which one the measurement supports."""
+status = "pending_package"
+pending_reason = """
+The sensitivity table has not been produced, so there is no write-up for
+this axis to appear in. Distinct from 0059f193dfec, which is the obligation
+to produce the table; this is an obligation on what the table's write-up
+must ADDRESS."""
+trigger = "manual"
+
+[binding_claim.f589d99127d1]
+parent_clause = "16b4ff3b7017"
+locator = "COMPANION_PROTOCOLS.md, ABS_CONV_EPS justification axes, axis 4"
+obligation = """
+The axis to write up for downstream feature sensitivity is what a phase
+residual of 1e-10, 1e-12 and 1e-13 does to the evolved features and to
+`Delta_g` -- i.e. whether any eps in the swept range is large enough to
+matter downstream at all."""
+status = "pending_package"
+pending_reason = """
+Same artifact as b4af82150247, and equally absent. Recorded as its own row
+rather than merged with it because they are separate axes over separate
+quantities: one is about the encoder's own convergence, the other about
+propagation into the ODE solve. A single row covering both would let an
+answer to one read as an answer to both."""
+trigger = "manual"
+
+[binding_claim.9e9598bd470a]
+# WAS not_binding NARRATION. Reviewer Part A:
+#
+#   "Those are direct normative statements. Saying 'each consequence binds
+#   where it was actually implemented' REVERSES THE SEMANTIC DIRECTION:
+#   implementation does not determine whether source text is binding. The
+#   source text already binds."
+#
+# That sentence is the correction and it generalises past this row. My
+# disposition read the code to decide what the document required. The
+# document requires what it says; code is evidence about compliance, never
+# about bindingness.
+#
+# Represented as a composite: the paragraph is the corpus candidate and
+# stays one row, and its four obligations are child rows carrying their own
+# status. Splitting into four candidates would have meant inventing corpus
+# sentences that do not exist.
+locator = "STAGE3_PLAN.md, section 'Consequences, all adopted'"
+obligation = """
+Four obligations adopted together when the population was fixed at 60,000.
+Each is a child row; this parent exists so the paragraph has one
+disposition and the children have somewhere to hang."""
+status = "unresolved"
+trigger = "manual"
+# Unresolved because one child is: e0519183ec6e and c32418555b6d both
+# restate 37ae915f8e61, which the Reviewer ruled not validly discharged
+# until the acceptance report states the population split explicitly. A
+# composite cannot be more discharged than its children.
+
+[binding_claim.900717062b1d]
+parent_clause = "9e9598bd470a"
+locator = "STAGE3_PLAN.md, 'Consequences, all adopted', item 1"
+obligation = """
+Phase A must be re-scoped to encode the 6,000 validation images too."""
+status = "discharged"
+discharged_in = "experiments/stage2b_denoising/encode_stage3_local.py, and the encoded_train_s1200 artifact's fingerprint config"
+evidence = """
+The artifact's recorded config carries `n_images: 60000`, and
+run_ladder_stage3.py::step3_encoded_input HALTS unless it does -- so the
+re-scope is not merely done, it is the condition Phase B refuses to run
+without. tests/test_stage2b_ladder_stage3.py::test_encoded_input_halts_on_a_different_encoder_step_count
+break-confirms the sibling check on the same manifest read."""
+trigger = "manual"
+
+[binding_claim.e0519183ec6e]
+parent_clause = "9e9598bd470a"
+canonical_clause = "37ae915f8e61"
+locator = "STAGE3_PLAN.md, 'Consequences, all adopted', item 2"
+obligation = """
+The regeneration's acceptance test changes shape: the new artifact is not a
+byte-comparison against the old one, because it covers a different
+population. Restates the acceptance-test obligation held in full at
+37ae915f8e61."""
+status = "unresolved"
+trigger = "manual"
+
+[binding_claim.1d7d41eb3813]
+parent_clause = "9e9598bd470a"
+locator = "STAGE3_PLAN.md, 'Consequences, all adopted', item 3"
+obligation = """
+`encode_stage3_local.py`'s Scope docstring is wrong and must be CORRECTED,
+NOT QUIETLY EDITED. A one-time remediation obligation: the requirement is
+that the correction be disclosed, not merely that the text end up right."""
+status = "discharged"
+discharged_in = "experiments/stage2b_denoising/encode_stage3_local.py, section 'Scope -- and a disclosed error in this script's first run'"
+evidence = """
+The heading itself is the evidence, and it is why this is discharged rather
+than assumed: the docstring does not simply state the corrected scope, it
+NAMES the error, what was believed, and why it was wrong. A quiet edit
+would have produced a correct docstring and no trace.
+
+Reviewer Part B's caution is what this row is written against: "a corrected
+docstring existing today is not by itself causal enforcement of an
+obligation that it must be corrected". Right -- so the discharge points at
+the DISCLOSURE, which is the part a quiet edit would lack, rather than at
+the text being currently accurate."""
+trigger = "manual"
+
+[binding_claim.c32418555b6d]
+parent_clause = "9e9598bd470a"
+canonical_clause = "37ae915f8e61"
+locator = "STAGE3_PLAN.md, 'Consequences, all adopted', item 4"
+obligation = """
+The deferred 6k and full-60k final-Delta tail counts become mandatory
+immediately. Restates the tail-reporting obligation held in full at
+37ae915f8e61."""
+status = "unresolved"
+trigger = "manual"
+
+[binding_claim.659ab6a9978b]
+# WAS not_binding NARRATION. Reviewer Part A, on this row:
+#
+#   "The proposed disposition acknowledges [the operative condition], then
+#   says it binds elsewhere. That can be legitimate only if the inventory
+#   explicitly represents this paragraph as a DUPLICATE statement of the same
+#   binding gate, not as wholly non-binding prose. Otherwise the taxonomy
+#   creates exactly the escape route we were trying to close."
+#
+# Correct, and it is the cleanest statement of why a fourth relationship was
+# needed rather than a fourth kind. Most of the paragraph IS narration -- the
+# eight review rounds, the conditional consensus. But "execution additionally
+# requires Dan's explicit release" is an operative condition sitting inside
+# it, and a paragraph does not stop binding because a better statement of the
+# same obligation exists elsewhere. It stops being SEPARATELY binding, which
+# is a different claim and now has a field to say so.
+#
+# The first use of `canonical_clause`, and the reason it exempts the field
+# contract: aec9fff59bbe carries the consent boundary in full. A second
+# account here would either restate it (and drift) or thin it (and mislead).
+locator = "STAGE3_PLAN.md, section 'Status' (document header)"
+obligation = """
+Execution additionally requires Dan's explicit release. A duplicate
+statement of the consent boundary that aec9fff59bbe holds in full -- the
+same obligation, restated in the document's status line where a reader
+meets it first."""
+status = "discharged"
+canonical_clause = "aec9fff59bbe"
+trigger = "manual"
+
+[binding_claim.5de8c56be1a5]
+# THE SUCCESSOR to 4e0f03367b9f, and the row that made this reclassification
+# necessary. Reviewer Part A conditionally accepted this as not_binding
+# RATIONALE; Reviewer Part B then ruled 4e0f03367b9f `superseded` rather than
+# "discharged as amended". Those two rulings interact: a superseded clause
+# must name a successor in a binding kind, and the successor is THIS
+# paragraph -- it is where the surviving prohibition is actually stated.
+# Left as not_binding, the supersession would point into narration, which is
+# the escape the successor rule exists to close. Flagged to the Reviewer as
+# an interaction of their two rulings rather than as a silent upgrade.
+locator = "DESIGN.md, post-lock amendment of 2026-08-06 (before ladder stage 3)"
+obligation = """
+Feature artifacts live in GCS, written through the verified transport. The
+prohibition that survives the two-phase amendment is on the MECHANISM -- a
+Colab session's upload path, whose limit the original clause names as its
+reason -- not on which machine computes. A direct local->GCS write is
+permitted; a round-trip through a session's upload mechanism is not."""
+status = "discharged"
+discharged_in = "experiments/stage2b_denoising/stage2b_gcs.py::upload_file, and encode_stage3_local.py's write path"
+evidence = """
+Phase A's encode ran locally and wrote `encoded_train_s1200` straight to GCS
+through `stage2b_gcs.upload_file` -- the same chunked, resumable,
+crc32c-verified transport a cloud-side write uses, and the same one
+`stage_kmnist_inputs.py` has moved KMNIST through for both prior rungs. No
+Colab upload mechanism is touched on that path.
+
+The artifact's own manifest is the reviewer-checkable part: it records the
+producing commit and a payload digest computed on the writing side and
+re-verified on the reading side, so a transport that silently truncated
+would be caught by `consume_validated` rather than needing to be trusted."""
+negative_attestation = """
+The prohibited thing is a feature artifact reaching GCS by any route other
+than the verified transport. The output set is every artifact write in the
+stage-1/2/3 drivers: all of them go through `ensure_artifact`, which
+delegates to `upload_file`, and `test_the_driver_never_forces_an_overwrite`
+plus the write-once refusal at a2f535ba3406 cover the ones that could
+bypass it. What is NOT established is that a future script could not call
+the GCS client directly; that is the same open edge `stage2b_gcs`'s own
+scope limitation records."""
+trigger = "manual"
+
+[binding_claim.cae84d1cb85b]
+locator = "STAGE3_PLAN.md, section 'What the survey found' -- GCS metadata"
+obligation = """
+The fingerprint must not depend on MD5. The survey's measured basis: the
+uploaded artifact returns `md5_hash: None`, confirming the composite/chunked
+path, so an MD5-keyed check would be comparing against a field GCS does not
+populate for the objects this project writes."""
+status = "discharged"
+discharged_in = "experiments/stage2b_denoising/stage2b_fingerprint.py"
+evidence = """
+Every digest in the mechanism is SHA-256: `sha256_of_file`,
+`sha256_of_bytes`, `canonical_digest`, the per-array `array_manifest`, and
+the `payload_sha256` that manifests are compared on. `ConsumePolicy`'s field
+sets name format, source_manifest, config and git_commit -- no md5 among
+them, so no policy can reach one.
+
+The stronger evidence than absence is that the whole test suite exercises
+the mechanism on payloads that HAVE no md5_hash: every fingerprint test
+builds its object locally and compares, and
+tests/test_stage2b_gcs.py's manifest round-trips assert on payload_sha256.
+A dependency on MD5 would fail there rather than needing to be looked for.
+
+The clause's first half -- `blob.metadata` is entirely unused -- is a
+RESULT, not an obligation; it is the survey finding that made the
+constraint necessary, and it is narration at 5de8c56be1a5's sibling row
+rather than a separate obligation here."""
+trigger = "manual"
+
+[binding_claim.152fe49478d2]
+locator = "STAGE3_PLAN.md, section 'Answers' -- Q5"
+obligation = """
+OOF per-image predictions under the frozen folds get MODULE-FIRST
+treatment: implemented with their own tests BEFORE any audit driver calls
+them. Full-refit in-sample MSE is descriptive only."""
+status = "discharged"
+discharged_in = "experiments/stage2b_denoising/stage2b_ridge.py::oof_per_image_mse and tests/test_stage2b_ridge.py"
+evidence = """
+`oof_per_image_mse` and `oof_clipped_mse_at_alpha` exist with ten dedicated
+tests -- coverage-is-a-partition, genuinely-out-of-sample, clipped-vs-raw
+distinctness, single-alpha agreement with the grid column, the recorded
+partition, reproducibility, and a partition guard shown to fire. No audit
+driver exists, so the ordering the clause requires held by construction
+rather than by discipline, and that is the honest reading of this discharge.
+
+SCOPE, and this is the half that is NOT discharged here. The clause's
+built-in cross-check -- "the per-fold mean of the new per-image OOF MSEs
+must reproduce the already-stored fold-aggregate values" -- binds at
+9bc6f9e3808a and is enforced by nothing. tests/test_stage2b_ridge.py's OOF
+cross-check pins the per-fold mean against a within-run recomputation on
+synthetic data, which is a different claim from reproducing the aggregates
+STORED BY THE STAGE-1 AND STAGE-2 RUNS. Citing it for the cross-check would
+be discharge by adjacent evidence; citing it for module-first treatment,
+which is what this row does, is not."""
+trigger = "manual"
+
+[binding_claim.23984119d253]
+locator = "DESIGN.md, section 'DESIGN STATUS' (document header)"
+obligation = """
+DESIGN.md is locked. Changes after the lock require an explicit, disclosed
+post-lock amendment; an undisclosed edit is prohibited. The document also
+records that no further scientific review round is required, which is the
+half that makes the first half load-bearing: nothing downstream re-derives
+the design, so an undisclosed edit is not caught by any later reading."""
+status = "pending_package"
+pending_reason = """
+The obligation ranges over every edit from the lock commit onward, so it
+cannot be discharged by a point-in-time check; its discharge point is the
+readiness package's provenance section, stating that DESIGN.md is frozen
+and listing its amendments. No such section exists.
+
+Same shape as 0ac873652382 for AUDIT_PROTOCOL.md and f18749c28dd0 for
+COMPANION_PROTOCOLS.md, and dispositioned separately for the same reason:
+three documents, three lock statements, three histories."""
+negative_attestation = """
+The prohibited thing is an UNDISCLOSED edit, and an absence does not
+announce itself, so the output set is stated rather than sampled: every
+commit touching experiments/stage2b_denoising/DESIGN.md from the lock
+commit to the package's own commit, read as a diff. The set is enumerable
+by `git log --follow -p -- experiments/stage2b_denoising/DESIGN.md`, which
+is what makes this checkable at all -- an attestation over "the document"
+would be satisfied by reading the current text, in which an undisclosed
+edit is by construction invisible.
+
+Compliance to date is observable in the document itself: three amendments
+appear, each carrying its own dated disclosure block (ENCODER_STEPS
+150->1200; the two-phase stage-3 encode; the ridge grid extended to
+1e-6..1e6). That is evidence about the range so far, not a discharge."""
+trigger = "manual"
+
+[binding_claim.916955ebbcf7]
+locator = "DESIGN.md, section 'Feasibility ladder'"
+obligation = """
+The ladder's rung 4: ONE locked evaluation on the official 10,000-image test
+corpus. Exactly one -- the constraint is the count, not merely the ordering.
+A second pass over the test corpus, however motivated, converts the held-out
+estimate into a selected one and there is no way to un-see the first."""
+status = "pending_package"
+pending_reason = """
+Nothing has been evaluated on the test corpus, so the count is zero and the
+obligation has not yet been tested by anything. Filed pending_package rather
+than not_applicable on the section's stated preference: not_applicable would
+pass silently and would become false the moment stage 4 runs.
+
+Scoped deliberately NARROWER than f3bbc791e7c6, which gates ACCESS to
+test-side objects during stages 1-3 and is enforced by
+_check_object_path_allowed. That gate is about reaching the corpus early;
+this clause is about how many times it may be read once reaching it is
+allowed, and no code distinguishes a first read from a second."""
+negative_attestation = """
+The prohibited thing is a SECOND evaluation, so the output set is every
+read of a test-split object after the stage-4 gate opens: the audit trail
+of `stage2b_gcs` object accesses under the `test` split, plus every
+reported test-corpus number in the readiness package and FINDINGS.md. A
+package that reports one test number is not evidence only one was computed
+-- which is why the set ranges over accesses, not over what was written up."""
+trigger = "manual"
+
+[binding_claim.8296ec49b5fa]
+locator = "AUDIT_PROTOCOL.md, section 'Companion protocols', ARM/x86 bullet"
+obligation = """
+The ARM/x86 propagation stress set's construction is fixed in advance:
+largest observed cross-architecture encoding discrepancies; the 79
+convergence-tail stress cases; coverage of every class; and a seeded
+stratified random component. The first comparison applies IDENTICAL FROZEN
+RIDGE COEFFICIENTS to ARM-derived and x86-derived features, isolating
+numerical propagation from refit variation. Max differences are reported at
+five points: encoding, evolved features per graph, prediction, per-image
+MSE, and the evolved-minus-pre contrast.
+
+The clause also fixes the NAMING: "convergence-tail stress cases", so named
+because the earlier "basin-boundary candidates" characterisation was
+retracted as unsupported -- encoder-contraction residuals being a different
+dynamical quantity from evolution-flow boundary proximity. The retraction is
+part of the frozen obligation, not background: reverting to the retracted
+term would restate a claim this project withdrew."""
+status = "pending_package"
+pending_reason = """
+The stress set does not exist and neither do its numbers. AUDIT_PROTOCOL's
+statement of the construction, dispositioned separately from
+COMPANION_PROTOCOLS' own rows (aa0198915e6b, 81d50983153e, c188b4e50c99)
+for the reason this file applies throughout: separate documents, separate
+sentences, separate ids.
+
+Related but distinct from ec37e874562c, which freezes the 500-case CAP.
+This row freezes what goes IN; that one freezes how many."""
+negative_attestation = """
+"Isolating numerical propagation from refit variation" is a must-not in
+positive dress: the first comparison must not refit. The output set is every
+reported ARM/x86 difference in the readiness package -- each must state
+which coefficients produced it, so a refit smuggled in as "the natural thing
+to do at this scale" is visible rather than inferred from a number's size."""
+trigger = "manual"
+
+[binding_claim.91597e31ea96]
+locator = "COMPANION_PROTOCOLS.md, section 'ABS_CONV_EPS sensitivity table'"
+obligation = """
+The reported quantity of interest is WHERE THE VERDICT FLIPS, at the locked
+ENCODER_STEPS=1200 and at every other step count. Both outcomes are
+results and both are reported as such: if the verdict at 1,200 is invariant
+across all four eps, that is the result; if it is not, the eps at which it
+changes AND the direction of the change are the result."""
+status = "pending_package"
+pending_reason = """
+The sensitivity table has not been produced, so there is no verdict to
+report a flip in. Distinct from 0059f193dfec, which is the obligation to
+produce the table; this is the obligation on what the table's write-up may
+present as its finding.
+
+The distinction is worth keeping because the two fail differently. A table
+produced but written up as "eps is not sensitive" -- with the flip locations
+omitted because they were uninteresting -- satisfies 0059f193dfec and
+violates this row."""
+negative_attestation = """
+The must-not is selective reporting: an invariant verdict may not be
+presented as the finding while a flip elsewhere in the sweep goes unstated.
+The output set is every cell of the 5-step-count x 4-eps table -- the
+protocol requires all of them reported, INCLUDING the ones that agree, so
+the attestation is checkable by counting cells in the write-up against the
+table's own dimensions rather than by judging emphasis."""
+trigger = "manual"
+
 # =============================================================================
 # not_binding -- candidates that are prose about something else
 # =============================================================================
 #
 # THE FRICTIONLESS ESCAPE, named here so a reviewer can audit for it. A
 # `not_binding` row needs one field and produces zero findings, while every
-# binding kind demands six or seven and can fail. With 83 rows left and a red
-# readiness signal, this section is the path of least resistance, and no check
-# in `gate_inventory.py` can distinguish an honest disposition from a
-# convenient one -- the anti-gaming clause it quotes covers moving a clause
-# BETWEEN binding kinds, not dropping it out of them.
+# binding kind demands six or seven and can fail. While rows remain
+# undispositioned and the readiness signal is red, this section is the path
+# of least resistance, and no check in `gate_inventory.py` can distinguish
+# an honest disposition from a convenient one -- the anti-gaming clause it
+# quotes covers moving a clause BETWEEN binding kinds, not dropping it out
+# of them.
+#
+# (That sentence read "With 83 rows left" until the count went stale. A
+# live count written into prose is principle 21 in a costume the principle
+# does not recognise: a derived quantity, maintained by hand, with nothing
+# checking it. `make stage2b-gate-inventory` derives it. Nothing else
+# should restate it -- including this file about itself.)
 #
 # So the reasons here are written to a fixed shape rather than freely: each
 # opens with the category of prose the sentence actually is --
@@ -744,6 +2223,97 @@ trigger = "manual"
 # names nothing. That is a cheaper audit than re-reading 89 sentences, which
 # is the point of constraining the shape at all.
 
+[not_binding.51fde2dbc946]
+reason = """
+NARRATION: how S*=1200 was selected, and the disclosure that an earlier,
+looser reading of the rule was caught before being applied -- "some S*
+brings noisy within 10x of clean-AT-150" is satisfied at S*=300, which then
+fails its own re-run. A record of a corrected defect, kept rather than
+edited away. The gate it describes binds at DESIGN.md:135 and :192
+(5d8386004c11, 5908ac408624).
+
+The paragraph's closing sentence is prospective -- "Revisit as its own
+disclosed decision if measured full-scale cost ever makes that trade
+different" -- and is therefore NOT covered by "this is narration". Reviewer
+Part A asked for it to be dispositioned explicitly rather than absorbed:
+it is non-binding because REVISIT is discretionary. It licenses a future
+decision and compels nothing; had it read "must be revisited", it would be
+a binding_claim and this row would be wrong. Recorded so the disposition
+rests on the modality rather than on the paragraph's overall flavour."""
+
+[not_binding.4b27219dd7cc]
+reason = """
+NARRATION: names the review rounds the freeze was reached under and where
+they are archived. A provenance statement about how the document came to be
+frozen; it commits the system to nothing. The freeze itself binds at
+AUDIT_PROTOCOL.md:3 (0ac873652382)."""
+
+
+[not_binding.df1784828365]
+reason = """
+NARRATION: "Role labels, frozen (Freeze 2):" -- a section lead-in
+introducing the list that follows. The paragraph scanner takes it as its own
+candidate because the list beneath is separately formatted. The labels it
+introduces bind at STAGE3_PLAN.md:354 (8bf414d720f2), which states the
+populations in full and is dispositioned as a substantiated binding_value.
+
+Worth recording rather than silently skipping: a heading whose content lives
+in an unscanned list is a real under-coverage shape, and the reason this one
+is safe is that the content is dispositioned elsewhere -- not that headings
+do not matter."""
+
+[not_binding.9724445a8125]
+reason = """
+RATIONALE: why the propagation halt threshold is borrowed rather than
+invented -- it is already frozen, already derived analytically from the
+metric's algebra and a recorded `d`, and already the line below which a
+difference is called implementation dust. The argument for reusing a number;
+the halt condition it justifies binds at COMPANION_PROTOCOLS.md:191
+(5354bdafe541)."""
+
+[not_binding.a69baac252b1]
+reason = """
+NARRATION: records that AUDIT_PROTOCOL requires four justification axes,
+that three already existed, and that the fourth was dropped in consolidation
+and reinstated here. A statement about the document's own repair history.
+The requirement binds in AUDIT_PROTOCOL.md; the axes themselves are at
+COMPANION_PROTOCOLS.md:161 (16b4ff3b7017)."""
+
+[not_binding.16b4ff3b7017]
+reason = """
+RATIONALE: the four axes justifying ABS_CONV_EPS = 1e-12, each with its
+measured numbers -- float64 dust at 1e-14..1e-16, the smallest meaningful
+measured final-Delta at 2.177e-07, the encoder's contraction residuals, and
+downstream sensitivity against the solver's rtol=1e-6. The argument for the
+value, not the value: it binds at DESIGN.md:192 (5908ac408624), which is
+dispositioned as a substantiated binding_value.
+
+Two of its four axes are written as work still to do ("the axis to write up
+is..."). I called those "forward-looking notes rather than obligations on
+the system" and Reviewer Part A refused it:
+
+  "I don't buy that distinction. A protocol saying THE AXIS TO WRITE UP IS X
+  is a process/reporting obligation, even though it isn't executable runtime
+  logic."
+
+Correct. "Not executable" and "not binding" are different claims, and the
+whole point of `binding_claim` is that the second does not follow from the
+first. Both sentences are now child obligations of this paragraph --
+b4af82150247 and f589d99127d1 -- each pending the sensitivity table that
+does not exist. The paragraph itself remains RATIONALE for the value; what
+changed is that the two obligations buried inside it are no longer narrated
+away with it."""
+
+[not_binding.beb0ab7095d2]
+reason = """
+RATIONALE: why the first ARM/x86 comparison applies identical already-fitted
+ridge coefficients to both architectures' features -- a refit on ARM
+features would produce different coefficients and confound numerical
+propagation with refit variation, with no way to separate them afterwards.
+The argument for the construction. The construction itself is required at
+AUDIT_PROTOCOL.md:219 (8296ec49b5fa), where the companion protocol is
+specified."""
+
 [not_binding.1aa42e6ea102]
 reason = """
 RESULT: reports the cross-architecture bit-reproducibility measurement made
@@ -758,9 +2328,20 @@ reason = """
 RATIONALE: the argument that the cross-architecture difference cannot
 amplify -- the encoder is a contraction toward a fixed point, and the
 downstream solver's rtol=1e-6 sits eight orders above the difference. An
-analytic justification for why the measured result above is tolerable. It
-commits the system to nothing; the tolerance it justifies is the solver's,
-set elsewhere."""
+analytic justification for why the measured result above is tolerable. The
+tolerance it justifies is the solver's, set elsewhere.
+
+SCOPE, at Reviewer Part A's insistence, because "commits the system to
+nothing" was too broad and this row carries the strongest assertions in the
+not_binding section: "it cannot amplify", "no reported quantity in this
+design can turn on it". Those ARE commitments -- epistemic ones. The
+narrower true statement is that this inventory ranges over PROTOCOL
+OBLIGATIONS, not over propositions requiring evidential substantiation, so
+a scientific claim is out of its scope rather than absent from the record.
+
+Worth stating rather than leaving implicit: nothing in this file checks
+whether that claim is true. If it is wrong, the failure surfaces as a
+result nobody can reproduce, not as a finding here."""
 
 [not_binding.76afced21901]
 reason = """
@@ -772,7 +2353,7 @@ with the formula this paragraph argues for, binds at DESIGN.md:345
 
 [not_binding.ddc8d96d73d7]
 reason = """
-NARRATION: the Review history -- seven drafts, four ChatGPT rounds, the
+NARRATION: the Review history -- seven drafts, four Reviewer rounds, the
 Fable-5 and Grok reviews, and each post-lock amendment in sequence. A record
 of how the document reached its current state. Every amendment it lists is
 binding where the amendment is WRITTEN (the grid extension at DESIGN.md:284
@@ -790,7 +2371,7 @@ Freeze 2; the population it argues for binds at STAGE3_PLAN.md:354
 [not_binding.ef1b61b7eac3]
 reason = """
 NARRATION: how the 54k-vs-60k question was decided -- Desktop withdrawing its
-recommendation, ChatGPT's independent agreement, and why it was resolved
+recommendation, the Reviewer's independent agreement, and why it was resolved
 explicitly rather than by convenience. The decision binds at Freeze 2
 (8bf414d720f2); this records the process that reached it."""
 

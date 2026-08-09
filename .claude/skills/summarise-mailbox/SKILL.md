@@ -117,7 +117,7 @@ on code2code.
 ### Transit-integrity check — run the committed script, do not eyeball it
 
 ```
-uv run python tools/mailbox/check_transit_integrity.py <archive dir>
+uv run python .claude/claude2claude/mailbox-tools/check_transit_integrity.py <archive dir>
 ```
 
 Run it before digesting a relayed channel and report its output in the digest.

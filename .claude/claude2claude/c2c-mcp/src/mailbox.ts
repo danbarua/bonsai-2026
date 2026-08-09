@@ -70,7 +70,6 @@ function makeSharedChannel(id: string, dirName: string): Channel {
 }
 
 export const CHANNELS = {
-  c2c: makeChannel("c2c", "claude2claude"),
   c2gpt: makeChannel("c2gpt", "claude2gpt"),
   code2code: makeSharedChannel("code2code", "code2code"),
 } as const;
@@ -230,11 +229,30 @@ export interface InboxMessage {
 // header today, but the parser shouldn't depend on that staying true --
 // anchoring on the `·` delimiter that actually separates fields is what
 // makes this safe regardless of what content later fields carry.
+// The capture runs to the NEXT FIELD DELIMITER, not to the next space.
+// Session names are not restricted to one word -- `/rename` accepts
+// anything, and "mailbox digest generation" is a live example. `(\S+)`
+// truncated that to "mailbox", and since readMailbox compares
+// slugify(to) against slugify(asName), "mailbox" never matched
+// "mailbox-digest-generation": the message was skipped as addressed to
+// someone ELSE, by the only session it was for. Undeliverable, with no
+// error to sender or reader, and left in the mailbox counted as unread by
+// everyone and claimable by nobody.
+//
+// Found by peeking at a real fanned-out delivery, where the parsed `to`
+// read "mailbox" beside a filename that correctly said
+// `--to-mailbox-digest-generation`. Pre-existing: any addressed message to
+// a multi-word name was always lost. Fan-out only made it visible, by
+// addressing every session by name for the first time.
+//
+// `·` remains the anchor and now also the terminator, so the widened
+// capture cannot run past this field into the next one.
 export function parseAddressee(content: string): string | undefined {
   const firstLine = content.split("\n", 1)[0];
   const beforeClose = firstLine.split("-->", 1)[0];
-  const match = /(?:^|·)\s*to:\s*(\S+)/i.exec(beforeClose);
-  return match ? match[1] : undefined;
+  const match = /(?:^|·)\s*to:\s*([^·]+)/i.exec(beforeClose);
+  const value = match?.[1].trim();
+  return value ? value : undefined;
 }
 
 // Extracts the optional "instance: <name>" sender identity from a
@@ -243,11 +261,17 @@ export function parseAddressee(content: string): string | undefined {
 // sender role -- claude-desktop, chatgpt -- that isn't itself
 // multi-instance in the way Claude Code sessions are). Anchored on `·` for
 // the same reason parseAddressee is -- see its comment.
+// Same widened capture, same reason -- see parseAddressee. A sender whose
+// name contains a space had its instance truncated too, which feeds
+// readMailbox's excludeSelfSent check: that session would fail to
+// recognise its own broadcast and could consume it before anyone else saw
+// it, which is precisely what excludeSelfSent exists to prevent.
 export function parseInstance(content: string): string | undefined {
   const firstLine = content.split("\n", 1)[0];
   const beforeClose = firstLine.split("-->", 1)[0];
-  const match = /(?:^|·)\s*instance:\s*(\S+)/i.exec(beforeClose);
-  return match ? match[1] : undefined;
+  const match = /(?:^|·)\s*instance:\s*([^·]+)/i.exec(beforeClose);
+  const value = match?.[1].trim();
+  return value ? value : undefined;
 }
 
 // Extracts the slugified `to` addressee directly from a FILENAME (the
@@ -294,6 +318,65 @@ export function parseToSlugFromFilename(filename: string): string | undefined {
 export function parseFromSlugFromFilename(filename: string): string | undefined {
   const match = /--from-([a-z0-9-]+?)(?:--to-[a-z0-9-]+)?\.md$/.exec(filename);
   return match ? match[1] : undefined;
+}
+
+/**
+ * Sender name reserved for machine-generated notifications -- webhook
+ * deliveries and the like -- that nobody replies to.
+ *
+ * A convention, not a credential: `instance` is caller-supplied, so any
+ * session could claim this name. Same trust model as every other routing
+ * field in this mailbox.
+ */
+export const NO_REPLY_SLUG = "no-reply";
+
+/**
+ * Retires one consumed message: deletes it if it came from `no-reply`,
+ * otherwise moves it to `archiveDir` as usual.
+ *
+ * Webhook traffic is high-volume and worthless the moment it has been read.
+ * Archiving it would put it in the digest corpus, where `comm -13` counts it
+ * as undigested and every digest gets padded with CI notifications nobody
+ * will read a week later. Deleting keeps the archive what it is for: the
+ * conversation between agents.
+ *
+ * The test is FILENAME-derived on purpose. archiveMessageByFilename never
+ * opens the file -- it is handed a name -- so a content-based check could not
+ * be shared between the two call sites, and an unshared check means two
+ * implementations that drift (CLAUDE.md principle 16). One function, both
+ * call sites.
+ */
+export function isFromNoReply(filename: string): boolean {
+  const raw = parseFromSlugFromFilename(filename);
+  if (raw === undefined) return false;
+  if (raw === NO_REPLY_SLUG) return true;
+  // A same-second collision appends `-2`, `-3`... to the END of the whole
+  // filename. When there is no `--to-` segment -- which is every broadcast,
+  // and webhook deliveries are broadcasts -- that counter lands inside the
+  // from-slug, so `--from-no-reply-2.md` parses as the sender "no-reply-2".
+  // Measured, not hypothetical: three deliveries in one second archived two
+  // of themselves. CI sends bursts, so this is the common case, not an edge.
+  //
+  // Only stripped when no `--to-` is present; with an addressee the counter
+  // attaches to the to-slug instead and the from-slug is already clean. The
+  // accepted trade is that a real session named `no-reply-<digits>` would be
+  // treated as the reserved sender. `no-reply-bot` and anything else
+  // non-numeric is unaffected.
+  if (!filename.includes("--to-") && raw.replace(/-\d+$/, "") === NO_REPLY_SLUG) return true;
+  return false;
+}
+
+export async function retireMessage(
+  filePath: string,
+  archiveDir: string,
+  filename: string,
+): Promise<void> {
+  if (isFromNoReply(filename)) {
+    await fs.unlink(filePath);
+    return;
+  }
+  await ensureDir(archiveDir);
+  await fs.rename(filePath, path.join(archiveDir, filename));
 }
 
 /**
@@ -379,15 +462,15 @@ export async function readMailbox(
 
     messages.push({ filename, content, to, instance });
     if (archive) {
-      await ensureDir(archiveDir);
-      await fs.rename(filePath, path.join(archiveDir, filename));
+      await retireMessage(filePath, archiveDir, filename);
     }
   }
   return { messages, skipped };
 }
 
 /**
- * Moves ONE specific, named file from `dir` to `archiveDir`, unconditionally
+ * Retires ONE specific, named file from `dir` -- to `archiveDir`, or deleted
+ * if it came from `no-reply` (see retireMessage) -- unconditionally
  * -- no addressing or self-exclusion logic applies, since the caller is
  * explicitly naming the exact file to archive, not doing a bulk consuming
  * read. Exists specifically as the escape hatch for code2code's
@@ -422,8 +505,7 @@ export async function archiveMessageByFilename(
   } catch {
     return false;
   }
-  await ensureDir(archiveDir);
-  await fs.rename(filePath, path.join(archiveDir, filename));
+  await retireMessage(filePath, archiveDir, filename);
   return true;
 }
 

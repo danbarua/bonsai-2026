@@ -1,9 +1,27 @@
 # CI on Google Cloud Build
 
-A proposal. `cloudbuild.yaml` and the guards under `tools/ci/` exist in the
-tree; no trigger, service account, or GCP resource has been created, and
-nothing here has run on Cloud Build. The trigger configuration a human must
-create is in "What a human has to create", below.
+**Status: ADOPTED, and superseded in part. Kept for its reasoning, not as a
+description of what runs.**
+
+The design here was built. `infra/` creates the GCP resources with Terraform,
+and CI gates pull requests into `stage2b-ci` today. For what actually exists
+and how it is configured, read `infra/triggers.tf`, `infra/README.md` and
+`.claude/skills/github/SKILL.md` — those are current; this document is not.
+
+Two things here were **overtaken by measurement** and are wrong if read as
+instructions:
+
+- The 15-minute **poll** is gone. It inferred "work has reached a coherent
+  point" from elapsed time; merging into `stage2b-ci` declares it instead.
+  Cloud Scheduler, Pub/Sub and the dispatch half of the `decide` step went
+  with it.
+- The claim that CI here **is not a merge gate** predates `stage2b-ci`, a
+  branch whose whole purpose is to be one. The checkpoint trigger fires on
+  `pull_request` precisely so a required status check can report on the PR.
+
+What remains worth reading is the section below on what a green build does
+and does not mean — that argument is unchanged and is the reason the gate
+inventory exists alongside the test runner.
 
 ## The limit, first, because a green build will otherwise be read as more
 
@@ -26,8 +44,26 @@ Work on this repository runs in supervised loops across several agents.
 A break that lands on `stage2b` between loops sits there until a human
 notices -- which, on the night that motivated this, was after a sleep. The
 design goal is that breaks surface *inside* the work loops, on a cadence
-the loops can act on. It is not general hygiene, and it is not a gate on
-merging.
+the loops can act on. It is not general hygiene.
+
+**Nothing gates `stage2b`, and everything gates the branches above it.**
+That distinction was originally written here as a flat "not a gate on
+merging", which was true when `stage2b` was the only branch CI touched and
+became misleading the moment `stage2b-ci` existed:
+
+- `stage2b` takes ~46 pushes a day from agents who have already run the
+  suite locally. Gating it would block the working branch mid-flight, for a
+  result its author already has. Nothing is required there.
+- `stage2b-ci` exists for no other purpose than to check a batch. Requiring
+  a green build to merge into it is what the branch IS -- the name is the
+  specification. A checkpoint you may merge into while red is not a
+  checkpoint.
+- `main` is the released artifact and receives only from `stage2b-ci`.
+
+The general principle the flat version was reaching for still holds and is
+narrower than it looked: **an LLM verdict must not gate a build.** The
+vacuous-test review advises; `cloudbuild.yaml`'s deterministic checks are
+what a required status check may point at.
 
 Two GitHub Actions workflows already exist (`.github/workflows/claude.yml`,
 `claude-code-review.yml`). Both invoke Claude Code -- review on pull
@@ -85,6 +121,17 @@ by pull request, so the vacuous-test review sees the diff),
 `bonsai-ci-deps` on a `uv.lock`/`pyproject.toml` change — 2.0/day, and the
 only thing that catches an undeclared dependency, which this repository
 currently has — and `bonsai-ci-manual`.
+
+**Three branches, and releases come from the checkpoint.** `stage2b` takes
+the traffic; a PR into `stage2b-ci` is the checkpoint, where the review and
+the full suite both run; `main` is released from `stage2b-ci`, never
+directly from `stage2b`. A PR straight from `stage2b` to `main` has had
+neither, which is what PR #23 was before this branch existed.
+
+The review's `pull_request` trigger is scoped to `branches: [stage2b-ci]`
+for the same reason the CI triggers are not per-push: reviewing every PR
+re-reads work nobody has declared coherent, and repeats itself across the
+pushes in between.
 
 ## What runs
 
@@ -585,8 +632,20 @@ Two consequences, both concrete rather than cautionary:
 
 ## First-run protocol: treat the first green as suspect
 
-Standing requirement set by the orchestrator on 2026-08-08, and the reason
-is this project's own recent record rather than caution in general. **A
+**Who required this, stated plainly: an AI agent did.** The
+claude-desktop-orchestrator set it on 2026-08-08 (mesh message 10:35:35Z,
+"here is the standing treatment"), and this document recorded it. Dan did
+not ask for it and it bills him nothing — every requirement is dischargeable
+by an agent, and all four were discharged by one.
+
+That label is here because "the orchestrator" reads as authority to a human
+skimming, and the distinction it hides is the one that matters: a constraint
+an agent invented and a constraint the human asked for are different things,
+and only the second may consume his attention. This one is the first, and it
+earns its place on its argument rather than on where it came from.
+
+The reason is this project's own recent record rather than caution in
+general. **A
 first-ever pass on a never-exercised path is the presence-shaped failure
 surface**: the build report would be correct in form and unverified in what
 it attests, which is exactly the shape of the capture record that reported
@@ -612,10 +671,40 @@ out of the built-not-verified column.
    in this document and nowhere demonstrated.
 4. **The same applies to the GitHub review workflow** on its first firing.
 
-Until all four are done, both are catalogued as **built, not verified** —
-and the distinction is the point. Neither has ever run; the suite itself
-has only ever run on macOS/ARM, so even the baseline this build compares
-against is a claim about a platform CI does not use.
+### Discharged 2026-08-08 — by incident, not by drill
+
+All four are now met, and every one was met by something going wrong for
+real rather than by a rehearsal. That is worth more than the drill would
+have been: a staged removal proves the guard can fire, an unplanned one
+proves it fires when nobody is watching for it.
+
+1. **The report states what executed.** Every build prints
+   `selected=N passed=N skipped=N failed=N errored=N` and dumps all skip
+   reasons by name. Build `92a089ac`: `selected=1234 passed=1199
+   skipped=35 failed=0 errored=0`.
+2. **The anti-vacuity check is proven live in CI.** It failed the build
+   twice — `a1e8b70b` and `2d780282` — each with **`failed=0 errored=0`**.
+   Every test passed and the build went red purely because one skip was
+   not in the baseline. That is the guard doing the one thing it exists
+   for, in the environment it runs in, unprompted.
+3. **"Fails closed" is observed behaviour.** Same two builds, plus
+   `7b17e46e`, which failed on three real test failures when `jq` was
+   missing from the image. Both red-to-green cycles were watched end to
+   end.
+4. **The GitHub review workflow** has fired repeatedly on real pull
+   requests, published structured output, maintained its sticky comment,
+   and gone red once on a publisher wiring bug — which is the same
+   requirement satisfied the same way.
+
+Two things the discharge does **not** cover, and they stay open:
+
+- The suite still has **no x86 numeric measurement** beyond "it passed".
+  The tolerance soft spot below is untested rather than disproven, and
+  non-significance is not equivalence.
+- The baseline was regenerated from a CI report, so it now describes the
+  CI platform — but the 4 tests that skip in CI and run locally are a
+  real coverage difference, not an artifact. They are accounted for, which
+  is a different claim from being absent.
 
 ## Bootstrapping the baseline, and the one measurement nobody has taken
 
@@ -664,7 +753,14 @@ report, or from a run in a checkout with the same capabilities removed.
   nothing else: it presents as a plain red test with no hint that the
   platform is the cause. Read a first-build numeric failure as a
   measurement, not as a flake, and not as a defect in the code under test.
-- **`equinox` is imported but not declared.**
+- **~~`equinox` is imported but not declared.~~ CLOSED 2026-08-08** (`b38e669`).
+  Declared at `>=0.13.8` and `uv.lock` re-resolved, promoting it from
+  transitive to direct. The guard gap the entry identifies is closed too:
+  `tests/test_dependency_declarations.py` now walks every HARD import in
+  `tests/`, not only `pytest.importorskip` call sites, and resolves import
+  name to distribution name so `yaml`/`pyyaml` does not misfire.
+  Break-confirmed by removing the declaration. The original analysis, which
+  was right, follows.
   `experiments/stage2b_denoising/stage2b_cnn.py` and
   `tests/test_stage2b_cnn.py` both hard-import it; it reaches the
   environment only as a transitive of `diffrax`/`lineax`/`optimistix`.

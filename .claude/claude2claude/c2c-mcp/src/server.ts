@@ -39,28 +39,11 @@ interface ChannelToolConfig {
   peerRole: string;
 }
 
+// The c2c channel (claude2claude, Code<->Desktop) was removed at 0.8.0.
+// Desktop joined the code2code mesh directly as its own identity, which
+// left c2c with no traffic and no reason to exist -- every party on it had
+// a better route. Its mailbox directories are not read by anything here.
 const CHANNEL_TOOLS: ChannelToolConfig[] = [
-  {
-    // DEPRECATED as of 0.7.0: superseded by code2code for Code<->Code
-    // traffic, and Desktop now participates in that same mesh directly
-    // as its own identity (claude-desktop-orchestrator) rather than via
-    // this channel's fixed peer role -- see code2code's design comment
-    // above registerCode2CodeTools. Still REGISTERED, not removed: the
-    // live server predates this change and can't be restarted without
-    // dropping other sessions mid-work (see DEVELOPMENT_PRACTICES.md),
-    // and the main checkout's claude2claude/outbox/ has at least one
-    // real, uncollected message addressed to Desktop as of 2026-08-08 --
-    // removing the tool now would strand it, since Desktop only reads
-    // via c2c-inbox and can't poll. Delete this entry (and update
-    // CHANNELS.c2c / claude2claude/'s .gitignore comment accordingly)
-    // once claude2claude/{inbox,outbox}/ are confirmed drained and no
-    // in-flight desktop<->code thread still depends on it.
-    toolPrefix: "c2c",
-    channel: CHANNELS.c2c,
-    channelLabel: "claude2claude (.claude/claude2claude/) -- DEPRECATED, use code2code instead",
-    codeRoles: ["claude-code"],
-    peerRole: "claude-desktop",
-  },
   {
     toolPrefix: "c2gpt",
     channel: CHANNELS.c2gpt,

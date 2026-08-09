@@ -39,6 +39,11 @@ FIRST_PARTY_ROOTS = (
     REPO_ROOT / "experiments",
     REPO_ROOT / "src",
     REPO_ROOT / "tools",
+    # The tests import their own helpers by bare name because pytest puts the
+    # test directory on sys.path -- `tests/_makefile.py` is imported as
+    # `_makefile` by six files. Omitting this root reports a first-party
+    # helper as an undeclared third-party package.
+    TESTS_DIR,
 )
 
 
@@ -113,6 +118,105 @@ def is_first_party(module: str) -> bool:
     return module.split(".")[0] in first_party_modules()
 
 
+def distributions_providing(module: str) -> set[str]:
+    """Which declared-name(s) could provide this IMPORT name.
+
+    An import name and a distribution name are different things, and assuming
+    they match is a field-semantics error that only shows up on the packages
+    where they diverge: `yaml` ships in `pyyaml`, `sklearn` in
+    `scikit-learn`, `PIL` in `Pillow`, `cv2` in `opencv-python`. Comparing
+    the import name straight against `pyproject.toml` marks every one of
+    those undeclared -- and then advises declaring what is already there.
+
+    `packages_distributions()` reads the installed metadata, which is the
+    only authority on this mapping; there is no rule to derive it from. It
+    sees only what is INSTALLED, so a module that is genuinely absent
+    resolves to nothing and falls back to the name-equality check -- which is
+    the conservative direction: an undeclared, uninstalled module still gets
+    flagged.
+    """
+    from importlib.metadata import packages_distributions
+
+    top = module.split(".")[0]
+    return {_normalise(d) for d in packages_distributions().get(top, [])}
+
+
+def find_offenders(
+    modules: dict[str, list[str]], declared: set[str]
+) -> dict[str, list[str]]:
+    """The composition: which of these modules count as undeclared.
+
+    Extracted from the two guards below so it can be run on input it should
+    REJECT. Written inline in a test, this three-way short-circuit was only
+    ever exercised against the real repository, which currently has no
+    undeclared modules — so it passed without anything demonstrating that a
+    genuinely undeclared one reaches `offenders` rather than being absorbed
+    by one of the three `continue`s. That is VACUOUS_TESTS #19's shape: a
+    gate whose tests all run it on data it accepts.
+
+    Every ingredient was unit-tested in isolation. The composition was not,
+    and the composition is the part that decides.
+    """
+    offenders: dict[str, list[str]] = {}
+    for module, files in modules.items():
+        if is_first_party(module):
+            continue
+        if _normalise(module) in declared:
+            continue
+        # The import name is not the distribution name. Ask the installed
+        # metadata which distribution ships this module before calling it
+        # undeclared -- see distributions_providing().
+        if distributions_providing(module) & declared:
+            continue
+        offenders[module] = files
+    return offenders
+
+
+def test_the_composition_rejects_a_module_that_should_be_rejected():
+    """Break-confirmation for the decision, not just for its ingredients.
+
+    A synthetic module that is not first-party, not declared, and shipped by
+    no installed distribution must land in `offenders`. If any of the three
+    checks were accidentally too permissive — say `is_first_party` matched a
+    stem that also exists under `experiments/` — the guards above would keep
+    passing on real undeclared dependencies and nothing would say so.
+
+    Raised by this project's own vacuous-test review, on this file, in the
+    pull request that added the widened guard.
+    """
+    declared = {"numpy", "scipy"}
+    modules = {
+        "definitely-not-a-real-module-xyz": ["tests/test_fake.py"],
+        "numpy": ["tests/test_real.py"],
+    }
+    offenders = find_offenders(modules, declared)
+
+    assert "definitely-not-a-real-module-xyz" in offenders, (
+        "an undeclared, uninstalled, non-first-party module was absorbed by "
+        "one of the three checks instead of being reported")
+    assert offenders["definitely-not-a-real-module-xyz"] == ["tests/test_fake.py"], (
+        "the offender must carry the files that named it, or the failure "
+        "message cannot say where to look")
+    assert "numpy" not in offenders, "a declared module must not be reported"
+
+
+def test_the_composition_respects_each_of_its_three_escapes():
+    """Each `continue` must be the thing that spares its own case.
+
+    Asserted separately because a single passing corpus cannot tell which
+    check did the work — and if one stopped functioning, the others would
+    keep the guard green for the wrong reason.
+    """
+    # first-party: a module living under tests/ is imported by bare name
+    assert not find_offenders({"_makefile": ["x.py"]}, set())
+    # declared by exact name
+    assert not find_offenders({"numpy": ["x.py"]}, {"numpy"})
+    # declared under a DIFFERENT distribution name than the import name
+    assert not find_offenders({"yaml": ["x.py"]}, {"pyyaml"})
+    # and none of those escapes covers an unrelated unknown
+    assert find_offenders({"nosuchmodule-xyz": ["x.py"]}, {"pyyaml"})
+
+
 def test_every_importorskip_names_a_declared_or_first_party_module():
     """The guard. A third-party module skipped-on-import must be declared.
 
@@ -122,20 +226,106 @@ def test_every_importorskip_names_a_declared_or_first_party_module():
     weeks being satisfied transitively and then vanished without a red
     test anywhere.
     """
-    declared = declared_distributions()
-    offenders = {}
-    for module, files in importorskip_modules().items():
-        if is_first_party(module):
-            continue
-        if _normalise(module) in declared:
-            continue
-        offenders[module] = files
+    offenders = find_offenders(importorskip_modules(), declared_distributions())
     assert not offenders, (
         f"importorskip on undeclared third-party module(s): {offenders}. "
         f"An undeclared dependency wearing a skip cannot be told apart "
         f"from a capability this machine does not have -- declare it in "
         f"pyproject.toml so it lives and dies with its group, or make the "
         f"import hard so its absence is a failure")
+
+
+def hard_imports(root: Path | None = None) -> dict[str, list[str]]:
+    """{module: [test files that import it unconditionally]}, from the AST.
+
+    `importorskip` says "this may legitimately be absent". A plain `import`
+    says "this must be here". The second is the stronger claim and was the
+    unguarded one.
+    """
+    import ast
+
+    found: dict[str, list[str]] = {}
+    for path in sorted((root or TESTS_DIR).glob("test_*.py")):
+        tree = ast.parse(path.read_text())
+        for node in ast.walk(tree):
+            if isinstance(node, ast.Import):
+                names = [alias.name for alias in node.names]
+            elif isinstance(node, ast.ImportFrom):
+                # `level > 0` is a relative import: first-party by definition.
+                if node.level or not node.module:
+                    continue
+                names = [node.module]
+            else:
+                continue
+            for name in names:
+                found.setdefault(name.split(".")[0], []).append(path.name)
+    return found
+
+
+def test_every_hard_import_in_the_tests_is_declared():
+    """A dependency imported unconditionally must be declared.
+
+    `equinox` was hard-imported by `tests/test_stage2b_cnn.py` and declared in
+    no dependency group -- it arrived only as a transitive of `diffrax`.
+    `uv sync --frozen` installed it, so nothing failed, and no local run could
+    ever have shown the gap because the developer's environment already had
+    it. A re-lock or an upstream drop was the exposure.
+
+    This is the stronger half of the guard above: `importorskip` at least
+    ANNOUNCES that a module may be missing. A plain import asserts it is
+    present and says so nowhere.
+    """
+    import sys
+
+    # Same composition as the importorskip guard, with stdlib dropped first --
+    # a hard `import os` is not a packaging question. Shared rather than
+    # re-inlined, so `find_offenders`'s break-confirmation covers both.
+    candidates = {
+        module: sorted(set(files))
+        for module, files in sorted(hard_imports().items())
+        if module not in sys.stdlib_module_names
+    }
+    offenders = find_offenders(candidates, declared_distributions())
+
+    assert not offenders, (
+        f"hard-imported but undeclared third-party module(s): {offenders}. "
+        f"These are satisfied today only by luck -- a transitive of something "
+        f"else, or a stale environment. Declare them in pyproject.toml so they "
+        f"live and die with their group")
+
+
+def test_the_hard_import_scan_actually_finds_imports():
+    """Anti-vacuity: an AST walk that stopped working would go green."""
+    found = hard_imports()
+    assert len(found) > 10, (
+        f"the hard-import scan found only {sorted(found)}; the test suite "
+        "imports far more than that, so the walk is broken")
+    assert "pytest" in found, "pytest is imported by these tests; the scan missed it"
+
+
+def test_an_import_name_is_resolved_to_its_distribution_name():
+    """The mapping the guard was missing, pinned on a live divergence.
+
+    `yaml` ships in `pyyaml`. Before this, `importorskip("yaml")` was reported
+    as an undeclared third-party module although `pyyaml>=6.0` is declared --
+    a guard correct about the field it read (distribution names) answering a
+    question about a different one (import names).
+
+    Asserting the names differ first is the part that stops this going
+    vacuous: if PyYAML were ever renamed so that import and distribution
+    names coincided, the resolution below would pass for the trivial reason
+    and prove nothing about the mapping.
+    """
+    assert _normalise("yaml") != _normalise("pyyaml"), (
+        "this test needs a package whose import name differs from its "
+        "distribution name; pick another if PyYAML stops being one"
+    )
+    assert "pyyaml" in declared_distributions()
+    assert "pyyaml" in distributions_providing("yaml")
+
+    # And it must not invent a provider for something that ships nowhere,
+    # or the guard would wave through any typo'd module name.
+    assert distributions_providing("definitely-not-a-real-module-xyz") == set()
 
 
 def test_the_scan_actually_finds_importorskip_calls():

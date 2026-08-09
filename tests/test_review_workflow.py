@@ -256,6 +256,62 @@ def test_the_review_can_read_files_and_publish(text):
             f"review nobody can read is indistinguishable from none")
 
 
+def test_the_review_only_fires_on_prs_into_the_checkpoint_branch(text):
+    """Scope, pinned, because widening it is silent and expensive.
+
+    `branches` on a `pull_request` trigger filters the BASE. Without it the
+    review fires on every pull request in the repository — including
+    stage2b into main, where the work has already passed the checkpoint and
+    reviewing it again is the repetition this design exists to remove.
+
+    Deleting the filter produces no error and no red build. It produces more
+    reviews, each costing minutes and dollars, and the only signal is a
+    billing line.
+    """
+    doc = yaml.safe_load(text)
+    trigger = (doc.get(True) or doc.get("on") or {}).get("pull_request") or {}
+    assert trigger.get("branches") == ["stage2b-ci"], (
+        f"the review's base-branch filter is {trigger.get('branches')!r}, "
+        f"not ['stage2b-ci']. Without it every PR in the repository gets a "
+        f"review, silently")
+    assert trigger.get("paths") == ["tests/**"], (
+        f"the path filter is {trigger.get('paths')!r}; a vacuous-test review "
+        f"of a PR that changed no tests has nothing to say and still costs "
+        f"tokens")
+
+
+@pytest.mark.parametrize("mutate,expected,why", [
+    (lambda t: _mutate(t, "    branches:\n      - stage2b-ci\n", ""),
+     "base-branch filter",
+     "the filter deleted outright -- the review then fires on EVERY pull "
+     "request in the repository, silently, with a billing line as the only "
+     "signal"),
+    (lambda t: _mutate(t, "      - stage2b-ci\n", "      - '**'\n"),
+     "base-branch filter",
+     "widened to match anything, which is the same defect wearing a filter"),
+    (lambda t: _mutate(t, '      - "tests/**"\n', '      - "**"\n'),
+     "path filter",
+     "the path filter widened -- every PR touching any file gets a "
+     "vacuous-test review that has nothing to say"),
+])
+def test_losing_the_review_scope_is_caught(text, mutate, expected, why):
+    """The pairing this file demands of every other guard, and did not have
+    for the scope test.
+
+    Reported by the vacuous-test review itself on PR #28, correctly: the
+    assertions on `branches`/`paths` were real and discriminating, but no
+    mutation had ever been watched turn them red. Principle 21's corollary
+    in the file whose entire discipline is pairing -- and added the same
+    afternoon the guard was, which is the moment the rule is easiest to
+    articulate and hardest to apply.
+
+    Widening is the mutation that matters. Deleting the filter is loud in a
+    diff; widening it to `**` reads as configuration. Both fail here.
+    """
+    with pytest.raises(AssertionError, match=re.escape(expected)):
+        test_the_review_only_fires_on_prs_into_the_checkpoint_branch(mutate(text))
+
+
 def test_track_progress_is_on(text):
     """The single line the whole design rests on.
 

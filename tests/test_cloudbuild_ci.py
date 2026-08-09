@@ -601,3 +601,105 @@ def test_the_import_scan_is_not_satisfied_by_a_comment():
         assert _cloud_imports(decoy) == set(), (
             "a comment and a string literal were read as imports, which is "
             "the substring failure this check replaced")
+
+
+def _tier_default(text: str | None = None) -> str:
+    import yaml
+
+    doc = yaml.safe_load(CLOUDBUILD.read_text() if text is None else text)
+    return str(doc.get("substitutions", {}).get("_TIER", ""))
+
+
+def _tier_branches(text: str | None = None) -> dict:
+    """{tier: the make target that tier runs}, from the `case` in the script.
+
+    Read out of the build config rather than restated here, so a renamed
+    target or a new tier is picked up instead of quietly disagreeing.
+    """
+    import re
+    import yaml
+
+    doc = yaml.safe_load(CLOUDBUILD.read_text() if text is None else text)
+    body = "\n".join(
+        (step.get("script") or "\n".join(step.get("args") or []))
+        for step in doc.get("steps", [])
+    )
+    case = re.search(r'case "\$_TIER" in(.*?)\n\s*esac', body, re.S)
+    assert case, "the _TIER case block is no longer where this test looks"
+    return {
+        tier: target.strip()
+        for tier, target in re.findall(
+            r"^\s*(\w+)\)\s*\n\s*(make [\w-]+)", case.group(1), re.M
+        )
+    }
+
+
+def _assert_default_tier_is_not_a_narrowing(text: str | None = None):
+    """A default that nobody sets must fail toward MORE coverage.
+
+    No trigger in `infra/` leaves `_TIER` unset; all three pass `full`
+    explicitly. So the default is what an unattended build gets --
+    `gcloud builds submit` by hand, or a new trigger whose author forgets
+    the substitution.
+
+    It defaulted to `fast`, which runs the `STAGE2B_TEST_FILES` narrowing.
+    That subset excludes every test guarding CI itself, so such a build ran
+    less than it looked like it ran and still reported success: an UNSET
+    VARIABLE chose a narrowing. That is principle 21's shape arriving through
+    a default rather than through a list.
+
+    This asserts the direction, not the spelling: whatever the default tier
+    is called, it must run the target that runs everything.
+    """
+    branches = _tier_branches(text)
+    default = _tier_default(text)
+
+    assert branches, "no tier branches parsed; the derivation is broken"
+    assert default in branches, (
+        f"the default _TIER {default!r} does not name a branch that runs the "
+        f"suite; branches are {branches}")
+
+    narrowing = {t: v for t, v in branches.items() if v != "make test"}
+    assert branches[default] == "make test", (
+        f"the default _TIER {default!r} runs {branches[default]!r}, which is a "
+        f"narrowing ({narrowing}). An unattended build must run the whole "
+        f"suite -- a subset that reports success is worse than no build")
+
+
+def test_the_real_build_config_defaults_to_the_whole_suite():
+    """The live assertion, on the file as committed."""
+    _assert_default_tier_is_not_a_narrowing()
+
+
+@pytest.mark.parametrize("mutate,why", [
+    (lambda t: t.replace("  _TIER: full", "  _TIER: fast"),
+     "the default flipped back to the narrowing -- an unattended build would "
+     "run STAGE2B_TEST_FILES and report success"),
+    (lambda t: t.replace("  _TIER: full", "  _TIER: gated"),
+     "the default set to a tier that runs no suite at all"),
+])
+def test_a_default_tier_that_narrows_coverage_is_caught(mutate, why):
+    """Break-confirmation, committed rather than performed by hand.
+
+    Raised by this project's own vacuous-test review: the helpers read
+    `CLOUDBUILD.read_text()` directly, so the only way to watch this guard
+    fail was to edit the real file and revert it -- a verification that
+    lives in a session transcript and fails nothing when it regresses.
+    That is principle 20's exact case, so the text is injectable and the
+    mutation is a test.
+    """
+    with pytest.raises(AssertionError):
+        _assert_default_tier_is_not_a_narrowing(mutate(CLOUDBUILD.read_text()))
+
+
+def test_the_mutations_above_actually_change_the_config():
+    """Anti-vacuity: a `replace` that matched nothing would pass silently.
+
+    If the substitution key is ever reformatted, every mutation above becomes
+    a no-op, `pytest.raises` sees the unmutated config, and the guard reports
+    success while testing nothing.
+    """
+    text = CLOUDBUILD.read_text()
+    assert text.replace("  _TIER: full", "  _TIER: fast") != text, (
+        "the _TIER substitution line no longer matches what the mutations "
+        "target, so the break-confirmations above are no-ops")

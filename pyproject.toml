@@ -5,6 +5,13 @@ requires-python = ">=3.14"
 license = "MIT"
 dependencies = [
     "diffrax>=0.7.2",
+    # Hard-imported by experiments/stage2b_denoising/stage2b_cnn.py and
+    # tests/test_stage2b_cnn.py, and until now declared nowhere -- it arrived
+    # only as a transitive of diffrax. `uv sync --frozen` installs it today,
+    # so nothing failed; a re-lock or an upstream drop was the exposure, and
+    # it is invisible to every local run because the developer's environment
+    # already has it.
+    "equinox>=0.13.8",
     "ipykernel>=7.3.0",
     "jax>=0.11.0",
     "jupyterlab>=4.6.2",

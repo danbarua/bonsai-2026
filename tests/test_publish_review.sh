@@ -254,7 +254,13 @@ NO_TESTS_CLAIM='{"no_tests_changed":true,"files_examined":[],"findings":[],
 run_cov "$NO_TESTS_CLAIM"
 expect_rc "no-tests-changed contradicted by GitHub fails" 1
 check "gives the count GitHub reported"  "GitHub lists"
-check "names the real cause"             "too large"
+# The message used to assert truncation here. It cannot be truncation: the
+# check above EXITS at n_all >= 100, so anything reaching the contradiction
+# is under the cap. Asserting a large-diff cause on a small PR is the
+# overclaim fail()'s own docstring names, and it sent a reader hunting a
+# problem that was not there on a measured 58-file PR.
+check "rules truncation OUT rather than in" "UNDER the 100-file cap"
+check "points at where to actually look"    "delta step"
 check "forbids reading it as clean"      "Do not read this as a clean result"
 
 # Non-vacuity: when GitHub agrees there are no test files, the same claim
@@ -272,6 +278,99 @@ PATH="$STUB_EMPTY:$PATH" PR_NUMBER=99 bash "$SCRIPT" "$NO_TESTS_CLAIM" "$OUT"
 RC=$?
 expect_rc "no-tests-changed CONFIRMED by GitHub passes" 0
 check "says there was nothing to review" "nothing to review"
+
+# The INCREMENTAL reading, which this guard used to fail on. Run 31281775221:
+# delta mode `none`, so the review correctly reported no NEW test files since
+# its last pass, re-verified its open findings against four test files, and
+# found nothing. GitHub named 25 changed test files across the whole PR, the
+# two were compared, and a healthy review failed the build.
+#
+# `no_tests_changed` carries two readings -- cumulative ("this PR changed no
+# tests") and incremental ("none since my last review") -- and its name
+# settles neither. The discriminator is `files_examined`: a review whose
+# injected list came back EMPTY, which is the failure the guard exists for,
+# cannot have examined any test file. One that examined some demonstrably had
+# a list.
+
+INCREMENTAL_CLAIM='{"no_tests_changed":true,
+  "files_examined":["tests/test_a.py","tests/test_b.py"],"findings":[],
+  "summary":"Delta mode none; re-verified open findings, all still closed."}'
+run_cov "$INCREMENTAL_CLAIM"
+expect_rc "no-tests-changed WITH test files examined passes" 0
+check "says no NEW test files"        "No NEW test files"
+check "reports what it re-verified"   "Re-verified"
+
+# And the narrowing must not have switched the guard off: the same payload
+# with NOTHING examined still has to fail, or the empty-list failure this
+# whole section exists for would sail through.
+STILL_FAILS='{"no_tests_changed":true,"files_examined":["docs/VACUOUS_TESTS.md"],
+  "findings":[],"summary":"Nothing changed."}'
+run_cov "$STILL_FAILS"
+expect_rc "no-tests-changed with no TEST file examined still fails" 1
+check "still names the count"  "GitHub lists"
+
+# THE PUSH THAT WAS ACTUALLY RED, and the case `files_examined` alone does
+# not cover. Run history on PR #28: the first failure was `5a1efdd`, a
+# DOCS-ONLY push (VACUOUS_TESTS.md). Delta mode returned `none`, so the review
+# had nothing to review and -- with no open findings to re-verify -- nothing
+# to examine either. `files_examined` was therefore empty, GitHub still named
+# every test file the PR had ever touched, and the build went red on a push
+# that was exactly as clean as it claimed to be.
+#
+# The fix is the same denominator on both sides: compare against what changed
+# IN THIS PUSH, resolved from GITHUB_EVENT_PATH's before/after, which is what
+# the delta step used. A docs-only push changed no test file, so there is no
+# contradiction to report.
+
+EVENT_JSON="$TMP/event_docs_only.json"
+cat > "$EVENT_JSON" <<'EVENTEOF'
+{"before":"1111111111111111111111111111111111111111",
+ "after":"2222222222222222222222222222222222222222"}
+EVENTEOF
+
+STUB_PUSH="$TMP/bin_push"
+mkdir -p "$STUB_PUSH"
+cat > "$STUB_PUSH/gh" <<'STUBEOF'
+#!/bin/bash
+# `pr diff` = the whole PR, which HAS test files.
+# `api .../compare/` = this push, which is docs-only.
+for arg in "$@"; do
+  case "$arg" in
+    */compare/*) printf 'docs/VACUOUS_TESTS.md
+'; exit 0 ;;
+  esac
+done
+printf 'tests/test_a.py
+tests/test_b.py
+docs/VACUOUS_TESTS.md
+'
+STUBEOF
+chmod +x "$STUB_PUSH/gh"
+
+DOCS_ONLY_PUSH='{"no_tests_changed":true,"files_examined":[],"findings":[],
+  "summary":"Delta mode none; this push touched no test files."}'
+
+n=$((n + 1)); OUT="$TMP/cov_$n"; : > "$OUT"
+PATH="$STUB_PUSH:$PATH" PR_NUMBER=99 GITHUB_EVENT_PATH="$EVENT_JSON"   GITHUB_REPOSITORY="o/r" bash "$SCRIPT" "$DOCS_ONLY_PUSH" "$OUT"
+RC=$?
+expect_rc "a docs-only push is not a contradiction" 0
+
+# And the guard must still fire when THIS PUSH really did change tests while
+# the review claims none -- otherwise scoping to the push switched it off.
+STUB_PUSH_TESTS="$TMP/bin_push_tests"
+mkdir -p "$STUB_PUSH_TESTS"
+cat > "$STUB_PUSH_TESTS/gh" <<'STUBEOF'
+#!/bin/bash
+printf 'tests/test_a.py
+'
+STUBEOF
+chmod +x "$STUB_PUSH_TESTS/gh"
+
+n=$((n + 1)); OUT="$TMP/cov_$n"; : > "$OUT"
+PATH="$STUB_PUSH_TESTS:$PATH" PR_NUMBER=99 GITHUB_EVENT_PATH="$EVENT_JSON"   GITHUB_REPOSITORY="o/r" bash "$SCRIPT" "$DOCS_ONLY_PUSH" "$OUT"
+RC=$?
+expect_rc "a push that DID change tests still contradicts" 1
+check "scopes the count to the push" "in this push"
 
 # --- truncation: the file list capped at 100 without saying so ------------
 #

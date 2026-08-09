@@ -41,7 +41,14 @@ scope and is not counted.
 
 | # | file::test | category | what would have to change for it to fail | first seen |
 |---|---|---|---|---|
-| 1 | `tests/test_x.py::test_y` | A | nothing — it greps source | run 3 |
+| 1 | `tests/test_x.py::test_y` | A | nothing — it greps source | this run |
+| 2 | `tests/test_z.py::test_w` | F | nothing — narrowing checked by the glob | run 3 |
+
+<!-- `first seen` takes "this run" or a run number YOU RECORDED IN THE RUN
+     LOG BELOW. If there is no prior comment, every row says "this run".
+     Never "prior review round" — that is a value invented to fill a
+     column, and the column is not worth a fabricated history. -->
+
 
 ### Fixed since first reported
 
@@ -59,6 +66,20 @@ scope and is not counted.
 | `tests/test_z.py` | run 4 | clean |
 
 </details>
+
+### Left scope
+
+<!-- In-scope tests that were DELETED or MOVED OUT of `tests/` in this push.
+     The delta reports these under a `DEPARTED` heading; they do not exist in
+     the working tree, so do not try to read them. Record where each one went
+     and, in one clause, whether the move looks legitimate.
+
+     Keep the section even when empty -- "none" is a fact worth stating on a
+     PR that removed tests, and its absence is not. -->
+
+| file | where it went | note |
+|---|---|---|
+| `tests/test_x.py` | `.claude/tooling/test_x.py` | moved out of the science suite |
 
 ### Not examined
 
@@ -78,7 +99,24 @@ scope and is not counted.
 
 1. **Read the existing comment first.** It is your own prior state, and it
    is injected into your context along with the rest of the thread.
-2. **Carry every open finding forward**, with its original `first seen`.
+
+2. **If `<comments>` says "No comments", YOU HAVE NO PRIOR STATE.** This is
+   your first run on this pull request. Every finding is `first seen: this
+   run`, the *Fixed* table is empty because nothing has been fixed yet, and
+   the run log has exactly one line. Do not write "prior review round", do
+   not carry anything forward, and do not infer a history from the fact that
+   this document describes one.
+
+   Observed on PR #28: the first run received `<comments>: No comments` and
+   an empty `<review_comments>`, and still filed a finding marked *"first
+   seen: prior review round"*. The finding was real; its history was
+   invented. A required column with no honest value gets one made up — which
+   is the same failure `tools/gates/gate_inventory.py` documents for
+   `discharged_in`, and the reason that field is required only when a row
+   claims to be discharged.
+
+3. **Carry every open finding forward**, with its original `first seen` —
+   **only when there is a prior comment to carry it from.**
    Re-verify it against the current code: if the code changed such that the
    finding no longer holds, move it to *Fixed* and name the commit. If it
    still holds, leave it — do not re-litigate it, and do not restate its
@@ -96,9 +134,24 @@ scope and is not counted.
    the same file on the same PR, and a disagreement is information — the
    later verdict is not automatically the right one.
 
+7. **A test leaving scope is a reportable event, not an absence.** Deleting a
+   test file, or moving it out of `tests/`, removes it from every future
+   review — so the run in which it happens is the only one that can say so.
+   Record it under *Left scope* and carry any open finding it held into
+   *Fixed* only if the code it guarded also went; otherwise the finding is
+   still open and now unguarded, which is worse, and it stays open.
+
+   This is not hypothetical. `review_delta.sh` reported "no in-scope test
+   files changed" for a push that moved eight tests out of `tests/`, because
+   the compare API returns a rename's DESTINATION in `.filename` and the
+   source only in `.previous_filename`. Fixed 2026-08-08; the delta now emits
+   a `DEPARTED` section, and this is where it lands.
+
 ## What must never happen
 
 - A finding vanishing without appearing under *Fixed*.
+- A test leaving scope with no row under *Left scope* — the one run that
+  could report it is the one where it happened.
 - *Examined* listing a file the run did not actually read.
 - The status line claiming full coverage when *Not examined* is non-empty.
 - Findings gating the build. This comment advises; the deterministic checks
