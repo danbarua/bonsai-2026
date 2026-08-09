@@ -138,28 +138,54 @@ trigger = "ci-fast"
 # "no Stage 2B test-side result is accessed during stages 1-3"
 enforcement = "experiments/stage2b_denoising/stage2b_gcs.py::_check_object_path_allowed"
 production_reachability = """
-Called by object_path on construction AND re-checked inside every transport
-function (upload_file, download_file, ensure_artifact, consume_validated,
-read_manifest, publish_manifest, delete_prefix, discard_uncommitted), so a
-caller that assembles a name string by hand rather than via object_path is
-still refused. That double-check is the reachability claim: there is no
-path to bytes that bypasses it."""
+Called by object_path on construction AND re-checked inside every function
+that touches an object path, so a caller assembling a name by hand rather
+than via object_path is still refused. There is no path to bytes that
+bypasses it.
+
+DERIVED, not listed, and the correction matters. This field previously
+named eight functions by hand and the real set is SIXTEEN --
+`tests/test_stage2b_gcs.py::_functions_that_check_the_path` walks the
+module's AST for calls to `_check_object_path_allowed` and
+`test_the_refusal_matrix_matches_the_derived_set` asserts the exercised set
+equals it in both directions. Principle 21 in its usual costume: the row's
+whole reachability claim rested on a hand-maintained list, and the list was
+half the truth.
+
+The claim survived the check -- all sixteen refuse -- so the row was
+under-evidenced rather than wrong. That is the good outcome and it was not
+the guaranteed one."""
 input_wiring = """
 `name` (any object path reaching the transport) and `allow_test_split`,
 which defaults False at every call site in run_ladder_stage3.py -- asserted
 by test_the_driver_never_names_the_test_split, which also greps the driver
 for the literal 'testsplit' and 'allow_test_split'."""
 decision_consequence = "PermissionError raised; no bytes transferred."
-test = "tests/test_stage2b_gcs.py::test_discard_uncommitted_refuses_the_test_split"
+test = "tests/test_stage2b_gcs.py::test_every_checking_function_refuses_a_hand_assembled_test_split_path"
 break_demonstrated = """
-Observed while writing that test: constructing the name via object_path
-raises inside object_path BEFORE the function under test is called, so the
-first version passed without exercising the guard at all. Rewritten to
-build the name with allow_test_split=True and pass it without, which routes
-the refusal through _check_object_path_allowed in the function under test;
-the message changes from 'refusing to touch a Stage 2B TEST-side object' to
-'it lies under the Stage 2B test-split root', confirming which guard
-fired."""
+Per route, and in both directions.
+
+(a) One function stops checking: `read_manifest`'s `allow_test_split`
+default flipped False -> True. Exactly one parametrized case fails, NAMING
+the function -- test_every_checking_function_refuses_a_hand_assembled_test_split_path[read_manifest].
+A per-route break rather than a sample, which is what the Reviewer's B6
+ruling asked for: access must fail "through every production route".
+
+(b) One function is dropped from the exercised matrix:
+test_the_refusal_matrix_matches_the_derived_set FAILS, and the parametrized
+case still runs (it is derived from the AST, not from the matrix) and fails
+too. Removing coverage cannot quietly shrink what is claimed.
+
+Also confirmed: test_the_opt_in_is_what_changes_the_authorization_state.
+Without it the refusal could be unconditional, and an unconditional refusal
+is a wall rather than a gate -- it would pass a suite that never needed the
+door to open.
+
+Earlier evidence, kept because it records a real near-miss: the first
+version of test_discard_uncommitted_refuses_the_test_split constructed the
+name via object_path, which raises INSIDE object_path before the function
+under test is reached -- so it passed without exercising the guard at
+all."""
 trigger = "ci-fast"
 
 [binding_gate.7e0f91ff9d81]
@@ -1560,8 +1586,8 @@ amendment audit and Phase B is consented ONCE THOSE ARE COMMITTED. Mismatch
 gates halt automatically. Successful completion of planned steps creates NO
 additional discretionary review. Stage 4 stays blocked behind the package
 review and explicit release."""
-status = "discharged"
-discharged_in = "The execution record: FINDINGS.md's Phase A and Phase B sections, and the absence of any Stage 4 artifact."
+status = "unresolved"
+discharged_in = "See the three child rows; this parent holds the paragraph, not the evidence."
 evidence = """
 Both halves held, and they pull in opposite directions, which is what makes
 the pair worth one row. Phase B ran without a fresh discretionary approval
@@ -1812,6 +1838,83 @@ what the freeze was for is the question a reviewer must answer, and it is
 open."""
 trigger = "manual"
 
+[binding_claim.1c61e76c45e9]
+parent_clause = "aec9fff59bbe"
+locator = "STAGE3_PLAN.md, section 'Consent', first clause"
+obligation = """
+Execution through fingerprint implementation, Phase A regeneration, the
+amendment audit and Phase B is consented ONCE THOSE ARE COMMITTED."""
+status = "discharged"
+discharged_in = "experiments/stage2b_denoising/FINDINGS.md, Phase A and Phase B sections"
+evidence = """
+Phase B ran after its freezes were committed and without a fresh
+discretionary approval -- the consent was standing, as written, and nobody
+re-asked. The freezes it was conditional on are in AUDIT_PROTOCOL.md and
+STAGE3_PLAN.md at commits predating the run."""
+trigger = "manual"
+
+[binding_claim.a47f19c55fe2]
+parent_clause = "aec9fff59bbe"
+locator = "STAGE3_PLAN.md, section 'Consent', second clause"
+obligation = """
+Successful completion of planned steps creates NO additional discretionary
+review checkpoint. An obligation NOT to manufacture a gate -- reading it as
+mere permission loses half of it."""
+status = "discharged"
+discharged_in = "experiments/stage2b_denoising/FINDINGS.md, Phase B section"
+evidence = """
+Behavioural governance, and the Reviewer is right that "nobody re-asked" is
+evidence about ONE execution rather than an executable gate. That is what
+this row claims and no more: Phase B proceeded from committed freezes to
+completion without an invented checkpoint, and the record shows no
+intermediate approval request.
+
+Split out of the Stage-4 clause deliberately. They pull in opposite
+directions -- one forbids adding a gate, the other requires one to stay
+shut -- and a single row satisfied in one direction reads as satisfied in
+both."""
+negative_attestation = """
+The prohibited thing is an added checkpoint, which leaves no artifact when
+it does NOT happen. The output set is the run record between the freeze
+commits and the Phase B report: every halt in it is a mechanical gate
+firing, none is a discretionary pause. Weaker than a sweep over a finished
+artifact and stated as such -- a future run could still manufacture one,
+and nothing here would prevent it."""
+trigger = "manual"
+
+[binding_gate.0773bf1b3e36]
+parent_clause = "aec9fff59bbe"
+# The Stage-4 boundary, inventoried as a GATE on Reviewer Part B's ruling:
+# "The Stage-4 part is a binding gate. Its strongest evidence is not
+# 'absence of a Stage 4 artifact'; it is the structural test-split refusal
+# mechanism." Correct -- an absence is not evidence a door is locked.
+enforcement = "experiments/stage2b_denoising/stage2b_gcs.py::_check_object_path_allowed"
+production_reachability = """
+Sixteen functions re-check the path, derived from the AST rather than
+listed; see f3bbc791e7c6, which holds the full reachability account. This
+row's obligation is the narrower one: that the door stays SHUT until the
+package review and an explicit release."""
+input_wiring = """
+`allow_test_split`, which defaults False at every production call site.
+Flipping it is the authorization-state change the clause conditions on --
+and that flip is a human act, performed after the package review and Dan's
+release. No code checks that the review happened."""
+decision_consequence = "PermissionError raised; no bytes transferred, on any of the sixteen routes."
+test = "tests/test_stage2b_gcs.py::test_the_opt_in_is_what_changes_the_authorization_state"
+break_demonstrated = """
+Per route: `read_manifest`'s opt-in default flipped to True fails exactly
+its own parametrized case. Both directions of the matrix confirmed at
+f3bbc791e7c6.
+
+WHAT IS NOT ENFORCED, stated because the clause has two halves and code
+carries one. The mechanism enforces DEFAULT-CLOSED: nothing reaches the
+test split without an explicit flag. It does NOT enforce that the flag is
+only set after the package review and an explicit release -- that
+precondition is a human obligation with no executable predicate, and
+claiming the refusal covers it would be exactly the overclaim this
+inventory exists to catch."""
+trigger = "ci-fast"
+
 [binding_claim.9825d43dd6bf]
 parent_clause = "152fe49478d2"
 locator = "STAGE3_PLAN.md, 'Answers' -- Q5, module-first clause"
@@ -2035,8 +2138,12 @@ Execution additionally requires Dan's explicit release. A duplicate
 statement of the consent boundary that aec9fff59bbe holds in full -- the
 same obligation, restated in the document's status line where a reader
 meets it first."""
-status = "discharged"
+status = "unresolved"
 canonical_clause = "aec9fff59bbe"
+# Followed its canonical from `discharged` to `unresolved` when B6 was split.
+# Not a judgement I made -- `duplicate_status_disagrees` fired on this row
+# the moment the parent moved, which is the check earning its place on the
+# first change after it was written.
 trigger = "manual"
 
 [binding_claim.5de8c56be1a5]
