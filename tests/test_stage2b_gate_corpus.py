@@ -239,14 +239,32 @@ def test_the_inventory_still_holds_a_disposition_for_every_kind():
     output ("NO CANDIDATES DERIVED -- the scan found nothing, which is not
     the same as everything being dispositioned").
     """
+    sys.path.insert(0, str(REPO_ROOT / "tools" / "gates"))
+    from gate_inventory import derive_clauses
+
     inventory = tomllib.loads((STAGE2B_DIR / "gates.toml").read_text())
-    for kind in ("binding_gate", "binding_value", "binding_claim",
-                 "not_binding"):
+    kinds = ("binding_gate", "binding_value", "binding_claim", "not_binding")
+    for kind in kinds:
         assert inventory.get(kind), f"{kind} is empty or absent"
-    total = sum(len(inventory.get(kind, {})) for kind in
-                ("binding_gate", "binding_value", "binding_claim",
-                 "not_binding"))
-    assert total == 89, (
-        f"the inventory holds {total} dispositions against 89 derived "
-        f"candidates; the corpus test pins the derivation, this pins that "
-        f"the inventory still answers it")
+
+    # Counted against the CORPUS, not against every row in the file. Child
+    # obligations mint their own ids and are additional rows rather than
+    # additional coverage -- the parent paragraph is what the corpus asked
+    # about. Written as a flat total first, which broke the moment the first
+    # composite was split: 95 rows, 89 candidates, and the honest number is
+    # neither of those on its own.
+    docs = [STAGE2B_DIR / name for name in gate_corpus.PROTOCOL_DOCS]
+    candidate_ids = {c.clause_id for c in derive_clauses(docs)}
+    answered = set()
+    for kind in kinds:
+        answered |= set(inventory.get(kind, {})) & candidate_ids
+    assert len(answered) == 89, (
+        f"the inventory answers {len(answered)} of 89 derived candidates; "
+        f"the corpus test pins the derivation, this pins that the inventory "
+        f"still answers it")
+
+    children = [cid for kind in kinds for cid, e in inventory.get(kind, {}).items()
+                if isinstance(e, dict) and e.get("parent_clause")]
+    assert set(children).isdisjoint(candidate_ids), (
+        "a child obligation collides with a corpus candidate id, so one "
+        "disposition covers two different things")
