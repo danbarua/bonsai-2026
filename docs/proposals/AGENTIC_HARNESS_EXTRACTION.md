@@ -468,10 +468,38 @@ required report — was never reported at all.
 | Gates | 2–3 of 15 | `gates.toml` + reconciler, ~2,100 lines |
 | Lines of enquiry | **5 of 9 lines mis-closed** | **none** |
 
-**The apparatus was built for the aspect with the fewest defects.** Neither
-this document's original ledger nor the Stage 2B extraction could have found
-that: a line of enquiry can only be checked once it has closed, and no Stage
-2B line has.
+**The apparatus was built for the aspect with the fewest defects.**
+
+**Correction to how this section justified itself.** An earlier version said
+no Stage 2B line has closed, so only Stage 2A could show this. That is false
+and the error was mine: `experiments/stage2b_denoising/FINDINGS.md` is 8,328
+words of evaluations, and I scoped the review without reading it. Stage 2B's
+*confirmatory* line is open; several feasibility lines are closed, one of them
+through a full FAIL → diagnosis → disclosed amendment → re-run cycle.
+
+The narrower claim that survives: Stage 2A is the control arm because it has
+**no gate inventory** and because its *primary* line closed, so pre-registered
+closure criteria can be checked against a completed confirmatory result. That
+was always the load-bearing reason. "2B has no evaluations" was not, and was
+wrong.
+
+**And Stage 2B's FINDINGS is ahead of this document on three counts I
+proposed as novel.** Its Part 3 separates (a) the contemporaneous decision-time
+reason, (b) a durable rationale identified retrospectively, and (c) subsequent
+evidence narrowing (a)'s premise — explicitly preserving (a) "as the decision
+record… not as a claim that still stands unmodified." That is the stacked
+criterion history of §5h, applied to a decision rather than a clause, and it
+predates the version sketched here. It also performs the invalidation check
+§5h says amendments omit: a looser reading of the amended rule was tested,
+found to select `S*=300`, and rejected because that value fails its own
+same-step re-run — establishing that **the correction did not select the
+outcome**. And (c) is a recorded reopen: the exact-zero premise "did not
+survive scale", with 79 nonzero final-Deltas at 54,000 images.
+
+So the amend-without-invalidation finding in §7 is narrower than stated. One
+gates.toml row records supersession without invalidation. The FINDINGS record
+of the same amendment does the invalidation work in prose. The defect is that
+the two live in different documents and only one of them is machine-checkable.
 
 This does not license building a lines-of-enquiry tool. §6's rule still binds
 — the first move is the format, not the machinery, and §6.2's citation
