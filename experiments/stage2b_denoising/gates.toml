@@ -1356,12 +1356,30 @@ Pointed at the artifact rather than at who checked it: an agent attribution
 is not reviewer-checkable, and these keys are."""
 
 [binding_claim.9b52d6ca717b]
+# NARROWED at Reviewer Part B's instruction, and the narrowing is
+# evidentiary rather than convenient. The clause's third sentence -- "full
+# suite green before each commit" -- is deliberately absent from the
+# normalized obligation below: this project never established persistent
+# per-commit test logs, so for commits already made there is no record that
+# could substantiate it. The Reviewer's framing was "either substantiate it
+# from records or narrow the normalized obligation to what can actually be
+# established", and there are no such records.
+#
+# What remains is weaker and checkable: the break-evidence half is
+# discharged by artifacts anyone can re-read. A subordinate sentence nobody
+# can verify should not ride along inside a discharge the rest of the clause
+# earns.
+#
+# Worth recording HOW this text ended up here rather than in `obligation`:
+# it was in `obligation` first, and `missing_negative_attestation` fired --
+# the word "cannot", inside explanatory prose, read to the guard as a
+# prohibition needing an attestation. Correctly. `obligation` holds the
+# normalized obligation; rationale goes in a comment.
 locator = "STAGE3_PLAN.md, section 'Verification'"
 obligation = """
 Every new guard confirmed by breaking what it watches and observing the
 specific expected failure -- not by observing a green suite. Payload
-comparison verified by deliberately perturbing one array. Full suite green
-before each commit."""
+comparison verified by deliberately perturbing one array."""
 status = "discharged"
 discharged_in = """
 The `break_demonstrated` field of every substantiated row in this file, and
@@ -1498,7 +1516,19 @@ a notebook, and no task or plan item proposes packaging one. The clause is
 unusual in being satisfied by something NOT happening, which is why it is
 worth a row: an implied task that nobody started leaves no trace, so the
 only way to show it was declined is to have said so where the decision
-would have been made."""
+would have been made.
+
+SCOPE OF THE DISCHARGE, at Reviewer Part B's instruction: discharged
+THROUGH THE CURRENT PRE-STAGE-4 PACKAGE STATE, not absolutely. The
+obligation stays live until the deferred delivery-format decision becomes
+permissible, which is after results exist. That is not a defect in the
+row -- it is what a continuing negative obligation looks like when it is
+recorded honestly, and the alternative is a discharge that silently
+expires on the day the question becomes live.
+
+The attestation gets more expensive as Stage 4 approaches, for the same
+reason: that is exactly when a deliverable format becomes a real question
+and the deferral is easiest to forget was deliberate."""
 negative_attestation = """
 Scoped to the plan of record, the task queue, and PHASE_B_PLAN.md. The
 prohibited thing is notebook packaging appearing as pending or implied
@@ -1767,6 +1797,36 @@ what the freeze was for is the question a reviewer must answer, and it is
 open."""
 trigger = "manual"
 
+[binding_claim.659ab6a9978b]
+# WAS not_binding NARRATION. Reviewer Part A, on this row:
+#
+#   "The proposed disposition acknowledges [the operative condition], then
+#   says it binds elsewhere. That can be legitimate only if the inventory
+#   explicitly represents this paragraph as a DUPLICATE statement of the same
+#   binding gate, not as wholly non-binding prose. Otherwise the taxonomy
+#   creates exactly the escape route we were trying to close."
+#
+# Correct, and it is the cleanest statement of why a fourth relationship was
+# needed rather than a fourth kind. Most of the paragraph IS narration -- the
+# eight review rounds, the conditional consensus. But "execution additionally
+# requires Dan's explicit release" is an operative condition sitting inside
+# it, and a paragraph does not stop binding because a better statement of the
+# same obligation exists elsewhere. It stops being SEPARATELY binding, which
+# is a different claim and now has a field to say so.
+#
+# The first use of `canonical_clause`, and the reason it exempts the field
+# contract: aec9fff59bbe carries the consent boundary in full. A second
+# account here would either restate it (and drift) or thin it (and mislead).
+locator = "STAGE3_PLAN.md, section 'Status' (document header)"
+obligation = """
+Execution additionally requires Dan's explicit release. A duplicate
+statement of the consent boundary that aec9fff59bbe holds in full -- the
+same obligation, restated in the document's status line where a reader
+meets it first."""
+status = "discharged"
+canonical_clause = "aec9fff59bbe"
+trigger = "manual"
+
 [binding_claim.5de8c56be1a5]
 # THE SUCCESSOR to 4e0f03367b9f, and the row that made this reclassification
 # necessary. Reviewer Part A conditionally accepted this as not_binding
@@ -2029,7 +2089,16 @@ looser reading of the rule was caught before being applied -- "some S*
 brings noisy within 10x of clean-AT-150" is satisfied at S*=300, which then
 fails its own re-run. A record of a corrected defect, kept rather than
 edited away. The gate it describes binds at DESIGN.md:135 and :192
-(5d8386004c11, 5908ac408624)."""
+(5d8386004c11, 5908ac408624).
+
+The paragraph's closing sentence is prospective -- "Revisit as its own
+disclosed decision if measured full-scale cost ever makes that trade
+different" -- and is therefore NOT covered by "this is narration". Reviewer
+Part A asked for it to be dispositioned explicitly rather than absorbed:
+it is non-binding because REVISIT is discretionary. It licenses a future
+decision and compels nothing; had it read "must be revisited", it would be
+a binding_claim and this row would be wrong. Recorded so the disposition
+rests on the modality rather than on the paragraph's overall flavour."""
 
 [not_binding.4b27219dd7cc]
 reason = """
@@ -2038,15 +2107,6 @@ they are archived. A provenance statement about how the document came to be
 frozen; it commits the system to nothing. The freeze itself binds at
 AUDIT_PROTOCOL.md:3 (0ac873652382)."""
 
-[not_binding.659ab6a9978b]
-reason = """
-NARRATION: the plan's own status line -- reviewed across eight rounds,
-conditional consensus reached, conditional on the five freezes being
-committed. Records how the document reached plan-of-record standing. Its one
-forward-looking clause, "execution additionally requires Dan's explicit
-release", is not narration -- but it binds at STAGE3_PLAN.md:335
-(aec9fff59bbe), which states the consent boundary in full and is
-dispositioned there."""
 
 [not_binding.9e9598bd470a]
 reason = """
@@ -2126,9 +2186,20 @@ reason = """
 RATIONALE: the argument that the cross-architecture difference cannot
 amplify -- the encoder is a contraction toward a fixed point, and the
 downstream solver's rtol=1e-6 sits eight orders above the difference. An
-analytic justification for why the measured result above is tolerable. It
-commits the system to nothing; the tolerance it justifies is the solver's,
-set elsewhere."""
+analytic justification for why the measured result above is tolerable. The
+tolerance it justifies is the solver's, set elsewhere.
+
+SCOPE, at Reviewer Part A's insistence, because "commits the system to
+nothing" was too broad and this row carries the strongest assertions in the
+not_binding section: "it cannot amplify", "no reported quantity in this
+design can turn on it". Those ARE commitments -- epistemic ones. The
+narrower true statement is that this inventory ranges over PROTOCOL
+OBLIGATIONS, not over propositions requiring evidential substantiation, so
+a scientific claim is out of its scope rather than absent from the record.
+
+Worth stating rather than leaving implicit: nothing in this file checks
+whether that claim is true. If it is wrong, the failure surfaces as a
+result nobody can reproduce, not as a finding here."""
 
 [not_binding.76afced21901]
 reason = """
