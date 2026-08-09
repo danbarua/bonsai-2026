@@ -132,11 +132,18 @@ def test_each_exemption_still_contributes_the_candidate_count_it_did():
     # gate) and names AUDIT_PROTOCOL.md as the actual authority -- the
     # same module-map genre as every other entry already counted here,
     # not a new obligation stated in this document's own voice.
+    # README.md moved 21 -> 22 adding the run_abs_conv_eps_sensitivity.py
+    # module-map entry (companion Protocol 2's driver). Re-read: the new
+    # NEVER candidate is "never reimplemented" (`evaluate_rho_gate`
+    # called unmodified) -- the same module-map genre as the run_audit.py
+    # entry above, describing what the code does and naming
+    # COMPANION_PROTOCOLS.md as the actual authority for the protocol
+    # itself, not a new obligation this document states in its own voice.
     at_exemption_time = {
         "FINDINGS.md": 46,
         "NEGATIVE_PATH_EVIDENCE.md": 19,
         "PHASE_B_PLAN.md": 38,
-        "README.md": 21,
+        "README.md": 22,
     }
     assert set(at_exemption_time) == set(gate_corpus.EXEMPT), (
         "an exemption was added or removed without a candidate count")

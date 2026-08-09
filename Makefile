@@ -324,7 +324,8 @@ STAGE2B_TEST_FILES := tests/test_stage2b_corruption.py tests/test_stage2b_encode
                       tests/test_stage2b_ladder_stage4.py \
                       tests/test_stage2b_gate_corpus.py \
                       tests/test_stage2b_audit.py \
-                      tests/test_stage2b_audit_driver.py
+                      tests/test_stage2b_audit_driver.py \
+                      tests/test_stage2b_abs_conv_eps_sensitivity.py
 
 .PHONY: stage2b-test
 stage2b-test:  ## Run the Stage 2B test suite (fast only; the Colab round trip is excluded)

@@ -183,6 +183,17 @@ mention here, in the same commit that creates it.
   release exactly as stage 4 was, gated by `make stage2b-audit` refusing to
   run without `STAGE2B_AUDIT_RELEASE_CONFIRMED=1`.
 
+- **`run_abs_conv_eps_sensitivity.py`** — `COMPANION_PROTOCOLS.md` Protocol
+  2: the encoder gate's verdict recomputed from stored per-image final-Delta
+  arrays, no re-encoding, at `eps in {1e-10, 1e-11, 1e-12, 1e-13}` across
+  every step count `diagnose_encoder_gate_failure.py`'s diagnostic pickle
+  covers. Pure CPU, no network — `stage2b_audit.sensitivity_table` and
+  `stage2b_encoder_gate.evaluate_rho_gate` are both called unmodified, never
+  reimplemented. Its one input is reproducible from committed code
+  (`diagnose_encoder_gate_failure.py`), gitignored and regenerated on
+  demand rather than committed. Run directly:
+  `uv run python run_abs_conv_eps_sensitivity.py`.
+
 - **`gate_corpus.py`** — pins which documents the binding-clause
   inventory ranges over, and asserts that list against the `.md` files
   actually present, in both directions, before handing them to
@@ -482,6 +493,7 @@ make test                      # the whole repository suite
 | `test_stage2b_gate_corpus.py` | which documents the binding-clause inventory ranges over — corpus against on-disk, both directions |
 | `test_stage2b_audit.py` | the pure amendment-audit calculations — index alignment, gauge phases, trigger verdicts, the stress-set construction, the sequencing-gate guard |
 | `test_stage2b_audit_driver.py` | the audit driver's constants, the pinned pre-contract digest table, the sizing probe's projections and halt paths, and the fixed/reselected OR-combination's completeness and break-confirmation |
+| `test_stage2b_abs_conv_eps_sensitivity.py` | the `ABS_CONV_EPS` sensitivity table's invariance check and halt rule, plus a skip-cleanly-when-absent check against the real diagnostic pickle |
 
 This table is the whole of what `make stage2b-test` runs, and the one
 exclusion is the slow round trip. It carries no test counts, deliberately:
