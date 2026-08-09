@@ -1,2 +1,5 @@
   [mcp_servers.pycharm]
     url = "http://127.0.0.1:64462/stream"
+
+  [mcp_servers.c2c]
+    url = "http://127.0.0.1:8765/mcp"
