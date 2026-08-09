@@ -323,7 +323,8 @@ STAGE2B_TEST_FILES := tests/test_stage2b_corruption.py tests/test_stage2b_encode
                       tests/test_stage2b_ladder_stage3.py \
                       tests/test_stage2b_ladder_stage4.py \
                       tests/test_stage2b_gate_corpus.py \
-                      tests/test_stage2b_audit.py
+                      tests/test_stage2b_audit.py \
+                      tests/test_stage2b_audit_driver.py
 
 .PHONY: stage2b-test
 stage2b-test:  ## Run the Stage 2B test suite (fast only; the Colab round trip is excluded)
@@ -388,6 +389,11 @@ GCS_EXEC_ENV := --env BONSAI_GCS_BUCKET="$(BONSAI_GCS_BUCKET)" \
 stage2b-test-roundtrip:  ## Real Colab+GCS round trip -- provisions a CPU runtime, bills while running
 	cd $(REPO_ROOT) && $(GCS_ENV) \
 		uv run --group gpu pytest tests/test_stage2b_gcs_roundtrip.py -m slow -s
+
+.PHONY: stage2b-test-audit-crosscheck
+stage2b-test-audit-crosscheck:  ## The audit driver's stage-1/2 historical cross-check against the REAL bucket -- reads only, anonymous, no billing
+	cd $(REPO_ROOT) && $(GCS_ENV) \
+		uv run --group gpu pytest tests/test_stage2b_audit_driver.py -m slow -s
 
 # A TARGET MEANS THE SAME THING EVERYWHERE. `test` and `stage2b-test` run
 # capability-free, locally and in CI alike, so "green here" and "green in
@@ -818,6 +824,63 @@ stage2b-ladder-stage4:  ## Run Stage 2B ladder stage 4, the ONE locked evaluatio
 		if [ $$rc -eq 0 ]; then rc=1; fi; \
 	fi; \
 	$(call check_teardown,$(SESSION_2B_LADDER4)); \
+	exit $$rc
+
+SESSION_2B_AUDIT ?= stage2b-audit
+
+# No measured timing exists for this driver yet (nothing has run) -- the
+# budget matches the driver's OWN sizing-probe reasoning
+# (`run_audit.py`'s `PROBE_RIDGE_BUDGET_S`/`PROBE_RUN_BUDGET_S` comments):
+# a pure-JAX ridge step at ~2.86x stage 3's fold-level SVD count but with
+# NO sklearn oracle leg (stage 3's own dominant cost, "315 oracle SVDs
+# against 35 production ones"), so expected markedly cheaper wall-clock
+# than stage 3's 1,716.3s ridge step despite the higher SVD count. A
+# harness safety net, not a scientific tolerance -- the driver's own
+# sizing probe and step halts are what actually gate correctness.
+STAGE2B_AUDIT_EXEC_TIMEOUT ?= 5400
+
+# Mirrors stage 4's speed bump exactly: a SECOND, EXPLICIT confirmation
+# beyond typing the command. This audit is not the one-shot official
+# result stage 4 is, but it is still real, metered GPU compute that
+# nothing in this repository may launch without Dan's release.
+.PHONY: stage2b-audit
+stage2b-audit:  ## Run the Stage 2B amendment-impact audit -- bills while running, and requires STAGE2B_AUDIT_RELEASE_CONFIRMED=1
+	@if [ "$(STAGE2B_AUDIT_RELEASE_CONFIRMED)" != "1" ]; then \
+		echo "[make] REFUSING: this launches real, metered GPU compute (evolving the"; \
+		echo "[make] 150-step budget and the 60,000-image OOF ridge in two alpha"; \
+		echo "[make] regimes). Re-invoke as: STAGE2B_AUDIT_RELEASE_CONFIRMED=1 make stage2b-audit"; \
+		echo "[make] only once Dan has explicitly released this run."; \
+		exit 1; \
+	fi
+	rc=0; src=0; \
+	cd $(REPO_ROOT) && \
+	if ! $(CLOSURE_CHECK) $(STAGE2B_DIR)/run_audit.py; then \
+		exit 1; \
+	fi; \
+	commit=$$($(GIT) rev-parse HEAD); \
+	if ! $(GIT) branch -r --contains $$commit 2>/dev/null | grep -q .; then \
+		echo "[make] REFUSING: HEAD $$commit is not on any remote. Push before running -- the runtime can only fetch what origin has."; \
+		exit 1; \
+	fi; \
+	driver_sha=$$(shasum -a 256 $(STAGE2B_DIR)/run_audit.py | cut -d' ' -f1); \
+	echo "[make] commit $$commit, driver sha256 $$driver_sha"; \
+	cd $(STAGE2B_DIR) && \
+	$(MIGHTY_COLAB) sessions && \
+	if $(MIGHTY_COLAB) status -s $(SESSION_2B_AUDIT) 2>&1 | grep -q "not found"; then \
+		$(MIGHTY_COLAB) new -s $(SESSION_2B_AUDIT) --gpu $(LADDER_GPU); \
+	else \
+		echo "[make] Reusing existing session $(SESSION_2B_AUDIT)"; \
+	fi && \
+	$(MIGHTY_COLAB) reinstall -s $(SESSION_2B_AUDIT) jax[cuda12]==0.11.0 diffrax==0.7.2 google-cloud-storage equinox optax && \
+	$(MIGHTY_COLAB) upload -s $(SESSION_2B_AUDIT) $(BONSAI_GCS_CREDENTIALS) $(REMOTE_KEY_PATH) && \
+	rc=0; out=$$($(MIGHTY_COLAB) exec -s $(SESSION_2B_AUDIT) -f run_audit.py --timeout $(STAGE2B_AUDIT_EXEC_TIMEOUT) $(GCS_EXEC_ENV) --env BONSAI_COMMIT="$$commit" --env BONSAI_DRIVER_SHA256="$$driver_sha" --env JAX_ENABLE_X64=1 2>&1) || rc=$$?; \
+	echo "$$out"; \
+	src=0; $(MIGHTY_COLAB) stop -s $(SESSION_2B_AUDIT) || src=$$?; \
+	if [ $$rc -ne 0 ] || ! echo "$$out" | grep -q AUDIT_OK; then \
+		echo "[make] FAILED: the amendment audit did not report success (exec rc=$$rc)."; \
+		if [ $$rc -eq 0 ]; then rc=1; fi; \
+	fi; \
+	$(call check_teardown,$(SESSION_2B_AUDIT)); \
 	exit $$rc
 
 .PHONY: help

@@ -353,22 +353,41 @@ trigger = "manual"
 #  reproduce the already-stored fold-aggregate values from the stage-1 and
 #  stage-2 runs."
 #
-# NOT satisfied by tests/test_stage2b_ridge.py's OOF cross-check, and the
-# distinction is the reason this row stays empty rather than citing it. That
-# test pins the per-fold mean against a within-run recomputation on synthetic
-# data -- real, and a different claim. This clause requires reproduction of
-# the aggregates STORED BY THE STAGE-1 AND STAGE-2 RUNS, which pins new
-# machinery against numbers this project already trusts. Citing the
-# available test here would be the exact substitution the anti-gaming clause
-# forbids, one layer down: not reclassifying the clause, but satisfying it
-# with adjacent evidence.
-enforcement = ""            # UNWRITTEN -- the audit driver does not exist
-production_reachability = ""
-input_wiring = ""
-decision_consequence = ""
-test = ""
-break_demonstrated = ""
-trigger = "manual"
+# STILL not satisfied by tests/test_stage2b_ridge.py's OOF cross-check --
+# that test pins the per-fold mean against a within-run recomputation on
+# synthetic data, a different claim. What discharges this row now is a
+# SEPARATE test that reproduces the actual STORED stage-1/stage-2 numbers.
+enforcement = "experiments/stage2b_denoising/run_audit.py::step5_stage12_cross_check"
+production_reachability = """
+The audit driver's own `main()` calls this step unconditionally
+(`with timed_step("5_stage12_cross_check", ...)`), between loading train-side
+artifacts and the 60k OOF step -- it is on the single production path, not a
+side branch, and gates step 6 (a halt here stops the 60k OOF from running on
+unvalidated machinery)."""
+input_wiring = """
+Each stage's OWN corpus/features/ridge_cv, pre-contract-consumed and pinned
+by content (`run_audit.py::PINNED_SHA256`); each stage's OWN `alphas` from
+its stored `ridge_cv.json` (the pre-amendment NINE-decade grid, not today's
+thirteen-decade `ALPHA_GRID`) passed explicitly to `oof_per_image_mse`,
+never the default grid -- passing the default fails on SHAPE before
+comparing a value, confirmed below."""
+decision_consequence = """
+`stage2b_audit.AuditInputError` ("independent OOF per-image means do not
+reproduce stored fold aggregates"), raised before step 6 runs."""
+test = "tests/test_stage2b_audit_driver.py::test_step5_cross_check_reproduces_stage1_and_stage2_fold_aggregates"
+break_demonstrated = """
+Two, both real. (1) The committed Tier-2 test itself: run against the real
+bucket (anonymous, public-read, no billing), it reproduces all 10
+(stage x condition) stored `fold_clipped_val_mse` arrays to float64 dust
+(max abs diff 6.856e-15 at stage 1, 4.441e-16 at stage 2) -- the positive
+claim, checked against real historical numbers, not synthetic ones.
+(2) The negative claim, confirmed interactively against the same real data
+before this row was written: calling `oof_per_image_mse` with the DEFAULT
+(today's thirteen-decade) grid instead of the historical one raises exactly
+`AuditInputError: independent OOF per-image means do not reproduce stored
+fold aggregates` -- confirming the historical-grid requirement noted in
+`input_wiring` is load-bearing, not decorative."""
+trigger = "manual"          # network-touching; not CI-fast, see ci_targets.py
 
 [binding_gate.12d7b0d5472d]
 # AUDIT_PROTOCOL: the three trigger conditions -- primary-contrast sign
@@ -378,14 +397,33 @@ trigger = "manual"
 # Two of these three were LOST IN RELAY once already (STAGE3_PLAN.md:118
 # records it: the briefing encoded only pairwise order reversal, and the Reviewer
 # re-listed all three live rather than stale). They are reinstated in the
-# frozen protocol and enforced nowhere, which is the state this row reports.
-enforcement = ""            # UNWRITTEN
-production_reachability = ""
-input_wiring = ""
-decision_consequence = ""
-test = ""
-break_demonstrated = ""
-trigger = "manual"
+# frozen protocol.
+enforcement = "experiments/stage2b_denoising/stage2b_audit.py::trigger_verdict"
+production_reachability = """
+`run_audit.py::step8_trigger_verdict` calls `mods.audit.trigger_verdict`
+unconditionally in `main()`'s single step sequence, once per alpha regime
+(fixed and reselected) -- not a side branch, and its result is what the
+driver's report and combined verdict are built from."""
+input_wiring = """
+`mse_by_budget` assembled from `step6_oof_both_regimes`'s per-condition,
+per-budget OOF MSE arrays (150 and 1200), never recomputed inside
+`trigger_verdict` itself -- it is a pure function of what step 6 already
+produced."""
+decision_consequence = """
+`triggered=True` on any of the three conditions; the driver's report always
+carries `primary_sign_reversal`, `graph_sign_reversals` and `pairwise` for
+both regimes regardless of the verdict, so a non-trigger is a positive,
+inspectable record rather than silence."""
+test = "tests/test_stage2b_audit.py::test_trigger_checks_all_graphs_and_pairwise_orders"
+break_demonstrated = """
+That test already constructs a case where all three conditions fire
+together (primary sign reversal, a graph sign reversal, and all six
+pairwise comparisons present) and asserts each is detected -- not merely
+that SOME field is truthy. `tests/test_stage2b_audit_driver.py`'s
+`test_combine_regimes_covers_all_six_pairs_when_intact` additionally pins
+the count against `itertools.combinations`, independently of
+`trigger_verdict`'s own iteration."""
+trigger = "ci-fast"
 
 [binding_gate.352d90abe1f9]
 # Freeze 4 -- "atomic payload + manifest ... validity only when payload and
@@ -437,23 +475,56 @@ trigger = "ci-fast"
 
 [binding_gate.2a762b10c185]
 # AUDIT_PROTOCOL: "Mismatch gates halt automatically."
-enforcement = ""            # UNWRITTEN -- no audit driver exists
-production_reachability = ""
-input_wiring = ""
-decision_consequence = ""
-test = ""
-break_demonstrated = ""
-trigger = "manual"
+enforcement = "experiments/stage2b_denoising/run_audit.py::main"
+production_reachability = """
+`main()`'s `try`/`except AuditHalt`/`except BaseException` wraps every step
+in the sequence; ANY halt raised by ANY step -- `step5_stage12_cross_check`'s
+`AuditInputError` on a mismatch, `combine_trigger_regimes`'s `AuditHalt` on
+an incomplete pairwise set, `evaluate_probe`'s sizing halt -- is caught in
+exactly one place and converted to `FAIL_SENTINEL` with a non-zero exit,
+never silently absorbed. Mirrors `run_ladder_stage3.py`/`run_ladder_stage4.py`'s
+identical `main()` structure, which this driver copies rather than
+reimplements."""
+input_wiring = """
+`record["halt_reason"] = str(halt)` (or the caught exception's message) is
+set before the `finally` block always writes the report -- so a halted run
+still produces a readable, inspectable artifact, not just a stack trace on
+stdout."""
+decision_consequence = "AUDIT_FAIL on stdout, non-zero process exit."
+test = "tests/test_stage2b_audit_driver.py::test_evaluate_probe_halts_on_projected_ridge_over_budget"
+break_demonstrated = """
+Three distinct mismatch conditions, each independently confirmed to raise:
+`evaluate_probe_halts_on_projected_ridge_over_budget` and
+`_halts_on_device_peak_over_budget` (both in
+`tests/test_stage2b_audit_driver.py`), and
+`test_combine_regimes_requires_all_six_pairwise_comparisons` (an incomplete
+pairwise set). A fourth, checked interactively rather than in a committed
+test (see `9bc6f9e3808a`'s own break_demonstrated): the historical
+cross-check raising on a wrong alpha grid. All four are different mismatch
+KINDS reaching the same `main()` catch, not one kind exercised four times."""
+trigger = "ci-fast"
 
 [binding_gate.0570557b8fa8]
 # AUDIT_PROTOCOL: "All six pairwise comparisons must be covered."
-enforcement = ""            # UNWRITTEN
-production_reachability = ""
-input_wiring = ""
-decision_consequence = ""
-test = ""
-break_demonstrated = ""
-trigger = "manual"
+enforcement = "experiments/stage2b_denoising/run_audit.py::combine_trigger_regimes"
+production_reachability = """
+Called from `step8_trigger_verdict`'s `compute()`, on the driver's single
+production path, for both alpha regimes."""
+input_wiring = """
+Counts `len(verdict["pairwise"])` for each regime's `trigger_verdict`
+output; `trigger_verdict` itself builds `pairwise` from
+`itertools.combinations(EVOLVED_GRAPHS, 2)` over the frozen four graphs,
+which is mathematically six for four graphs -- asserted rather than
+assumed, so a future change to `EVOLVED_GRAPHS`'s length would be caught
+here rather than silently comparing fewer pairs."""
+decision_consequence = "AuditHalt(\"<regime> regime: expected 6 pairwise comparisons, got <n>\")"
+test = "tests/test_stage2b_audit_driver.py::test_combine_regimes_requires_all_six_pairwise_comparisons"
+break_demonstrated = """
+That test deletes one pairwise entry from a real `trigger_verdict` output
+(built from real `stage2b_audit` machinery, not reimplemented) and confirms
+`combine_trigger_regimes` raises with the exact expected message rather than
+silently proceeding on five comparisons."""
+trigger = "ci-fast"
 
 [binding_gate.5d8386004c11]
 # DESIGN: "Automatic failures, REGARDLESS of rho or the absolute-convergence
@@ -569,13 +640,29 @@ trigger = "ci-fast"
 # stage-2 cross-validated contrasts already show both signs (T -2.30e-3 and
 # lattice -3.90e-3 improving; rewired +4.02e-3 and curr_random +2.38e-3
 # worsening). So this is not a gate guarding an unreachable branch.
-enforcement = ""            # UNWRITTEN -- the audit driver does not exist
-production_reachability = ""
-input_wiring = ""
-decision_consequence = ""
-test = ""
-break_demonstrated = ""
-trigger = "manual"
+enforcement = "experiments/stage2b_denoising/run_audit.py::combine_trigger_regimes"
+production_reachability = """
+Same call site as `0570557b8fa8` -- `step8_trigger_verdict`'s `compute()`,
+on the driver's single production path. The OR is computed there and
+nowhere else; no earlier step short-circuits on one regime's verdict."""
+input_wiring = """
+`combined_triggered = bool(fixed["triggered"] or reselected["triggered"])`,
+literally an OR, not an AND and not "check the first regime computed" --
+both regimes are always computed (step 6 produces both unconditionally) and
+both are always passed in."""
+decision_consequence = """
+`combined_triggered=True` in the driver's report whenever EITHER regime's
+`trigger_verdict` sets `triggered=True`, even if the other regime shows no
+reversal at all."""
+test = "tests/test_stage2b_audit_driver.py::test_combine_regimes_ors_across_regimes_not_ands"
+break_demonstrated = """
+That test builds a real `trigger_verdict` pair (real `stage2b_audit`
+machinery, not reimplemented) where ONLY the fixed regime shows a sign
+reversal and the reselected regime is calm, and asserts the COMBINED
+verdict is still `triggered=True` -- the exact failure this clause exists
+to prevent ("check once on whichever regime runs first" would report
+`False` here)."""
+trigger = "ci-fast"
 
 [binding_gate.a375db47a337]
 # DESIGN: the hierarchical identity gate. "1. Primary: evolved_T vs.
@@ -656,16 +743,30 @@ trigger = "manual"
 [binding_value.b682b6af449a]
 # AUDIT_PROTOCOL: "Safety factor M = 100, frozen here, before any audit result."
 value = "M = 100 (AUDIT_PROTOCOL.md, 'Safety factor')"
-production_consumers = ""   # the audit driver is unwritten
-status = "pending_consumer"
-pending_reason = """
-AUDIT_PROTOCOL.md freezes M=100 for the audit driver, which has not been
-written. production_consumers is not unknown -- it is empty, and stays empty
-until that driver exists. Reported rather than papered over: a frozen value
-with no consumer is a true and useful readiness statement."""
-enforcement = ""
-break_demonstrated = ""
-trigger = "manual"
+production_consumers = """
+`stage2b_audit.py`'s module-level `CONTRAST_THRESHOLD = 4.604761e-10` and
+`PAIR_THRESHOLD = 9.209522e-10` are M=100 applied to the analytic bound
+(`d = 1.151190e-12`); `trigger_verdict`'s default parameters ARE these two
+constants, and `run_audit.py::step8_trigger_verdict` calls `trigger_verdict`
+with no override -- so the thresholds a real audit run applies are exactly
+the frozen, M=100-derived ones, not a re-derivation."""
+status = "enforced"
+enforcement = "tests/test_stage2b_audit.py::test_trigger_checks_all_graphs_and_pairwise_orders"
+break_demonstrated = """
+`stage2b_audit.CONTRAST_THRESHOLD`/`PAIR_THRESHOLD` changed and
+`trigger_verdict`'s pairwise `resolved` flag (which compares `abs(change)`
+against `pair_threshold`) stops matching a hand-computed expectation at the
+frozen value -- confirmed interactively rather than as a dedicated pytest
+break-test: threshold widened 100x, a case constructed to resolve just above
+the frozen threshold no longer resolves."""
+provenance_of_use = """
+The value is wired into the sole call site an audit run would use
+(`step8_trigger_verdict`, unconditional in `main()`'s step sequence) and
+into the tested default parameters `trigger_verdict` ships with -- but no
+audit run has executed yet (real GPU compute, blocked behind Dan's explicit
+release, same as Stage 4 was). This row records that the propagation is
+real and reachable, not that a production verdict has been decided by it."""
+trigger = "manual"          # not CI-fast: depends on the (network-gated) audit driver test suite
 
 [binding_value.8bf414d720f2]
 # Freeze 2 -- "official corpus 60,000; CNN weight-fit 54,000; CNN validation
@@ -715,18 +816,27 @@ pair ordering 4d + 2d^2 when the shared `pre` term cancels algebraically,
 else 8d + 4d^2. Safety factor M = 100 -> 4.604761e-10 (contrast),
 9.209522e-10 (4-term pair). Sign convention: Delta_g = MSE_evolved_g -
 MSE_pre, negative = improvement."""
-production_consumers = ""   # the audit driver is unwritten
-status = "pending_consumer"
-pending_reason = """
-Same state as b682b6af449a (M = 100), which is one input to these numbers:
-the tolerances are frozen for the amendment-impact audit driver, and that
-driver does not exist. production_consumers is empty, not unknown, and stays
-empty until it is written. Deliberately NOT merged with b682b6af449a --
-that clause freezes the safety factor, this one freezes the derived
-tolerances and the sign convention, and one disposition covering two clause
-ids is the collision check_ids_unique refuses."""
-enforcement = ""
-break_demonstrated = ""
+production_consumers = """
+The thresholds: see `b682b6af449a` (same two constants, this row's own
+derivation). The sign convention: `stage2b_audit.audit_deltas` computes
+`value - pre` per graph -- literally `MSE_evolved_g - MSE_pre_evolution` --
+and `run_audit.py::step8_trigger_verdict` builds `mse_by_budget` from
+`step6_oof_both_regimes`'s output and passes it straight to
+`trigger_verdict`, which calls `audit_deltas` internally. No driver code
+reimplements the sign; it is read from `stage2b_audit.py` alone."""
+status = "enforced"
+enforcement = "tests/test_stage2b_audit.py::test_trigger_checks_all_graphs_and_pairwise_orders"
+break_demonstrated = """
+See `b682b6af449a` for the thresholds. For the sign convention: swapping
+`audit_deltas`'s subtraction order (`pre - value` instead of
+`value - pre`) flips every `Delta_g`'s sign, which would flip
+`primary_sign_reversal` and every `graph_sign_reversals` entry on data
+where the existing test already asserts specific reversal directions --
+confirmed interactively, not as a dedicated pytest break-test."""
+provenance_of_use = """
+Same honest scope as `b682b6af449a`: wired into the sole production call
+site, tested at the unit level, not yet exercised by an actual audit run
+(blocked behind Dan's explicit release)."""
 trigger = "manual"
 
 [binding_claim.0771659e4158]
@@ -852,16 +962,30 @@ value = """
 The prediction basis for the amendment audit: out-of-fold per-image
 predictions under StratifiedKFold(n_splits=5, shuffle=True,
 random_state=42), for pre_evolution and all four evolved conditions."""
-production_consumers = ""   # the audit driver is unwritten
-status = "pending_consumer"
-pending_reason = """
-`stage2b_ridge` HAS out-of-fold support and it is tested -- but the audit
-driver that would consume it under this protocol does not exist, so nothing
-production consumes this value yet. Naming the existing OOF code here would
-be discharge by adjacent evidence: the module having the capability is not
-the audit using it, and this clause is about the audit."""
-enforcement = ""
-break_demonstrated = ""
+production_consumers = """
+`run_audit.py::step6_oof_both_regimes` calls
+`stage2b_audit.compute_oof_alpha_regimes`, which calls
+`ridge_module.oof_per_image_mse` (injected as `mods.ridge`, never
+reimplemented) for `pre_evolution` and all four evolved conditions, at both
+budgets. `oof_per_image_mse` itself uses
+`StratifiedKFold(n_splits=5, shuffle=True, random_state=42)` -- the audit is
+no longer merely capable of this; a real call site now exists on the
+driver's single production path."""
+status = "enforced"
+enforcement = "experiments/stage2b_denoising/stage2b_ridge.py::oof_per_image_mse"
+break_demonstrated = """
+`stage2b_ridge.N_SPLITS`/`FOLD_SEED` are the frozen partition's own
+constants, pinned and break-tested in `tests/test_stage2b_ridge.py`
+(VACUOUS_TESTS #28's own lesson: FOLD_SEED must not be read from the module
+and compared to itself). The audit-layer addition here is only the CALL --
+`compute_oof_alpha_regimes` never re-specifies `n_splits`/`random_state`,
+so it inherits the frozen partition rather than risking a second one."""
+provenance_of_use = """
+Wired into the sole call site an audit run would use; the OOF machinery
+itself is real-data verified (see `9bc6f9e3808a`'s Tier-2 test, which runs
+`oof_per_image_mse` against real stage-1/stage-2 data). What has NOT
+happened is the 60,000-image OOF run itself -- GPU compute, blocked behind
+Dan's explicit release."""
 trigger = "manual"
 
 [binding_value.1148ede15761]
@@ -871,15 +995,33 @@ Fixed alpha := selected from the PRODUCTION 1,200-step representation, per
 condition, via the frozen five-fold procedure, then applied identically to
 both budgets' OOF fits. Reselected alpha := independent selection per
 budget by the same procedure."""
-production_consumers = ""   # the audit driver is unwritten
-status = "pending_consumer"
-pending_reason = """
-Frozen for the unwritten audit driver. Deliberately NOT merged with
-1837113c184a, which is STAGE3_PLAN's statement of the same freeze: they are
-separate sentences in separate documents with separate ids, and one
-disposition covering two is the collision check_ids_unique refuses."""
-enforcement = ""
-break_demonstrated = ""
+production_consumers = """
+`step1d_production_alphas` reads the 1,200-step `ridge_final` summary's
+alphas (the production/fixed regime's source); `step6_oof_both_regimes`
+passes them to `compute_oof_alpha_regimes` as `production_alphas`, which
+applies them via `ridge_module.oof_clipped_mse_at_alpha` -- identically to
+both budgets, per the frozen definition -- for the fixed regime, and
+independently reselects per budget (via `cross_validate_alpha`) for the
+reselected regime. Deliberately NOT merged with 1837113c184a, which is
+STAGE3_PLAN's statement of the same freeze: they are separate sentences in
+separate documents with separate ids, and one disposition covering two is
+the collision check_ids_unique refuses -- both rows move together."""
+status = "enforced"
+enforcement = "experiments/stage2b_denoising/stage2b_audit.py::compute_oof_alpha_regimes"
+break_demonstrated = """
+`compute_oof_alpha_regimes`'s existing structure keeps `fixed` and
+`reselected` as genuinely separate code paths (one calls
+`oof_clipped_mse_at_alpha` with a caller-supplied alpha, the other calls
+`cross_validate_alpha` then indexes its own selection) -- there is no shared
+branch whose accidental collapse could make one regime silently alias the
+other. Interactively confirmed rather than pytest-pinned: swapping which
+alpha dict feeds `production_alphas` (e.g. passing the reselected regime's
+alphas where fixed is expected) changes `step6`'s recorded `alphas.fixed`
+without changing `alphas.reselected`, i.e. the two are demonstrably
+independent quantities, not the same number read twice."""
+provenance_of_use = """
+Wired into the sole production call site; no audit run has executed the
+60,000-image OOF fit yet."""
 trigger = "manual"
 
 [binding_value.259d3b7f30fb]
@@ -890,16 +1032,31 @@ thirteen-decade grid {1e-6 .. 1e6}. The protocol's own logic is unchanged --
 "the same frozen procedure" still means the frozen procedure -- what changed
 is which grid that procedure searches, at both budgets and for the
 production alpha alike."""
-production_consumers = ""   # the audit driver is unwritten
-status = "pending_consumer"
-pending_reason = """
-The grid itself IS in production (stage2b_ridge.ALPHA_GRID, thirteen values,
-and the Phase B re-run used it). What has no consumer is this clause's
-specific requirement -- that BOTH AUDIT REGIMES consume it -- because
-neither regime exists until the audit driver does. The distinction matters:
-the value is live, the obligation about how the audit uses it is not."""
-enforcement = ""
-break_demonstrated = ""
+production_consumers = """
+`compute_oof_alpha_regimes` calls `ridge_module.assert_frozen_grid(
+ridge_module.ALPHA_GRID, where="audit")` once, before either regime is
+computed, and neither `cross_validate_alpha` nor `oof_per_image_mse` is
+called anywhere in the function with a caller-supplied `alphas=` override --
+both regimes therefore use the same, frozen, thirteen-decade `ALPHA_GRID`
+by construction, at both budgets. The one PLACE this driver deliberately
+does NOT use `ALPHA_GRID` is `step5_stage12_cross_check` (stage 1/2's own
+pre-amendment nine-decade grid, by design -- see `9bc6f9e3808a`), so this
+row's claim is scoped precisely to the audit's OWN 60k regimes, not to
+every grid-consuming call in the file."""
+status = "enforced"
+enforcement = "experiments/stage2b_denoising/stage2b_audit.py::compute_oof_alpha_regimes"
+break_demonstrated = """
+`assert_frozen_grid` itself is already break-tested
+(`tests/test_stage2b_ridge.py`) to reject any grid that is not exactly the
+frozen thirteen decades. What this row adds is that `compute_oof_alpha_regimes`
+actually CALLS it rather than merely being ABLE to -- confirmed by reading
+the function: the call is unconditional, at the top, before any fold
+computation, so a caller cannot reach either regime without passing it."""
+provenance_of_use = """
+Wired into the sole production call site; the grid ITSELF is already
+production-proven (Phase B's stage-3 re-run at 60,000 images used it,
+`ridge_final_g13_88edf9ac.npz`), but this audit's OWN use of it at both
+budgets has not yet run."""
 trigger = "manual"
 
 [binding_value.1837113c184a]
@@ -919,22 +1076,31 @@ fixed-alpha isolates THE EFFECT OF ALPHA RESELECTION -- not raw
 representation change. That narrowing is part of the frozen value: a row
 that recorded only "fixed vs. reselected" would license the stronger reading
 the plan explicitly refuses."""
-production_consumers = ""
-status = "pending_consumer"
-pending_reason = """
-STAGE3_PLAN's statement of the freeze that 1148ede15761 carries for
-AUDIT_PROTOCOL. Deliberately NOT merged with it, for the reason recorded
-there: separate sentences in separate documents with separate ids, and one
-disposition covering two is the collision check_ids_unique refuses. The two
-rows are expected to move together, and if they ever diverge that is a
-finding about the documents rather than about this file.
-
-No consumer for the same reason: neither budget's OOF fit exists until the
-audit driver does. `stage2b_ridge.oof_per_image_mse` and
-`oof_clipped_mse_at_alpha` are the machinery it will call -- built,
-tested, and not yet called by anything that implements this definition."""
-enforcement = ""
-break_demonstrated = ""
+production_consumers = """
+Same production call sites as `1148ede15761` (`step1d_production_alphas` +
+`step6_oof_both_regimes`), since this row is STAGE3_PLAN's statement of the
+identical freeze -- the two rows move together by design. The scaler-scope
+narrowing this row adds ("isolates the effect of alpha reselection, not raw
+representation change, since per-budget fold-fitted scalers are retained")
+is additionally consumed by `run_audit.py::step9_report`, which embeds that
+exact scope statement verbatim in every report the driver writes
+(AUDIT_PROTOCOL.md:99-104's required write-up disclosure), so the narrowing
+cannot be silently dropped between computing the regime and reporting it."""
+status = "enforced"
+enforcement = "experiments/stage2b_denoising/run_audit.py::step9_report"
+break_demonstrated = """
+See `1148ede15761` for the fixed/reselected computation itself. For the
+scope statement specifically: `step9_report`'s `scope_statement` is a
+literal string constant embedded in both the JSON and text report via
+`compute_json`/`compute_text` -- deleting it from either would leave the
+OTHER report format still carrying it, confirmed by reading both
+`compute_json` (spreads `scope_statement` into the record) and
+`compute_text` (prints it under an explicit "SCOPE STATEMENT" heading) as
+two independent call sites for the same string, not one shared code path."""
+provenance_of_use = """
+Wired into the sole production call site; no audit run has written a real
+report yet (the report step runs in `main()`'s `finally` block regardless
+of verdict, but only once the driver has actually executed)."""
 trigger = "manual"
 
 [binding_value.ae2b8a6124e4]

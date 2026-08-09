@@ -166,11 +166,22 @@ mention here, in the same commit that creates it.
   themselves. Refuses to compute the official result a second time if it
   already exists -- "evaluated once" is enforced, not merely stated.
 
-- **`run_audit.py` / `stage2b_audit.py`** — the guarded amendment-impact
-  audit seam and its pure calculations. They enforce the 150-step and
-  production-rerun sequencing gate before composing validated artifacts;
-  the frozen protocol remains authoritative and no test-split data is
-  permitted.
+- **`run_audit.py` / `stage2b_audit.py`** — the amendment-impact audit
+  driver and its pure calculations, mirroring stage 3/4's
+  bootstrap-fetched-commit architecture rather than a local CLI. Evolves
+  ONLY the 150-step budget; the 1,200-step side is Phase B's own persisted
+  evolved-feature artifacts, consumed rather than re-evolved
+  (`PHASE_B_PLAN.md`'s Decision 4). No test-split data anywhere. Diagnostic
+  by design — no one-shot lock: every artifact resumes ordinarily like
+  stage 3, unlike stage 4's single locked confirmatory result. A sizing
+  probe (this driver's own cost shape: pure JAX, no sklearn leg, 100
+  fold-level SVDs) gates the 60,000-image OOF ridge step before it runs.
+  Reproduces stage 1's and stage 2's own stored fold-aggregate values with
+  the new out-of-fold machinery, on each stage's own pre-amendment
+  nine-decade alpha grid, before trusting that machinery at 60,000. Written
+  but **not executed**: real GPU work, blocked behind Dan's explicit
+  release exactly as stage 4 was, gated by `make stage2b-audit` refusing to
+  run without `STAGE2B_AUDIT_RELEASE_CONFIRMED=1`.
 
 - **`gate_corpus.py`** — pins which documents the binding-clause
   inventory ranges over, and asserts that list against the `.md` files
@@ -470,6 +481,7 @@ make test                      # the whole repository suite
 | `test_stage2b_ladder_stage4.py` | the stage-4 driver's constants, the CNN reproduction gate, and the single-opt-in-site invariant derived from every `.py` file's AST, in both directions |
 | `test_stage2b_gate_corpus.py` | which documents the binding-clause inventory ranges over — corpus against on-disk, both directions |
 | `test_stage2b_audit.py` | the pure amendment-audit calculations — index alignment, gauge phases, trigger verdicts, the stress-set construction, the sequencing-gate guard |
+| `test_stage2b_audit_driver.py` | the audit driver's constants, the pinned pre-contract digest table, the sizing probe's projections and halt paths, and the fixed/reselected OR-combination's completeness and break-confirmation |
 
 This table is the whole of what `make stage2b-test` runs, and the one
 exclusion is the slow round trip. It carries no test counts, deliberately:
