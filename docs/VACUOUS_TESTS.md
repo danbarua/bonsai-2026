@@ -55,6 +55,8 @@ claim the rest of this repository's discipline exists to prevent.
 
 | 31 | 08-08 | session | Not a test: `make stage2b-gate-inventory` is local and read-only, so nothing ran it. Deleting an entire dispositioned row from `gates.toml` — ~2,000 characters — left all 64 tests across `test_stage2b_gate_corpus.py` and `test_gate_inventory.py` green; the whole inventory could be emptied the same way. Every test either drove the reconciler on synthetic input or derived candidate counts from the DOCUMENTS. None read the dispositions | asking what preserved the 89/89 figure |
 
+| 32 | 08-09 | `54d15b8` | Not a test — a FIX validated against the case that prompted it. `publish_review.sh`'s contradiction check fired on delta-mode pushes; the first fix narrowed on `files_examined`, which covers a review re-verifying open findings — the run in front of its author. It does not cover the docs-only push with no open findings, where `files_examined` is empty and the guard still fires. That was the run actually red, two commits earlier than the webhook named | the run history, read as a sequence |
+
 Two near-misses belong here too, because they were caught *before* becoming
 tests:
 
@@ -460,6 +462,45 @@ a guard rather than a fixture, and the remedy is the same as principle
 the CI scripts and asserts the image installs it, parsed **per Cloud
 Build step**, because each step is its own container and a union would
 report a package as present where it was never installed.
+
+**M. The fix is validated against the case that prompted it.** #32, and
+it is the only entry here that is not about a check at all.
+
+Every other category is *a check that could not see what it named*. This
+one is about the remedy: the guard was fine, and **the sample was one**.
+A fix confirmed on the reported case is confirmed on the least
+informative case available — the single case guaranteed to be in the
+class, and therefore the one that says least about the class's shape.
+
+The mechanics in #32: the reported red was a review re-verifying open
+findings, so `files_examined` was non-empty, and a fix keyed on that
+field cleared it. The case that was *actually* first red — a docs-only
+push with no open findings to re-verify — has `files_examined` empty and
+survives the fix untouched. Both are the same defect. Only one of them
+was in front of anybody.
+
+What exposed it was not analysis. It was **six rows of `gh run list`**:
+
+```
+73674cd  touched a test file      success
+5a1efdd  docs only                failure   ← first red
+43e50db  docs only                failure
+2cd67e9  docs only                failure
+b43a344  docs only                failure
+2a362f1  touched a test file      success
+```
+
+Two agents independently read the script correctly and both started at
+`b43a344`, because that is the commit the webhook named. The sequence
+said the red began two commits earlier and that the discriminating
+variable was *whether the push touched a test file* — which neither
+reading produced. **A history is a sample; the incident that reached you
+is a sample of one.**
+
+The remedy is the same shape as every other category's: before accepting
+a fix, ask what OTHER inputs reach the broken branch, and confirm on one
+you did not receive a report about. Where a sequence exists — CI runs,
+deploys, a log — read the sequence rather than the instance.
 
 **L. The expected value is read from the thing it is meant to pin.** #28.
 

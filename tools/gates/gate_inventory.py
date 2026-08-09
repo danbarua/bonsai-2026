@@ -326,7 +326,26 @@ _REQUIRED_BY_KIND: dict[str, dict[str, str]] = {}
 # about. Order is the order they are offered in.
 _VALUE_STATUSES = ("enforced", "pending_consumer", "unresolved")
 _CLAIM_STATUSES = ("discharged", "pending_package", "not_applicable",
-                   "unresolved")
+                   "superseded", "unresolved")
+
+# `superseded` exists because "discharged as amended" is not a thing.
+#
+# Reviewer ruling of 2026-08-09, on B10: a frozen clause that a later
+# amendment validly replaced was NOT discharged -- the thing it required
+# stopped being required. Recording that as a discharge "allows any violated
+# frozen clause to appear green merely by redefining its meaning later",
+# which is the escape this whole inventory exists to close, arriving through
+# the status column instead of the kind column.
+#
+# So the history is represented rather than flattened: the original clause is
+# `superseded`, names its successor and the amendment that made it, and the
+# successor is separately inventoried as the surviving obligation. Execution
+# evidence then demonstrates compliance with the SUCCESSOR, which is the true
+# statement, rather than with an original the run did not satisfy.
+#
+# It fails readiness like every other non-discharged status. A superseded
+# clause is not a closed one: somebody must still confirm the amendment was
+# validly made, and that judgement is a reviewer's.
 
 # Requirements that are CONDITIONAL on status, because demanding them
 # unconditionally forces a lie.
@@ -349,8 +368,37 @@ _REQUIRED_ONLY_WHEN_STATUS: dict[str, dict[str, frozenset[str]]] = {
     "binding_claim": {
         "discharged_in": frozenset({"discharged"}),
         "evidence": frozenset({"discharged"}),
+        # A supersession with no successor is a deletion with better
+        # manners: the obligation vanishes and nothing takes its place.
+        # Both fields are what make the history traceable rather than
+        # merely asserted.
+        "superseded_by": frozenset({"superseded"}),
+        "amendment_locator": frozenset({"superseded"}),
     },
 }
+
+# Fields that describe a row's RELATIONSHIP to another row rather than its
+# own content. Both exist because the Reviewer's two cross-cutting rulings
+# (2026-08-09) found the same structural gap from opposite directions.
+#
+#   canonical_clause  this row restates an obligation inventoried in full
+#                     elsewhere. Part A, on A4: "'the binding content lives
+#                     elsewhere' is valid only as DEDUPLICATION, not as a
+#                     reason that the present text ceases to be binding.
+#                     Without [a typed relationship] not_binding becomes
+#                     structurally unsafe whenever the same obligation is
+#                     restated in multiple places."
+#   parent_clause     this row is one obligation of a paragraph that carries
+#                     several. Part B: "split mixed clauses by obligation
+#                     semantics rather than forcing the paragraph to have one
+#                     kind. Paragraph identity can remain as provenance, but
+#                     the inventory needs child obligations."
+#
+# A row carrying `canonical_clause` is exempt from its kind's field contract
+# -- the canonical row holds the evidence, and demanding it twice would
+# invite a second, divergent account of the same obligation -- and is
+# reported on its own count line so it cannot inflate enforcement coverage.
+_RELATIONSHIP_FIELDS = ("canonical_clause", "parent_clause")
 
 
 _REQUIRED_DIMENSIONS = {
@@ -415,6 +463,16 @@ _REQUIRED_BY_KIND["binding_claim"] = {
                 "session -- an instance can truthfully deny sending a "
                 "message that carries its tag, so it cannot carry provenance "
                 "into a readiness package",
+    "superseded_by": "the clause id of the obligation that REPLACED this "
+                     "one. Required only at status=superseded, and it must "
+                     "resolve to a row in a binding kind that is neither "
+                     "superseded itself nor a duplicate -- without that, "
+                     "'redefine the meaning later' is available one hop away",
+    "amendment_locator": "where the amendment that superseded this clause is "
+                         "disclosed, with its date. Required only at "
+                         "status=superseded. A supersession whose amendment "
+                         "cannot be found is indistinguishable from a clause "
+                         "quietly abandoned",
 }
 
 # Negative obligations need more than a compliant example, and the reason is
@@ -513,6 +571,20 @@ def _check_claim(clause_id: str, entry: dict, clause: Clause | None) -> list[Fin
             f"{clause_id} is marked not_applicable with no reason tied to the "
             f"clause's TRIGGERING CONDITION. Not-applicable is a claim that "
             f"the condition never arose, not an escape hatch"))
+    elif status == "superseded":
+        # Visible, and still failing. Without its own finding a supersession
+        # would be the quietest state in the file: a frozen clause retired
+        # with no reader ever asked whether the amendment was legitimate.
+        # The mechanical half -- successor exists, is binding, is not itself
+        # superseded -- is `check_relationships`. This is the half no check
+        # can settle.
+        findings.append(Finding(
+            "superseded_clause",
+            f"{clause_id} was superseded rather than discharged, by "
+            f"{entry.get('superseded_by', '(unnamed)')}. Whether the "
+            f"amendment legitimately replaced what the freeze was FOR is a "
+            f"reviewer's judgement and is open: "
+            f"{entry.get('pending_reason', '(no reason given)')}"))
     elif status not in _CLAIM_STATUSES:
         findings.append(Finding(
             "unknown_status",
@@ -521,14 +593,129 @@ def _check_claim(clause_id: str, entry: dict, clause: Clause | None) -> list[Fin
 
     # Negative obligations need an attestation over the output set, because a
     # compliant paragraph cannot prove a prohibited claim is absent elsewhere.
+    #
+    # Not at `superseded`: the prohibition is no longer in force, so an
+    # attestation that it is absent from the output set would be a claim
+    # about a rule that stopped applying. The SUCCESSOR carries the
+    # attestation for whatever survived -- which is exactly the distinction
+    # the status exists to make, and demanding one here would quietly
+    # re-assert the retired obligation.
     text = entry.get("obligation") or (clause.text if clause else "")
-    if _NEGATIVE_OBLIGATION.search(text) and not entry.get("negative_attestation"):
+    if (status != "superseded"
+            and _NEGATIVE_OBLIGATION.search(text)
+            and not entry.get("negative_attestation")):
         findings.append(Finding(
             "missing_negative_attestation",
             f"{clause_id} is a must-not/never obligation and carries no "
             f"`negative_attestation` scoped to the relevant output set. "
             f"Pointing at one compliant passage cannot establish the "
             f"prohibited claim is absent from the rest"))
+    return findings
+
+
+def _binding_rows(inventory: dict) -> dict[str, tuple[str, dict]]:
+    """Every row in a binding kind, keyed by id."""
+    rows: dict[str, tuple[str, dict]] = {}
+    for kind in _REQUIRED_BY_KIND:
+        for clause_id, entry in inventory.get(kind, {}).items():
+            rows[clause_id] = (kind, entry)
+    return rows
+
+
+def check_relationships(inventory: dict) -> list[Finding]:
+    """`superseded_by`, `canonical_clause` and `parent_clause` must land.
+
+    Each of the three is a pointer out of one row into another, and each
+    reopens the escape it was added to close if the pointer is allowed to
+    terminate anywhere convenient. The chain rules are the load-bearing
+    part:
+
+    * a successor may not itself be `superseded` -- otherwise "redefine the
+      meaning later" is available one hop away, which is precisely what the
+      status was added to stop;
+    * a successor may not be a duplicate, for the same reason one hop
+      sideways;
+    * a duplicate's canonical target may not itself be a duplicate, so a
+      row's evidence is always exactly one dereference away rather than at
+      the end of a chain nobody walks.
+
+    The analogue of `test_every_binds_at_pointer_names_a_clause_in_a_binding_kind`
+    one layer down, and added for the same reason: a pointer that resolves
+    to nothing looks identical, in a green run, to an obligation that was
+    handled.
+    """
+    findings: list[Finding] = []
+    rows = _binding_rows(inventory)
+    not_binding = inventory.get("not_binding", {})
+    duplicates = {cid for cid, (_, e) in rows.items() if e.get("canonical_clause")}
+
+    for clause_id, (kind, entry) in sorted(rows.items()):
+        target = entry.get("canonical_clause")
+        if target:
+            if target not in rows:
+                findings.append(Finding(
+                    "canonical_target_missing",
+                    f"{clause_id} [{kind}] restates {target}, which is not "
+                    f"dispositioned in any binding kind. A duplicate whose "
+                    f"canonical row does not exist is an undispositioned "
+                    f"obligation wearing a pointer"))
+            elif target in duplicates:
+                findings.append(Finding(
+                    "canonical_target_is_itself_a_duplicate",
+                    f"{clause_id} restates {target}, which restates something "
+                    f"else. Chains are refused: the evidence must be exactly "
+                    f"one dereference away"))
+            elif target == clause_id:
+                findings.append(Finding(
+                    "canonical_target_is_self",
+                    f"{clause_id} names itself as its own canonical row"))
+
+        successor = entry.get("superseded_by")
+        if successor:
+            if successor not in rows:
+                findings.append(Finding(
+                    "successor_missing",
+                    f"{clause_id} is superseded by {successor}, which is not "
+                    f"dispositioned in any binding kind -- so the obligation "
+                    f"was removed rather than replaced, and nothing carries "
+                    f"what survived"))
+            else:
+                s_kind, s_entry = rows[successor]
+                if s_entry.get("status") == "superseded":
+                    findings.append(Finding(
+                        "successor_is_itself_superseded",
+                        f"{clause_id} is superseded by {successor}, which is "
+                        f"itself superseded. A supersession chain lets a "
+                        f"frozen clause be redefined one hop at a time, which "
+                        f"is the escape this status exists to close"))
+                if s_entry.get("canonical_clause"):
+                    findings.append(Finding(
+                        "successor_is_a_duplicate",
+                        f"{clause_id} is superseded by {successor}, which is a "
+                        f"duplicate rather than a row carrying its own "
+                        f"evidence"))
+
+        parent = entry.get("parent_clause")
+        if parent and parent not in rows and parent not in not_binding:
+            findings.append(Finding(
+                "parent_missing",
+                f"{clause_id} [{kind}] is a child obligation of {parent}, "
+                f"which is dispositioned nowhere"))
+
+    # One id, one row, across every kind. `check_ids_unique` covers COLLISIONS
+    # in the derived corpus; this covers the inventory's own keyspace, which
+    # now holds ids that no corpus candidate mints -- children.
+    seen: dict[str, str] = {}
+    for kind in list(_REQUIRED_BY_KIND) + ["not_binding"]:
+        for clause_id in inventory.get(kind, {}):
+            if clause_id in seen:
+                findings.append(Finding(
+                    "duplicate_inventory_id",
+                    f"{clause_id} appears in both {seen[clause_id]} and "
+                    f"{kind} -- one id, two dispositions, and no way to say "
+                    f"which one governs"))
+            else:
+                seen[clause_id] = kind
     return findings
 
 
@@ -605,15 +792,35 @@ def reconcile(clauses: list[Clause], inventory: dict,
             clause))
 
     # Direction 2: every disposition still names a live candidate.
+    #
+    # Child obligations are exempt BY CONSTRUCTION, not by leniency: a child
+    # is one obligation of a paragraph that carries several, and the
+    # paragraph is the candidate. Its id is minted from its own normalized
+    # obligation, so no corpus sentence will ever match it. `parent_clause`
+    # is what keeps it anchored, and `check_relationships` requires that
+    # parent to be dispositioned -- so a child cannot float free, it is
+    # simply anchored to a paragraph rather than to a sentence.
     for clause_id in list(binding) + list(not_binding):
-        if clause_id not in by_id:
-            findings.append(Finding(
-                "orphaned_disposition",
-                f"inventory entry {clause_id} matches no candidate in the "
-                f"documents -- the sentence was reworded or removed, and its "
-                f"disposition no longer describes anything"))
+        if clause_id in by_id:
+            continue
+        entry = binding.get(clause_id) or not_binding.get(clause_id) or {}
+        if entry.get("parent_clause"):
+            continue
+        findings.append(Finding(
+            "orphaned_disposition",
+            f"inventory entry {clause_id} matches no candidate in the "
+            f"documents -- the sentence was reworded or removed, and its "
+            f"disposition no longer describes anything"))
+
+    findings.extend(check_relationships(inventory))
 
     for clause_id, (kind, entry) in dispositions.items():
+        # A duplicate carries no evidence of its own: the canonical row holds
+        # it, and demanding it twice invites two divergent accounts of one
+        # obligation. `check_relationships` has already required the pointer
+        # to land in a binding kind that is not itself a duplicate.
+        if entry.get("canonical_clause"):
+            continue
         for dimension, description in _REQUIRED_BY_KIND[kind].items():
             # A conditionally-required field is demanded only in the statuses
             # where it can be answered truthfully. Everywhere else the row's
@@ -677,6 +884,25 @@ def counts_by_kind(clauses: list[Clause], inventory: dict) -> dict[str, int]:
            for kind in _REQUIRED_BY_KIND}
     out["not_binding"] = len(ids & set(inventory.get("not_binding", {})))
     out["undispositioned"] = len(ids) - sum(out.values())
+
+    # Reported after the arithmetic above, and separately, because a
+    # duplicate is dispositioned but carries no evidence of its own. Folding
+    # it into its kind's count would report an obligation as enforced twice
+    # on the strength of one row's evidence -- "avoid double-counting
+    # coverage", the Reviewer's phrase, and the reason `canonical_clause`
+    # exists rather than a second full row.
+    #
+    # Children are counted here too, and are NOT in the figures above by
+    # construction: their ids are minted from their own obligation text, so
+    # they never intersect the corpus candidate set. They are additional
+    # rows, not additional coverage; the parent paragraph is what the corpus
+    # asked about.
+    rows = _binding_rows(inventory)
+    out["  of which restate another row"] = sum(
+        1 for cid, (_, e) in rows.items()
+        if e.get("canonical_clause") and cid in ids)
+    out["  child obligations (not corpus candidates)"] = sum(
+        1 for _, e in rows.values() if e.get("parent_clause"))
     return out
 
 

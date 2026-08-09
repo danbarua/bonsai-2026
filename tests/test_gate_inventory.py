@@ -869,3 +869,246 @@ def test_an_unknown_claim_status_is_still_rejected(tmp_path):
     assert "unknown_status" in kinds(reconcile([clause], {
         "reviewed": True, "binding_claim": {
             clause.clause_id: claim_row(status="pending_review")}}, tmp_path))
+
+
+# --- superseded, duplicates and child obligations ---------------------------
+#
+# Three mechanisms added on the Reviewer's cross-cutting rulings of
+# 2026-08-09. Each closes an escape found by reading the inventory's own
+# rows, and each is tested for the escape rather than for the happy path --
+# a pointer that lands is worth nothing if a pointer that does not land also
+# passes.
+
+TWO_CLAUSE_DOC = ("# P\n\nResults MUST be reported with the seed.\n\n"
+                  "Artifacts MUST be written through the verified transport.\n")
+
+
+def _two_clauses(tmp_path):
+    doc = write_doc(tmp_path, TWO_CLAUSE_DOC)
+    first, second = derive_clauses([doc], tmp_path)
+    return doc, first, second
+
+
+def test_a_superseded_clause_names_its_successor_and_the_amendment(tmp_path):
+    """The valid case. A frozen clause validly replaced is not discharged --
+    the thing it required stopped being required -- so the history is
+    recorded rather than flattened into a discharge that was never true."""
+    _, old, new = _two_clauses(tmp_path)
+    inventory = {"reviewed": True, "binding_claim": {
+        old.clause_id: claim_row(
+            status="superseded", discharged_in=None, evidence=None,
+            superseded_by=new.clause_id,
+            amendment_locator="DESIGN.md, post-lock amendment of 2026-08-06",
+            pending_reason="amendment validity is a reviewer's call"),
+        new.clause_id: claim_row(),
+    }}
+    # NOT finding-free, and that is the design: the mechanical half is
+    # satisfied, the judgement half is open. Written `== []` first, which
+    # encoded the opposite -- a valid supersession quietly closing a frozen
+    # obligation is the exact escape the status was added to prevent.
+    assert kinds(reconcile([old, new], inventory, tmp_path)) == ["superseded_clause"]
+
+
+def test_a_supersession_with_no_successor_is_a_deletion_with_manners(tmp_path):
+    """Without this the status is strictly worse than `discharged`: it
+    retires an obligation and names nothing that carries what survived."""
+    _, old, new = _two_clauses(tmp_path)
+    inventory = {"reviewed": True, "binding_claim": {
+        old.clause_id: claim_row(
+            status="superseded", discharged_in=None, evidence=None,
+            superseded_by="0" * 12,
+            amendment_locator="DESIGN.md, some amendment"),
+        new.clause_id: claim_row(),
+    }}
+    assert "successor_missing" in kinds(reconcile([old, new], inventory, tmp_path))
+
+
+def test_a_successor_that_is_itself_superseded_is_refused(tmp_path):
+    """The escape one hop away, and the reason the status needed a chain
+    rule at all: without it, "redefine the meaning later" is available by
+    superseding the successor."""
+    _, old, new = _two_clauses(tmp_path)
+    inventory = {"reviewed": True, "binding_claim": {
+        old.clause_id: claim_row(
+            status="superseded", discharged_in=None, evidence=None,
+            superseded_by=new.clause_id, amendment_locator="DESIGN.md, A"),
+        new.clause_id: claim_row(
+            status="superseded", discharged_in=None, evidence=None,
+            superseded_by=old.clause_id, amendment_locator="DESIGN.md, B"),
+    }}
+    assert "successor_is_itself_superseded" in kinds(
+        reconcile([old, new], inventory, tmp_path))
+
+
+def test_superseded_still_fails_readiness(tmp_path):
+    """A superseded clause is not a closed one. Somebody must still confirm
+    the amendment was validly made, and that judgement is a reviewer's."""
+    _, old, new = _two_clauses(tmp_path)
+    inventory = {"reviewed": True, "binding_claim": {
+        old.clause_id: claim_row(
+            status="superseded", discharged_in=None, evidence=None,
+            superseded_by=new.clause_id, amendment_locator="DESIGN.md, A",
+            pending_reason="amendment validity is a reviewer's call"),
+        new.clause_id: claim_row(),
+    }}
+    findings = reconcile([old, new], inventory, tmp_path)
+    assert kinds(findings) == ["superseded_clause"], (
+        "a supersession must remain visible; a clean run here would mean a "
+        "frozen obligation can be retired with nobody asked whether the "
+        "amendment was legitimate")
+    assert gate_inventory.coverage([old, new], inventory) == (2, 2)
+
+
+def test_a_duplicate_row_is_exempt_from_the_field_contract(tmp_path):
+    """`canonical_clause` is deduplication, not an escape.
+
+    The Reviewer's Part A ruling: "'the binding content lives elsewhere' is
+    valid only as deduplication, not as a reason that the present text
+    ceases to be binding." So a restating paragraph stays in a BINDING kind
+    -- it does not become not_binding -- and the canonical row carries the
+    evidence for both. Demanding it twice would invite two divergent
+    accounts of one obligation."""
+    _, canonical, restatement = _two_clauses(tmp_path)
+    inventory = {"reviewed": True, "binding_claim": {
+        canonical.clause_id: claim_row(),
+        restatement.clause_id: {
+            "locator": "P.md#restated",
+            "obligation": "restates the transport requirement",
+            "status": "discharged",
+            "canonical_clause": canonical.clause_id,
+        },
+    }}
+    assert kinds(reconcile([canonical, restatement], inventory, tmp_path)) == []
+
+
+def test_a_duplicate_pointing_at_nothing_is_an_undispositioned_obligation(tmp_path):
+    """The failure the exemption would otherwise create: a row that carries
+    no evidence AND names no row that does."""
+    _, canonical, restatement = _two_clauses(tmp_path)
+    inventory = {"reviewed": True, "binding_claim": {
+        canonical.clause_id: claim_row(),
+        restatement.clause_id: {
+            "locator": "P.md#restated", "obligation": "restates it",
+            "status": "discharged", "canonical_clause": "0" * 12,
+        },
+    }}
+    assert "canonical_target_missing" in kinds(
+        reconcile([canonical, restatement], inventory, tmp_path))
+
+
+def test_a_chain_of_duplicates_is_refused(tmp_path):
+    """Evidence must be exactly one dereference away. A chain is how a row
+    ends up citing something nobody walked to."""
+    doc = write_doc(tmp_path, "# P\n\nA MUST a.\n\nB MUST b.\n\nC MUST c.\n")
+    a, b, c = derive_clauses([doc], tmp_path)
+    inventory = {"reviewed": True, "binding_claim": {
+        a.clause_id: claim_row(),
+        b.clause_id: {"locator": "P#b", "obligation": "b", "status": "discharged",
+                      "canonical_clause": a.clause_id},
+        c.clause_id: {"locator": "P#c", "obligation": "c", "status": "discharged",
+                      "canonical_clause": b.clause_id},
+    }}
+    assert "canonical_target_is_itself_a_duplicate" in kinds(
+        reconcile([a, b, c], inventory, tmp_path))
+
+
+def test_a_duplicate_does_not_double_count_coverage(tmp_path):
+    """The Reviewer's phrase was "avoid double-counting coverage". One
+    obligation's evidence must not report as two enforced rows."""
+    _, canonical, restatement = _two_clauses(tmp_path)
+    inventory = {"reviewed": True, "binding_claim": {
+        canonical.clause_id: claim_row(),
+        restatement.clause_id: {
+            "locator": "P#r", "obligation": "restates it", "status": "discharged",
+            "canonical_clause": canonical.clause_id},
+    }}
+    counts = gate_inventory.counts_by_kind([canonical, restatement], inventory)
+    assert counts["binding_claim"] == 2
+    assert counts["  of which restate another row"] == 1, (
+        "the duplicate is invisible in the report, so two rows read as two "
+        "independently evidenced obligations")
+
+
+def test_a_child_obligation_is_anchored_to_its_parent_not_orphaned(tmp_path):
+    """A child's id is minted from its own obligation text, so no corpus
+    sentence will ever match it. That must not read as an orphan -- and the
+    thing keeping it honest is that its parent must be dispositioned."""
+    doc = write_doc(tmp_path, CLAIM_DOC)
+    (parent,) = derive_clauses([doc], tmp_path)
+    child_id = "a1b2c3d4e5f6"
+    inventory = {"reviewed": True, "binding_claim": {
+        parent.clause_id: claim_row(),
+        child_id: claim_row(obligation="one of the paragraph's obligations",
+                            parent_clause=parent.clause_id),
+    }}
+    assert kinds(reconcile([parent], inventory, tmp_path)) == []
+
+
+def test_a_child_whose_parent_is_dispositioned_nowhere_is_a_finding(tmp_path):
+    """Otherwise `parent_clause` is a word that switches off the orphan
+    check, which is the shape `pending_package` needed a reason to avoid."""
+    doc = write_doc(tmp_path, CLAIM_DOC)
+    (parent,) = derive_clauses([doc], tmp_path)
+    inventory = {"reviewed": True, "binding_claim": {
+        parent.clause_id: claim_row(),
+        "a1b2c3d4e5f6": claim_row(obligation="an orphan child",
+                                  parent_clause="0" * 12),
+    }}
+    assert "parent_missing" in kinds(reconcile([parent], inventory, tmp_path))
+
+
+def test_one_id_cannot_hold_two_dispositions_across_kinds(tmp_path):
+    """`check_ids_unique` covers collisions in the DERIVED corpus. This
+    covers the inventory's own keyspace, which now holds ids no corpus
+    candidate mints."""
+    doc = write_doc(tmp_path, CLAIM_DOC)
+    (clause,) = derive_clauses([doc], tmp_path)
+    inventory = {"reviewed": True,
+                 "binding_claim": {clause.clause_id: claim_row()},
+                 "not_binding": {clause.clause_id: {"reason": "NARRATION: no"}}}
+    assert "duplicate_inventory_id" in kinds(
+        reconcile([clause], inventory, tmp_path))
+
+
+def test_a_superseded_clause_is_reported_not_silently_retired(tmp_path):
+    """The quietest possible failure, closed.
+
+    Without its own finding, `superseded` would retire a frozen obligation
+    with nobody ever asked whether the amendment was legitimate -- which is
+    the same shape as `not_applicable` passing silently, one column over.
+    """
+    _, old, new = _two_clauses(tmp_path)
+    inventory = {"reviewed": True, "binding_claim": {
+        old.clause_id: claim_row(
+            status="superseded", discharged_in=None, evidence=None,
+            superseded_by=new.clause_id, amendment_locator="DESIGN.md, A",
+            pending_reason="whether the amendment preserved the freeze's "
+                           "purpose is open"),
+        new.clause_id: claim_row(),
+    }}
+    findings = reconcile([old, new], inventory, tmp_path)
+    assert "superseded_clause" in kinds(findings)
+    assert any("open" in f.detail for f in findings
+               if f.kind == "superseded_clause"), (
+        "the finding does not carry the reason, so a reader cannot tell a "
+        "reviewed supersession from one nobody has looked at")
+
+
+def test_a_superseded_negative_obligation_is_not_asked_to_attest(tmp_path):
+    """Demanding an attestation for a prohibition that stopped applying
+    forces a claim about a rule no longer in force. The successor carries
+    the attestation for whatever survived -- which is the whole distinction
+    the status exists to make."""
+    doc = write_doc(tmp_path, "# P\n\nArtifacts MUST NEVER be round-tripped.\n\n"
+                              "Artifacts MUST use the verified transport.\n")
+    old, new = derive_clauses([doc], tmp_path)
+    inventory = {"reviewed": True, "binding_claim": {
+        old.clause_id: claim_row(
+            obligation="artifacts are NEVER round-tripped through local upload",
+            status="superseded", discharged_in=None, evidence=None,
+            superseded_by=new.clause_id, amendment_locator="DESIGN.md, A",
+            pending_reason="amendment validity is a reviewer's call"),
+        new.clause_id: claim_row(),
+    }}
+    assert "missing_negative_attestation" not in kinds(
+        reconcile([old, new], inventory, tmp_path))
