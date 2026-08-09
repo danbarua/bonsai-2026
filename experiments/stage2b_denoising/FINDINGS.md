@@ -1360,12 +1360,16 @@ requires ("either alpha regime triggers review... a reversal seen under
 fixed-alpha alone, or under reselected-alpha alone, is sufficient").
 
 Reading the number: the change in the primary contrast is real and
-measured, not zero, and sits roughly five orders of magnitude above the
-frozen analytic resolution threshold (`4.604761e-10`) -- but the change
-itself is ~2.3e-7, about 0.004% of the contrast's own magnitude
-(-0.0052). The amendment moved the number by an amount the audit can
-resolve, in a direction and scale that changes no sign, no per-graph
-verdict, and no pairwise ordering. The 150-step and 1,200-step
+measured, not zero, and sits roughly 2.7 orders of magnitude above the
+frozen analytic resolution threshold (`4.604761e-10`) --
+`2.339e-7 / 4.604761e-10 ~= 508` -- but the change itself is ~2.3e-7,
+about 0.0045% of the contrast's own magnitude (-0.0052). A clean double
+bound: well-resolved (real margin above the threshold, not a coin-flip
+near it) AND scientifically immaterial (four-and-a-half-thousandths of a
+percent of the quantity it changes) -- the two readings do not trade off
+against each other here. The amendment moved the number by an amount the
+audit can resolve, in a direction and scale that changes no sign, no
+per-graph verdict, and no pairwise ordering. The 150-step and 1,200-step
 representations tell the same qualitative story about which evolved
 graph does best; the 1,200-step budget's own confirmatory result (the
 stage-4 section above) is not put in question by this measurement.

@@ -412,8 +412,9 @@ that comparison, below and in
 The 150-vs-1200 encoder-budget amendment-impact audit has since run
 (2026-08-09, `AUDIT_OK`): none of the three frozen triggers fired in
 either alpha regime -- the amendment's representational effect is real
-and measured (~2.3e-7 shift in the primary contrast, five orders above
-the frozen analytic resolution threshold) but changes no sign, no
+and measured (~2.3e-7 shift in the primary contrast, ~2.7 orders above
+the frozen analytic resolution threshold, ~0.0045% of the contrast's own
+magnitude) but changes no sign, no
 per-graph verdict, and no pairwise ordering, so it does not put the
 stage-4 result above in question. Full account:
 `experiments/stage2b_denoising/FINDINGS.md`'s audit section.**
