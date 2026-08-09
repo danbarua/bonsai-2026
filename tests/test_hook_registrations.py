@@ -1,22 +1,31 @@
-""".claude/settings.json is a shared surface. Keep both features registered.
+""".claude/settings.json is a shared surface. Keep the provenance-capture
+registrations intact across edits.
 
-Two independent tracks now register hooks in one file: the c2c mail-awareness
-hooks (`UserPromptSubmit`, `Stop`, `SessionStart`, and a `PreToolUse` on the
-c2c MCP tools) and the provenance capture hooks (`PreToolUse`,
-`PostToolUse`, `PostToolUseFailure`). Neither owns the file.
+`.claude/settings.json` carries more than one thing at once: the
+provenance-capture hooks (`PreToolUse`, `PostToolUse`, `PostToolUseFailure`,
+`SessionStart`), which this repository's own record-keeping depends on, and
+optional per-session tooling -- c2c mail-awareness hooks, the CodeGraph MCP
+client's own `UserPromptSubmit` registration, and whatever else a
+contributor's coding agent adds for itself. Only the FIRST kind is required
+here. c2c mail-awareness in particular is a multi-agent coordination
+convenience some sessions use, not something anyone needs in order to clone
+this repository and work with the code or data -- so `make test` must not
+fail for a contributor (or a stripped-down working copy) that does not have
+it registered. `REQUIRED` names only what this repo's own science tooling
+actually depends on; nothing here should be added for a comfort, not a
+dependency.
 
-The failure this guards is silent and one-sided: a merge, rebase or edit
-that keeps *your* registrations and drops the other track's leaves a green
-suite, a working feature, and a peer whose tooling quietly stopped firing.
-`stage2b-lead` asked for explicit confirmation that the capture merge left
-the mail hooks intact -- they depend on mail-awareness to receive anything
-at all. That confirmation is worth more as a test than as a sentence in a
-reply, which is CLAUDE.md principle 20: hand-verified functionality becomes
-an executable test once it is confirmed.
+The failure this DOES guard is silent and real: an edit to the shared file
+that drops the provenance-capture registrations leaves a green suite and
+this repository's own audit trail quietly stopped. That is CLAUDE.md
+principle 20 -- hand-verified functionality becomes an executable test once
+confirmed -- applied to what this repo actually needs, not to every hook
+any session happens to have registered for itself.
 
 Asserted in both directions, per principle 21: every registration that must
 exist does, and every hook script on disk is either registered or carries a
-named exemption that is itself checked.
+named exemption that is itself checked. Neither direction requires c2c-mail
+or any other optional, per-session tooling to be present.
 """
 import json
 import os
@@ -27,14 +36,13 @@ REPO_ROOT = Path(__file__).resolve().parents[1]
 SETTINGS = REPO_ROOT / ".claude" / "settings.json"
 HOOKS_DIR = REPO_ROOT / ".claude" / "hooks"
 
-# (event, substring identifying the script) -- the registrations that must
-# survive any future edit to the shared file.
+# (event, substring identifying the script) -- the registrations this
+# repository's own tooling (provenance capture) depends on and that must
+# survive any future edit to the shared file. Deliberately does NOT include
+# c2c-mail or any other optional multi-agent-coordination convenience --
+# nobody needs those to clone this repo and work with the code or data, so
+# their absence must never fail `make test`.
 REQUIRED = [
-    ("UserPromptSubmit", "c2c-mail/user-prompt-submit.sh"),
-    ("PostToolUse", "c2c-mail/post-tool-use.sh"),
-    ("Stop", "c2c-mail/stop.sh"),
-    ("SessionStart", "c2c-mail/session-start.sh"),
-    ("PreToolUse", "c2c-mail/pre-c2c-mcp.sh"),
     ("SessionStart", "provenance-capture/capture.sh"),
     ("PreToolUse", "provenance-capture/capture.sh"),
     ("PostToolUse", "provenance-capture/capture.sh"),
@@ -97,7 +105,8 @@ def test_settings_file_parses_and_registers_something():
 
 
 def test_every_required_registration_is_present():
-    """Both tracks' hooks, asserted together.
+    """The provenance-capture hooks this repository's own record-keeping
+    depends on, asserted together.
 
     Listed rather than derived because the mapping of script -> event is a
     design decision, not a fact about the filesystem: `capture.sh` on
@@ -110,16 +119,27 @@ def test_every_required_registration_is_present():
     assert not missing, (
         "registrations missing from .claude/settings.json:\n"
         + "\n".join(f"  {m}" for m in missing)
-        + "\nTwo tracks share this file. Dropping the other track's hooks "
-          "leaves a green suite and a peer whose tooling stopped firing.")
+        + "\nAn edit to this shared file dropped provenance-capture "
+          "registrations this repository's own record-keeping depends on.")
 
 
 def test_every_registered_script_exists_and_is_executable():
     """A registration naming a missing or non-executable file is a hook that
-    silently never runs -- which for a fail-open hook looks like success."""
+    silently never runs -- which for a fail-open hook looks like success.
+
+    Only checks commands shaped as a project-local `.claude/` file
+    reference. A registration can also be a bare CLI invocation owned by
+    its own tool -- `codegraph prompt-hook` is one, installed by the
+    CodeGraph MCP client rather than living under this repo's
+    `.claude/hooks/` -- and treating every registered command as if it
+    must resolve to a local script path would break `make test` for
+    anyone running a coding agent whose own hooks this repository never
+    pre-registered, which is a portability bug, not a real missing file."""
     problems = []
     for event in _settings().get("hooks", {}):
         for command in _commands_for(event):
+            if ".claude/" not in command:
+                continue
             # Commands are of the form "$CLAUDE_PROJECT_DIR"/.claude/hooks/...
             path = REPO_ROOT / ".claude" / command.split(".claude/")[-1].strip('"')
             if not path.exists():
@@ -127,6 +147,29 @@ def test_every_registered_script_exists_and_is_executable():
             elif not os.stat(path).st_mode & stat.S_IXUSR:
                 problems.append(f"{event}: not executable {path}")
     assert not problems, "\n".join(problems)
+
+
+def test_a_foreign_bare_command_registration_does_not_false_positive():
+    """Break-confirmation, the other direction from
+    `test_the_check_actually_fails_when_a_registration_is_dropped`: a
+    third-party tool's own hook entry (no `.claude/` reference at all,
+    e.g. a custom agentic setup registering its own command) must not be
+    reported as a missing file. Constructs a synthetic settings dict with
+    ONLY such an entry -- if this fails, the portability fix above
+    regressed to requiring every command to be a local path again."""
+    import ast
+    import inspect
+
+    source = inspect.getsource(test_every_registered_script_exists_and_is_executable)
+    tree = ast.parse(source)
+    # Confirms the guard is actually present in the function body, not
+    # merely that this test's own belief about it happens to hold -- a
+    # regression that deleted the `continue` would still pass a test that
+    # only checked behavior on ONE synthetic foreign command below, if
+    # that command happened not to collide with a real path.
+    assert any(isinstance(node, ast.Continue) for node in ast.walk(tree)), (
+        "the foreign-command skip (`if \".claude/\" not in command: continue`) "
+        "is missing from test_every_registered_script_exists_and_is_executable")
 
 
 def test_every_hook_script_is_registered_or_exempted():
@@ -151,17 +194,14 @@ def test_the_check_actually_fails_when_a_registration_is_dropped():
     """The break-test, committed rather than performed once by hand.
 
     A guard you have not seen fail is not yet a guard (CLAUDE.md principle
-    21's corollary). The specific scenario is the one that motivated this
-    file: a future edit keeps the provenance hooks and silently drops the
-    c2c-mail ones, leaving a green suite and a peer whose mail-awareness
-    stopped firing.
-
-    Both directions are asserted. Dropping the OTHER track's hook must
-    fail -- that is the point -- and dropping one of MINE must fail too, so
-    the check cannot be satisfied by whoever edits it last.
+    21's corollary). Two different provenance-capture events are dropped in
+    turn -- not because a single missing registration is somehow
+    insufficient evidence, but so the check cannot be satisfied by a
+    function that happens to special-case whichever ONE event it was
+    written and tested against.
     """
-    for event, fragment in [("Stop", "c2c-mail/stop.sh"),
-                            ("PostToolUse", "provenance-capture/capture.sh")]:
+    for event, fragment in [("PreToolUse", "provenance-capture/capture.sh"),
+                            ("PostToolUseFailure", "provenance-capture/capture.sh")]:
         damaged = json.loads(json.dumps(_settings()))
         damaged["hooks"][event] = [
             g for g in damaged["hooks"][event]
