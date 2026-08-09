@@ -158,40 +158,53 @@ def _files_containing_literal_allow_test_split_true():
     return found
 
 
-# `smoke_stage2b_gcs.py` is a pre-existing, hand-run infrastructure probe
-# for `stage2b_gcs`'s transport layer itself (round-trips a throwaway
-# object through every stage/split combination, including a deliberate
-# test-side round trip it deletes immediately afterward). It exercises
-# the OPT-IN MECHANISM, not the science -- it produces no scientific
-# artifact and is not a driver. Named and justified per CLAUDE.md
+# Files other than the driver itself that legitimately pass the literal
+# `allow_test_split=True`, each named and justified per CLAUDE.md
 # principle 21 ("any exemption gets a named constant and a reason, plus
 # its own test that the exemption still refers to something real"),
 # rather than silently widening the driver-only claim below.
-_NON_DRIVER_EXEMPTION = "smoke_stage2b_gcs.py"
+_NON_DRIVER_EXEMPTIONS = {
+    "smoke_stage2b_gcs.py":
+        "a pre-existing, hand-run infrastructure probe for stage2b_gcs's "
+        "transport layer itself (round-trips a throwaway object through "
+        "every stage/split combination, including a deliberate test-side "
+        "round trip it deletes immediately afterward). Exercises the "
+        "OPT-IN MECHANISM, not the science -- produces no scientific "
+        "artifact and is not a driver.",
+    "generate_stage2b_artifact_manifest.py":
+        "reads (never writes) stage 4's already-published official_result "
+        "-- the ONE locked result this manifest indexes -- through the "
+        "same validated consume path everything else uses, with the same "
+        "named require_manifest=False opt-out run-scoped reports need. "
+        "Read-only provenance indexing, not a driver and not new science.",
+}
 
 
-def test_the_exemption_still_refers_to_something_real():
-    """The exemption is only honest if the file it names still exists and
+def test_every_exemption_still_refers_to_something_real():
+    """Each exemption is only honest if the file it names still exists and
     still contains the literal it is excused for -- an exemption for code
     that moved or lost the opt-in would silently stop meaning anything."""
-    assert (STAGE2B_DIR / _NON_DRIVER_EXEMPTION).is_file()
-    assert _NON_DRIVER_EXEMPTION in _files_containing_literal_allow_test_split_true()
+    found = _files_containing_literal_allow_test_split_true()
+    for name, reason in _NON_DRIVER_EXEMPTIONS.items():
+        assert reason, f"{name} is exempt with no reason"
+        assert (STAGE2B_DIR / name).is_file(), f"exemption {name} names a missing file"
+        assert name in found, f"{name} is exempted but no longer contains the literal"
 
 
-def test_allow_test_split_true_appears_in_exactly_this_driver_plus_the_exemption():
+def test_allow_test_split_true_appears_in_exactly_this_driver_plus_the_exemptions():
     """The module docstring's claim, checked rather than trusted: across
     every `.py` file in the directory, the literal `allow_test_split=True`
-    appears in `run_ladder_stage4.py`, in the named non-driver exemption
+    appears in `run_ladder_stage4.py`, in the named non-driver exemptions
     above, and nowhere else.
 
     Break-confirmed both directions by construction of the test itself:
     adding the literal to any other, unexempted file in the directory
-    would grow the derived set past the expected pair and fail the first
+    would grow the derived set past the expected set and fail the first
     assertion; removing every occurrence from this driver (e.g. reverting
     to `allow_test_split=False` throughout, silently disabling the whole
     test-corpus path) would drop it from the set and fail the second."""
     found = _files_containing_literal_allow_test_split_true()
-    expected = {"run_ladder_stage4.py", _NON_DRIVER_EXEMPTION}
+    expected = {"run_ladder_stage4.py", *_NON_DRIVER_EXEMPTIONS}
     assert found == expected, (
         f"expected exactly {sorted(expected)} to pass the literal "
         f"allow_test_split=True opt-in, found {sorted(found)}")

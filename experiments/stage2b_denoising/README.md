@@ -199,6 +199,21 @@ mention here, in the same commit that creates it.
   demand rather than committed. Run directly:
   `uv run python run_abs_conv_eps_sensitivity.py`.
 
+- **`generate_stage2b_artifact_manifest.py`** — produces the committed
+  `ARTIFACT_MANIFEST.json`: GCS object paths, payload SHA256, producing
+  commit, and the frozen headline numbers behind Stage 2B's two locked
+  results (stage 4's official confirmatory result, stage 5's
+  amendment-impact audit), so provenance is checkable from a clone with
+  no GCS credentials and no re-running anything. Mirrors
+  `stage2a_dynamics_classification/generate_artifact_manifest.py`'s
+  purpose, adapted to this project's GCS-native architecture: reads
+  already-published GCS manifests (anonymous, public-read, no billing)
+  rather than hashing local scratch files, since that is where Stage 2B's
+  artifacts actually live. Long arrays (e.g. the primary test's 20,000
+  bootstrap resamples) are stripped to a count for manifest brevity — the
+  full arrays stay in the GCS artifacts this file points at. Run via
+  `make stage2b-generate-artifact-manifest`.
+
 - **`gate_corpus.py`** — pins which documents the binding-clause
   inventory ranges over, and asserts that list against the `.md` files
   actually present, in both directions, before handing them to
@@ -499,6 +514,7 @@ make test                      # the whole repository suite
 | `test_stage2b_audit.py` | the pure amendment-audit calculations — index alignment, gauge phases, trigger verdicts, the stress-set construction, the sequencing-gate guard |
 | `test_stage2b_audit_driver.py` | the audit driver's constants, the pinned pre-contract digest table, the sizing probe's projections and halt paths, and the fixed/reselected OR-combination's completeness and break-confirmation |
 | `test_stage2b_abs_conv_eps_sensitivity.py` | the `ABS_CONV_EPS` sensitivity table's invariance check and halt rule, plus a skip-cleanly-when-absent check against the real diagnostic pickle |
+| `test_stage2b_artifact_manifest.py` | the artifact-manifest generator's list shape, the long-list-stripping break-confirmation, and a real-bucket check against the committed manifest |
 
 This table is the whole of what `make stage2b-test` runs, and the one
 exclusion is the slow round trip. It carries no test counts, deliberately:

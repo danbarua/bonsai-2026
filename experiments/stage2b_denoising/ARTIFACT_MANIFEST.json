@@ -1,0 +1,946 @@
+{
+  "artifacts": {
+    "stage4_official_result_json": {
+      "object": "stage2b/testsplit/stage4/common/official_result.json",
+      "present": false,
+      "reason": "no manifest"
+    },
+    "stage4_official_result_txt": {
+      "object": "stage2b/testsplit/stage4/common/official_result.txt",
+      "present": false,
+      "reason": "no manifest"
+    },
+    "stage5_audit_report_json": {
+      "object": "stage2b/train/stage5/common/audit_report_20260809T192835Z.json",
+      "present": false,
+      "reason": "no manifest"
+    },
+    "stage5_audit_report_txt": {
+      "object": "stage2b/train/stage5/common/audit_report_20260809T192835Z.txt",
+      "present": false,
+      "reason": "no manifest"
+    },
+    "stage5_feature_distances": {
+      "config_digest": "9539c6f4a1e5f3cb2afc983ff7a6a41a848a2ea40da6a15a6c8fa7449919cbad",
+      "generation": 1786305471931707,
+      "object": "stage2b/train/stage5/common/feature_distances.json",
+      "present": true,
+      "producing_commit": "410324f9b96c40dfe3c224b85bc4853233f9326e",
+      "sha256": "0b51556746938718ea66b735919d0c28e159eda89fcf9efd50ab024ad0096258"
+    },
+    "stage5_features_s150_T": {
+      "config_digest": "9539c6f4a1e5f3cb2afc983ff7a6a41a848a2ea40da6a15a6c8fa7449919cbad",
+      "generation": 1786304594163608,
+      "object": "stage2b/train/stage5/evolved_T/features_s150.npz",
+      "present": true,
+      "producing_commit": "410324f9b96c40dfe3c224b85bc4853233f9326e",
+      "sha256": "14a7702e1c2317ef89bfd4364ccf592a13f4ec71e6cd524b58872da929489ad4"
+    },
+    "stage5_features_s150_curr_random": {
+      "config_digest": "9539c6f4a1e5f3cb2afc983ff7a6a41a848a2ea40da6a15a6c8fa7449919cbad",
+      "generation": 1786304875020351,
+      "object": "stage2b/train/stage5/evolved_curr_random/features_s150.npz",
+      "present": true,
+      "producing_commit": "410324f9b96c40dfe3c224b85bc4853233f9326e",
+      "sha256": "631ea2f3a208a58c918e7021baf8a297cbc94668f1f335fe7b61e4b43974ee0d"
+    },
+    "stage5_features_s150_lattice": {
+      "config_digest": "9539c6f4a1e5f3cb2afc983ff7a6a41a848a2ea40da6a15a6c8fa7449919cbad",
+      "generation": 1786304686015244,
+      "object": "stage2b/train/stage5/evolved_lattice/features_s150.npz",
+      "present": true,
+      "producing_commit": "410324f9b96c40dfe3c224b85bc4853233f9326e",
+      "sha256": "3775f264275a4cffe6cba94850f2ae59c545675f2031c5f2c90344a93d6fcbc1"
+    },
+    "stage5_features_s150_pre_evolution": {
+      "config_digest": "9539c6f4a1e5f3cb2afc983ff7a6a41a848a2ea40da6a15a6c8fa7449919cbad",
+      "generation": 1786304502923402,
+      "object": "stage2b/train/stage5/pre_evolution/features_s150.npz",
+      "present": true,
+      "producing_commit": "410324f9b96c40dfe3c224b85bc4853233f9326e",
+      "sha256": "2153fc29abc43db0f855e6ded5a3aa728d7490ee868c3a772c132cdbe95bf776"
+    },
+    "stage5_features_s150_rewired": {
+      "config_digest": "9539c6f4a1e5f3cb2afc983ff7a6a41a848a2ea40da6a15a6c8fa7449919cbad",
+      "generation": 1786304782110217,
+      "object": "stage2b/train/stage5/evolved_rewired/features_s150.npz",
+      "present": true,
+      "producing_commit": "410324f9b96c40dfe3c224b85bc4853233f9326e",
+      "sha256": "36f9f07392fe5cdc5775fc7801513e2fa4e65e80bd6de75a3f1e74c7b358fa02"
+    },
+    "stage5_oof_regimes": {
+      "config_digest": "9539c6f4a1e5f3cb2afc983ff7a6a41a848a2ea40da6a15a6c8fa7449919cbad",
+      "generation": 1786305458090006,
+      "object": "stage2b/train/stage5/common/oof_regimes.json",
+      "present": true,
+      "producing_commit": "410324f9b96c40dfe3c224b85bc4853233f9326e",
+      "sha256": "b14657677119559e4938fd81b8a8fdeecc60747660a853938e3d166c017237e2"
+    },
+    "stage5_probe_sizing": {
+      "config_digest": "9539c6f4a1e5f3cb2afc983ff7a6a41a848a2ea40da6a15a6c8fa7449919cbad",
+      "generation": 1786304118785261,
+      "object": "stage2b/train/stage5/common/probe_sizing_20260809T192835Z.json",
+      "present": true,
+      "producing_commit": "410324f9b96c40dfe3c224b85bc4853233f9326e",
+      "sha256": "75963bd21df6389658e081931cc1cc3b8ae0075212075d686dd173d180551d3d"
+    },
+    "stage5_theta_T_s150_T": {
+      "config_digest": "9539c6f4a1e5f3cb2afc983ff7a6a41a848a2ea40da6a15a6c8fa7449919cbad",
+      "generation": 1786304189733337,
+      "object": "stage2b/train/stage5/evolved_T/theta_T_s150.npz",
+      "present": true,
+      "producing_commit": "410324f9b96c40dfe3c224b85bc4853233f9326e",
+      "sha256": "067b1e662e561f51c8b95948c5472cc608e78f9803a14432f1931f961f0e0838"
+    },
+    "stage5_theta_T_s150_curr_random": {
+      "config_digest": "9539c6f4a1e5f3cb2afc983ff7a6a41a848a2ea40da6a15a6c8fa7449919cbad",
+      "generation": 1786304420256800,
+      "object": "stage2b/train/stage5/evolved_curr_random/theta_T_s150.npz",
+      "present": true,
+      "producing_commit": "410324f9b96c40dfe3c224b85bc4853233f9326e",
+      "sha256": "f0fc4f981d81d3e1012f96db7e2afed11bc51aa90e97f993a70283122a8d99fb"
+    },
+    "stage5_theta_T_s150_lattice": {
+      "config_digest": "9539c6f4a1e5f3cb2afc983ff7a6a41a848a2ea40da6a15a6c8fa7449919cbad",
+      "generation": 1786304266152294,
+      "object": "stage2b/train/stage5/evolved_lattice/theta_T_s150.npz",
+      "present": true,
+      "producing_commit": "410324f9b96c40dfe3c224b85bc4853233f9326e",
+      "sha256": "0977cd5eebf189b03c95cfe0498d99c28dddd87bb81d08859a518fe721b6b4d8"
+    },
+    "stage5_theta_T_s150_rewired": {
+      "config_digest": "9539c6f4a1e5f3cb2afc983ff7a6a41a848a2ea40da6a15a6c8fa7449919cbad",
+      "generation": 1786304343315000,
+      "object": "stage2b/train/stage5/evolved_rewired/theta_T_s150.npz",
+      "present": true,
+      "producing_commit": "410324f9b96c40dfe3c224b85bc4853233f9326e",
+      "sha256": "c760a1dd4558c010a817a3b0877cee51172c53569ecf9f9f95e3d6a29119f0d2"
+    },
+    "stage5_trigger_verdict": {
+      "config_digest": "9539c6f4a1e5f3cb2afc983ff7a6a41a848a2ea40da6a15a6c8fa7449919cbad",
+      "generation": 1786305476901496,
+      "object": "stage2b/train/stage5/common/trigger_verdict.json",
+      "present": true,
+      "producing_commit": "410324f9b96c40dfe3c224b85bc4853233f9326e",
+      "sha256": "f588e150de0a8d0bc23481ee3b960ae8e7c691cc7db6fa77a464fb6e41c9bcaf"
+    }
+  },
+  "environment": {
+    "git_commit_sha": "1b11072cf9926fff2bdb12eafa70a6a16acaf910",
+    "note": "Reflects the environment this script itself ran in (local, GCS-read-only) -- not the remote A100 sessions that produced the artifacts. Each artifact's own manifest carries ITS producing commit and fingerprint, which is the provenance that matters.",
+    "platform": "macOS-26.5.2-arm64-arm-64bit-Mach-O",
+    "python_version": "3.14.6"
+  },
+  "frozen_results": {
+    "stage4_official_result": {
+      "cnn": {
+        "best_clipped_val_mse": 0.062344111243006047,
+        "best_epoch": 99,
+        "best_index": 1,
+        "best_seed": 1
+      },
+      "descriptive": {
+        "cnn": 0.06306884441464826,
+        "corruption_diagnostics": {
+          "mse_postclip_505": 0.19885647762082956,
+          "mse_postclip_784": 0.19655876142255338,
+          "mse_preclip_505": 0.5158878623067538,
+          "mse_preclip_784": 0.5132737114948203
+        },
+        "raw_505": 0.19885641426008693,
+        "raw_784": 0.19885640898288706,
+        "rescaled_identity": 0.24695167114506966
+      },
+      "evolution": {
+        "T": {
+          "n_failed": 0,
+          "n_images": 10000,
+          "object": "stage2b/testsplit/stage4/evolved_T/theta_T.npz"
+        },
+        "curr_random": {
+          "n_failed": 0,
+          "n_images": 10000,
+          "object": "stage2b/testsplit/stage4/evolved_curr_random/theta_T.npz"
+        },
+        "lattice": {
+          "n_failed": 0,
+          "n_images": 10000,
+          "object": "stage2b/testsplit/stage4/evolved_lattice/theta_T.npz"
+        },
+        "rewired": {
+          "n_failed": 0,
+          "n_images": 10000,
+          "object": "stage2b/testsplit/stage4/evolved_rewired/theta_T.npz"
+        }
+      },
+      "halt_reason": null,
+      "inference": {
+        "family1": {
+          "alpha": 0.05,
+          "description": "three controls vs. pre_evolution",
+          "family": "family1",
+          "holm_adjusted_p": {
+            "curr_random": 3.7020399108306353e-252,
+            "lattice": 0.0,
+            "rewired": 1.395421565006389e-144
+          },
+          "holm_rejected": {
+            "curr_random": true,
+            "lattice": true,
+            "rewired": true
+          },
+          "members": [
+            "lattice",
+            "rewired",
+            "curr_random"
+          ],
+          "n_p_underflowed": 1,
+          "n_tests": 3,
+          "p_underflowed": [
+            "lattice"
+          ],
+          "per_test": {
+            "curr_random": {
+              "bootstrap": {
+                "ci_high": -0.0027129393433770505,
+                "ci_low": -0.003034148118994086,
+                "n_resamples": 20000,
+                "observed_mean": -0.002872175226381038,
+                "seed": 42
+              },
+              "contrast": "MSE(curr_random) - MSE(pre_evolution)",
+              "favorable": true,
+              "t_test": {
+                "assumption": "At the locked test-corpus size the paired t-test is justified by the CLT even for skewed per-image MSE differences (DESIGN.md, 'Primary comparison and test'). At the small sample sizes used in unit tests that justification does not apply.",
+                "df": 9999,
+                "mean": -0.002872175226381038,
+                "n": 10000,
+                "p_underflow": false,
+                "p_value": 1.8510199554153177e-252,
+                "sd": 0.008220351440571943,
+                "se": 8.220351440571942e-05,
+                "t": -34.93981062908428
+              }
+            },
+            "lattice": {
+              "bootstrap": {
+                "ci_high": -0.003931321163370315,
+                "ci_low": -0.004216754349912448,
+                "n_resamples": 20000,
+                "observed_mean": -0.0040727120879443714,
+                "seed": 42
+              },
+              "contrast": "MSE(lattice) - MSE(pre_evolution)",
+              "favorable": true,
+              "t_test": {
+                "assumption": "At the locked test-corpus size the paired t-test is justified by the CLT even for skewed per-image MSE differences (DESIGN.md, 'Primary comparison and test'). At the small sample sizes used in unit tests that justification does not apply.",
+                "df": 9999,
+                "mean": -0.0040727120879443714,
+                "n": 10000,
+                "p_underflow": true,
+                "p_value": 0.0,
+                "sd": 0.007327130681083278,
+                "se": 7.327130681083277e-05,
+                "t": -55.5839968633157
+              }
+            },
+            "rewired": {
+              "bootstrap": {
+                "ci_high": -0.0020153483895033798,
+                "ci_low": -0.002342407070852227,
+                "n_resamples": 20000,
+                "observed_mean": -0.0021788726776565434,
+                "seed": 42
+              },
+              "contrast": "MSE(rewired) - MSE(pre_evolution)",
+              "favorable": true,
+              "t_test": {
+                "assumption": "At the locked test-corpus size the paired t-test is justified by the CLT even for skewed per-image MSE differences (DESIGN.md, 'Primary comparison and test'). At the small sample sizes used in unit tests that justification does not apply.",
+                "df": 9999,
+                "mean": -0.0021788726776565434,
+                "n": 10000,
+                "p_underflow": false,
+                "p_value": 1.395421565006389e-144,
+                "sd": 0.008370757012188914,
+                "se": 8.370757012188914e-05,
+                "t": -26.029577426316646
+              }
+            }
+          },
+          "raw_p": {
+            "curr_random": 1.8510199554153177e-252,
+            "lattice": 0.0,
+            "rewired": 1.395421565006389e-144
+          },
+          "underflow_note": "a raw or Holm-adjusted p of 0.0 is a float64 underflow of the analytic t-tail, not an exact zero; report it as below the smallest representable positive double (CLAUDE.md principle 6)"
+        },
+        "family2": {
+          "alpha": 0.05,
+          "description": "six pairwise comparisons among the four evolved graphs",
+          "family": "family2",
+          "holm_adjusted_p": {
+            "T_vs_curr_random": 9.192029828928196e-153,
+            "T_vs_lattice": 2.7334838536687548e-18,
+            "T_vs_rewired": 6.693422906090326e-296,
+            "lattice_vs_curr_random": 1.3002689981025035e-93,
+            "lattice_vs_rewired": 1.369233604648444e-210,
+            "rewired_vs_curr_random": 3.0974251899623206e-30
+          },
+          "holm_rejected": {
+            "T_vs_curr_random": true,
+            "T_vs_lattice": true,
+            "T_vs_rewired": true,
+            "lattice_vs_curr_random": true,
+            "lattice_vs_rewired": true,
+            "rewired_vs_curr_random": true
+          },
+          "members": [
+            "T_vs_lattice",
+            "T_vs_rewired",
+            "T_vs_curr_random",
+            "lattice_vs_rewired",
+            "lattice_vs_curr_random",
+            "rewired_vs_curr_random"
+          ],
+          "n_p_underflowed": 0,
+          "n_tests": 6,
+          "p_underflowed": [],
+          "per_test": {
+            "T_vs_curr_random": {
+              "a_favored": true,
+              "contrast": "MSE(T) - MSE(curr_random)",
+              "graph_a": "T",
+              "graph_b": "curr_random",
+              "sign_flip": {
+                "assumption": "Sign-exchangeability assumption: exact sign-flip validity requires each d_i to be exchangeable with -d_i under H0, i.e. a symmetry condition on d_i's distribution about zero -- strictly stronger than E[d_i]=0. That condition is not verified here; at Stage 2B's test-corpus size this is a large-sample-justified approximation for the mean contrast, not a test that is exact by construction. DESIGN.md requires this assumption to be stated wherever this p-value is reported.",
+                "at_monte_carlo_floor": true,
+                "chunk_size": 2048,
+                "chunk_size_in_design_range": true,
+                "comparison": "two-sided, |T_b| >= |T_obs|",
+                "degenerate_observed": false,
+                "n": 10000,
+                "n_as_extreme": 0,
+                "n_chunks": 49,
+                "n_flips": 100000,
+                "n_zero_sd_flips": 0,
+                "p_monte_carlo_floor": 9.99990000099999e-06,
+                "p_value": 9.99990000099999e-06,
+                "seed": 42,
+                "sign_dtype": "int8",
+                "statistic": "studentized: mean(s*d) / (SD(s*d, ddof=1) / sqrt(n))",
+                "t_observed": -26.846867362512135
+              },
+              "t_test": {
+                "assumption": "At the locked test-corpus size the paired t-test is justified by the CLT even for skewed per-image MSE differences (DESIGN.md, 'Primary comparison and test'). At the small sample sizes used in unit tests that justification does not apply.",
+                "df": 9999,
+                "mean": -0.001578693729487706,
+                "n": 10000,
+                "p_underflow": false,
+                "p_value": 2.298007457232049e-153,
+                "sd": 0.005880364767220958,
+                "se": 5.880364767220958e-05,
+                "t": -26.84686736251214
+              }
+            },
+            "T_vs_lattice": {
+              "a_favored": true,
+              "contrast": "MSE(T) - MSE(lattice)",
+              "graph_a": "T",
+              "graph_b": "lattice",
+              "sign_flip": {
+                "assumption": "Sign-exchangeability assumption: exact sign-flip validity requires each d_i to be exchangeable with -d_i under H0, i.e. a symmetry condition on d_i's distribution about zero -- strictly stronger than E[d_i]=0. That condition is not verified here; at Stage 2B's test-corpus size this is a large-sample-justified approximation for the mean contrast, not a test that is exact by construction. DESIGN.md requires this assumption to be stated wherever this p-value is reported.",
+                "at_monte_carlo_floor": true,
+                "chunk_size": 2048,
+                "chunk_size_in_design_range": true,
+                "comparison": "two-sided, |T_b| >= |T_obs|",
+                "degenerate_observed": false,
+                "n": 10000,
+                "n_as_extreme": 0,
+                "n_chunks": 49,
+                "n_flips": 100000,
+                "n_zero_sd_flips": 0,
+                "p_monte_carlo_floor": 9.99990000099999e-06,
+                "p_value": 9.99990000099999e-06,
+                "seed": 42,
+                "sign_dtype": "int8",
+                "statistic": "studentized: mean(s*d) / (SD(s*d, ddof=1) / sqrt(n))",
+                "t_observed": -8.738827424368539
+              },
+              "t_test": {
+                "assumption": "At the locked test-corpus size the paired t-test is justified by the CLT even for skewed per-image MSE differences (DESIGN.md, 'Primary comparison and test'). At the small sample sizes used in unit tests that justification does not apply.",
+                "df": 9999,
+                "mean": -0.0003781568679243728,
+                "n": 10000,
+                "p_underflow": false,
+                "p_value": 2.7334838536687548e-18,
+                "sd": 0.004327318180810719,
+                "se": 4.327318180810719e-05,
+                "t": -8.738827424368539
+              }
+            },
+            "T_vs_rewired": {
+              "a_favored": true,
+              "contrast": "MSE(T) - MSE(rewired)",
+              "graph_a": "T",
+              "graph_b": "rewired",
+              "sign_flip": {
+                "assumption": "Sign-exchangeability assumption: exact sign-flip validity requires each d_i to be exchangeable with -d_i under H0, i.e. a symmetry condition on d_i's distribution about zero -- strictly stronger than E[d_i]=0. That condition is not verified here; at Stage 2B's test-corpus size this is a large-sample-justified approximation for the mean contrast, not a test that is exact by construction. DESIGN.md requires this assumption to be stated wherever this p-value is reported.",
+                "at_monte_carlo_floor": true,
+                "chunk_size": 2048,
+                "chunk_size_in_design_range": true,
+                "comparison": "two-sided, |T_b| >= |T_obs|",
+                "degenerate_observed": false,
+                "n": 10000,
+                "n_as_extreme": 0,
+                "n_chunks": 49,
+                "n_flips": 100000,
+                "n_zero_sd_flips": 0,
+                "p_monte_carlo_floor": 9.99990000099999e-06,
+                "p_value": 9.99990000099999e-06,
+                "seed": 42,
+                "sign_dtype": "int8",
+                "statistic": "studentized: mean(s*d) / (SD(s*d, ddof=1) / sqrt(n))",
+                "t_observed": -38.098050082122604
+              },
+              "t_test": {
+                "assumption": "At the locked test-corpus size the paired t-test is justified by the CLT even for skewed per-image MSE differences (DESIGN.md, 'Primary comparison and test'). At the small sample sizes used in unit tests that justification does not apply.",
+                "df": 9999,
+                "mean": -0.002271996278212201,
+                "n": 10000,
+                "p_underflow": false,
+                "p_value": 1.1155704843483876e-296,
+                "sd": 0.005963550032914489,
+                "se": 5.963550032914489e-05,
+                "t": -38.098050082122604
+              }
+            },
+            "lattice_vs_curr_random": {
+              "a_favored": true,
+              "contrast": "MSE(lattice) - MSE(curr_random)",
+              "graph_a": "lattice",
+              "graph_b": "curr_random",
+              "sign_flip": {
+                "assumption": "Sign-exchangeability assumption: exact sign-flip validity requires each d_i to be exchangeable with -d_i under H0, i.e. a symmetry condition on d_i's distribution about zero -- strictly stronger than E[d_i]=0. That condition is not verified here; at Stage 2B's test-corpus size this is a large-sample-justified approximation for the mean contrast, not a test that is exact by construction. DESIGN.md requires this assumption to be stated wherever this p-value is reported.",
+                "at_monte_carlo_floor": true,
+                "chunk_size": 2048,
+                "chunk_size_in_design_range": true,
+                "comparison": "two-sided, |T_b| >= |T_obs|",
+                "degenerate_observed": false,
+                "n": 10000,
+                "n_as_extreme": 0,
+                "n_chunks": 49,
+                "n_flips": 100000,
+                "n_zero_sd_flips": 0,
+                "p_monte_carlo_floor": 9.99990000099999e-06,
+                "p_value": 9.99990000099999e-06,
+                "seed": 42,
+                "sign_dtype": "int8",
+                "statistic": "studentized: mean(s*d) / (SD(s*d, ddof=1) / sqrt(n))",
+                "t_observed": -20.79818386008128
+              },
+              "t_test": {
+                "assumption": "At the locked test-corpus size the paired t-test is justified by the CLT even for skewed per-image MSE differences (DESIGN.md, 'Primary comparison and test'). At the small sample sizes used in unit tests that justification does not apply.",
+                "df": 9999,
+                "mean": -0.001200536861563333,
+                "n": 10000,
+                "p_underflow": false,
+                "p_value": 4.3342299936750115e-94,
+                "sd": 0.005772315840844006,
+                "se": 5.7723158408440055e-05,
+                "t": -20.798183860081277
+              }
+            },
+            "lattice_vs_rewired": {
+              "a_favored": true,
+              "contrast": "MSE(lattice) - MSE(rewired)",
+              "graph_a": "lattice",
+              "graph_b": "rewired",
+              "sign_flip": {
+                "assumption": "Sign-exchangeability assumption: exact sign-flip validity requires each d_i to be exchangeable with -d_i under H0, i.e. a symmetry condition on d_i's distribution about zero -- strictly stronger than E[d_i]=0. That condition is not verified here; at Stage 2B's test-corpus size this is a large-sample-justified approximation for the mean contrast, not a test that is exact by construction. DESIGN.md requires this assumption to be stated wherever this p-value is reported.",
+                "at_monte_carlo_floor": true,
+                "chunk_size": 2048,
+                "chunk_size_in_design_range": true,
+                "comparison": "two-sided, |T_b| >= |T_obs|",
+                "degenerate_observed": false,
+                "n": 10000,
+                "n_as_extreme": 0,
+                "n_chunks": 49,
+                "n_flips": 100000,
+                "n_zero_sd_flips": 0,
+                "p_monte_carlo_floor": 9.99990000099999e-06,
+                "p_value": 9.99990000099999e-06,
+                "seed": 42,
+                "sign_dtype": "int8",
+                "statistic": "studentized: mean(s*d) / (SD(s*d, ddof=1) / sqrt(n))",
+                "t_observed": -31.784251035007756
+              },
+              "t_test": {
+                "assumption": "At the locked test-corpus size the paired t-test is justified by the CLT even for skewed per-image MSE differences (DESIGN.md, 'Primary comparison and test'). At the small sample sizes used in unit tests that justification does not apply.",
+                "df": 9999,
+                "mean": -0.0018938394102878285,
+                "n": 10000,
+                "p_underflow": false,
+                "p_value": 2.7384672092968883e-211,
+                "sd": 0.005958420754360136,
+                "se": 5.958420754360136e-05,
+                "t": -31.78425103500776
+              }
+            },
+            "rewired_vs_curr_random": {
+              "a_favored": false,
+              "contrast": "MSE(rewired) - MSE(curr_random)",
+              "graph_a": "rewired",
+              "graph_b": "curr_random",
+              "sign_flip": {
+                "assumption": "Sign-exchangeability assumption: exact sign-flip validity requires each d_i to be exchangeable with -d_i under H0, i.e. a symmetry condition on d_i's distribution about zero -- strictly stronger than E[d_i]=0. That condition is not verified here; at Stage 2B's test-corpus size this is a large-sample-justified approximation for the mean contrast, not a test that is exact by construction. DESIGN.md requires this assumption to be stated wherever this p-value is reported.",
+                "at_monte_carlo_floor": true,
+                "chunk_size": 2048,
+                "chunk_size_in_design_range": true,
+                "comparison": "two-sided, |T_b| >= |T_obs|",
+                "degenerate_observed": false,
+                "n": 10000,
+                "n_as_extreme": 0,
+                "n_chunks": 49,
+                "n_flips": 100000,
+                "n_zero_sd_flips": 0,
+                "p_monte_carlo_floor": 9.99990000099999e-06,
+                "p_value": 9.99990000099999e-06,
+                "seed": 42,
+                "sign_dtype": "int8",
+                "statistic": "studentized: mean(s*d) / (SD(s*d, ddof=1) / sqrt(n))",
+                "t_observed": 11.524426721085813
+              },
+              "t_test": {
+                "assumption": "At the locked test-corpus size the paired t-test is justified by the CLT even for skewed per-image MSE differences (DESIGN.md, 'Primary comparison and test'). At the small sample sizes used in unit tests that justification does not apply.",
+                "df": 9999,
+                "mean": 0.0006933025487244949,
+                "n": 10000,
+                "p_underflow": false,
+                "p_value": 1.5487125949811603e-30,
+                "sd": 0.0060159395821050695,
+                "se": 6.01593958210507e-05,
+                "t": 11.524426721085813
+              }
+            }
+          },
+          "raw_p": {
+            "T_vs_curr_random": 2.298007457232049e-153,
+            "T_vs_lattice": 2.7334838536687548e-18,
+            "T_vs_rewired": 1.1155704843483876e-296,
+            "lattice_vs_curr_random": 4.3342299936750115e-94,
+            "lattice_vs_rewired": 2.7384672092968883e-211,
+            "rewired_vs_curr_random": 1.5487125949811603e-30
+          },
+          "sign_flip_assumption": "Sign-exchangeability assumption: exact sign-flip validity requires each d_i to be exchangeable with -d_i under H0, i.e. a symmetry condition on d_i's distribution about zero -- strictly stronger than E[d_i]=0. That condition is not verified here; at Stage 2B's test-corpus size this is a large-sample-justified approximation for the mean contrast, not a test that is exact by construction. DESIGN.md requires this assumption to be stated wherever this p-value is reported.",
+          "sign_flip_role": "robustness only -- the Family-2 decision rule is the Holm-corrected paired t-test; sign-flip p-values are not Holm-corrected and are not a second family",
+          "underflow_note": null
+        },
+        "identity_baselines": {
+          "claim_if_gate_absent_or_failed": "only the reconstruction claim is supported; the gate never rescues a failed primary",
+          "claim_if_gate_passes": "the 'actual denoising' claim may be added to the primary reconstruction claim",
+          "context_note": "pre_evolution vs. identity is reported independently and sits outside the gate",
+          "gate": {
+            "ci_high": -0.13289603695935276,
+            "ci_low": -0.13357390409917455,
+            "contrast": "MSE(T) - MSE(identity)",
+            "entirely_below_zero": true,
+            "n_resamples": 20000,
+            "observed_mean": -0.13323343752944625,
+            "seed": 42
+          },
+          "gate_evaluated": true,
+          "gate_passed": true,
+          "identity_key": "identity",
+          "pre_evolution_vs_identity": {
+            "ci_high": -0.128435409258754,
+            "ci_low": -0.1291309794169352,
+            "contrast": "MSE(pre_evolution) - MSE(identity)",
+            "entirely_below_zero": true,
+            "n_resamples": 20000,
+            "observed_mean": -0.12878256857357748,
+            "seed": 42
+          },
+          "primary_succeeded": true
+        },
+        "multiplicity_note": "two prespecified families, each Holm-corrected within itself; the primary test is outside both and uncorrected",
+        "n_images": 10000,
+        "one_graph_wins": {
+          "alpha": 0.05,
+          "alpha_comparison": "Both families qualify on strict `Holm-adjusted p < alpha`. DESIGN.md states this explicitly for Family 1 and leaves Family 2's comparison unworded; the Family-1 rule is applied to both. The imported `holm_bonferroni`'s own step-down decision is recorded alongside as `holm_rejected` and is unmodified -- it differs only for an adjusted p exactly equal to alpha.",
+          "beats_others": {
+            "T": {
+              "beats_all": true,
+              "per_opponent": {
+                "curr_random": {
+                  "alpha": 0.05,
+                  "favorable": true,
+                  "graph": "T",
+                  "graph_is_first_in_pair": true,
+                  "holm_adjusted_p": 9.192029828928196e-153,
+                  "holm_rejected": true,
+                  "holm_significant": true,
+                  "mean_diff": -0.001578693729487706,
+                  "other": "curr_random",
+                  "pair_key": "T_vs_curr_random"
+                },
+                "lattice": {
+                  "alpha": 0.05,
+                  "favorable": true,
+                  "graph": "T",
+                  "graph_is_first_in_pair": true,
+                  "holm_adjusted_p": 2.7334838536687548e-18,
+                  "holm_rejected": true,
+                  "holm_significant": true,
+                  "mean_diff": -0.0003781568679243728,
+                  "other": "lattice",
+                  "pair_key": "T_vs_lattice"
+                },
+                "rewired": {
+                  "alpha": 0.05,
+                  "favorable": true,
+                  "graph": "T",
+                  "graph_is_first_in_pair": true,
+                  "holm_adjusted_p": 6.693422906090326e-296,
+                  "holm_rejected": true,
+                  "holm_significant": true,
+                  "mean_diff": -0.002271996278212201,
+                  "other": "rewired",
+                  "pair_key": "T_vs_rewired"
+                }
+              }
+            },
+            "curr_random": {
+              "beats_all": false,
+              "per_opponent": {
+                "T": {
+                  "alpha": 0.05,
+                  "favorable": false,
+                  "graph": "curr_random",
+                  "graph_is_first_in_pair": false,
+                  "holm_adjusted_p": 9.192029828928196e-153,
+                  "holm_rejected": true,
+                  "holm_significant": true,
+                  "mean_diff": 0.001578693729487706,
+                  "other": "T",
+                  "pair_key": "T_vs_curr_random"
+                },
+                "lattice": {
+                  "alpha": 0.05,
+                  "favorable": false,
+                  "graph": "curr_random",
+                  "graph_is_first_in_pair": false,
+                  "holm_adjusted_p": 1.3002689981025035e-93,
+                  "holm_rejected": true,
+                  "holm_significant": true,
+                  "mean_diff": 0.001200536861563333,
+                  "other": "lattice",
+                  "pair_key": "lattice_vs_curr_random"
+                },
+                "rewired": {
+                  "alpha": 0.05,
+                  "favorable": true,
+                  "graph": "curr_random",
+                  "graph_is_first_in_pair": false,
+                  "holm_adjusted_p": 3.0974251899623206e-30,
+                  "holm_rejected": true,
+                  "holm_significant": true,
+                  "mean_diff": -0.0006933025487244949,
+                  "other": "rewired",
+                  "pair_key": "rewired_vs_curr_random"
+                }
+              }
+            },
+            "lattice": {
+              "beats_all": false,
+              "per_opponent": {
+                "T": {
+                  "alpha": 0.05,
+                  "favorable": false,
+                  "graph": "lattice",
+                  "graph_is_first_in_pair": false,
+                  "holm_adjusted_p": 2.7334838536687548e-18,
+                  "holm_rejected": true,
+                  "holm_significant": true,
+                  "mean_diff": 0.0003781568679243728,
+                  "other": "T",
+                  "pair_key": "T_vs_lattice"
+                },
+                "curr_random": {
+                  "alpha": 0.05,
+                  "favorable": true,
+                  "graph": "lattice",
+                  "graph_is_first_in_pair": true,
+                  "holm_adjusted_p": 1.3002689981025035e-93,
+                  "holm_rejected": true,
+                  "holm_significant": true,
+                  "mean_diff": -0.001200536861563333,
+                  "other": "curr_random",
+                  "pair_key": "lattice_vs_curr_random"
+                },
+                "rewired": {
+                  "alpha": 0.05,
+                  "favorable": true,
+                  "graph": "lattice",
+                  "graph_is_first_in_pair": true,
+                  "holm_adjusted_p": 1.369233604648444e-210,
+                  "holm_rejected": true,
+                  "holm_significant": true,
+                  "mean_diff": -0.0018938394102878285,
+                  "other": "rewired",
+                  "pair_key": "lattice_vs_rewired"
+                }
+              }
+            },
+            "rewired": {
+              "beats_all": false,
+              "per_opponent": {
+                "T": {
+                  "alpha": 0.05,
+                  "favorable": false,
+                  "graph": "rewired",
+                  "graph_is_first_in_pair": false,
+                  "holm_adjusted_p": 6.693422906090326e-296,
+                  "holm_rejected": true,
+                  "holm_significant": true,
+                  "mean_diff": 0.002271996278212201,
+                  "other": "T",
+                  "pair_key": "T_vs_rewired"
+                },
+                "curr_random": {
+                  "alpha": 0.05,
+                  "favorable": false,
+                  "graph": "rewired",
+                  "graph_is_first_in_pair": true,
+                  "holm_adjusted_p": 3.0974251899623206e-30,
+                  "holm_rejected": true,
+                  "holm_significant": true,
+                  "mean_diff": 0.0006933025487244949,
+                  "other": "curr_random",
+                  "pair_key": "rewired_vs_curr_random"
+                },
+                "lattice": {
+                  "alpha": 0.05,
+                  "favorable": false,
+                  "graph": "rewired",
+                  "graph_is_first_in_pair": false,
+                  "holm_adjusted_p": 1.369233604648444e-210,
+                  "holm_rejected": true,
+                  "holm_significant": true,
+                  "mean_diff": 0.0018938394102878285,
+                  "other": "lattice",
+                  "pair_key": "lattice_vs_rewired"
+                }
+              }
+            }
+          },
+          "descriptive_ranking": {
+            "best_point_estimate": "T",
+            "best_point_estimate_summary": "3 of 3 directional, 3 of 3 Holm-surviving",
+            "is_inferential": false,
+            "note": "DESCRIPTIVE ONLY. This is a plain readout of point estimates and directional pairwise outcomes, not a test and not a verdict. It applies no multiplicity correction of its own -- the Holm-surviving counts are read from Family 2's existing correction, and nothing further is corrected for producing this ordering. It qualifies NO graph as a winner: `unique_winner` in this same dict is the only supported inferential statement about which graph wins, and it is decided by the branched rule, not by this ranking. A graph named `best_point_estimate` here may well be a graph that `unique_winner` correctly declines to name.",
+            "order": [
+              "T",
+              "lattice",
+              "curr_random",
+              "rewired"
+            ],
+            "order_is_strict": true,
+            "per_graph": {
+              "T": {
+                "directional_only_wins": [],
+                "directional_wins": [
+                  "lattice",
+                  "rewired",
+                  "curr_random"
+                ],
+                "holm_surviving_wins": [
+                  "lattice",
+                  "rewired",
+                  "curr_random"
+                ],
+                "n_directional_wins": 3,
+                "n_holm_surviving_wins": 3,
+                "n_opponents": 3,
+                "summary": "3 of 3 directional, 3 of 3 Holm-surviving"
+              },
+              "curr_random": {
+                "directional_only_wins": [],
+                "directional_wins": [
+                  "rewired"
+                ],
+                "holm_surviving_wins": [
+                  "rewired"
+                ],
+                "n_directional_wins": 1,
+                "n_holm_surviving_wins": 1,
+                "n_opponents": 3,
+                "summary": "1 of 3 directional, 1 of 3 Holm-surviving"
+              },
+              "lattice": {
+                "directional_only_wins": [],
+                "directional_wins": [
+                  "rewired",
+                  "curr_random"
+                ],
+                "holm_surviving_wins": [
+                  "rewired",
+                  "curr_random"
+                ],
+                "n_directional_wins": 2,
+                "n_holm_surviving_wins": 2,
+                "n_opponents": 3,
+                "summary": "2 of 3 directional, 2 of 3 Holm-surviving"
+              },
+              "rewired": {
+                "directional_only_wins": [],
+                "directional_wins": [],
+                "holm_surviving_wins": [],
+                "n_directional_wins": 0,
+                "n_holm_surviving_wins": 0,
+                "n_opponents": 3,
+                "summary": "0 of 3 directional, 0 of 3 Holm-surviving"
+              }
+            }
+          },
+          "qualification": {
+            "T": {
+              "ci_high": -0.004300165544258418,
+              "ci_low": -0.0046028133344867715,
+              "qualifies": true,
+              "rule": "primary bootstrap interval entirely below zero",
+              "rule_source": "primary test (outside both families, uncorrected)"
+            },
+            "curr_random": {
+              "favorable": true,
+              "holm_adjusted_p": 3.7020399108306353e-252,
+              "holm_rejected": true,
+              "holm_significant": true,
+              "qualifies": true,
+              "rule": "favorable direction AND Family-1 Holm-adjusted p < alpha",
+              "rule_source": "Family 1 (vs. pre_evolution, Holm across three)"
+            },
+            "lattice": {
+              "favorable": true,
+              "holm_adjusted_p": 0.0,
+              "holm_rejected": true,
+              "holm_significant": true,
+              "qualifies": true,
+              "rule": "favorable direction AND Family-1 Holm-adjusted p < alpha",
+              "rule_source": "Family 1 (vs. pre_evolution, Holm across three)"
+            },
+            "rewired": {
+              "favorable": true,
+              "holm_adjusted_p": 1.395421565006389e-144,
+              "holm_rejected": true,
+              "holm_significant": true,
+              "qualifies": true,
+              "rule": "favorable direction AND Family-1 Holm-adjusted p < alpha",
+              "rule_source": "Family 1 (vs. pre_evolution, Holm across three)"
+            }
+          },
+          "rule": "T qualifies iff the primary bootstrap interval lies entirely below zero; a control graph qualifies iff its direction is favorable and its Family-1 Holm-adjusted p < alpha; a graph is the unique winner only if it qualifies by whichever rule applies to it AND outperforms each of the other three in the favorable direction after Family-2 Holm correction",
+          "unique_winner": "T"
+        },
+        "primary": {
+          "ci_high": -0.004300165544258418,
+          "ci_low": -0.0046028133344867715,
+          "contrast": "MSE(T) - MSE(pre_evolution)",
+          "correction": "none -- the primary test sits outside both Holm families",
+          "decision_rule": "interval entirely below zero => evolution improves; entirely above => pre-evolution wins; straddling => null",
+          "entirely_below_zero": true,
+          "multiplicity_family": null,
+          "n_resamples": 20000,
+          "observed_mean": -0.004450868955868745,
+          "resampled_means": "<20000 values omitted for manifest brevity -- see the GCS artifact itself>",
+          "seed": 42,
+          "verdict": "evolution_improves"
+        }
+      },
+      "run": {
+        "bucket": "bonsai-2026-stage2b-cache",
+        "checksum_backend": "google-crc32c",
+        "clone_dir": "/content/bonsai-2026",
+        "credentials_path": "/content/bonsai-colab-storage-key.json",
+        "devices": [
+          "cuda:0"
+        ],
+        "driver_identity": {
+          "expected": "803b5849f5a3b25f9d719abdf2ab0b56645c77010302453c760dc0c0d572a48a",
+          "matches": true,
+          "path": "/content/bonsai-2026/experiments/stage2b_denoising/run_ladder_stage4.py",
+          "sha256": "803b5849f5a3b25f9d719abdf2ab0b56645c77010302453c760dc0c0d572a48a"
+        },
+        "fingerprint": {
+          "config_digest": "04542e8a58061d520e607f2145e3fdbe988d8d26c1961373962d5c358142b6eb",
+          "git": {
+            "clean": true,
+            "closure_clean": true,
+            "closure_dirty_paths": [],
+            "commit": "431d90acdf90dfc35102e5e7c16385e2c480bf20",
+            "tree_dirty_porcelain": null
+          },
+          "n_source_files": 25,
+          "source_manifest_digest": "15db2dd883ac5dc6a74134a35af9084e28327e0b2f6d8a1190450d6876647d66"
+        },
+        "head_sha": "431d90acdf90dfc35102e5e7c16385e2c480bf20",
+        "jax_enable_x64": true,
+        "kmnist": {
+          "t10k-images-idx3-ubyte": 7840016,
+          "t10k-labels-idx1-ubyte": 10008,
+          "train-images-idx3-ubyte": 47040016,
+          "train-labels-idx1-ubyte": 60008
+        },
+        "package_versions": {
+          "diffrax": "0.7.2",
+          "equinox": "0.13.8",
+          "google-cloud-storage": "3.13.0",
+          "google-crc32c": "1.8.0",
+          "jax": "0.11.0",
+          "jaxlib": "0.11.0",
+          "numpy": "2.5.1",
+          "optax": "0.2.8",
+          "python": "3.12.13 (main, Mar  4 2026, 09:23:07) [GCC 11.4.0]",
+          "scikit-learn": "1.6.1",
+          "scipy": "1.16.3"
+        },
+        "pip_editable": true,
+        "python": "3.12.13 (main, Mar  4 2026, 09:23:07) [GCC 11.4.0]",
+        "realised_float64_dtype": "float64",
+        "requested_commit": "431d90acdf90dfc35102e5e7c16385e2c480bf20",
+        "run_id": "20260809T041415Z"
+      },
+      "timings": {
+        "0_preflight": 0.0029027462005615234,
+        "10_descriptive": 0.0002789497375488281,
+        "1_test_corpus": 5.121646881103516,
+        "1b_topologies": 1.8397846221923828,
+        "2_test_corruption": 14.152298927307129,
+        "3_encode_test": 9.491137266159058,
+        "4_test_evolution": 43.61310935020447,
+        "5_test_features": 50.92461943626404,
+        "6_test_ridge": 225.0440742969513,
+        "7_test_cnn": 669.0107984542847,
+        "8_identity_baselines": 0.5230295658111572,
+        "9_inference": 124.76138925552368,
+        "bootstrap": 18.21833562850952,
+        "stage_kmnist": 15.87481689453125,
+        "total": 1189.057140827179
+      },
+      "verdict": "STAGE4_OK"
+    },
+    "stage5_trigger_verdict_summary": {
+      "combination_rule": "fixed.triggered OR reselected.triggered",
+      "combined_triggered": false,
+      "fixed_primary_contrast": {
+        "1200": -0.005207373205848399,
+        "150": -0.0052076071195253735
+      },
+      "fixed_triggered": false,
+      "reselected_primary_contrast": {
+        "1200": -0.005207373205848357,
+        "150": -0.005207607119525382
+      },
+      "reselected_triggered": false
+    }
+  }
+}

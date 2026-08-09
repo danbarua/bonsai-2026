@@ -325,7 +325,8 @@ STAGE2B_TEST_FILES := tests/test_stage2b_corruption.py tests/test_stage2b_encode
                       tests/test_stage2b_gate_corpus.py \
                       tests/test_stage2b_audit.py \
                       tests/test_stage2b_audit_driver.py \
-                      tests/test_stage2b_abs_conv_eps_sensitivity.py
+                      tests/test_stage2b_abs_conv_eps_sensitivity.py \
+                      tests/test_stage2b_artifact_manifest.py
 
 .PHONY: stage2b-test
 stage2b-test:  ## Run the Stage 2B test suite (fast only; the Colab round trip is excluded)
@@ -395,6 +396,16 @@ stage2b-test-roundtrip:  ## Real Colab+GCS round trip -- provisions a CPU runtim
 stage2b-test-audit-crosscheck:  ## The audit driver's stage-1/2 historical cross-check against the REAL bucket -- reads only, anonymous, no billing
 	cd $(REPO_ROOT) && $(GCS_ENV) \
 		uv run --group gpu pytest tests/test_stage2b_audit_driver.py -m slow -s
+
+.PHONY: stage2b-generate-artifact-manifest
+stage2b-generate-artifact-manifest:  ## Regenerate the committed ARTIFACT_MANIFEST.json from the real bucket -- anonymous read, no credentials, no billing
+	cd $(REPO_ROOT) && $(GCS_ENV) \
+		uv run --group gpu python $(STAGE2B_DIR)/generate_stage2b_artifact_manifest.py
+
+.PHONY: stage2b-test-artifact-manifest
+stage2b-test-artifact-manifest:  ## The artifact-manifest generator's test against the REAL bucket -- anonymous, no billing
+	cd $(REPO_ROOT) && $(GCS_ENV) \
+		uv run --group gpu pytest tests/test_stage2b_artifact_manifest.py -m slow -s
 
 # A TARGET MEANS THE SAME THING EVERYWHERE. `test` and `stage2b-test` run
 # capability-free, locally and in CI alike, so "green here" and "green in
