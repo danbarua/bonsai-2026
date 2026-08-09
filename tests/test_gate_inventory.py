@@ -1112,3 +1112,37 @@ def test_a_superseded_negative_obligation_is_not_asked_to_attest(tmp_path):
     }}
     assert "missing_negative_attestation" not in kinds(
         reconcile([old, new], inventory, tmp_path))
+
+
+def test_a_duplicate_cannot_claim_a_stronger_status_than_its_canonical(tmp_path):
+    """A duplicate is skipped by the field contract and by the per-kind
+    status checks, so any status it declares was unchecked decoration --
+    and `discharged` on a row whose canonical is `unresolved` reads as a
+    closed obligation to anyone scanning statuses.
+
+    Found by reading my own rows after splitting a composite, not by
+    design: two child duplicates carried `unresolved` and nothing would
+    have objected had they carried `discharged`.
+    """
+    _, canonical, restatement = _two_clauses(tmp_path)
+    inventory = {"reviewed": True, "binding_claim": {
+        canonical.clause_id: claim_row(status="unresolved"),
+        restatement.clause_id: {
+            "locator": "P#r", "obligation": "restates it",
+            "status": "discharged", "canonical_clause": canonical.clause_id},
+    }}
+    assert "duplicate_status_disagrees" in kinds(
+        reconcile([canonical, restatement], inventory, tmp_path))
+
+
+def test_a_duplicate_matching_its_canonical_is_accepted(tmp_path):
+    """The other direction, without which the check above could refuse
+    every duplicate and still look correct."""
+    _, canonical, restatement = _two_clauses(tmp_path)
+    inventory = {"reviewed": True, "binding_claim": {
+        canonical.clause_id: claim_row(),
+        restatement.clause_id: {
+            "locator": "P#r", "obligation": "restates it",
+            "status": "discharged", "canonical_clause": canonical.clause_id},
+    }}
+    assert kinds(reconcile([canonical, restatement], inventory, tmp_path)) == []

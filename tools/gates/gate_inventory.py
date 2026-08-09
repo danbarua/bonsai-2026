@@ -669,6 +669,20 @@ def check_relationships(inventory: dict) -> list[Finding]:
                 findings.append(Finding(
                     "canonical_target_is_self",
                     f"{clause_id} names itself as its own canonical row"))
+            elif (entry.get("status")
+                  and entry["status"] != rows[target][1].get("status")):
+                # Found by reading my own rows: a duplicate is skipped by the
+                # field contract AND by the per-kind status checks, so any
+                # status it declares is unchecked decoration -- and a reader
+                # sees `discharged` on a row whose canonical is unresolved.
+                # One source of truth: match it or omit it.
+                findings.append(Finding(
+                    "duplicate_status_disagrees",
+                    f"{clause_id} declares status "
+                    f"{entry['status']!r} while the row it restates "
+                    f"({target}) is {rows[target][1].get('status')!r}. A "
+                    f"duplicate carries no evidence of its own, so it cannot "
+                    f"be in a different state from the row that does"))
 
         successor = entry.get("superseded_by")
         if successor:

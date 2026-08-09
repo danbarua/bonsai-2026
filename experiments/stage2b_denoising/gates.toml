@@ -1339,11 +1339,12 @@ The 54k arrays payload-compare bit-exact against the uploaded artifact; the
 at birth and their final-Delta tail computed alongside the full-60k tail.
 The acceptance report MUST STATE THAT SPLIT EXPLICITLY rather than letting
 one "regeneration passed" blur two different kinds of evidence."""
-status = "discharged"
+status = "unresolved"
 discharged_in = """
 experiments/stage2b_denoising/results/stage3_regeneration_acceptance.json,
 top-level keys `fit_tail`, `validation_tail`, `fit_tail_crosscheck` and
-`alignment` -- produced by compare_stage3_regeneration.py."""
+`alignment` -- produced by compare_stage3_regeneration.py. NOT yet a
+discharge; see the unresolved note below."""
 evidence = """
 The report does not carry one merged verdict. `fit_tail` and
 `validation_tail` are separate objects, and `fit_tail_crosscheck` exists
@@ -1353,7 +1354,21 @@ evidentiary asymmetry the clause is about made structural rather than
 stated. `alignment` records the join as by official index.
 
 Pointed at the artifact rather than at who checked it: an agent attribution
-is not reviewer-checkable, and these keys are."""
+is not reviewer-checkable, and these keys are.
+
+UNRESOLVED, and the Reviewer's Part B correction is exactly right. The
+obligation says the acceptance report "must STATE that split explicitly".
+Separate JSON structures make the asymmetry STRUCTURAL, which is better
+engineering -- and a reader still has to INFER why only the 54k population
+carries a cross-check. The clause specifically prohibited making them infer
+it. Structure is not a statement.
+
+What closes it needs no recomputation: extend
+`compare_stage3_regeneration.py` to emit an explanatory field naming the two
+populations and why only one is payload-compared, then regenerate the report
+deterministically from the existing arrays. Left `unresolved` rather than
+pre-marked, because a discharge written before the field exists is the thing
+this row is being corrected for."""
 
 [binding_claim.9b52d6ca717b]
 # NARROWED at Reviewer Part B's instruction, and the narrowing is
@@ -1797,6 +1812,132 @@ what the freeze was for is the question a reviewer must answer, and it is
 open."""
 trigger = "manual"
 
+[binding_claim.b4af82150247]
+parent_clause = "16b4ff3b7017"
+locator = "COMPANION_PROTOCOLS.md, ABS_CONV_EPS justification axes, axis 3"
+obligation = """
+The axis to write up for the encoder implementation is the relationship
+between the contraction residual's decay and the threshold: at which step
+count the residual first crosses 1e-12, and whether the escape is therefore
+describing CONVERGENCE or describing the FLOAT64 FLOOR.
+
+That disjunction is the obligation's substance. The two readings license
+different claims about what the absolute-convergence escape means, and the
+protocol requires the write-up to say which one the measurement supports."""
+status = "pending_package"
+pending_reason = """
+The sensitivity table has not been produced, so there is no write-up for
+this axis to appear in. Distinct from 0059f193dfec, which is the obligation
+to produce the table; this is an obligation on what the table's write-up
+must ADDRESS."""
+trigger = "manual"
+
+[binding_claim.f589d99127d1]
+parent_clause = "16b4ff3b7017"
+locator = "COMPANION_PROTOCOLS.md, ABS_CONV_EPS justification axes, axis 4"
+obligation = """
+The axis to write up for downstream feature sensitivity is what a phase
+residual of 1e-10, 1e-12 and 1e-13 does to the evolved features and to
+`Delta_g` -- i.e. whether any eps in the swept range is large enough to
+matter downstream at all."""
+status = "pending_package"
+pending_reason = """
+Same artifact as b4af82150247, and equally absent. Recorded as its own row
+rather than merged with it because they are separate axes over separate
+quantities: one is about the encoder's own convergence, the other about
+propagation into the ODE solve. A single row covering both would let an
+answer to one read as an answer to both."""
+trigger = "manual"
+
+[binding_claim.9e9598bd470a]
+# WAS not_binding NARRATION. Reviewer Part A:
+#
+#   "Those are direct normative statements. Saying 'each consequence binds
+#   where it was actually implemented' REVERSES THE SEMANTIC DIRECTION:
+#   implementation does not determine whether source text is binding. The
+#   source text already binds."
+#
+# That sentence is the correction and it generalises past this row. My
+# disposition read the code to decide what the document required. The
+# document requires what it says; code is evidence about compliance, never
+# about bindingness.
+#
+# Represented as a composite: the paragraph is the corpus candidate and
+# stays one row, and its four obligations are child rows carrying their own
+# status. Splitting into four candidates would have meant inventing corpus
+# sentences that do not exist.
+locator = "STAGE3_PLAN.md, section 'Consequences, all adopted'"
+obligation = """
+Four obligations adopted together when the population was fixed at 60,000.
+Each is a child row; this parent exists so the paragraph has one
+disposition and the children have somewhere to hang."""
+status = "unresolved"
+trigger = "manual"
+# Unresolved because one child is: e0519183ec6e and c32418555b6d both
+# restate 37ae915f8e61, which the Reviewer ruled not validly discharged
+# until the acceptance report states the population split explicitly. A
+# composite cannot be more discharged than its children.
+
+[binding_claim.900717062b1d]
+parent_clause = "9e9598bd470a"
+locator = "STAGE3_PLAN.md, 'Consequences, all adopted', item 1"
+obligation = """
+Phase A must be re-scoped to encode the 6,000 validation images too."""
+status = "discharged"
+discharged_in = "experiments/stage2b_denoising/encode_stage3_local.py, and the encoded_train_s1200 artifact's fingerprint config"
+evidence = """
+The artifact's recorded config carries `n_images: 60000`, and
+run_ladder_stage3.py::step3_encoded_input HALTS unless it does -- so the
+re-scope is not merely done, it is the condition Phase B refuses to run
+without. tests/test_stage2b_ladder_stage3.py::test_encoded_input_halts_on_a_different_encoder_step_count
+break-confirms the sibling check on the same manifest read."""
+trigger = "manual"
+
+[binding_claim.e0519183ec6e]
+parent_clause = "9e9598bd470a"
+canonical_clause = "37ae915f8e61"
+locator = "STAGE3_PLAN.md, 'Consequences, all adopted', item 2"
+obligation = """
+The regeneration's acceptance test changes shape: the new artifact is not a
+byte-comparison against the old one, because it covers a different
+population. Restates the acceptance-test obligation held in full at
+37ae915f8e61."""
+status = "unresolved"
+trigger = "manual"
+
+[binding_claim.1d7d41eb3813]
+parent_clause = "9e9598bd470a"
+locator = "STAGE3_PLAN.md, 'Consequences, all adopted', item 3"
+obligation = """
+`encode_stage3_local.py`'s Scope docstring is wrong and must be CORRECTED,
+NOT QUIETLY EDITED. A one-time remediation obligation: the requirement is
+that the correction be disclosed, not merely that the text end up right."""
+status = "discharged"
+discharged_in = "experiments/stage2b_denoising/encode_stage3_local.py, section 'Scope -- and a disclosed error in this script's first run'"
+evidence = """
+The heading itself is the evidence, and it is why this is discharged rather
+than assumed: the docstring does not simply state the corrected scope, it
+NAMES the error, what was believed, and why it was wrong. A quiet edit
+would have produced a correct docstring and no trace.
+
+Reviewer Part B's caution is what this row is written against: "a corrected
+docstring existing today is not by itself causal enforcement of an
+obligation that it must be corrected". Right -- so the discharge points at
+the DISCLOSURE, which is the part a quiet edit would lack, rather than at
+the text being currently accurate."""
+trigger = "manual"
+
+[binding_claim.c32418555b6d]
+parent_clause = "9e9598bd470a"
+canonical_clause = "37ae915f8e61"
+locator = "STAGE3_PLAN.md, 'Consequences, all adopted', item 4"
+obligation = """
+The deferred 6k and full-60k final-Delta tail counts become mandatory
+immediately. Restates the tail-reporting obligation held in full at
+37ae915f8e61."""
+status = "unresolved"
+trigger = "manual"
+
 [binding_claim.659ab6a9978b]
 # WAS not_binding NARRATION. Reviewer Part A, on this row:
 #
@@ -2108,16 +2249,6 @@ frozen; it commits the system to nothing. The freeze itself binds at
 AUDIT_PROTOCOL.md:3 (0ac873652382)."""
 
 
-[not_binding.9e9598bd470a]
-reason = """
-NARRATION: "Consequences, all adopted" -- the four downstream effects of
-deciding the population at 60,000. A record of what was adopted, and each
-consequence binds where it was actually implemented rather than here: the
-6,000 re-scope in encode_stage3_local.py, the acceptance test's shape at
-STAGE3_PLAN.md:285 (37ae915f8e61), the corrected docstring in the script
-itself, and the tail counts in the acceptance report. Listing adopted
-consequences is not a second statement of them."""
-
 [not_binding.df1784828365]
 reason = """
 NARRATION: "Role labels, frozen (Freeze 2):" -- a section lead-in
@@ -2158,9 +2289,20 @@ value, not the value: it binds at DESIGN.md:192 (5908ac408624), which is
 dispositioned as a substantiated binding_value.
 
 Two of its four axes are written as work still to do ("the axis to write up
-is..."), which makes those forward-looking notes rather than obligations on
-the system -- and the obligation to write them up binds at
-COMPANION_PROTOCOLS.md's sensitivity-table section, not here."""
+is..."). I called those "forward-looking notes rather than obligations on
+the system" and Reviewer Part A refused it:
+
+  "I don't buy that distinction. A protocol saying THE AXIS TO WRITE UP IS X
+  is a process/reporting obligation, even though it isn't executable runtime
+  logic."
+
+Correct. "Not executable" and "not binding" are different claims, and the
+whole point of `binding_claim` is that the second does not follow from the
+first. Both sentences are now child obligations of this paragraph --
+b4af82150247 and f589d99127d1 -- each pending the sensitivity table that
+does not exist. The paragraph itself remains RATIONALE for the value; what
+changed is that the two obligations buried inside it are no longer narrated
+away with it."""
 
 [not_binding.beb0ab7095d2]
 reason = """
