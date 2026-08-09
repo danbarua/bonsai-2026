@@ -126,11 +126,17 @@ def test_each_exemption_still_contributes_the_candidate_count_it_did():
     # have narrative license to describe. The count rose because
     # substantial new narrative content was added, not because the
     # judgement about FINDINGS.md's bindingness changed.
+    # README.md moved 20 -> 21 at `3daea87`, which added the
+    # run_audit.py/stage2b_audit.py module-map entry. Re-read: the new
+    # paragraph describes what the code does (enforces the sequencing
+    # gate) and names AUDIT_PROTOCOL.md as the actual authority -- the
+    # same module-map genre as every other entry already counted here,
+    # not a new obligation stated in this document's own voice.
     at_exemption_time = {
         "FINDINGS.md": 46,
         "NEGATIVE_PATH_EVIDENCE.md": 19,
         "PHASE_B_PLAN.md": 38,
-        "README.md": 20,
+        "README.md": 21,
     }
     assert set(at_exemption_time) == set(gate_corpus.EXEMPT), (
         "an exemption was added or removed without a candidate count")
