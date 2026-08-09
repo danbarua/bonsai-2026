@@ -39,11 +39,15 @@ before that by construction, so the only verdict they can earn is
 `WOULD HAVE BEEN WRONG`. Humans read committed records; guards fire on
 uncommitted ones. The two populations cannot land in the same bucket.
 
-Checked rather than reasoned: all six `RESULT WAS WRONG` rows were fixed by
-commits that modify already-committed files (`f522e41`, `7e46952`, `e6d704c`
-carry deletions; `4173bf7` is pure insertion because the halt never existed
-and the wrong `STAGE3_OK` sat in a run artifact). The single automated catch,
-`8fd8aa7`, fired pre-commit. The comparison was rigged by its own definitions.
+**The argument is structural and needs no count**: `RESULT WAS WRONG` requires
+a durable record by definition, so a pre-merge guard can only ever earn
+`WOULD HAVE BEEN WRONG`. The comparison was rigged by its own definitions.
+
+The commits corroborate it. All six `RESULT WAS WRONG` rows were fixed by
+commits touching already-committed files — `f522e41`, `7e46952`, `e6d704c`,
+`c6e0312` and `e51050f` all carry deletions; `4173bf7` is pure insertion
+because the halt never existed and the wrong `STAGE3_OK` sat in a run
+artifact. The single automated catch, `8fd8aa7`, fired pre-commit.
 
 This is a category-J instance — right field, wrong question — inside a review
 whose subject is category-J instances. It is recorded rather than quietly
@@ -80,7 +84,7 @@ which is its success condition, not its failure.
 | Reading the artifact, no guard | 1 (1 wrong) | PAID |
 | Catalogue/doc-citation guards | 1 (1 would-be) | PAID |
 | Deliberate breakage tests | 10 | UNPAID |
-| Gate inventory | 7 | UNPAID |
+| Gate inventory | 7 | UNPAID (but see §6.3 — the credit sits with one schema field, not the reconciler) |
 | PR #28 vacuous-test review | 9 | UNPAID |
 | In-session review | 6 | UNPAID |
 | Cloud Build anti-vacuity | 2 | UNPAID |
@@ -176,6 +180,9 @@ provenance probes (measurements of one harness version; the emitters lift) ·
    contract.
 5. Obligation vocabulary — before `gate_inventory.py`; clause ids hash
    normalised text, so freezing the schema late orphans every mapping.
+   **Reconciles with §6's "defer the reconciler":** defer the *tool*, freeze
+   the *schema shape* early. They are not the same decision, and a reader who
+   defers both orphans every mapping the day the reconciler arrives.
 6. Recipe-parser interface — before `ci_targets.py`, which imports it.
 7. Provenance root convention — before both hook sets.
 8. Terraform last; it creates the triggers the workflows assume.
@@ -210,11 +217,28 @@ formats, not software.**
    durable record carries a SHA, run id, or log line beside it. Catches #39,
    #40 (`f522e41`), and the coverage claim drawn from the bad provenance
    record in #18 (`c6e0312`, `63ac018`). Cost: one line of norm.
-3. **A flat, human-readable inventory of claim-bearing gates** — the *file*,
-   not the reconciler and not the per-kind schema. An outside reader of
-   `gates.toml` produced five of the six wrong-result findings (#36:
-   `e51050f`, `4c4871b`, `2dc8c9b`, `d54554c`). Build the list; defer the
-   schema.
+3. **A flat, human-readable inventory of claim-bearing gates, with one
+   evidence field that must be filled honestly** — but not the reconciler.
+   An outside reader of `gates.toml` produced five of the six wrong-result
+   findings (#36: `e51050f`, `4c4871b`, `2dc8c9b`, `d54554c`).
+
+   The evidence field is a late amendment to this item, and the file argued
+   against my first draft. `gates.toml:1394-1400` records that filling
+   `break_demonstrated` honestly is what exposed the ridge equivalence gate
+   having no negative-path test at all (142 tests green under a hardcoded
+   verdict) and the index-join guard being a source grep that stayed green
+   while all three joins were replaced — adding, pointedly, "**neither was
+   found by review**." Both remain LATENT (ledger rows 19, 20; `8017225`,
+   `bff25eb`), so this does not move the gate inventory to PAID. But it
+   relocates the credit: the catching was done by **a schema field demanding
+   evidence a human had to supply**, not by the reconciler that checks the
+   file, and not by the outside-reader pass in item 4. "The row that would not
+   go in is the instrument" is the file's own phrase for it, and it is the
+   single most transferable sentence in this repository.
+
+   Build the list and that one field. Defer the reconciler and the per-kind
+   contracts — but see §5e: freeze the schema's shape early even while
+   deferring the tool, because clause ids hash normalised text.
 4. **A standing outside-reader pass over durable records**, by someone who
    did not write them. Cited by #36, #17a, #18, #23 (`e6d704c`), #40 — five
    of six wrong results. The highest-yield item in the ledger, and not code.
