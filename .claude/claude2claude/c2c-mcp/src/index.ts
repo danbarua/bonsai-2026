@@ -160,10 +160,29 @@ const COMMENT_EVENTS = new Set(["issue_comment", "pull_request_review_comment", 
  */
 const NON_TERMINAL_ACTIONS = new Set(["requested", "in_progress"]);
 
-export function isWorthDelivering(event: string, action: unknown): boolean {
-  if (event === "workflow_run" && typeof action === "string") {
-    return !NON_TERMINAL_ACTIONS.has(action);
-  }
+// Conclusions that carry no information for a reader. A run that was
+// cancelled, skipped or superseded says nothing about the code -- only that
+// it did not happen. Measured in one five-minute window: of eight delivered
+// events, four were `cancelled` or `skipped`, so half the traffic said
+// nothing at all.
+//
+// Unlike the event TYPES, this cannot be a subscription setting: GitHub
+// filters by event, and `conclusion` exists only inside the payload. So it
+// has to live here, and it is the only part of the noise that does.
+//
+// A DENYLIST again, for the same reason as the actions above -- an
+// allowlist of "interesting" conclusions is wrong the moment GitHub adds
+// one, and silently swallowing a new terminal state is worse than
+// delivering it. `success` stays: green after red is worth knowing.
+const UNINFORMATIVE_CONCLUSIONS = new Set(["cancelled", "skipped", "stale"]);
+
+export function isWorthDelivering(event: string, body: Record<string, unknown>): boolean {
+  if (event !== "workflow_run") return true;
+  const action = body.action;
+  if (typeof action === "string" && NON_TERMINAL_ACTIONS.has(action)) return false;
+  const run = (body.workflow_run ?? {}) as Record<string, unknown>;
+  const conclusion = run.conclusion;
+  if (typeof conclusion === "string" && UNINFORMATIVE_CONCLUSIONS.has(conclusion)) return false;
   return true;
 }
 
@@ -306,8 +325,11 @@ app.post("/webhook", async (req, res) => {
   const delivery = typeof req.headers["x-github-delivery"] === "string" ? req.headers["x-github-delivery"] : "";
   const body = (req.body ?? {}) as Record<string, unknown>;
 
-  if (!isWorthDelivering(event, body.action)) {
-    console.log(`[c2c-mcp] webhook ${event} dropped: action=${String(body.action)} is not worth delivering`);
+  if (!isWorthDelivering(event, body)) {
+    const run = (body.workflow_run ?? {}) as Record<string, unknown>;
+    console.log(
+      `[c2c-mcp] webhook ${event} dropped: action=${String(body.action)} conclusion=${String(run.conclusion)}`,
+    );
     res.status(202).json({ ok: true, dropped: "not-worth-delivering" });
     return;
   }
