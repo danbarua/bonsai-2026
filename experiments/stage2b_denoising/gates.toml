@@ -1484,8 +1484,8 @@ Thirteen values, one per decade, NO interpolation and NO densification
 around an observed minimum, ever. A grid that may be refined near a minimum
 after the minimum has been seen has a stopping rule chosen by looking at
 results."""
-status = "discharged"
-discharged_in = "experiments/stage2b_denoising/stage2b_ridge.py::ALPHA_GRID"
+status = "unresolved"
+discharged_in = "See the two child rows; this parent holds the paragraph, not the evidence."
 evidence = """
 ALPHA_GRID is thirteen literal decade values and there is no densification
 code path -- no refine step, no second grid, nothing that takes a selected
@@ -1507,9 +1507,15 @@ Two things make the absence checkable rather than asserted: `cross_validate_alph
 and `ridge_equivalence_check` both DEFAULT to ALPHA_GRID and the stage-3
 driver passes no override, and the run's own artifact records the grid it
 used, so a run on a different grid is visible in the record afterwards
-rather than only preventable beforehand. What is NOT established is that a
-future caller cannot pass its own list -- the parameter exists. That is a
-real gap and it is named here rather than papered over."""
+rather than only preventable beforehand.
+
+The gap this attestation named -- "a future caller cannot pass its own list
+-- the parameter exists" -- is now CLOSED at 5b228475bc3c, and the Reviewer
+is why. I wrote the hole down and left the row discharged; their Part B
+ruling is that naming it is not the same as covering it: "the fact that the
+current Stage-3 driver does not pass an override proves the COMPLETED RUN
+respected the grid. It does not discharge an ever-scoped procedural rule if
+production functions continue to accept arbitrary alpha arrays.""""
 
 [binding_claim.4e826a51fe84]
 locator = "DESIGN.md, section 'Named possible outcomes'"
@@ -1837,6 +1843,68 @@ separately inventoried and discharged (5de8c56be1a5). Whether replacing
 what the freeze was for is the question a reviewer must answer, and it is
 open."""
 trigger = "manual"
+
+[binding_value.6ff7b2b574d0]
+parent_clause = "3043a89b2aae"
+canonical_clause = "ccd85c56816e"
+# The VALUE half. Restates the grid ccd85c56816e already holds in full with
+# its own break evidence -- a duplicate rather than a third account of the
+# same thirteen numbers, which is what the Reviewer's Part A deduplication
+# ruling exists to prevent.
+value = """
+The alpha grid is exactly thirteen values, one per decade from 1e-6 to
+1e6. Held in full at ccd85c56816e."""
+production_consumers = ""
+status = "enforced"
+enforcement = ""
+break_demonstrated = ""
+trigger = "ci-fast"
+
+[binding_gate.5b228475bc3c]
+parent_clause = "3043a89b2aae"
+# The PROCEDURAL half, and the only Reviewer finding this round that needed
+# new production code. Part B: "I would split this: binding_value ... and
+# binding_gate or production-path invariant: Stage 2B production execution
+# may evaluate only that grid; caller override must either be unavailable
+# on production paths or validated against the exact frozen grid."
+enforcement = "experiments/stage2b_denoising/stage2b_ridge.py::assert_frozen_grid"
+production_reachability = """
+run_ladder_stage3.py::step7_ridge calls it once per condition, BEFORE
+cross_validate_alpha, on the grid the module is about to use. Placed at the
+driver boundary rather than inside the ridge module on the ruling's own
+wording -- "unavailable on production paths OR validated against the exact
+frozen grid" -- because a check inside cross_validate_alpha would refuse
+the many tests that legitimately pass small custom grids, or grow a
+test-only bypass flag. A gate with an off-switch is a gate nobody has to
+defeat."""
+input_wiring = """
+`stage2b_ridge.ALPHA_GRID`, the value the driver's fits will actually use,
+compared against a grid GENERATED from the design's rule
+(`frozen_decade_grid()`, thirteen decades from 1e-6 to 1e6) rather than
+from a transcribed second list. That direction matters: comparing the
+constant against a copy of itself is VACUOUS_TESTS #28, where every test
+read FOLD_SEED from the module and asserted a record equalled it."""
+decision_consequence = """
+ValueError naming the condition it fired on, raised before any fit
+evaluates the grid."""
+test = "tests/test_stage2b_ridge.py::test_the_boundary_refuses_a_grid_that_is_not_the_frozen_decades"
+break_demonstrated = """
+Four breaks, four distinct failure sets:
+
+  boundary removed from the driver     test_the_stage3_driver_validates_the_grid_before_any_fit
+  boundary moved AFTER the fit         same test -- the ordering is asserted
+                                       on the AST, so a check that runs once
+                                       the grid has already been evaluated
+                                       fails rather than passing on presence
+  predicate stops refusing             all four parametrized cases plus the
+                                       message test
+  ALPHA_GRID densified with 3e-6       test_the_frozen_grid_is_generated_from_the_rule
+                                       and test_select_alpha_uses_locked_grid
+
+The second is the one worth having. A gate present in the same function as
+the thing it guards, but running after it, is the shape a source grep
+cannot tell from a working gate."""
+trigger = "ci-fast"
 
 [binding_claim.1c61e76c45e9]
 parent_clause = "aec9fff59bbe"

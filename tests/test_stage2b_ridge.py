@@ -1265,3 +1265,58 @@ def test_new_diagnostics_serialize_through_the_ladder_drivers_json_default(monke
     assert loaded["fold_numerical_rank"] == cv["fold_numerical_rank"].tolist()
     np.testing.assert_allclose(loaded["fold_kappa_alpha"], cv["fold_kappa_alpha"])
     assert "oof_clipped_mse" not in cv
+
+
+# ---- the frozen grid, enforced on the production path ----------------------
+
+def test_the_frozen_grid_is_generated_from_the_rule_not_a_second_list():
+    """DESIGN.md states a RULE -- thirteen values, one per decade -- and the
+    predicate computes it. A transcribed second list would be one more
+    constant to drift, and comparing `ALPHA_GRID` against a copy of itself
+    is VACUOUS_TESTS #28 with extra steps."""
+    assert ridge.frozen_decade_grid() == tuple(10.0 ** e for e in range(-6, 7))
+    assert len(ridge.frozen_decade_grid()) == 13
+    assert ridge.ALPHA_GRID == ridge.frozen_decade_grid()
+
+
+@pytest.mark.parametrize("bad,why", [
+    ((1e-6, 1e-5, 1e-4), "a truncated grid"),
+    (tuple(10.0 ** e for e in range(-6, 7)) + (3e-6,), "a densified grid"),
+    (tuple(10.0 ** (e / 2) for e in range(-12, 13)), "half-decade spacing"),
+    (tuple(10.0 ** e for e in range(-5, 8)), "thirteen decades, shifted"),
+])
+def test_the_boundary_refuses_a_grid_that_is_not_the_frozen_decades(bad, why):
+    """The densified case is the one the clause exists for: a grid refined
+    near a minimum AFTER the minimum has been seen has a stopping rule
+    chosen by looking at results."""
+    with pytest.raises(ValueError, match="no densification"):
+        ridge.assert_frozen_grid(bad, where=why)
+
+
+def test_the_boundary_names_where_it_refused():
+    """A refusal that does not say which condition it fired on sends a
+    reader to the wrong place in a seven-condition loop."""
+    with pytest.raises(ValueError, match=r"step7_ridge\[evolved_T\]"):
+        ridge.assert_frozen_grid((1.0,), where="step7_ridge[evolved_T]")
+
+
+def test_the_stage3_driver_validates_the_grid_before_any_fit():
+    """The gate is only a gate if production reaches it. Asserted on the
+    AST rather than by grepping the source, and BEFORE the CV call rather
+    than merely present in the same function -- a check that runs after the
+    fit has already evaluated the grid it was meant to refuse."""
+    import ast
+    driver = (Path(__file__).resolve().parent.parent / "experiments" /
+              "stage2b_denoising" / "run_ladder_stage3.py")
+    tree = ast.parse(driver.read_text())
+    step = next(n for n in ast.walk(tree)
+                if isinstance(n, ast.FunctionDef) and n.name == "step7_ridge")
+
+    def call_line(attr):
+        return min(n.lineno for n in ast.walk(step)
+                   if isinstance(n, ast.Call) and isinstance(n.func, ast.Attribute)
+                   and n.func.attr == attr)
+
+    assert call_line("assert_frozen_grid") < call_line("cross_validate_alpha"), (
+        "the grid boundary does not precede the cross-validation call, so a "
+        "grid it would refuse has already been evaluated by the time it runs")

@@ -1088,6 +1088,8 @@ def step7_ridge(mods, bucket, features, Y, y_strat, record, fp, parents_by_condi
             entry = {}
             X = features[condition]
             try:
+                mods.ridge.assert_frozen_grid(
+                    mods.ridge.ALPHA_GRID, where=f"step7_ridge[{condition}]")
                 cv = mods.ridge.cross_validate_alpha(X, Y, y_strat)
                 entry["cv"] = cv
                 alphas = np.asarray(cv["alphas"])
