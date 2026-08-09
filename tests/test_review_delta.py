@@ -444,6 +444,21 @@ def test_a_missing_jq_fails_open_loudly_rather_than_reviewing_nothing(
     assert "reviewing everything in scope" in proc.stderr
 
 
+def test_malformed_compare_json_fails_open_rather_than_reviewing_nothing(
+    tmp_path: Path, real_tree: dict
+) -> None:
+    """A compare payload with no `.files` key makes `.files[]` a jq runtime
+    error inside `classify`. Before the fix, neither call site checks jq's
+    exit status, both come back empty, and the script reports `mode=none`
+    -- exactly the silent fallback to reviewing nothing this script exists
+    to avoid."""
+    malformed_compare = {"url": "https://example.invalid/compare"}  # no "files"
+    outputs, stderr = _run_delta(tmp_path, malformed_compare, real_tree)
+    assert outputs["mode"] == "full"
+    assert "jq failed" in stderr.lower()
+    assert "reviewing everything in scope" in stderr
+
+
 @pytest.mark.parametrize(
     "before, why",
     [

@@ -153,8 +153,12 @@ classify() {  # classify <section>
   '
 }
 
-examine=$(classify examine)
-departed=$(classify departed)
+if ! examine=$(classify examine); then
+  fail_open "jq failed classifying the examine set"
+fi
+if ! departed=$(classify departed); then
+  fail_open "jq failed classifying the departed set"
+fi
 
 n_examine=$(printf '%s' "$examine" | grep -c . || true)
 n_departed=$(printf '%s' "$departed" | grep -c . || true)
