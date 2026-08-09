@@ -166,6 +166,12 @@ mention here, in the same commit that creates it.
   themselves. Refuses to compute the official result a second time if it
   already exists -- "evaluated once" is enforced, not merely stated.
 
+- **`run_audit.py` / `stage2b_audit.py`** — the guarded amendment-impact
+  audit seam and its pure calculations. They enforce the 150-step and
+  production-rerun sequencing gate before composing validated artifacts;
+  the frozen protocol remains authoritative and no test-split data is
+  permitted.
+
 - **`gate_corpus.py`** — pins which documents the binding-clause
   inventory ranges over, and asserts that list against the `.md` files
   actually present, in both directions, before handing them to
