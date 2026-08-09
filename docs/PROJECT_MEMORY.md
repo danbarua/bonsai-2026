@@ -665,10 +665,16 @@ already established. Full account, every number, and the complete
 caveat: `experiments/stage2b_denoising/FINDINGS.md`'s stage-4 section.
 
 **Genuinely open, not required by the confirmatory result above**: the
-two companion protocols (`COMPANION_PROTOCOLS.md`'s ARM/x86 propagation
-stress set and `ABS_CONV_EPS` sensitivity table) were specified but their
-results were never produced, and `AUDIT_PROTOCOL.md` does not require
-them for the stage-4 verdict itself. Whether the CNN belongs in this
+**150-vs-1200 amendment-impact audit itself** -- `AUDIT_PROTOCOL.md`'s own
+core apparatus, which `PHASE_B_PLAN.md`'s Decision 4 sequenced to run
+after Phase B against Phase B's own persisted artifacts -- has not run;
+no audit driver exists in the repository and no bucket object records
+one, and no ruling re-scoping it away from that plan was found. The two
+companion protocols it names (`COMPANION_PROTOCOLS.md`'s ARM/x86
+propagation stress set and `ABS_CONV_EPS` sensitivity table) were
+likewise specified but their results were never produced. None of these
+are required for the stage-4 verdict itself, per `AUDIT_PROTOCOL.md`'s
+own scoping. Whether the CNN belongs in this
 design at all -- INFRA found it has no stated consumer anywhere in
 `DESIGN.md`'s text, in neither statistics family nor any named
 watched-for outcome -- is unresolved; this result treats it as the

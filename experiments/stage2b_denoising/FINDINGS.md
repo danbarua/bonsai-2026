@@ -1310,11 +1310,20 @@ positive answer on the official held-out test corpus: yes, and the
 stronger "actual denoising" claim holds too. What remains open, tracked
 separately rather than folded into this result: whether a denser or
 extended ridge grid would move `T`'s floor-pinned alpha (the caveat
-above); the two companion protocols (`COMPANION_PROTOCOLS.md`'s ARM/x86
-propagation stress set and `ABS_CONV_EPS` sensitivity table), whose
-results were not part of this evaluation and were not required to be, per
-`AUDIT_PROTOCOL.md`'s own scoping of what the confirmatory test itself
-needs; and INFRA's still-open finding that the CNN has no stated consumer
+above); the **150-vs-1200 amendment-impact audit itself**
+(`AUDIT_PROTOCOL.md`'s own core apparatus -- sign convention, population
+roles, OOF prediction basis, both alpha regimes, the analytic resolution
+limit, all three review triggers), which `PHASE_B_PLAN.md`'s Decision 4
+sequenced to run AFTER Phase B against Phase B's own persisted artifacts,
+and which has not run: no audit driver exists in this repository, no
+audit-related object exists in the bucket, and no ruling re-scoping it
+away from that plan was found on searching for one -- it is simply
+unstarted, not deferred by any decision this file can point to; the two
+companion protocols it names (`COMPANION_PROTOCOLS.md`'s ARM/x86
+propagation stress set and `ABS_CONV_EPS` sensitivity table), likewise
+specified but not run; none of these results were part of this
+evaluation and none were required to be, per `AUDIT_PROTOCOL.md`'s own
+scoping of what the confirmatory test itself needs; and INFRA's still-open finding that the CNN has no stated consumer
 in `DESIGN.md`'s own text, which this result treats as settled in the
 "descriptive comparator" reading rather than resolving the ambiguity
 INFRA named -- sharpened by this section's own descriptive finding that
