@@ -632,8 +632,20 @@ Two consequences, both concrete rather than cautionary:
 
 ## First-run protocol: treat the first green as suspect
 
-Standing requirement set by the orchestrator on 2026-08-08, and the reason
-is this project's own recent record rather than caution in general. **A
+**Who required this, stated plainly: an AI agent did.** The
+claude-desktop-orchestrator set it on 2026-08-08 (mesh message 10:35:35Z,
+"here is the standing treatment"), and this document recorded it. Dan did
+not ask for it and it bills him nothing — every requirement is dischargeable
+by an agent, and all four were discharged by one.
+
+That label is here because "the orchestrator" reads as authority to a human
+skimming, and the distinction it hides is the one that matters: a constraint
+an agent invented and a constraint the human asked for are different things,
+and only the second may consume his attention. This one is the first, and it
+earns its place on its argument rather than on where it came from.
+
+The reason is this project's own recent record rather than caution in
+general. **A
 first-ever pass on a never-exercised path is the presence-shaped failure
 surface**: the build report would be correct in form and unverified in what
 it attests, which is exactly the shape of the capture record that reported
