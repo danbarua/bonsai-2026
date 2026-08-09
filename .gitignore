@@ -290,3 +290,4 @@ terraform.rc
 
 # oh-my-openagent
 /.omo/**
+/.opencode/**
