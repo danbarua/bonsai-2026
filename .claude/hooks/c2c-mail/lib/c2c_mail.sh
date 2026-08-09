@@ -35,46 +35,26 @@
 # instead of pure bash fixtures. Considered and explicitly deferred this
 # session, not overlooked.
 
-# Watched inbox dirs. Default is claude2claude/inbox ONLY -- deliberately
-# NOT a glob over every .claude/claude2*/inbox, despite that being this
-# file's original design (principle 21 from docs/VACUOUS_TESTS.md: derive
-# a set rather than hand-list it, so a new channel isn't silently
-# under-covered). That principle still holds for "which channels get
-# discovered automatically" in general, but a real incident showed the
-# glob was solving the wrong problem here: the intended mail topology is
-# ChatGPT -> Claude Desktop -> Claude Code (via claude2claude), NOT
-# ChatGPT -> Claude Code directly, so a Claude Code session's Stop hook
-# blocking on raw, unaddressed claude2gpt/inbox traffic (content meant
-# for Desktop to triage and relay, not for an arbitrary unrelated Code
-# session to consume or archive) is a false positive, not under-coverage.
-# Confirmed live: a substantive ChatGPT review ruling about an unrelated
-# ML pipeline stage landed in claude2gpt/inbox and blocked a Claude Code
-# session doing unrelated MCP-server engineering, with no clean way to
-# unblock without either mishandling content that wasn't its business or
-# leaving the session stuck. The fix is scope, not addressing: Code only
-# watches the channel Desktop relays INTO it on, full stop.
+# Watched mail dirs: code2code only. claude2claude was removed at 0.8.0.
 #
-# code2code/mailbox/ IS also watched by default, unlike claude2gpt above --
-# a different case, not an exception to the reasoning that excluded
-# claude2gpt: that exclusion was about topology (Code isn't the intended
-# recipient of raw ChatGPT<->Desktop relay traffic), not about "watch
-# fewer things." code2code messages are BY Claude Code sessions FOR Claude
-# Code sessions -- exactly the mail a Code session's Stop hook exists to
-# notice. Addressing (c2c_list_unread_for below) still narrows it to "mine
-# or broadcast," same as claude2claude.
+# Not a glob over .claude/claude2*/, deliberately. claude2gpt carries raw
+# ChatGPT<->Desktop relay traffic that a Code session is not the intended
+# recipient of -- watching it once blocked a session on a review ruling
+# about an unrelated pipeline stage, with no clean way out but to mishandle
+# someone else's mail. code2code is the opposite case: messages BY Code
+# sessions FOR Code sessions, which is exactly what a Stop hook exists to
+# notice.
 #
-# Set C2C_MAIL_WATCH_DIRS (space-separated, relative-to-project or
-# absolute) to override with an explicit list instead -- used by
-# test/break-tests.sh for a throwaway location, and available if a future
-# channel genuinely does deliver straight to Code (bypassing Desktop) and
-# needs watching too.
+# So anything added here has to pass that test -- is a Code session the
+# intended recipient? -- not merely "is it a mailbox".
+#
+# C2C_MAIL_WATCH_DIRS (space-separated, relative-to-project or absolute)
+# overrides the list; test/break-tests.sh uses it for a throwaway location.
 c2c_watch_dirs() {
   if [ -n "${C2C_MAIL_WATCH_DIRS:-}" ]; then
     printf '%s\n' $C2C_MAIL_WATCH_DIRS
     return
   fi
-  # code2code only. The claude2claude channel was removed at 0.8.0 -- every
-  # party on it had a better route once Desktop joined the mesh directly.
   local d
   d="${CLAUDE_PROJECT_DIR:-.}/.claude/code2code/mailbox"
   [ -d "$d" ] && printf '%s\n' "$d"
