@@ -1310,20 +1310,16 @@ positive answer on the official held-out test corpus: yes, and the
 stronger "actual denoising" claim holds too. What remains open, tracked
 separately rather than folded into this result: whether a denser or
 extended ridge grid would move `T`'s floor-pinned alpha (the caveat
-above); the **150-vs-1200 amendment-impact audit itself**
-(`AUDIT_PROTOCOL.md`'s own core apparatus -- sign convention, population
-roles, OOF prediction basis, both alpha regimes, the analytic resolution
-limit, all three review triggers), which `PHASE_B_PLAN.md`'s Decision 4
-sequenced to run AFTER Phase B against Phase B's own persisted artifacts,
-and which has not run: no audit driver exists in this repository, no
-audit-related object exists in the bucket, and no ruling re-scoping it
-away from that plan was found on searching for one -- it is simply
-unstarted, not deferred by any decision this file can point to; the two
-companion protocols it names (`COMPANION_PROTOCOLS.md`'s ARM/x86
-propagation stress set and `ABS_CONV_EPS` sensitivity table), likewise
-specified but not run; none of these results were part of this
-evaluation and none were required to be, per `AUDIT_PROTOCOL.md`'s own
-scoping of what the confirmatory test itself needs; and INFRA's still-open finding that the CNN has no stated consumer
+above); the two companion protocols `AUDIT_PROTOCOL.md` names
+(`COMPANION_PROTOCOLS.md`'s ARM/x86 propagation stress set and the
+`ABS_CONV_EPS` sensitivity table -- the latter now run, see this file's
+own section below; the former not yet started); none of these results
+were part of this evaluation and none were required to be, per
+`AUDIT_PROTOCOL.md`'s own scoping of what the confirmatory test itself
+needs. **The 150-vs-1200 amendment-impact audit itself has since run --
+see "Stage 2B: the amendment-impact audit" below, which supersedes the
+"has not run" framing this paragraph previously carried.** And INFRA's
+still-open finding that the CNN has no stated consumer
 in `DESIGN.md`'s own text, which this result treats as settled in the
 "descriptive comparator" reading rather than resolving the ambiguity
 INFRA named -- sharpened by this section's own descriptive finding that
@@ -1335,3 +1331,152 @@ conditions -- the comparison `DESIGN.md`'s statistics families and
 `one_graph_wins` actually run. It is not a claim that `T` is the
 best-performing condition in this file, and the CNN's descriptive number
 says it is not.**
+
+# Stage 2B: the amendment-impact audit -- no trigger
+
+`AUDIT_PROTOCOL.md`'s own core apparatus, run 2026-08-09 (`AUDIT_OK`, A100,
+one attempt, ~29.4 minutes of GPU). Quantifies the representational impact
+of the encoder-budget amendment (150 -> 1,200 steps) made after ladder
+stage 1's gate failure -- a prospective, disclosed, post-failure amendment,
+not a preregistered component of the original design. Per the protocol:
+this is not a model-selection knob and the 1,200-step budget stays frozen
+regardless of what follows; what can change is the scope of the claim.
+
+## Result: none of the three triggers fired, in either alpha regime
+
+| quantity | 150-step | 1,200-step | change |
+|---|---|---|---|
+| primary contrast (`T` vs. `pre_evolution`, fixed alpha) | -0.0052076071 | -0.0052073732 | +2.339e-7 |
+| primary contrast (`T` vs. `pre_evolution`, reselected alpha) | -0.0052076071 | -0.0052073732 | +2.339e-7 |
+
+Both regimes: `primary_sign_reversal = False`; all four
+`graph_sign_reversals` (`T`, `lattice`, `rewired`, `curr_random`)
+`= False`; every one of the six pairwise comparisons has
+`order_reversed = False` (so `resolved` is `False` throughout --
+`resolved` requires an order reversal in the first place, the frozen
+threshold is what would matter had one occurred). `combined_triggered =
+False` -- the explicit OR over both regimes that `AUDIT_PROTOCOL.md`
+requires ("either alpha regime triggers review... a reversal seen under
+fixed-alpha alone, or under reselected-alpha alone, is sufficient").
+
+Reading the number: the change in the primary contrast is real and
+measured, not zero, and sits roughly five orders of magnitude above the
+frozen analytic resolution threshold (`4.604761e-10`) -- but the change
+itself is ~2.3e-7, about 0.004% of the contrast's own magnitude
+(-0.0052). The amendment moved the number by an amount the audit can
+resolve, in a direction and scale that changes no sign, no per-graph
+verdict, and no pairwise ordering. The 150-step and 1,200-step
+representations tell the same qualitative story about which evolved
+graph does best; the 1,200-step budget's own confirmatory result (the
+stage-4 section above) is not put in question by this measurement.
+
+## Stage-1/2 historical cross-check: the new OOF machinery reproduces trusted numbers
+
+`gates.toml`'s `binding_gate.9bc6f9e3808a` (out-of-fold per-image MSEs
+must reproduce the already-stored fold-aggregate values from the stage-1
+and stage-2 runs, not merely agree with a within-run recomputation on
+synthetic data). Run against each stage's OWN stored `ridge_cv.json` and
+OWN pre-amendment nine-decade alpha grid (not the 1,200-step run's
+thirteen-decade `ALPHA_GRID` -- the two grids have different column
+counts, so using the wrong one fails on shape before comparing a single
+value). All ten (stage x condition) checks passed, at or near float64
+dust:
+
+| stage | max abs diff across 5 conditions |
+|---|---|
+| 1 (n=1,000) | 1.388e-17 -- 2.776e-17 |
+| 2 (n=5,000) | 0.0 (exact, 4 of 5 conditions) -- negligible |
+
+This is the gate that discharges before the 60,000-image OOF ridge step
+is trusted to mean anything: new machinery, pinned against numbers this
+project already trusted, before being run at a scale ten times larger
+than anything it had been checked against.
+
+## Feature distances: real but small, and the amendment's own magnitude
+
+150-vs-1200 distance per condition (gauge-fixed, reference node 363),
+NOT the pre-vs-evolved distance within one budget -- the quantity that
+answers "how much did the amendment change the representation", not
+"how much does evolution change the representation":
+
+| condition | cos/sin Euclidean, median | p95 | max |
+|---|---|---|---|
+| `pre_evolution` | 0.001761 | 0.005419 | 0.05987 |
+| `T` | 0.001269 | 0.003926 | 0.03857 |
+| `lattice` | 0.001286 | 0.004027 | 0.04247 |
+| `rewired` | 0.000180 | 0.000588 | 0.01049 |
+| `curr_random` | 0.000250 | 0.000812 | 0.01420 |
+
+`pre_evolution` shows the largest median distance of the five -- the
+raw encoding itself differs more between 150 and 1,200 steps than the
+EVOLVED representations do, for three of the four graphs (`rewired` and
+`curr_random`, the two most strongly synchronizing graphs per Stage 2A's
+order-parameter measurements, show markedly smaller distances than
+`pre_evolution`; `T` and `lattice` sit closer to `pre_evolution`'s own
+scale). Consistent with graph evolution partially washing out
+budget-dependent encoding differences for the graphs that synchronize
+most, rather than amplifying them -- offered as a descriptive reading of
+this table, not a claim this audit's own triggers test for.
+
+## The scope statement the protocol requires in any write-up, stated verbatim
+
+Per-budget fold-fitted `StandardScaler`s are retained (production
+preprocessing). Fixed-alpha therefore isolates **the effect of alpha
+reselection** -- it does **not** completely isolate raw representation
+change. A shared-scaler comparison is optional secondary work, not
+required, and must not be presented as the primary probe.
+
+## What it took
+
+One attempt, `AUDIT_OK` on the first real run. A prior attempt (same
+commit, before `LADDER_STAGE=5` was added to `stage2b_gcs.py`'s
+`LADDER_STAGES` validation tuple) failed at the first artifact write in
+the 150-step evolution step, after ~163s of real evolution compute --
+caught non-fatally once already (inside the sizing probe's own publish
+step, which logs and continues) before failing fatally; fixed, pinned
+with a regression test, and re-run. The session tore down cleanly both
+times; no billing leak.
+
+Total wall-clock 1,764.1s (~29.4 min): bootstrap 17.1s, load train-side
+artifacts 54.6s, topologies 1.9s, consume stage 3's 1,200-step
+thetas/features 313.2s, production alphas 9.1s, sizing probe 8.0s,
+evolve the 150-step budget (4 graphs x 60,000 images) 307.8s, 150-step
+features 460.3s, stage-1/2 cross-check 66.0s, the 60,000-image OOF ridge
+(both alpha regimes, both budgets, 5 conditions) 507.5s, feature
+distances 14.0s, trigger verdict 4.3s. The sizing probe's own projection
+(516.8s for the OOF ridge step, measured from one JAX SVD at production
+shape before anything expensive ran) came in within 2% of that step's
+actual 507.5s -- the probe's methodology validated by the run it gated.
+
+Production (1,200-step) alphas the fixed-alpha regime applied
+identically to both budgets: `pre_evolution=1000.0`, `T=1e-6`,
+`lattice=1e-6`, `rewired=1e-5`, `curr_random=1e-5` -- `T` and `lattice`
+at the grid floor, the same caveat the stage-4 section above already
+carries forward from Phase B's amendment.
+
+## Code and artifacts
+
+`run_audit.py`, `stage2b_audit.py`, `tests/test_stage2b_audit.py`,
+`tests/test_stage2b_audit_driver.py`. Run report:
+`stage2b/train/stage5/common/audit_report_20260809T192835Z.json` / `.txt`.
+Per-condition, per-budget artifacts (150-step evolved thetas and
+features, the 60,000-image OOF results in both alpha regimes, feature
+distances, trigger verdict) all under `stage2b/train/stage5/`. The
+1,200-step thetas and features are Phase B's own persisted artifacts
+under `stage2b/train/stage3/`, consumed rather than re-evolved, per
+`PHASE_B_PLAN.md`'s Decision 4.
+
+## Status of the investigation
+
+The amendment-impact audit is closed: no trigger fired, in either alpha
+regime, on any of the three frozen conditions. The 150-vs-1200
+encoder-budget amendment has a real, measured representational effect,
+and it is too small to change the sign, per-graph verdict, or pairwise
+ordering the stage-4 confirmatory result (and Phase B's own ridge
+result) depend on. Still open: the `ABS_CONV_EPS` sensitivity table (run
+separately, see `run_abs_conv_eps_sensitivity.py` and this document's
+own entry once written up -- as of this section, computed and committed
+but not yet narrated here) and the ARM/x86 propagation stress set
+(`COMPANION_PROTOCOLS.md` Protocol 1, not yet started -- needs real
+ARM-encoded and real x86-encoded data on the same stress-set images, a
+substantially larger undertaking than this section's audit).

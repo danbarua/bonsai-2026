@@ -149,11 +149,13 @@ mention here, in the same commit that creates it.
   before it ran; thetas and features are persisted per graph and per
   condition because the amendment audit consumes those exact objects.
 - **`run_ladder_stage4.py`** — the stage-4 driver, DESIGN.md's ONE locked
-  evaluation on the official 10,000-image KMNIST test corpus. Written but
-  **not executed**: `AUDIT_PROTOCOL.md` blocks it behind the pre-Stage-4
-  package review and Dan's explicit release, and `make
-  stage2b-ladder-stage4` refuses to run without a separate
-  `STAGE4_RELEASE_CONFIRMED=1`. The only file permitted to pass
+  evaluation on the official 10,000-image KMNIST test corpus. Ran
+  2026-08-09 (`STAGE4_OK`, three attempts, two real bugs caught and fixed
+  by the first two) — the official, locked confirmatory result; full
+  account in `FINDINGS.md`'s stage-4 section. `make stage2b-ladder-stage4`
+  refuses to run without a separate `STAGE4_RELEASE_CONFIRMED=1`, and
+  `AUDIT_PROTOCOL.md`'s "evaluated once" is enforced by the driver's own
+  one-shot lock, not merely stated. The only file permitted to pass
   `allow_test_split=True` for scientific work (`smoke_stage2b_gcs.py` also
   carries the literal, as a named exemption -- it is a hand-run transport
   probe, not a driver). Refits ridge fresh from stage 3's persisted TRAIN
@@ -164,7 +166,7 @@ mention here, in the same commit that creates it.
   test-corpus inference, because stage 3 persisted training histories and
   a summary but not the fitted coefficients, scaler, or model weights
   themselves. Refuses to compute the official result a second time if it
-  already exists -- "evaluated once" is enforced, not merely stated.
+  already exists.
 
 - **`run_audit.py` / `stage2b_audit.py`** — the amendment-impact audit
   driver and its pure calculations, mirroring stage 3/4's
@@ -178,10 +180,13 @@ mention here, in the same commit that creates it.
   fold-level SVDs) gates the 60,000-image OOF ridge step before it runs.
   Reproduces stage 1's and stage 2's own stored fold-aggregate values with
   the new out-of-fold machinery, on each stage's own pre-amendment
-  nine-decade alpha grid, before trusting that machinery at 60,000. Written
-  but **not executed**: real GPU work, blocked behind Dan's explicit
-  release exactly as stage 4 was, gated by `make stage2b-audit` refusing to
-  run without `STAGE2B_AUDIT_RELEASE_CONFIRMED=1`.
+  nine-decade alpha grid, before trusting that machinery at 60,000. Ran
+  2026-08-09 (`AUDIT_OK`, ~29.4 minutes of GPU, one real attempt after an
+  earlier one caught a genuine bug -- `stage2b_gcs.py`'s `LADDER_STAGES`
+  validation tuple never having been extended for this driver's own
+  `LADDER_STAGE=5`, fixed and re-run): no trigger fired in either alpha
+  regime. Full account in `FINDINGS.md`'s audit section. `make
+  stage2b-audit` refuses to run without `STAGE2B_AUDIT_RELEASE_CONFIRMED=1`.
 
 - **`run_abs_conv_eps_sensitivity.py`** — `COMPANION_PROTOCOLS.md` Protocol
   2: the encoder gate's verdict recomputed from stored per-image final-Delta

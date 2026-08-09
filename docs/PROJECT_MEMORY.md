@@ -408,7 +408,15 @@ prespecified families. **Not established: that `T` is the best
 condition overall** -- the CNN, a separate model class tested against
 nothing here, has a numerically lower mean MSE. Full account, including
 that comparison, below and in
-`experiments/stage2b_denoising/FINDINGS.md`'s stage-4 section.**
+`experiments/stage2b_denoising/FINDINGS.md`'s stage-4 section.
+The 150-vs-1200 encoder-budget amendment-impact audit has since run
+(2026-08-09, `AUDIT_OK`): none of the three frozen triggers fired in
+either alpha regime -- the amendment's representational effect is real
+and measured (~2.3e-7 shift in the primary contrast, five orders above
+the frozen analytic resolution threshold) but changes no sign, no
+per-graph verdict, and no pairwise ordering, so it does not put the
+stage-4 result above in question. Full account:
+`experiments/stage2b_denoising/FINDINGS.md`'s audit section.**
 `experiments/stage2b_denoising/DESIGN.md` -- seven drafts, four external
 review rounds plus an adversarial blind-spot review and an outsider peer
 review, all incorporated; asks the Stage-2A-shaped question (does
@@ -664,17 +672,25 @@ cost without the resumability contract every earlier ladder stage had
 already established. Full account, every number, and the complete
 caveat: `experiments/stage2b_denoising/FINDINGS.md`'s stage-4 section.
 
-**Genuinely open, not required by the confirmatory result above**: the
-**150-vs-1200 amendment-impact audit itself** -- `AUDIT_PROTOCOL.md`'s own
-core apparatus, which `PHASE_B_PLAN.md`'s Decision 4 sequenced to run
-after Phase B against Phase B's own persisted artifacts -- has not run;
-no audit driver exists in the repository and no bucket object records
-one, and no ruling re-scoping it away from that plan was found. The two
-companion protocols it names (`COMPANION_PROTOCOLS.md`'s ARM/x86
-propagation stress set and `ABS_CONV_EPS` sensitivity table) were
-likewise specified but their results were never produced. None of these
-are required for the stage-4 verdict itself, per `AUDIT_PROTOCOL.md`'s
-own scoping. Whether the CNN belongs in this
+**Closed since**: the **150-vs-1200 amendment-impact audit itself** --
+`AUDIT_PROTOCOL.md`'s own core apparatus, which `PHASE_B_PLAN.md`'s
+Decision 4 sequenced to run after Phase B against Phase B's own
+persisted artifacts -- ran 2026-08-09 (`AUDIT_OK`, one attempt after a
+first attempt caught a real bug, `LADDER_STAGE=5` never having been
+added to `stage2b_gcs.py`'s stage-validation tuple, and was fixed and
+re-run). No trigger fired in either alpha regime. Full account:
+`experiments/stage2b_denoising/FINDINGS.md`'s audit section.
+**Genuinely still open, not required by the confirmatory result above**:
+of the two companion protocols `AUDIT_PROTOCOL.md` names, the
+`ABS_CONV_EPS` sensitivity table has run (verdict invariant across the
+full swept eps range at every step count, including the locked
+`ENCODER_STEPS=1200` -- its own halt condition does not fire); the
+ARM/x86 propagation stress set (`COMPANION_PROTOCOLS.md` Protocol 1) has
+not been started, and is a substantially larger undertaking than the
+sensitivity table -- it needs real ARM-encoded and real x86-encoded data
+on the same stress-set images. None of these are required for the
+stage-4 verdict itself, per `AUDIT_PROTOCOL.md`'s own scoping. Whether
+the CNN belongs in this
 design at all -- INFRA found it has no stated consumer anywhere in
 `DESIGN.md`'s text, in neither statistics family nor any named
 watched-for outcome -- is unresolved; this result treats it as the

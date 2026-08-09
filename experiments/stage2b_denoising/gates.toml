@@ -760,12 +760,14 @@ frozen value -- confirmed interactively rather than as a dedicated pytest
 break-test: threshold widened 100x, a case constructed to resolve just above
 the frozen threshold no longer resolves."""
 provenance_of_use = """
-The value is wired into the sole call site an audit run would use
-(`step8_trigger_verdict`, unconditional in `main()`'s step sequence) and
-into the tested default parameters `trigger_verdict` ships with -- but no
-audit run has executed yet (real GPU compute, blocked behind Dan's explicit
-release, same as Stage 4 was). This row records that the propagation is
-real and reachable, not that a production verdict has been decided by it."""
+The audit ran 2026-08-09 (`AUDIT_OK`, run_id 20260809T192835Z, commit
+410324f). `stage2b/train/stage5/common/trigger_verdict.json` records
+`thresholds: {contrast: 4.604761e-10, pair_ordering: 9.209522e-10}` --
+these exact values, not re-derived at run time -- for both the fixed and
+reselected alpha regimes. No pairwise comparison had an order reversal in
+this run, so `resolved` never had cause to compare a `change` against
+`pair_threshold`, but the threshold itself was demonstrably the one
+`trigger_verdict` carried into the real computation."""
 trigger = "manual"          # not CI-fast: depends on the (network-gated) audit driver test suite
 
 [binding_value.8bf414d720f2]
@@ -834,9 +836,13 @@ See `b682b6af449a` for the thresholds. For the sign convention: swapping
 where the existing test already asserts specific reversal directions --
 confirmed interactively, not as a dedicated pytest break-test."""
 provenance_of_use = """
-Same honest scope as `b682b6af449a`: wired into the sole production call
-site, tested at the unit level, not yet exercised by an actual audit run
-(blocked behind Dan's explicit release)."""
+Same run as `b682b6af449a` (2026-08-09, `AUDIT_OK`). The real
+`primary_contrast` for `T` came back negative at both budgets
+(-0.0052076071 at 150 steps, -0.0052073732 at 1,200), i.e. `T` improving
+relative to `pre_evolution` under the frozen sign convention -- consistent
+with the same-signed stage-2 contrast this protocol's own text cites
+(-2.30e-3). Both thresholds and the sign convention were demonstrably the
+ones a real, executed run applied, not merely available for one to."""
 trigger = "manual"
 
 [binding_claim.0771659e4158]
@@ -981,11 +987,12 @@ and compared to itself). The audit-layer addition here is only the CALL --
 `compute_oof_alpha_regimes` never re-specifies `n_splits`/`random_state`,
 so it inherits the frozen partition rather than risking a second one."""
 provenance_of_use = """
-Wired into the sole call site an audit run would use; the OOF machinery
-itself is real-data verified (see `9bc6f9e3808a`'s Tier-2 test, which runs
-`oof_per_image_mse` against real stage-1/stage-2 data). What has NOT
-happened is the 60,000-image OOF run itself -- GPU compute, blocked behind
-Dan's explicit release."""
+The 60,000-image OOF run itself happened 2026-08-09 (`AUDIT_OK`):
+`stage2b/train/stage5/common/oof_regimes.json` (34.8 MB) holds real
+per-image OOF MSE arrays for `pre_evolution` and all four evolved
+conditions, at both budgets, produced by exactly this call chain in
+507.5s of A100 wall-clock -- not merely reachable, but the thing that ran
+when the driver ran."""
 trigger = "manual"
 
 [binding_value.1148ede15761]
@@ -1020,8 +1027,14 @@ alphas where fixed is expected) changes `step6`'s recorded `alphas.fixed`
 without changing `alphas.reselected`, i.e. the two are demonstrably
 independent quantities, not the same number read twice."""
 provenance_of_use = """
-Wired into the sole production call site; no audit run has executed the
-60,000-image OOF fit yet."""
+2026-08-09's run computed both regimes for real: `trigger_verdict.json`
+carries independently-computed `fixed`/`reselected` primary contrasts
+(-0.0052076071/-0.0052076071 at 150 steps, -0.0052073732/-0.0052073732 at
+1,200 -- distinct code paths that happened to select the same alphas at
+production scale, not the same number read twice, per this row's own
+`break_demonstrated`). `step1d_production_alphas` recorded the real fixed
+alphas applied identically to both budgets: `pre_evolution=1000.0,
+T=1e-6, lattice=1e-6, rewired=1e-5, curr_random=1e-5`."""
 trigger = "manual"
 
 [binding_value.259d3b7f30fb]
@@ -1053,10 +1066,12 @@ actually CALLS it rather than merely being ABLE to -- confirmed by reading
 the function: the call is unconditional, at the top, before any fold
 computation, so a caller cannot reach either regime without passing it."""
 provenance_of_use = """
-Wired into the sole production call site; the grid ITSELF is already
-production-proven (Phase B's stage-3 re-run at 60,000 images used it,
-`ridge_final_g13_88edf9ac.npz`), but this audit's OWN use of it at both
-budgets has not yet run."""
+The grid was already production-proven (Phase B's stage-3 re-run at
+60,000 images, `ridge_final_g13_88edf9ac.npz`); the audit's OWN use of it
+at both budgets ran 2026-08-09 -- `step1d_production_alphas`'s recorded
+production alphas (`pre_evolution=1000.0, T=1e-6, lattice=1e-6,
+rewired=1e-5, curr_random=1e-5`) are each a member of the frozen
+thirteen-decade grid, not a value the grid excludes."""
 trigger = "manual"
 
 [binding_value.1837113c184a]
@@ -1098,9 +1113,10 @@ OTHER report format still carrying it, confirmed by reading both
 `compute_text` (prints it under an explicit "SCOPE STATEMENT" heading) as
 two independent call sites for the same string, not one shared code path."""
 provenance_of_use = """
-Wired into the sole production call site; no audit run has written a real
-report yet (the report step runs in `main()`'s `finally` block regardless
-of verdict, but only once the driver has actually executed)."""
+A real report was written 2026-08-09:
+`stage2b/train/stage5/common/audit_report_20260809T192835Z.json` /`.txt`
+both carry the `scope_statement` field verbatim -- downloaded and
+confirmed directly, not inferred from the code that should write it."""
 trigger = "manual"
 
 [binding_value.ae2b8a6124e4]

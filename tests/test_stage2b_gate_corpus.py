@@ -139,8 +139,20 @@ def test_each_exemption_still_contributes_the_candidate_count_it_did():
     # entry above, describing what the code does and naming
     # COMPANION_PROTOCOLS.md as the actual authority for the protocol
     # itself, not a new obligation this document states in its own voice.
+    # FINDINGS.md moved 46 -> 52, appending the amendment-impact audit's
+    # own closing section (the AUDIT_OK result, the stage-1/2 historical
+    # cross-check, feature distances, the protocol-required scope
+    # statement quoted verbatim, and the closed-investigation status) plus
+    # a correction to the stage-4 section's now-stale "audit has not run"
+    # paragraph. Re-read all 7 candidates individually (line > 1300)
+    # before changing this number: each reports execution or a measured
+    # result of an already-frozen procedure -- AUDIT_PROTOCOL.md's own
+    # trigger definitions, its analytic resolution threshold, and its
+    # required write-up scope statement (quoted, not restated in this
+    # document's own voice) -- using the same vocabulary those frozen
+    # documents already use. None creates a new obligation.
     at_exemption_time = {
-        "FINDINGS.md": 46,
+        "FINDINGS.md": 52,
         "NEGATIVE_PATH_EVIDENCE.md": 19,
         "PHASE_B_PLAN.md": 38,
         "README.md": 22,
