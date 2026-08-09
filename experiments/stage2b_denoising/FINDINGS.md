@@ -1098,3 +1098,200 @@ document and the driver had the same author, in the same session, hours
 apart. There was no handoff to blame, which is what rules out "be more
 careful" as the remedy and motivated the binding-gate inventory now
 required before the package.
+
+---
+
+# Stage 2B: Feasibility Ladder Stage 4 -- the official result
+
+**Status: THE locked confirmatory result.** `DESIGN.md`'s ONE evaluation
+on the official 10,000-image KMNIST test corpus, run under the locked
+statistical procedure, evaluated once. Everything upstream of this
+section -- stages 1 through 3 -- was feasibility work; stage 3 was
+labeled "SMOKE OF THE MACHINERY ONLY... NOT A RESULT" throughout. This
+section is the first and only place in Stage 2B where that label does
+not apply.
+
+**`STAGE4_OK`, `run_ladder_stage4.py`, commit `431d90a`.** Official
+result: `stage2b/testsplit/stage4/common/official_result.json`.
+
+## Result: T is the unique winner
+
+**Primary test** (`d_i = MSE_i(T) - MSE_i(pre_evolution)`, active-support,
+post-clip, 20,000-resample paired class-stratified bootstrap, `seed=42`):
+95% CI **[-0.0046028, -0.0043002]**, mean **-0.0044509**, entirely below
+zero. **Verdict: evolution improves reconstruction.** Uncorrected -- the
+primary test sits outside both multiplicity families, per the locked
+design.
+
+**Denoising gate** (Level 2 of the hierarchical identity gate, evaluated
+because the primary succeeded): `T` vs. identity (`clip(x_t)`,
+active-support, post-clip), CI **[-0.1335739, -0.1328960]**, mean
+**-0.1332334**, entirely below zero. **Gate passed** -- the "actual
+denoising" claim is added to the primary reconstruction claim, not just
+the weaker relative-improvement one. Context, reported independently and
+outside the gate: `pre_evolution` vs. identity, CI [-0.1291310,
+-0.1284354], mean -0.1287826 -- pre-evolution already denoises
+substantially on its own; evolution adds a further, statistically
+resolved margin on top.
+
+**Family 1** (three controls vs. `pre_evolution`, Holm across three, all
+favorable): `curr_random` mean -0.002872, raw/Holm p=1.851e-252/3.702e-252;
+`rewired` mean -0.002179, raw/Holm p=1.395e-144/1.395e-144; `lattice` mean
+-0.004073, raw and Holm p reported as `0.0` -- a float64 underflow of the
+analytic t-tail (`t=-55.58`, df=9999), not an exact zero (CLAUDE.md
+principle 6). All three Holm-rejected.
+
+**Family 2** (six pairwise among the four evolved graphs, Holm across
+six): all six Holm-rejected, every raw p underflowing or near it
+(largest surviving p, `rewired_vs_curr_random`: 1.549e-30). Directional
+picture -- `T` beats all three others (vs. `lattice` t=-8.74,
+p=2.73e-18; vs. `rewired` t=-38.10; vs. `curr_random` t=-26.85);
+`lattice` beats `rewired` and `curr_random` but loses to `T`;
+`curr_random` beats `rewired` but loses to `T` and `lattice`; `rewired`
+loses to everyone. Sign-flip robustness check (100,000 flips, `seed=42`,
+studentized statistic) agrees in direction and significance on all six,
+each landing at the Monte Carlo floor (`p=9.9999e-06`); reported per
+DESIGN.md's own framing as robustness only, not a second corrected
+family, and with the sign-exchangeability assumption stated per pair
+rather than asserted once and applied silently.
+
+**`one_graph_wins`: `unique_winner = "T"`.** `T` qualifies via the primary
+rule (bootstrap interval entirely below zero) and outperforms each of the
+three other evolved graphs after Family-2 Holm correction. This is
+`DESIGN.md`'s named watched-for outcome #2 ("one evolved graph qualifies
+per the branched rule AND outperforms each of the other three after
+Family-2 correction"), realized rather than one of the other four named
+outcomes.
+
+## The caveat this result inherits from Stage 3, stated again rather than left implicit
+
+Stage 3's amended-grid result (above) already states it for the training-
+side number and it applies unchanged here, because stage 4 REFITS at the
+exact frozen alpha stage 3 selected, not a re-selected one: **`T` and
+`lattice` both sit at the ridge grid FLOOR (`alpha=1e-6`)**; `rewired` and
+`curr_random` sit at genuine interior minima (`alpha=1e-5`);
+`pre_evolution` at `alpha=1e+03`. `T`'s continuous-domain ridge optimum is
+therefore **not established, and not known to equal, lie below, or lie
+near `1e-6`** -- the grid says nothing about alpha values between sampled
+decades, let alone below the smallest one.
+
+What this does and does not license, stated in the same terms Stage 3
+used: `T` beating `lattice` is a floor-vs-floor comparison, so that
+particular result is not confounded by asymmetric regularization freedom
+between the two. `T` beating `rewired` and `curr_random` compares a
+floor-pinned condition against two conditions with room to move, and the
+comparison is therefore of the four pipelines **as selected under the
+frozen discrete grid**, not of the four graphs under continuously optimal
+regularization each. A denser or extended grid could in principle move
+`T`'s number in either direction; nothing here bounds by how much. The
+primary test and the denoising gate, both stated in terms of `T` alone
+against `pre_evolution` and against identity respectively, do not depend
+on this comparison and are unaffected by it.
+
+## CNN: retrained and verified, reported descriptively
+
+Per `run_ladder_stage4.py`'s design (stage 3 persisted no trained
+weights, only training histories and a summary -- see that file's module
+docstring), the CNN was retrained from the same three fixed seeds on the
+same locked 54,000/6,000 fit/validation split, then verified against
+stage 3's persisted selection before being trusted for test-corpus
+inference. **Reproduction confirmed**: seed 1, epoch 99, matching stage
+3 exactly on both (the structural gate `cnn_reproduction_mismatch_reason`
+requires exact equality on these two); `best_clipped_val_mse` differed
+by **2.385e-07** -- reported, not gated, per the module's own refusal to
+invent a numeric tolerance with no measured basis. This is now real,
+repeated evidence (three separate real-GPU retrains across this run's
+three attempts, differing by 9.328e-07 and 2.385e-07 respectively from
+stage 3's own number) that this iterative, float32, cross-session
+training procedure reproduces its seed/epoch selection reliably in
+practice, though the module deliberately does not claim this as a proven
+guarantee.
+
+CNN test-corpus mean clipped MSE: **0.063069**. Reported descriptively
+throughout this file and this driver, per DESIGN.md's own framing -- the
+CNN is in neither statistics family and is not part of the inference this
+section's verdict rests on.
+
+## Descriptive baselines, official test corpus
+
+| condition | mean clipped MSE |
+|---|---:|
+| `raw_505` | 0.198856 |
+| `raw_784` | 0.198856 |
+| rescaled identity (`clip(x_t_clip / sqrt(0.5), 0, 1)`) | 0.246952 |
+| CNN | 0.063069 |
+| identity (`clip(x_t)`, hierarchical-gate baseline) | 0.198856 |
+
+Raw-pixel ridge and the identity baseline sit within rounding of each
+other (0.198856 vs. 0.198856) -- no sign here that the phase
+representation is reconstruction-lossy relative to doing nothing to the
+corrupted pixels directly; named watched-for outcome #5 (raw-pixel ridge
+dominating every phase-based condition) is not what was observed.
+Corruption diagnostics, full 10,000-image test corpus: pre-clip MSE
+0.515888 (505-support) / 0.513274 (784); post-clip 0.198856 / 0.196559.
+
+## What it took to get a clean run
+
+Three attempts, `commit`s `6e7f811` -> `1b2e58b` -> `431d90a`, roughly 44
+minutes of A100 time in total (not the 72-hour/$3,000 scale this would
+cost without the resumability contract every earlier ladder stage
+already established -- the first two attempts' correctly-computed
+artifacts were reused, not recomputed, by the attempt that finally
+completed). Two real bugs, both caught by the first real execution rather
+than by review, both fixed and pinned as regression tests before the next
+attempt:
+
+1. `parent_map` never threaded `allow_test_split` through to
+   `read_manifest` -- every parent this driver records is a test-side
+   object, unlike stage 3's `parent_map`, which never touches the test
+   split. Surfaced at `2_test_corruption`, 42 seconds in, before any real
+   cost was incurred.
+2. `step7_test_cnn` called `clipped_validation_per_image_mse` directly on
+   raw `(n, 28, 28)` arrays without `as_image_batch`'s channel-first cast
+   -- the exact mistake that function's own docstring names and warns
+   against. Surfaced 663.65 seconds into the CNN step, after a full,
+   successful three-seed retrain -- confirming the retrain-and-verify
+   design works, only to fail one call later on shape. Pinned with a real,
+   executable regression test (`test_cnn_test_evaluation_runs_on_raw_corpus_arrays`)
+   that actually runs JAX/equinox on CPU, not a static check -- this was
+   the one bug static review could not have caught.
+
+A third defect was caught and fixed before it could matter: `step11_report`
+originally wrote `official_result` unconditionally, including on a FAIL
+verdict, which would have let the first attempt's halted, pre-inference
+run permanently occupy the one-shot slot and block every subsequent
+attempt via `refuse_if_official_result_exists` -- including a correct
+one. Fixed to gate on `verdict == OK_SENTINEL` before the second attempt
+ran; confirmed working when the second attempt's own failure correctly
+wrote no `official_result`.
+
+## Code and artifacts
+
+`run_ladder_stage4.py`, `tests/test_stage2b_ladder_stage4.py`. Official
+result: `stage2b/testsplit/stage4/common/official_result.json` /
+`.txt`. Per-attempt reports (all three, including the two failures, kept
+as history): `stage4_report_20260809T033701Z`,
+`stage4_report_20260809T034509Z`, `stage4_report_20260809T041415Z`.
+Test-side intermediate artifacts (corpus, corruption, encoded phases,
+evolved thetas per graph, features per condition, the ridge test MSEs,
+the CNN reproduction and test evaluation) all under
+`stage2b/testsplit/stage4/`.
+
+## Status of the investigation
+
+This closes DESIGN.md's feasibility ladder. The question the whole of
+Stage 2B was built to ask -- does runtime oscillator-network evolution on
+a learned topology improve single-step active-support denoising relative
+to the same representation before evolution -- has a locked, confirmatory,
+positive answer on the official held-out test corpus: yes, and the
+stronger "actual denoising" claim holds too. What remains open, tracked
+separately rather than folded into this result: whether a denser or
+extended ridge grid would move `T`'s floor-pinned alpha (the caveat
+above); the two companion protocols (`COMPANION_PROTOCOLS.md`'s ARM/x86
+propagation stress set and `ABS_CONV_EPS` sensitivity table), whose
+results were not part of this evaluation and were not required to be, per
+`AUDIT_PROTOCOL.md`'s own scoping of what the confirmatory test itself
+needs; and INFRA's still-open finding that the CNN has no stated consumer
+in `DESIGN.md`'s own text, which this result treats as settled in the
+"descriptive comparator" reading rather than resolving the ambiguity
+INFRA named.
