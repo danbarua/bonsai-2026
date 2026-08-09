@@ -469,6 +469,7 @@ make test                      # the whole repository suite
 | `test_stage2b_ladder_stage3.py` | the stage-3 driver's constants, the sizing probe's projections and halt paths, the pinned pre-contract consumes, and Makefile agreement |
 | `test_stage2b_ladder_stage4.py` | the stage-4 driver's constants, the CNN reproduction gate, and the single-opt-in-site invariant derived from every `.py` file's AST, in both directions |
 | `test_stage2b_gate_corpus.py` | which documents the binding-clause inventory ranges over — corpus against on-disk, both directions |
+| `test_stage2b_audit.py` | the pure amendment-audit calculations — index alignment, gauge phases, trigger verdicts, the stress-set construction, the sequencing-gate guard |
 
 This table is the whole of what `make stage2b-test` runs, and the one
 exclusion is the slow round trip. It carries no test counts, deliberately:
