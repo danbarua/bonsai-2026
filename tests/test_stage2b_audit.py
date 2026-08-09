@@ -60,6 +60,11 @@ def test_feature_distance_reports_per_image_distributions():
     assert result["cos_sin_euclidean"]["median"] == pytest.approx(np.sqrt(6))
 
 
+def test_wrapped_phase_difference_rejects_incompatible_shapes():
+    with pytest.raises(audit.AuditInputError, match="broadcast-compatible"):
+        audit.wrapped_phase_difference(np.zeros((2, 4)), np.zeros((3, 1)))
+
+
 def test_stress_set_is_sorted_deduplicated_and_class_covered():
     indices = np.arange(60000)
     labels = np.arange(60000) % 10

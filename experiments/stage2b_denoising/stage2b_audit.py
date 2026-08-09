@@ -70,8 +70,11 @@ def assert_same_audit_inputs(left, right):
 
 def wrapped_phase_difference(left, right):
     left, right = np.asarray(left, dtype=np.float64), np.asarray(right, dtype=np.float64)
-    if left.shape != right.shape:
-        raise AuditInputError(f"phase shapes differ: {left.shape} vs {right.shape}")
+    try:
+        np.broadcast_shapes(left.shape, right.shape)
+    except ValueError as exc:
+        raise AuditInputError(
+            f"phase shapes are not broadcast-compatible: {left.shape} vs {right.shape}") from exc
     return (left - right + np.pi) % (2.0 * np.pi) - np.pi
 
 
