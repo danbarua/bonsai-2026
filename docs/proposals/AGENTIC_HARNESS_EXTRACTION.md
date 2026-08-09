@@ -413,6 +413,71 @@ defects would have occurred without the apparatus, including any deterred
 before they took observable form. That single quantity is unmeasured, and it
 is the one on which "was the apparatus worth it" turns.
 
+### 8a. A control arm existed after all
+
+Added after §9 was written, on new evidence rather than reflection.
+
+`experiments/stage2a_dynamics_classification/` is **complete, locked, and has
+no `gates.toml`** — the inventory was invented for Stage 2B. So the repository
+contains a stage that ran to completion without the apparatus. Three cold-read
+agents characterised it (32,860 words across 7 docs). This does not measure
+deterrence, but it does answer a question §8 called unanswerable: **what
+actually goes wrong in a stage with no inventory?**
+
+**Stage 2A: 15 catalogued defects — 9 wrong results already in durable
+records** (11 distinct claims), 2 would-be-wrong, 4 latent. The tooling ledger
+in §3, same verdict standard and method, different subject: **6 wrong of 38.**
+
+Different populations and discovery processes, so this is not a clean rate
+comparison. The direction is not in doubt. **The tooling produced mostly
+latent defects; the science produced mostly wrong claims.** §1's 81% figure
+sharpens accordingly: the effort went where the defects were not.
+
+**Two or three of the fifteen would a gate inventory have caught** — all of
+them documented HALT/`never` clauses with no executable behind them. The
+largest class was something else entirely: **eight of fifteen were prose-claim
+errors** — a conclusion drawn backwards, a comparison that could not support
+its inference, framing words ("independent corroboration", "equally-sized",
+"ruled out") that overstated. Every one caught by a human reading prose, at
+`cd25a86` and `5d3a29d`. The apparatus was built for a different class.
+
+**And the same external review pass also surfaced the defects the inventory
+would have covered structurally** — so review is a superset, consistent with
+§3's finding that it was the only PAID component.
+
+**Correction to §3.** The gate inventory's row should not be read as UNPAID
+alone. A cold read established a capability the ledger could not score: a
+*code-resident* inventory can only enumerate gates that exist, so a **missing**
+gate is invisible — which is why nobody noticed that no Stage 2A driver
+branches on its go/no-go report. `gates.toml`'s failing-empty state is designed
+against exactly that. The honest verdict is neither UNPAID nor vindicated:
+**a narrow instrument doing a narrow job, where the job is a minority of what
+goes wrong.**
+
+**The finding that changes what to build.** Stage 2A's lines of enquiry were
+checked against their pre-registered closure criteria — possible only because
+the stage is closed. **Four of nine closed cleanly.** Two are SILENT (a
+pre-registered gauge-sensitivity comparison never mentioned again, whose
+function exists and is called by no pipeline; and a named watched-for outcome
+adjudicated for three of its four cases). One DRIFTED. Two closed on criteria
+never stated. A documented approval gate lapsed unremarked, and storage — a
+required report — was never reported at all.
+
+| Aspect | Defects | Tooling built |
+|---|---|---|
+| Gates | 2–3 of 15 | `gates.toml` + reconciler, ~2,100 lines |
+| Lines of enquiry | **5 of 9 lines mis-closed** | **none** |
+
+**The apparatus was built for the aspect with the fewest defects.** Neither
+this document's original ledger nor the Stage 2B extraction could have found
+that: a line of enquiry can only be checked once it has closed, and no Stage
+2B line has.
+
+This does not license building a lines-of-enquiry tool. §6's rule still binds
+— the first move is the format, not the machinery, and §6.2's citation
+convention plus §6.4's outside reader are what caught the prose-claim class
+that dominates here.
+
 ## 9. What this establishes, and what it does not
 
 Stated narrowly, because the broad version was wrong twice already.
