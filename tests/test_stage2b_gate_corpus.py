@@ -111,8 +111,23 @@ def test_each_exemption_still_contributes_the_candidate_count_it_did():
     # bindingly", and that is MORE true after the edit, not less. The
     # count fell because a candidate-generating paragraph left, not
     # because the judgement changed.
+    #
+    # FINDINGS.md moved 37 -> 46 across `9efac76`/`4bbd454`/`b0c382a`,
+    # which appended the stage-4 closing section (the official result,
+    # the floor-alpha caveat, the CNN comparison, the retraction of the
+    # "raw pixel ~ identity" reading, and the audit-status correction).
+    # Re-read all 9 new candidates individually (line > 1100) before
+    # changing this number: every one reports a fact about an
+    # already-frozen procedure's execution or result (the bootstrap CI,
+    # the alpha that was already selected in stage 3, what the driver's
+    # already-committed code does, what closed) using the same
+    # vocabulary those procedures use ("locked", "frozen", "required")
+    # -- none creates a new obligation this document did not already
+    # have narrative license to describe. The count rose because
+    # substantial new narrative content was added, not because the
+    # judgement about FINDINGS.md's bindingness changed.
     at_exemption_time = {
-        "FINDINGS.md": 37,
+        "FINDINGS.md": 46,
         "NEGATIVE_PATH_EVIDENCE.md": 19,
         "PHASE_B_PLAN.md": 38,
         "README.md": 20,
