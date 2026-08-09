@@ -125,6 +125,20 @@ def test_ladder_stage_and_upstream_stages(driver):
     assert driver.STAGE2_STAGE == 2
 
 
+def test_ladder_stage_5_is_actually_a_valid_object_path_stage(driver):
+    """A constant matching what the driver EXPECTS is not the same claim as
+    `stage2b_gcs.object_path` actually ACCEPTING that value -- the exact gap
+    that broke the first real GPU run: `LADDER_STAGE = 5` was correct as a
+    driver constant while `stage2b_gcs.LADDER_STAGES` still hard-coded
+    `(1, 2, 3, 4)`, so every artifact-writing call in `step3_evolve_150`
+    failed on its first attempt, after real evolution compute had already
+    run. `_check_stage` is reached through `object_path` itself, not
+    re-implemented here."""
+    name = gcs.object_path(stage=driver.LADDER_STAGE, condition="evolved_T",
+                           kind="theta_T_s150", ext="npz", split=driver.SPLIT)
+    assert name == "stage2b/train/stage5/evolved_T/theta_T_s150.npz"
+
+
 def test_corpus_constants(driver):
     assert driver.EXPECTED_N == 60_000
     assert driver.EXPECTED_N_ACTIVE == 505

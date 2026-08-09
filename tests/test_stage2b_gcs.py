@@ -343,7 +343,7 @@ def test_infrastructure_constants():
     assert gcs.ROOT_PREFIX == "stage2b"
     assert gcs.TRAIN_ROOT == "stage2b/train"
     assert gcs.TEST_SPLIT_ROOT == "stage2b/testsplit"
-    assert gcs.LADDER_STAGES == (1, 2, 3, 4)
+    assert gcs.LADDER_STAGES == (1, 2, 3, 4, 5)
     assert gcs.TEST_SPLIT_STAGE == 4
 
 
@@ -545,7 +545,7 @@ def test_stage_and_condition_prefixes_are_prefixes_of_the_object_path():
     assert condition.startswith(stage + "/")
 
 
-@pytest.mark.parametrize("stage", [0, 5, -1, "1", 1.0, True, None])
+@pytest.mark.parametrize("stage", [0, 6, -1, "1", 1.0, True, None])
 def test_object_path_rejects_a_stage_outside_the_ladder(stage):
     """`1.0` and `True` are both `== 1`, so a plain membership test would
     accept them and render "stage1" from something nobody wrote."""
