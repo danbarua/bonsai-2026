@@ -1733,31 +1733,79 @@ quietly changing what the task is."""
 trigger = "ci-fast"
 
 [binding_claim.4e0f03367b9f]
+# WAS "discharged AS AMENDED" until the Reviewer's Part B ruling, which is
+# the sharpest correction of the round: "The original obligation was not
+# discharged. It was amended/superseded before the relevant execution ...
+# Otherwise 'discharged as amended' allows any violated frozen clause to
+# appear green merely by redefining its meaning later."
+#
+# That is exactly right and it was my error, not a wording preference. The
+# clause says generation, features and statistics run ENTIRELY in the cloud
+# environment. Stage 3 does not do that. Calling it discharged asserted
+# compliance with a requirement the run did not meet.
 locator = "DESIGN.md, section 'Computational strategy', closing paragraph"
 obligation = """
 Generation, features and statistics run in the cloud environment; artifacts
 are pushed to GCS from within it and NEVER round-tripped through local
 upload. The parenthetical states what the prohibition is for: Stage 2A's
 242MB-vs-~6-15MB Colab upload limit, already hit once."""
+status = "superseded"
+superseded_by = "5de8c56be1a5"
+amendment_locator = """
+DESIGN.md, post-lock amendment of 2026-08-06 (before ladder stage 3):
+"stage 3 runs in two phases, and the encode phase runs locally". Disclosed
+in the frozen document itself and listed in its Review history, so the
+amendment predates the execution it licensed rather than explaining it
+afterwards."""
+pending_reason = """
+Recorded as superseded rather than discharged, and it stays a finding: the
+amendment's VALIDITY is a reviewer's judgement, not mine. What can be shown
+is that it was disclosed in advance and that the successor obligation is
+separately inventoried and discharged (5de8c56be1a5). Whether replacing
+"entirely in the cloud" with "through the verified transport" preserved
+what the freeze was for is the question a reviewer must answer, and it is
+open."""
+trigger = "manual"
+
+[binding_claim.5de8c56be1a5]
+# THE SUCCESSOR to 4e0f03367b9f, and the row that made this reclassification
+# necessary. Reviewer Part A conditionally accepted this as not_binding
+# RATIONALE; Reviewer Part B then ruled 4e0f03367b9f `superseded` rather than
+# "discharged as amended". Those two rulings interact: a superseded clause
+# must name a successor in a binding kind, and the successor is THIS
+# paragraph -- it is where the surviving prohibition is actually stated.
+# Left as not_binding, the supersession would point into narration, which is
+# the escape the successor rule exists to close. Flagged to the Reviewer as
+# an interaction of their two rulings rather than as a silent upgrade.
+locator = "DESIGN.md, post-lock amendment of 2026-08-06 (before ladder stage 3)"
+obligation = """
+Feature artifacts live in GCS, written through the verified transport. The
+prohibition that survives the two-phase amendment is on the MECHANISM -- a
+Colab session's upload path, whose limit the original clause names as its
+reason -- not on which machine computes. A direct local->GCS write is
+permitted; a round-trip through a session's upload mechanism is not."""
 status = "discharged"
-discharged_in = "experiments/stage2b_denoising/DESIGN.md, post-lock amendment of 2026-08-06 (before ladder stage 3)"
+discharged_in = "experiments/stage2b_denoising/stage2b_gcs.py::upload_file, and encode_stage3_local.py's write path"
 evidence = """
-Discharged AS AMENDED, and the narrowing is stated rather than glossed
-because the clause as originally written is no longer what holds. Stage 3
-runs in two phases and the encode phase runs locally, so "entirely in the
-cloud environment" is false today.
+Phase A's encode ran locally and wrote `encoded_train_s1200` straight to GCS
+through `stage2b_gcs.upload_file` -- the same chunked, resumable,
+crc32c-verified transport a cloud-side write uses, and the same one
+`stage_kmnist_inputs.py` has moved KMNIST through for both prior rungs. No
+Colab upload mechanism is touched on that path.
 
-What the amendment preserves is the rule that was load-bearing: feature
-artifacts live in GCS, written through the verified transport. A direct
-local->GCS write never touches Colab's upload mechanism -- it uses the same
-`google-cloud-storage` client and the same chunked, resumable,
-crc32c-verified path in stage2b_gcs.py that a cloud-side write uses, and
-`stage_kmnist_inputs.py` has moved KMNIST that way for both prior rungs.
-
-So the prohibition that survives is on the MECHANISM (a session's upload
-path), not on the machine. Recorded here rather than by editing DESIGN.md,
-which is frozen; the amendment is the disclosure and this row points at it.
-The amendment's own narration is dispositioned separately at 5de8c56be1a5."""
+The artifact's own manifest is the reviewer-checkable part: it records the
+producing commit and a payload digest computed on the writing side and
+re-verified on the reading side, so a transport that silently truncated
+would be caught by `consume_validated` rather than needing to be trusted."""
+negative_attestation = """
+The prohibited thing is a feature artifact reaching GCS by any route other
+than the verified transport. The output set is every artifact write in the
+stage-1/2/3 drivers: all of them go through `ensure_artifact`, which
+delegates to `upload_file`, and `test_the_driver_never_forces_an_overwrite`
+plus the write-once refusal at a2f535ba3406 cover the ones that could
+bypass it. What is NOT established is that a future script could not call
+the GCS client directly; that is the same open edge `stage2b_gcs`'s own
+scope limitation records."""
 trigger = "manual"
 
 [binding_claim.cae84d1cb85b]
@@ -1973,16 +2021,6 @@ trigger = "manual"
 # that fits none of those four shapes, or one whose "binds at X" pointer
 # names nothing. That is a cheaper audit than re-reading 89 sentences, which
 # is the point of constraining the shape at all.
-
-[not_binding.5de8c56be1a5]
-reason = """
-RATIONALE: why the two-phase stage 3 does not violate the cloud-execution
-rule -- that the failure the rule guards against is getting a large file
-INTO a Colab session through that session's upload mechanism, and a direct
-local->GCS write never touches it. An argument for a freeze, not a freeze.
-The obligation it argues about binds at DESIGN.md's 'Computational
-strategy' closing paragraph (4e0f03367b9f), whose row records the
-amendment as the disclosure and states the surviving prohibition."""
 
 [not_binding.51fde2dbc946]
 reason = """

@@ -571,6 +571,20 @@ def _check_claim(clause_id: str, entry: dict, clause: Clause | None) -> list[Fin
             f"{clause_id} is marked not_applicable with no reason tied to the "
             f"clause's TRIGGERING CONDITION. Not-applicable is a claim that "
             f"the condition never arose, not an escape hatch"))
+    elif status == "superseded":
+        # Visible, and still failing. Without its own finding a supersession
+        # would be the quietest state in the file: a frozen clause retired
+        # with no reader ever asked whether the amendment was legitimate.
+        # The mechanical half -- successor exists, is binding, is not itself
+        # superseded -- is `check_relationships`. This is the half no check
+        # can settle.
+        findings.append(Finding(
+            "superseded_clause",
+            f"{clause_id} was superseded rather than discharged, by "
+            f"{entry.get('superseded_by', '(unnamed)')}. Whether the "
+            f"amendment legitimately replaced what the freeze was FOR is a "
+            f"reviewer's judgement and is open: "
+            f"{entry.get('pending_reason', '(no reason given)')}"))
     elif status not in _CLAIM_STATUSES:
         findings.append(Finding(
             "unknown_status",
@@ -579,8 +593,17 @@ def _check_claim(clause_id: str, entry: dict, clause: Clause | None) -> list[Fin
 
     # Negative obligations need an attestation over the output set, because a
     # compliant paragraph cannot prove a prohibited claim is absent elsewhere.
+    #
+    # Not at `superseded`: the prohibition is no longer in force, so an
+    # attestation that it is absent from the output set would be a claim
+    # about a rule that stopped applying. The SUCCESSOR carries the
+    # attestation for whatever survived -- which is exactly the distinction
+    # the status exists to make, and demanding one here would quietly
+    # re-assert the retired obligation.
     text = entry.get("obligation") or (clause.text if clause else "")
-    if _NEGATIVE_OBLIGATION.search(text) and not entry.get("negative_attestation"):
+    if (status != "superseded"
+            and _NEGATIVE_OBLIGATION.search(text)
+            and not entry.get("negative_attestation")):
         findings.append(Finding(
             "missing_negative_attestation",
             f"{clause_id} is a must-not/never obligation and carries no "

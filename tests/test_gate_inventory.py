@@ -898,10 +898,15 @@ def test_a_superseded_clause_names_its_successor_and_the_amendment(tmp_path):
         old.clause_id: claim_row(
             status="superseded", discharged_in=None, evidence=None,
             superseded_by=new.clause_id,
-            amendment_locator="DESIGN.md, post-lock amendment of 2026-08-06"),
+            amendment_locator="DESIGN.md, post-lock amendment of 2026-08-06",
+            pending_reason="amendment validity is a reviewer's call"),
         new.clause_id: claim_row(),
     }}
-    assert kinds(reconcile([old, new], inventory, tmp_path)) == []
+    # NOT finding-free, and that is the design: the mechanical half is
+    # satisfied, the judgement half is open. Written `== []` first, which
+    # encoded the opposite -- a valid supersession quietly closing a frozen
+    # obligation is the exact escape the status was added to prevent.
+    assert kinds(reconcile([old, new], inventory, tmp_path)) == ["superseded_clause"]
 
 
 def test_a_supersession_with_no_successor_is_a_deletion_with_manners(tmp_path):
@@ -942,13 +947,15 @@ def test_superseded_still_fails_readiness(tmp_path):
     inventory = {"reviewed": True, "binding_claim": {
         old.clause_id: claim_row(
             status="superseded", discharged_in=None, evidence=None,
-            superseded_by=new.clause_id, amendment_locator="DESIGN.md, A"),
+            superseded_by=new.clause_id, amendment_locator="DESIGN.md, A",
+            pending_reason="amendment validity is a reviewer's call"),
         new.clause_id: claim_row(),
     }}
     findings = reconcile([old, new], inventory, tmp_path)
-    assert kinds(findings) == [], "the valid shape should raise no finding"
-    # and the status itself is not one a package ships in silently: it is
-    # absent from the discharged set, so coverage counts it as binding.
+    assert kinds(findings) == ["superseded_clause"], (
+        "a supersession must remain visible; a clean run here would mean a "
+        "frozen obligation can be retired with nobody asked whether the "
+        "amendment was legitimate")
     assert gate_inventory.coverage([old, new], inventory) == (2, 2)
 
 
@@ -1061,3 +1068,47 @@ def test_one_id_cannot_hold_two_dispositions_across_kinds(tmp_path):
                  "not_binding": {clause.clause_id: {"reason": "NARRATION: no"}}}
     assert "duplicate_inventory_id" in kinds(
         reconcile([clause], inventory, tmp_path))
+
+
+def test_a_superseded_clause_is_reported_not_silently_retired(tmp_path):
+    """The quietest possible failure, closed.
+
+    Without its own finding, `superseded` would retire a frozen obligation
+    with nobody ever asked whether the amendment was legitimate -- which is
+    the same shape as `not_applicable` passing silently, one column over.
+    """
+    _, old, new = _two_clauses(tmp_path)
+    inventory = {"reviewed": True, "binding_claim": {
+        old.clause_id: claim_row(
+            status="superseded", discharged_in=None, evidence=None,
+            superseded_by=new.clause_id, amendment_locator="DESIGN.md, A",
+            pending_reason="whether the amendment preserved the freeze's "
+                           "purpose is open"),
+        new.clause_id: claim_row(),
+    }}
+    findings = reconcile([old, new], inventory, tmp_path)
+    assert "superseded_clause" in kinds(findings)
+    assert any("open" in f.detail for f in findings
+               if f.kind == "superseded_clause"), (
+        "the finding does not carry the reason, so a reader cannot tell a "
+        "reviewed supersession from one nobody has looked at")
+
+
+def test_a_superseded_negative_obligation_is_not_asked_to_attest(tmp_path):
+    """Demanding an attestation for a prohibition that stopped applying
+    forces a claim about a rule no longer in force. The successor carries
+    the attestation for whatever survived -- which is the whole distinction
+    the status exists to make."""
+    doc = write_doc(tmp_path, "# P\n\nArtifacts MUST NEVER be round-tripped.\n\n"
+                              "Artifacts MUST use the verified transport.\n")
+    old, new = derive_clauses([doc], tmp_path)
+    inventory = {"reviewed": True, "binding_claim": {
+        old.clause_id: claim_row(
+            obligation="artifacts are NEVER round-tripped through local upload",
+            status="superseded", discharged_in=None, evidence=None,
+            superseded_by=new.clause_id, amendment_locator="DESIGN.md, A",
+            pending_reason="amendment validity is a reviewer's call"),
+        new.clause_id: claim_row(),
+    }}
+    assert "missing_negative_attestation" not in kinds(
+        reconcile([old, new], inventory, tmp_path))
