@@ -994,8 +994,14 @@ def step7_test_cnn(mods, bucket, topo, fp, parents):
     with np.load(test_corpus_local, allow_pickle=False) as handle:
         test_images = np.asarray(handle["images_01"])
 
+    # `as_image_batch`'s own docstring: "Any caller reaching ... clipped_validation_mse
+    # directly should pass its arrays through here first, the same way train_cnn does,
+    # rather than writing its own cast." train_cnn_for_seed does this internally for
+    # fit/val; this driver's own direct call on the TEST arrays is new and missed it on
+    # the first real run -- caught there, fixed here, not by static review.
     test_mse = np.asarray(mods.cnn.clipped_validation_per_image_mse(
-        best_model, test_x_t_clip, test_images, mask))
+        best_model, mods.cnn.as_image_batch(test_x_t_clip, "test_x_t_clip"),
+        mods.cnn.as_image_batch(test_images, "test_images"), mask))
 
     def compute():
         return {"mse_cnn": test_mse,

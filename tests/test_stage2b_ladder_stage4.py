@@ -453,6 +453,48 @@ def types_namespace(driver, **kwargs):
 
 # ---- call sites bind against real signatures ----
 
+# ---- CNN test-corpus evaluation actually runs -- regression for the
+# second real run's actual failure: `clipped_validation_per_image_mse`
+# was called directly on raw (n, 28, 28) arrays, never passed through
+# `as_image_batch` first (its own docstring names this exact mistake:
+# "Any caller reaching ... clipped_validation_mse directly should pass
+# its arrays through here first"). `equinox`'s Conv rejected the
+# unbatched-channel shape 663.65s into a real GPU run, after the CNN had
+# already been retrained from all three seeds. This is the one test in
+# this file that actually executes JAX/equinox, on CPU, rather than only
+# checking signatures or ASTs -- a static check would not have caught a
+# runtime shape error one function call deep in a library. ----
+
+def test_cnn_test_evaluation_runs_on_raw_corpus_arrays():
+    """Exercises the exact call `step7_test_cnn` makes: a real model, a
+    real mask, and raw (n, 28, 28) arrays straight off an `.npz` load --
+    not pre-shaped by any caller, matching what `corrupt_corpus` and
+    `images_01` actually hand back."""
+    import numpy as np
+    import stage2b_ridge  # noqa: F401 -- enables jax_enable_x64 at import,
+                          # required by clipped_validation_per_image_mse's
+                          # float64 accumulation; must precede stage2b_cnn,
+                          # exactly as run_ladder_stage4.py's load_modules
+                          # orders its own imports.
+    import stage2b_cnn as cnn
+
+    n, active_indices = 4, np.array([0, 1, 27, 28, 55, 700], dtype=np.int64)
+    model = cnn.make_model(cnn.seed_keys(0)[0])
+    mask = cnn.build_active_support_mask(active_indices)
+    rng = np.random.default_rng(0)
+    x_raw = rng.uniform(0, 1, size=(n, 28, 28)).astype(np.float64)
+    y_raw = rng.uniform(0, 1, size=(n, 28, 28)).astype(np.float64)
+
+    with pytest.raises(ValueError, match="rank 3|shape"):
+        cnn.clipped_validation_per_image_mse(model, x_raw, y_raw, mask)
+
+    result = cnn.clipped_validation_per_image_mse(
+        model, cnn.as_image_batch(x_raw, "x"), cnn.as_image_batch(y_raw, "y"), mask)
+    result = np.asarray(result)
+    assert result.shape == (n,)
+    assert np.all(np.isfinite(result))
+
+
 @pytest.mark.parametrize("module_name,func,expected", [
     ("stage2b_ridge", "fit_final", ("X_train", "Y_train", "alpha")),
     ("stage2b_ridge", "ridge_predict", ("fit", "X_scaled", "alpha_index")),
