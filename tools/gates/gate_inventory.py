@@ -613,8 +613,23 @@ def _check_claim(clause_id: str, entry: dict, clause: Clause | None) -> list[Fin
     return findings
 
 
-_SEMANTIC_REVIEW_FIELDS = ("inventory_sha256", "reviewer", "scopes",
-                           "findings", "findings_resolved")
+_SEMANTIC_REVIEW_FIELDS = ("inventory_sha256", "reviewer", "recorded_by",
+                           "review_basis", "scopes", "findings",
+                           "findings_resolved")
+
+# `reviewer` and `recorded_by` are separate fields on the Reviewer's ruling
+# of 2026-08-09, and the distinction is not bookkeeping:
+#
+#   "The distinction is between AUTHORSHIP OF THE TOML RECORD and SOURCE OF
+#   THE REVIEW DECISION. Claude Code can encode my ruling mechanically; it
+#   cannot independently make my attestation."
+#
+# One field would have made those indistinguishable, and the failure mode is
+# specific: an agent transcribing a ruling and an agent asserting one look
+# identical in a record that has room for only the second. This inventory
+# exists because a disposition can be honest or convenient and no check can
+# tell -- collapsing the reviewer into the recorder rebuilds that ambiguity
+# at the top of the file.
 
 # Kinds whose dispositions a machine cannot settle. The Reviewer's ruling of
 # 2026-08-09 is that these, not "every row", are what human review is FOR:

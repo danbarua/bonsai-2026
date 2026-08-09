@@ -58,6 +58,8 @@ REVIEWED_TOML = (
     '[semantic_review]\n'
     'inventory_sha256 = "' + "0" * 64 + '"\n'
     'reviewer = "fixture"\n'
+    'recorded_by = "fixture-recorder"\n'
+    'review_basis = "a fixture ruling"\n'
     'scopes = ["not_binding", "superseded", "canonical_clause", "binding_claim"]\n'
     'findings = 0\n'
     'findings_resolved = 0\n'
@@ -79,6 +81,8 @@ def write_inventory(path, body):
 REVIEWED = {"semantic_review": {
     "inventory_sha256": "0" * 64,
     "reviewer": "the Reviewer, for this fixture",
+    "recorded_by": "the fixture",
+    "review_basis": "a fixture ruling",
     "scopes": ["not_binding", "superseded", "canonical_clause", "binding_claim"],
     "findings": 0,
     "findings_resolved": 0,
@@ -1216,6 +1220,7 @@ def test_the_attestation_must_cover_every_non_machine_decidable_scope(tmp_path):
     exactly the judgements review exists for."""
     review = {"semantic_review": {
         "inventory_sha256": "x" * 64, "reviewer": "r",
+        "recorded_by": "rec", "review_basis": "b",
         "scopes": ["not_binding"], "findings": 0, "findings_resolved": 0}}
     findings = gate_inventory.check_semantic_review(review)
     assert "unreviewed_semantic_scope" in kinds(findings)
@@ -1225,6 +1230,7 @@ def test_the_attestation_must_cover_every_non_machine_decidable_scope(tmp_path):
 def test_an_attestation_with_open_findings_is_not_a_sign_off():
     review = {"semantic_review": {
         "inventory_sha256": "x" * 64, "reviewer": "r",
+        "recorded_by": "rec", "review_basis": "b",
         "scopes": list(gate_inventory._SEMANTIC_SCOPES),
         "findings": 12, "findings_resolved": 9}}
     assert "unresolved_review_findings" in kinds(

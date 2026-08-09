@@ -2807,20 +2807,36 @@ contemporaneous narration rather than standing obligation."""
 
 [semantic_review]
 inventory_sha256 = "948de81b5ac1661ec0b35909b1ba078e806b90a7f24dd7b64ed7eef447c062c1"
-reviewer = """
-ChatGPT (the Reviewer), rulings of 2026-08-08 (scope, three-way schema, six
+reviewer = "ChatGPT / Stage 2B Reviewer"
+# Separate from `reviewer` on the Reviewer's own instruction: "Claude Code
+# can encode my ruling mechanically; it cannot independently make my
+# attestation." This row is a transcription, and says so where a reader
+# meets it rather than somewhere else in the repository.
+recorded_by = "stage2b-lead (Claude Code), transcribing the ruling"
+review_basis = """
+Reviewer rulings of 2026-08-08 (scope, the three-way schema, the six
 dimensions) and 2026-08-09 (Part A over the 27 not_binding dispositions,
-Part B over the 12 discharged claims, and the delta ruling accepting the
-A1/B10 supersession)."""
+Part B over the 12 discharged claims, the delta ruling accepting the
+A1/B10 supersession, and the sign-off ruling accepting B2)."""
 scopes = ["not_binding", "superseded", "canonical_clause", "binding_claim"]
 findings = 12
 findings_resolved = 12
 outcome = """
-"Requirement 4 architecture: approved." The twelve findings of 2026-08-09
-are resolved, B2 last and by source semantics rather than by available
-evidence.
+"Requirement 4 remediation/inventory mechanism: SIGNED OFF." The twelve
+findings of 2026-08-09 are 12/12 resolved, B2 last and by source semantics
+rather than by available evidence.
 
-WHAT THIS ATTESTATION DOES NOT SAY. Stage-4 readiness remains blocked,
+TWO STATES THAT MUST NOT BE CONFLATED, on the Reviewer's qualification:
+`findings_resolved = 12` records that the REVIEW findings are closed. The
+B2 child obligation (6d69999e116d, "full suite green before each commit")
+remains separately `unresolved` because it cannot be established
+retrospectively. The review defect was that B2 had been improperly
+narrowed; that is fixed. The underlying historical obligation is a
+different thing and stays open.
+
+NOT A STAGE-4 RELEASE. The Reviewer: "It clears Requirement 4 as a
+prerequisite; it does not clear the independent package-review gate."
+Stage-4 readiness remains blocked,
 independently of this review, by the package-dependent rows that are
 unresolved and pending_package ON PURPOSE -- the audit driver does not
 exist, and no artifact they discharge into does either. A clean review is
