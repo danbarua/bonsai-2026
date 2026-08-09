@@ -495,6 +495,46 @@ def test_cnn_test_evaluation_runs_on_raw_corpus_arrays():
     assert np.all(np.isfinite(result))
 
 
+# ---- train_raw_pixel_conditions builds X from CORRUPTED train images --
+# regression for the PR #29 finding: `step6_test_ridge` built raw_505/
+# raw_784's TRAIN-side X from clean `images_01` directly (the same array
+# `Y_train` comes from), fitting Y-on-Y. The primary test, denoising
+# gate, both Holm families, and one_graph_wins never touch raw_505/
+# raw_784 (mse_by_condition's six keys are pre_evolution, the four
+# evolved graphs, and identity), so this bug never reached the locked
+# result -- but it silently collapsed the raw-pixel descriptive
+# baseline toward the identity baseline, which is exactly the "no sign
+# the phase representation is lossy" reading the official write-up drew
+# from it. This test runs the real `stage2b_corruption.corrupt_corpus`,
+# not a stub -- the failure mode is a data-flow mistake a signature
+# check or an AST check cannot see. ----
+
+def test_train_raw_pixel_conditions_uses_corrupted_not_clean_images(driver):
+    import numpy as np
+    import types
+    import stage2b_corruption as corruption
+
+    rng = np.random.default_rng(0)
+    n = 32
+    images_train = rng.uniform(0.2, 0.8, size=(n, 28, 28))
+    train_indices = np.arange(n, dtype=np.int64)
+    active_indices = np.array([0, 1, 27, 28, 55, 400, 700], dtype=np.int64)
+    mods = types.SimpleNamespace(corruption=corruption)
+
+    raw_784, raw_505, y_train = driver.train_raw_pixel_conditions(
+        mods, images_train, train_indices, active_indices)
+
+    clean_784 = images_train.reshape(n, 784)
+    # The bug this regresses: raw_784 identical to the clean array. A
+    # genuine corruption (nonzero alpha_bar noise) makes this a real,
+    # not merely formal, difference.
+    assert not np.allclose(raw_784, clean_784)
+    # Y is unaffected by the fix -- targets are always the clean pixels.
+    np.testing.assert_array_equal(y_train, clean_784[:, active_indices])
+    np.testing.assert_array_equal(raw_505, raw_784[:, active_indices])
+    assert raw_784.shape == (n, 784)
+
+
 @pytest.mark.parametrize("module_name,func,expected", [
     ("stage2b_ridge", "fit_final", ("X_train", "Y_train", "alpha")),
     ("stage2b_ridge", "ridge_predict", ("fit", "X_scaled", "alpha_index")),

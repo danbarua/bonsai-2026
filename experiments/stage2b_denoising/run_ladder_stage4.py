@@ -869,6 +869,35 @@ def grid_tag(alphas):
     return f"g{len(tuple(alphas))}_{digest}"
 
 
+def train_raw_pixel_conditions(mods, images_train, train_indices, active_indices):
+    """`raw_505`/`raw_784`'s TRAIN-side X, and `Y_train`, built the way the
+    corrupted-to-clean reconstruction task actually requires: X from the
+    CORRUPTED train images (`x_t_clip`), Y from the clean ones.
+
+    A caller that reaches `images_train` directly for X fits Y-on-Y --
+    ridge learns an identity map on the training population, then meets
+    genuinely corrupted pixels for the first time at test time, where its
+    near-identity fit reproduces something close to the input verbatim --
+    numerically close to the identity/do-nothing baseline, which is
+    exactly how this bug presented (PR review, not local testing: the
+    corrected and buggy versions still disagree once real GCS artifacts
+    are involved, which this pure function cannot exercise, so the
+    regression test for it asserts the two OUTPUTS differ on synthetic
+    data rather than asserting a specific downstream MSE).
+
+    Both stage 3's own `step6_features` and this driver's own
+    `step5_test_features` build the raw conditions from `x_t_clip`; this
+    is the same construction, applied to the train population."""
+    _x_t_train, x_t_clip_train = mods.corruption.corrupt_corpus(
+        images_train, TRAIN_SPLIT, train_indices, alpha_bar=mods.corruption.ALPHA_BAR)
+    n = images_train.shape[0]
+    raw_784_train = np.asarray(x_t_clip_train).reshape(n, FULL_GRID)
+    raw_505_train = raw_784_train[:, active_indices]
+    clean_784_train = np.asarray(images_train).reshape(n, FULL_GRID)
+    Y_train = clean_784_train[:, active_indices]
+    return raw_784_train, raw_505_train, Y_train
+
+
 def step6_test_ridge(mods, bucket, features_test, Y_test, topo, fp, parents):
     """Refit each condition's ridge on the full 60,000-image TRAIN corpus
     at stage 3's FROZEN production alpha, then predict once on the TEST
@@ -877,10 +906,11 @@ def step6_test_ridge(mods, bucket, features_test, Y_test, topo, fp, parents):
     active_indices = np.asarray(topo["active_indices"])
     train_corpus, train_features, alphas, _train_parents = _load_train_ridge_inputs(
         mods, bucket)
-    raw_784_train = train_corpus["images_01"].reshape(EXPECTED_N_TRAIN, FULL_GRID)
+    raw_784_train, raw_505_train, Y_train = train_raw_pixel_conditions(
+        mods, np.asarray(train_corpus["images_01"]),
+        np.asarray(train_corpus["train_indices"]), active_indices)
     train_features["raw_784"] = raw_784_train
-    train_features["raw_505"] = raw_784_train[:, active_indices]
-    Y_train = raw_784_train[:, active_indices]
+    train_features["raw_505"] = raw_505_train
 
     conditions = (*RAW_CONDITIONS, *mods.conditions.ALL_CONDITIONS)
 
