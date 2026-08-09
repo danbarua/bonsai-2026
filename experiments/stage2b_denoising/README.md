@@ -148,6 +148,23 @@ mention here, in the same commit that creates it.
   the JAX and sklearn cost legs separately and halts against budgets fixed
   before it ran; thetas and features are persisted per graph and per
   condition because the amendment audit consumes those exact objects.
+- **`run_ladder_stage4.py`** — the stage-4 driver, DESIGN.md's ONE locked
+  evaluation on the official 10,000-image KMNIST test corpus. Written but
+  **not executed**: `AUDIT_PROTOCOL.md` blocks it behind the pre-Stage-4
+  package review and Dan's explicit release, and `make
+  stage2b-ladder-stage4` refuses to run without a separate
+  `STAGE4_RELEASE_CONFIRMED=1`. The only file permitted to pass
+  `allow_test_split=True` for scientific work (`smoke_stage2b_gcs.py` also
+  carries the literal, as a named exemption -- it is a hand-run transport
+  probe, not a driver). Refits ridge fresh from stage 3's persisted TRAIN
+  features at the frozen production alpha (a deterministic SVD solve,
+  bit-exact by construction); retrains the CNN from the same three fixed
+  seeds on the same locked split and VERIFIES the reproduction against
+  stage 3's persisted `(best_seed, best_epoch)` before trusting it for
+  test-corpus inference, because stage 3 persisted training histories and
+  a summary but not the fitted coefficients, scaler, or model weights
+  themselves. Refuses to compute the official result a second time if it
+  already exists -- "evaluated once" is enforced, not merely stated.
 
 - **`gate_corpus.py`** — pins which documents the binding-clause
   inventory ranges over, and asserts that list against the `.md` files
@@ -444,6 +461,7 @@ make test                      # the whole repository suite
 | `test_stage2b_ladder_stage1.py` | the stage-1 driver's constants, call sites and Makefile agreement |
 | `test_stage2b_ladder_stage2.py` | the stage-2 driver's constants, call sites (including the CNN closure) and Makefile agreement |
 | `test_stage2b_ladder_stage3.py` | the stage-3 driver's constants, the sizing probe's projections and halt paths, the pinned pre-contract consumes, and Makefile agreement |
+| `test_stage2b_ladder_stage4.py` | the stage-4 driver's constants, the CNN reproduction gate, and the single-opt-in-site invariant derived from every `.py` file's AST, in both directions |
 | `test_stage2b_gate_corpus.py` | which documents the binding-clause inventory ranges over — corpus against on-disk, both directions |
 
 This table is the whole of what `make stage2b-test` runs, and the one

@@ -321,6 +321,7 @@ STAGE2B_TEST_FILES := tests/test_stage2b_corruption.py tests/test_stage2b_encode
                       tests/test_stage2b_encode_stage3_local.py \
                       tests/test_stage2b_compare_stage3.py \
                       tests/test_stage2b_ladder_stage3.py \
+                      tests/test_stage2b_ladder_stage4.py \
                       tests/test_stage2b_gate_corpus.py
 
 .PHONY: stage2b-test
@@ -739,6 +740,83 @@ stage2b-ladder-stage3:  ## Run Stage 2B ladder stage 3 Phase B (n=60,000) on a C
 		if [ $$rc -eq 0 ]; then rc=1; fi; \
 	fi; \
 	$(call check_teardown,$(SESSION_2B_LADDER3)); \
+	exit $$rc
+
+SESSION_2B_LADDER4 ?= stage2b-ladder4
+
+# `EXEC_TIMEOUT` override, by the same reasoning as stage 3's. No stage-4
+# run has happened -- this is not itself a measurement -- but two of its
+# legs ARE grounded in real numbers pulled from stage 3's own committed
+# artifacts (`gsutil cat` against the public-read bucket, no session
+# needed) rather than a fresh guess:
+#   - CNN (3 seeds, 54,000/6,000 fit/validation, A100): stage 3's own
+#     `stage3_report_20260807T155651Z.json` records total_wallclock_s =
+#     639.6s (228.4/219.2/192.0 per seed) -- this driver retrains from
+#     scratch a second time (see run_ladder_stage4.py's module docstring)
+#     at the SAME scale, so that recorded total is the right anchor, not
+#     the ~1,200s FINDINGS.md projection table itself flags as unvalidated
+#     ("CNN cost scales with epochs x batches, not simply n").
+#   - Ridge (7 conditions, refit on the full 60,000-row training scale):
+#     the SAME report's "7_ridge" step (recomputing at production scale
+#     under the amended thirteen-decade grid) took 1,716.3s -- this driver
+#     performs the same operation once more, so budgeted at that figure
+#     rather than a fresh estimate.
+# Evolution and features are population-scaled from that report's own
+# "5_evolution" (393.5s) and "6_features" (513.8s) legs, at 10,000/60,000
+# of the population. Stage 3's TRAIN-side artifacts (corpus, five features
+# arrays, ridge_final, cnn_production) downloaded fresh into this session
+# are unmeasured but bounded by the ~3.4GB stage 3 itself uploaded. Summed
+# and rounded up generously, 7200s leaves a wide margin; it is a harness
+# safety net, not a scientific tolerance, exactly as stage 3's own comment
+# states -- the driver's own halts are what actually gate correctness.
+STAGE4_EXEC_TIMEOUT ?= 7200
+
+# A second, EXPLICIT confirmation beyond typing the command, because this
+# target is different in kind from stages 1-3: it is the one-shot official
+# result (AUDIT_PROTOCOL.md: "Stage 4 stays blocked behind the package
+# review and explicit release"), and `refuse_if_official_result_exists`
+# only protects against a SECOND run, not a first one launched before the
+# package review has actually happened. This is a structural speed bump,
+# not a substitute for that review.
+.PHONY: stage2b-ladder-stage4
+stage2b-ladder-stage4:  ## Run Stage 2B ladder stage 4, the ONE locked evaluation on the official test corpus -- bills while running, and requires STAGE4_RELEASE_CONFIRMED=1
+	@if [ "$(STAGE4_RELEASE_CONFIRMED)" != "1" ]; then \
+		echo "[make] REFUSING: this is the one-shot official Stage 4 evaluation on the"; \
+		echo "[make] official KMNIST test corpus. AUDIT_PROTOCOL.md requires the"; \
+		echo "[make] pre-Stage-4 package review plus Dan's explicit release before this"; \
+		echo "[make] runs. Re-invoke as: STAGE4_RELEASE_CONFIRMED=1 make stage2b-ladder-stage4"; \
+		echo "[make] only once both of those have actually happened."; \
+		exit 1; \
+	fi
+	rc=0; src=0; \
+	cd $(REPO_ROOT) && \
+	if ! $(CLOSURE_CHECK) $(STAGE2B_DIR)/run_ladder_stage4.py; then \
+		exit 1; \
+	fi; \
+	commit=$$($(GIT) rev-parse HEAD); \
+	if ! $(GIT) branch -r --contains $$commit 2>/dev/null | grep -q .; then \
+		echo "[make] REFUSING: HEAD $$commit is not on any remote. Push before running -- the runtime can only fetch what origin has."; \
+		exit 1; \
+	fi; \
+	driver_sha=$$(shasum -a 256 $(STAGE2B_DIR)/run_ladder_stage4.py | cut -d' ' -f1); \
+	echo "[make] commit $$commit, driver sha256 $$driver_sha"; \
+	cd $(STAGE2B_DIR) && \
+	$(MIGHTY_COLAB) sessions && \
+	if $(MIGHTY_COLAB) status -s $(SESSION_2B_LADDER4) 2>&1 | grep -q "not found"; then \
+		$(MIGHTY_COLAB) new -s $(SESSION_2B_LADDER4) --gpu $(LADDER_GPU); \
+	else \
+		echo "[make] Reusing existing session $(SESSION_2B_LADDER4)"; \
+	fi && \
+	$(MIGHTY_COLAB) reinstall -s $(SESSION_2B_LADDER4) jax[cuda12]==0.11.0 diffrax==0.7.2 google-cloud-storage equinox optax && \
+	$(MIGHTY_COLAB) upload -s $(SESSION_2B_LADDER4) $(BONSAI_GCS_CREDENTIALS) $(REMOTE_KEY_PATH) && \
+	rc=0; out=$$($(MIGHTY_COLAB) exec -s $(SESSION_2B_LADDER4) -f run_ladder_stage4.py --timeout $(STAGE4_EXEC_TIMEOUT) $(GCS_EXEC_ENV) --env BONSAI_COMMIT="$$commit" --env BONSAI_DRIVER_SHA256="$$driver_sha" --env JAX_ENABLE_X64=1 2>&1) || rc=$$?; \
+	echo "$$out"; \
+	src=0; $(MIGHTY_COLAB) stop -s $(SESSION_2B_LADDER4) || src=$$?; \
+	if [ $$rc -ne 0 ] || ! echo "$$out" | grep -q STAGE4_OK; then \
+		echo "[make] FAILED: ladder stage 4 did not report success (exec rc=$$rc)."; \
+		if [ $$rc -eq 0 ]; then rc=1; fi; \
+	fi; \
+	$(call check_teardown,$(SESSION_2B_LADDER4)); \
 	exit $$rc
 
 .PHONY: help
