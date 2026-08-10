@@ -1106,7 +1106,7 @@ def phase_propagate(mods, args, repo_root, work_dir, bucket, fp, record):
     ensure_json(mods, bucket, work_dir, report_obj, compute_report,
                 no_upload=args.no_upload)
     # optional latest convenience copy (local only, not a GCS object)
-    latest = results_mirror(work_dir, "protocol1_propagation_report_latest.json")
+    latest = os.path.join(work_dir, "protocol1_propagation_report_latest.json")
     try:
         with open(latest, "w", encoding="utf-8") as handle:
             handle.write(_dumps(report))
