@@ -272,29 +272,31 @@ def test_every_path_resolves_inside_the_repository(rel):
 
 
 @pytest.mark.parametrize("rel", artefact_json_paths())
-def test_a_declared_artefact_the_repo_carries_is_actually_there(rel):
-    """The check Dan asked for: it says the file is there, so it is there.
+def test_report_what_each_manifest_claims_about_obtainability(rel):
+    """REPORTS. Asserts nothing, and says so, because there is nothing yet to assert.
 
-    Scoped to git-tracked paths. An untracked path is a regenerable cache
-    the repository never promised to ship, and failing on those would make
-    a fresh clone red for doing exactly what it is supposed to do.
+    A "declared artefacts exist" check was written here and removed the same
+    day: measured against the only two manifests in the repository it has
+    ZERO candidates -- Stage 2A's eight paths are all untracked, Stage 2B's
+    seventeen entries carry bucket object ids and no local path. It passed
+    by finding nothing, which is the failure `gate_inventory.py` exits 2 to
+    avoid, committed inside the file that cites that rule.
+
+    The check cannot be written because the decision it would enforce has
+    not been made. `present: true` collapses four different situations --
+    committed here, in the bucket, regenerable on demand, or gone -- into
+    one word, and only the last is dangerous. Until a manifest says WHICH,
+    any assertion built on it encodes a promise nobody made. See task #38.
     """
     doc = json.loads((REPO_ROOT / rel).read_text(encoding="utf-8"))
+    rows = list(declared_artefacts(doc))
     tracked = _tracked_files()
-    missing, unshipped = [], []
-    for name, path, present in declared_artefacts(doc):
-        exists = (REPO_ROOT / path).exists()
-        if path in tracked and not exists:
-            missing.append((name, path))
-        elif present and not exists:
-            unshipped.append((name, path))
-    for name, path in unshipped:
-        print(f"[artefact-json] {rel}: {name} says present=true; not in a fresh "
-              f"clone (untracked, regenerable) -- {path}")
-    assert not missing, (
-        f"{rel} declares {len(missing)} artefact(s) that git tracks but that are "
-        f"not on disk: {[p for _, p in missing]}. Either the filename is wrong in "
-        "the manifest or the file never landed; both are one-line GitHub issues.")
+    print(f"\n[artefact-json] {rel}: {len(rows)} entries carrying a local path")
+    for name, path, present in rows:
+        state = ("committed" if path in tracked
+                 else "not in repo" if not (REPO_ROOT / path).exists()
+                 else "untracked but on this disk")
+        print(f"[artefact-json]   present={present!s:5} {state:26} {name}")
 
 
 @pytest.mark.parametrize("rel", artefact_json_paths())
@@ -361,30 +363,23 @@ def test_ordinary_content_is_not_flagged(value):
     assert not unreachable_path_violations({"k": value}), f"{value!r} wrongly flagged"
 
 
-def test_the_missing_artefact_check_fires_on_a_tracked_file_that_is_gone(tmp_path):
-    """Break-test for the check above, both directions.
+def test_no_manifest_yet_declares_an_obtainable_local_artefact():
+    """The measurement that removed the existence check, pinned so it stays true.
 
-    A tracked path that is absent must fail; an untracked absent path must
-    not, or a fresh clone goes red for its gitignored caches.
+    This is the anti-vacuity assertion the deleted check could not make. It
+    fails the day a manifest first declares a path the repository actually
+    carries -- which is the day an existence check becomes writable, and the
+    day someone should write it. Until then it records WHY there isn't one.
     """
     tracked = _tracked_files()
-    a_tracked_file = "experiments/stage2b_denoising/ARTIFACT_MANIFEST.json"
-    assert a_tracked_file in tracked, "fixture assumption broken"
-
-    doc = {"artifacts": {
-        "gone": {"path": a_tracked_file + ".typo", "present": True},
-        "cache": {"path": "experiments/x/results/regenerable.pkl", "present": True},
-    }}
-    missing = [p for _, p, _ in declared_artefacts(doc)
-               if p in tracked and not (REPO_ROOT / p).exists()]
-    assert missing == [], "neither fixture path is tracked, so neither is 'missing'"
-
-    # the real direction: a path that IS tracked and IS absent
-    doc2 = {"artifacts": {"gone": {"path": a_tracked_file, "present": True}}}
-    resolved = [(p, (REPO_ROOT / p).exists()) for _, p, _ in declared_artefacts(doc2)]
-    assert resolved == [(a_tracked_file, True)], (
-        "a tracked, present file must read as present -- if this flips, the "
-        "existence check is measuring something other than the filesystem")
+    obtainable = []
+    for rel in artefact_json_paths():
+        doc = json.loads((REPO_ROOT / rel).read_text(encoding="utf-8"))
+        obtainable += [(rel, p) for _, p, _ in declared_artefacts(doc) if p in tracked]
+    assert not obtainable, (
+        f"a manifest now declares artefact(s) the repo tracks: {obtainable}. That "
+        "is good news and it invalidates this test: replace it with the existence "
+        "check it was standing in for -- declared + tracked must be on disk.")
 
 
 def test_strict_json_check_rejects_nan_and_infinity():
