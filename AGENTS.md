@@ -33,7 +33,8 @@ where a shared, hardened library actually earns its cost.
   reasons unrelated to what they named, with dates, SHAs, a six-way
   taxonomy, and what actually caught each one. Principles 10, 20 and 21
   are the rules distilled from it; that document is the evidence they
-  came from and the place to add the next incident.
+  came from and the place to add the next incident. Local preflight before
+  a checkpoint PR: `make vacuous-review PR=N` (Haiku; see the github skill).
 - **`docs/MULTI_AGENT_PRACTICE.md`** -- the OPERATIONAL counterpart to
   the methodological principles below: how to run this work across
   several agents that cannot see each other, on localhost and on
