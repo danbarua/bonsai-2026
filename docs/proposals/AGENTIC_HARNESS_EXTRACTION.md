@@ -745,6 +745,75 @@ incrementally from observed failure modes.**
 That conclusion survives the taxonomy correction in §2, which the original
 "humans good, guards bad" framing did not.
 
+## 10. Journal: the reviewer's own failure modes
+
+Kept at Dan's suggestion, in the first person, because the useful record of
+a session like this is not only what the apparatus did. Deliberately not
+mirrored into the plain-English half — that half is for readers; this is
+working notes.
+
+### 10a. A defect-driven process has no stopping condition
+
+The clearest finding of 2026-08-10, and it came out of the smallest task in
+the file. I wrote a guard rejecting absolute paths in artefact JSON. What
+followed, each step justified entirely by the previous step's evidence:
+
+| round | trigger | response |
+|---|---|---|
+| 1 | sidecar bug | prefix list: `/Users/`, `/home/`, `/root/` |
+| 2 | external review | list accepts `/tmp`, `/opt`, `/var`, both Windows forms |
+| 3 | fix round 2 | replace list with `PurePosixPath`/`PureWindowsPath.is_absolute()` |
+| 4 | round 3 flags a division sign | require a segment below the root |
+| 5 | round 4 finds real `/content/` paths | add an exemption, plus two tests guarding the exemption |
+| 6 | Dan inverts the requirement | ask whether the file is *there* instead |
+| 7 | measure | the check has **zero candidates** on both manifests; delete it |
+
+Seven rounds. Every one was evidence-driven, which is exactly what made it
+feel like rigour rather than thrashing. The escalation was not a lapse in
+the discipline this project holds itself to — **it was that discipline
+running without a termination criterion.** Break-test everything, derive
+don't hand-list, fix what review finds: each rule fired correctly, and their
+composition produced six increasingly elaborate versions of a check that was
+never checking anything.
+
+What was missing is a question none of the rules ask: *how many real cases
+does this guard have?* Asking it at round 1 ends the sequence at round 1.
+The anti-vacuity machinery elsewhere in this repository asks exactly that —
+`gate_inventory.py` exits 2 on zero candidates — and I did not apply it to
+my own work until round 7, while writing anchors against it for other
+people's.
+
+**Proposed as a rule, on this evidence: a new guard states its candidate
+count before its predicate.** Not after, and not in a follow-up — the count
+is what tells you whether the predicate is worth arguing about. Rounds 2
+through 6 were an argument about a predicate with no subjects.
+
+### 10b. Smaller notes from the same session
+
+- **I measured a rate and called it a defect without asking what set the
+  rate.** The review's per-push trigger looked like the dial; PR lifetime
+  was the dial. §5f. A component-by-component audit invites this: every
+  component has knobs, and the thing setting the behaviour may not be one.
+- **A stated contract broader than the predicate implementing it — three
+  instances in one day.** My prefix list; the frequency claim; and the
+  `GCS_ENV` guard that checks whether a Makefile *exports* a name while the
+  property anyone wants is whether the driver *reads* it (§8b). The last is
+  the general form: **a guard spanning two artefacts must assert the
+  relation between them, not a property of one.**
+- **A break-test only proves a guard catches what its author imagined.**
+  Mine passed through rounds 1–2 while missing five forms, because I wrote
+  the cases and the predicate from the same mental list.
+- **I wrote down a hypothesis whose test required me not to act, then
+  acted.** §8b. Observer and fixer were the same party and I noticed only
+  when re-reading the task.
+- **I read strata as inconsistency.** Stage 2A lacking Stage 2B's practices
+  is chronology, not drift — §8a's correction. Every "2A doesn't do X"
+  finding this session needed that lens and did not get it until Dan
+  supplied it.
+- **I answered "you are overengineering this" with a longer docstring.**
+  Recorded because the reflex to explain is itself the failure mode under
+  discussion, and it survived being named.
+
 ---
 
 # The same document, in plain English
