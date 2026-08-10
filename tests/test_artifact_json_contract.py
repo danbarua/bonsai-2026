@@ -52,13 +52,51 @@ itself, touches no network, provisions nothing.
 import json
 import re
 import subprocess
+from pathlib import PurePosixPath, PureWindowsPath
 
 import pytest
 
 from _makefile import REPO_ROOT
 
-# `file://` is included because it is an absolute path wearing a scheme.
-_ABSOLUTE = re.compile(r"(?:^|[\s\"'(=])(?:/Users/|/home/|/root/|[A-Za-z]:[\\/]{2}|file://)")
+# Splitting a JSON string into path-like tokens. A value is usually the whole
+# path, but a path can also sit inside a sentence, so whitespace and the
+# characters that commonly bracket a path are all separators.
+_TOKENS = re.compile(r"[\s\"'(),\[\]{}<>;]+")
+
+# The FIRST version of this check was a hand-written alternation of prefixes
+# -- /Users/, /home/, /root/, a Windows drive, file:// -- and an external
+# review found it accepts /tmp/x, /opt/x, /var/folders/... and BOTH forms of
+# C:\Users\dan\x (the drive pattern demanded two separators where there is
+# one). The break-tests below passed throughout, because they exercised the
+# prefixes the alternation already knew about.
+#
+# That is CLAUDE.md principle 21 committed inside a file that cites principle
+# 21: a hand-maintained list standing in for a derivable set, under-covering
+# silently. So the set is no longer hand-maintained. `is_absolute()` is the
+# standard library's own definition of the property being tested, it covers
+# every root this alternation was enumerating one at a time, and it cannot
+# fall behind a prefix nobody thought of.
+
+
+def _looks_absolute(token: str) -> bool:
+    """True for a rooted path that actually names something below the root.
+
+    The `parts` length test is not decoration. A bare "/" is_absolute() --
+    and a bare "/" is what tokenising a DIVISION SIGN produces. Stage 2B's
+    own manifest carries `mean(s*d) / (SD(s*d, ddof=1) / sqrt(n))`, so
+    without this an arithmetic formula in a committed artefact reads as a
+    filesystem path. Requiring a segment after the root keeps every real
+    path and drops every bare operator.
+    """
+    if not token:
+        return False
+    if token.lower().startswith("file://"):
+        return True                      # an absolute path wearing a scheme
+    for flavour in (PureWindowsPath, PurePosixPath):
+        path = flavour(token)
+        if path.is_absolute() and len(path.parts) > 1:
+            return True
+    return False
 
 # Anti-vacuity anchors: files that MUST be in any correct discovery result.
 # Their job is to fail loudly if the discovery predicate is ever narrowed to
@@ -67,6 +105,29 @@ _ABSOLUTE = re.compile(r"(?:^|[\s\"'(=])(?:/Users/|/home/|/root/|[A-Za-z]:[\\/]{
 _ANCHORS = {
     "experiments/stage2a_dynamics_classification/results/ARTIFACT_MANIFEST.json",
     "experiments/stage2b_denoising/ARTIFACT_MANIFEST.json",
+}
+
+# THE ONE EXEMPTION, and the argument for it.
+#
+# Invariant 1 forbids absolute paths because they are CONFIGURATION that
+# should have been portable -- the sidecar's `local_path` describes where a
+# file may be found, and describing that with one machine's layout is simply
+# wrong. But a path can also be EVIDENCE: a record of where a run physically
+# happened. Stage 4's locked result records `/content/...`, the Colab VM it
+# ran on. That is not an un-portable way of saying something portable; it is
+# the true and only answer to "where did this execute". Rewriting it
+# repo-relative would not improve portability, it would falsify the record.
+#
+# So the exemption is by ROLE, not by file: a field whose job is to say where
+# execution occurred. It is deliberately keyed on exact leaf paths rather
+# than a substring like "path", which would exempt half the corpus, and
+# `test_every_exemption_still_matches_a_real_string` fails if any entry stops
+# naming something real -- CLAUDE.md principle 21's requirement that an
+# exemption carry a reason AND a test that it still refers to something.
+_EXECUTION_PROVENANCE = {
+    "$.frozen_results.stage4_official_result.run.clone_dir",
+    "$.frozen_results.stage4_official_result.run.credentials_path",
+    "$.frozen_results.stage4_official_result.run.driver_identity.path",
 }
 
 
@@ -96,8 +157,16 @@ def _strings(node, trail="$"):
             yield from _strings(value, f"{trail}[{i}]")
 
 
-def absolute_path_violations(doc):
-    return [(where, s) for where, s in _strings(doc) if _ABSOLUTE.search(s)]
+def absolute_path_violations(doc, *, exempt=frozenset()):
+    out = []
+    for where, s in _strings(doc):
+        if where in exempt:
+            continue
+        for token in _TOKENS.split(s):
+            if _looks_absolute(token):
+                out.append((where, s))
+                break
+    return out
 
 
 def strict_json_violation(raw):
@@ -149,10 +218,46 @@ def test_anchors_still_name_files_that_exist():
 # ---- the three invariants ------------------------------------------------
 
 
+def test_every_exemption_still_matches_a_real_string():
+    """An exemption naming nothing is a hole, not an exemption.
+
+    Principle 21: an exemption gets a named constant, a reason, and its own
+    test that it still refers to something real. If Stage 4's manifest is
+    ever regenerated without these fields, this fails and the entry gets
+    deleted rather than sitting there silently widening the contract.
+    """
+    seen = set()
+    for rel in artefact_json_paths():
+        doc = json.loads((REPO_ROOT / rel).read_text(encoding="utf-8"))
+        seen.update(where for where, _ in _strings(doc))
+    orphans = _EXECUTION_PROVENANCE - seen
+    assert not orphans, (
+        f"exemption(s) naming no string in any artefact: {sorted(orphans)}. "
+        "Delete them; an exemption for a field that no longer exists only "
+        "widens the contract for whatever takes that path next.")
+
+
+def test_the_exemption_is_load_bearing_and_narrow():
+    """It must actually suppress something, and only what it names.
+
+    Without the first half the exemption could be deleted with no test
+    noticing, which would make it indistinguishable from dead code.
+    """
+    doc = {"frozen_results": {"stage4_official_result": {"run": {
+        "credentials_path": "/content/key.json",
+        "some_other_path": "/content/key.json"}}}}
+    unexempted = absolute_path_violations(doc)
+    assert len(unexempted) == 2, "both should trip without the exemption"
+    exempted = absolute_path_violations(doc, exempt=_EXECUTION_PROVENANCE)
+    assert len(exempted) == 1, (
+        "the exemption must suppress exactly the field it names and no other")
+    assert exempted[0][0].endswith("some_other_path")
+
+
 @pytest.mark.parametrize("rel", artefact_json_paths())
 def test_no_absolute_paths_or_host_identity(rel):
     doc = json.loads((REPO_ROOT / rel).read_text(encoding="utf-8"))
-    violations = absolute_path_violations(doc)
+    violations = absolute_path_violations(doc, exempt=_EXECUTION_PROVENANCE)
     for where, value in violations:
         print(f"[artefact-json] {rel}: {where} = {value!r}")
     assert not violations, (
@@ -192,17 +297,55 @@ def test_is_canonically_serialized(rel):
 # and asserted to reject it for the SPECIFIC stated reason.
 
 
-def test_absolute_path_check_rejects_a_path_at_any_depth():
-    assert absolute_path_violations({"local_path": "/Users/dan/x/results/t.json"})
+@pytest.mark.parametrize("path", [
+    "/Users/dan/x/results/t.json",
+    "/home/ci/out.json",
+    # every one of the five below was ACCEPTED by the first version of this
+    # check and found by external review, 2026-08-10. They are the regression
+    # test for that miss, not decoration.
+    "/tmp/x.json",
+    "/opt/tools/x.json",
+    "/var/folders/zz/T/tmpabc/x.json",   # macOS tempfile.mkdtemp() lives here
+    "C:\\Users\\dan\\x.json",
+    "C:/Users/dan/x.json",
+    "file:///tmp/x.json",
+    "\\\\server\\share\\x.json",
+])
+def test_absolute_path_check_rejects_every_absolute_form(path):
+    assert absolute_path_violations({"local_path": path}), f"{path} not caught"
+
+
+def test_absolute_path_check_looks_at_any_depth_and_at_keys():
     assert absolute_path_violations({"a": [{"b": "/home/ci/out.json"}]})
-    assert absolute_path_violations({"a": "file:///tmp/x.json"})
     assert absolute_path_violations({"/Users/dan/key": "harmless value"}), (
         "a path used as a KEY must be caught too")
-    # and does not fire on the shapes these artefacts legitimately contain
-    assert not absolute_path_violations(
-        {"object": "stage2b/train/stage3/common/table.json",
-         "rel": "experiments/stage2b_denoising/results/table.json",
-         "note": "ratio a/b is fine", "digest": "5ebded9ea78d"})
+    assert absolute_path_violations({"note": "scratch went to /tmp/x.json first"}), (
+        "a path embedded in a sentence must be caught too")
+
+
+@pytest.mark.parametrize("value", [
+    "stage2b/train/stage3/common/table.json",       # bucket-relative object
+    "experiments/stage2b_denoising/results/t.json",  # repo-relative
+    "ratio a/b is fine",
+    "a / b with spaces",
+    # the real string from stage2b's ARTIFACT_MANIFEST.json that the first
+    # attempt at this fix flagged: a division sign tokenises to a bare "/",
+    # which is_absolute() calls absolute.
+    "studentized: mean(s*d) / (SD(s*d, ddof=1) / sqrt(n))",
+    "/",
+    "//",
+    "5ebded9ea78da1f66aa826683828c0990fbd57ab",
+    "stage2b_local_manifest_v1",
+    "",
+])
+def test_absolute_path_check_does_not_fire_on_legitimate_content(value):
+    """The half that stops the fix above from being a blunt instrument.
+
+    Widening a detector is only safe if its false-positive rate stays at
+    zero on the content that must keep passing -- otherwise the next author
+    silences it.
+    """
+    assert not absolute_path_violations({"k": value}), f"{value!r} wrongly flagged"
 
 
 def test_strict_json_check_rejects_nan_and_infinity():
