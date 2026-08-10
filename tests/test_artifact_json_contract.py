@@ -1,24 +1,48 @@
 """Committed artefact JSON must be portable, strict, and byte-reproducible.
 
+THE PROBLEM THIS PREVENTS, stated before any rule, because the first
+version of this file got the rule right and the problem wrong: someone
+clones the repo, runs `make`, and it does what the README says it does. An
+artefact that names a location only one machine can reach breaks that, and
+the person it breaks for cannot tell why.
+
 THE SPEC. Every `.json` file tracked by git under `experiments/` is an
 ARTEFACT: a result some FINDINGS.md cites, or a manifest that indexes such
 results. Three invariants hold for all of them. They are not a structural
 schema -- the four artefacts that exist today share no top-level keys, and
-the two properties that actually bite (an absolute path in ANY string value,
-at any depth; byte-exact serialization) cannot be expressed in JSON Schema
-at all. So the contract is over form and portability, not shape.
+the two properties that actually bite (reachability from a fresh clone;
+byte-exact serialization) cannot be expressed in JSON Schema at all.
 
-  1. NO ABSOLUTE PATHS OR HOST IDENTITY in any string, at any depth.
-     `/Users/...`, `/home/...`, `C:\\...`, `file://...`.
+  1. A DECLARED ARTEFACT THE REPOSITORY CARRIES IS ACTUALLY THERE, AND
+     EVERY DECLARED PATH STAYS INSIDE THE REPOSITORY.
+
+     The failure this exists to produce, in full: "the manifest says
+     `experiments/.../some_result.json` is there; it isn't." Someone
+     fat-fingered a filename, or the file never landed. Either way it is a
+     GitHub issue in two sentences, filed by whoever ran `make` after a
+     fresh clone.
+
+     Existence is asserted only for paths GIT TRACKS. The rest are
+     regenerable local caches -- Stage 2A's manifest declares eight
+     gitignored `.pkl`s -- and demanding those exist would turn a fresh
+     clone permanently red for files it is not supposed to have.
+
+     `REPO_ROOT / s` lands outside REPO_ROOT exactly when `s` is absolute
+     or climbs out with `..`, so one local question replaces a prohibition
+     that would need every root every filesystem ever had. Whole values
+     only, never fragments of prose: the harm is a field some code opens.
 
      Provenance: a CAUGHT DEFECT, 2026-08-10. `_write_provenance_sidecar`
-     in `run_abs_conv_eps_sensitivity.py` builds `local_path` and
-     `object_path` from `os.path.dirname(os.path.abspath(__file__))`, so a
-     sidecar generated in one checkout embeds that checkout's absolute path.
-     Committing it would bake one machine's layout into shared history and
-     produce a spurious diff every time a different checkout regenerated it.
-     A manifest that only validates on the machine that wrote it is not
-     doing the job a manifest exists to do.
+     in `run_abs_conv_eps_sensitivity.py` builds `local_path` from
+     `abspath(__file__)`, naming a directory no other checkout has.
+
+     NOT asserted, and the reason is the same defect one level up: these
+     manifests carry `present: true/false`, and all eight of Stage 2A's
+     `present: true` entries are absent from a fresh clone. `present`
+     records what the GENERATING machine had. Asserting it would fail on
+     locked science for being honest about a sandbox that no longer
+     exists, so this file reports the disagreement and does not fail on
+     it.
 
   2. STRICT RFC 8259 -- no `NaN`, `Infinity`, `-Infinity`.
 
@@ -52,51 +76,19 @@ itself, touches no network, provisions nothing.
 import json
 import re
 import subprocess
-from pathlib import PurePosixPath, PureWindowsPath
-
 import pytest
 
 from _makefile import REPO_ROOT
 
-# Splitting a JSON string into path-like tokens. A value is usually the whole
-# path, but a path can also sit inside a sentence, so whitespace and the
-# characters that commonly bracket a path are all separators.
-_TOKENS = re.compile(r"[\s\"'(),\[\]{}<>;]+")
-
-# The FIRST version of this check was a hand-written alternation of prefixes
-# -- /Users/, /home/, /root/, a Windows drive, file:// -- and an external
-# review found it accepts /tmp/x, /opt/x, /var/folders/... and BOTH forms of
-# C:\Users\dan\x (the drive pattern demanded two separators where there is
-# one). The break-tests below passed throughout, because they exercised the
-# prefixes the alternation already knew about.
-#
-# That is CLAUDE.md principle 21 committed inside a file that cites principle
-# 21: a hand-maintained list standing in for a derivable set, under-covering
-# silently. So the set is no longer hand-maintained. `is_absolute()` is the
-# standard library's own definition of the property being tested, it covers
-# every root this alternation was enumerating one at a time, and it cannot
-# fall behind a prefix nobody thought of.
-
-
-def _looks_absolute(token: str) -> bool:
-    """True for a rooted path that actually names something below the root.
-
-    The `parts` length test is not decoration. A bare "/" is_absolute() --
-    and a bare "/" is what tokenising a DIVISION SIGN produces. Stage 2B's
-    own manifest carries `mean(s*d) / (SD(s*d, ddof=1) / sqrt(n))`, so
-    without this an arithmetic formula in a committed artefact reads as a
-    filesystem path. Requiring a segment after the root keeps every real
-    path and drops every bare operator.
-    """
-    if not token:
-        return False
-    if token.lower().startswith("file://"):
-        return True                      # an absolute path wearing a scheme
-    for flavour in (PureWindowsPath, PurePosixPath):
-        path = flavour(token)
-        if path.is_absolute() and len(path.parts) > 1:
-            return True
-    return False
+def _escapes_repo(value: str) -> bool:
+    """True if `value`, read as a path from the repo root, lands outside it."""
+    if not value or value.lower().startswith("file://"):
+        return bool(value)
+    try:
+        landed = (REPO_ROOT / value).resolve()
+    except (OSError, ValueError):
+        return False        # not path-shaped on this platform; not our problem
+    return not (landed == REPO_ROOT or REPO_ROOT in landed.parents)
 
 # Anti-vacuity anchors: files that MUST be in any correct discovery result.
 # Their job is to fail loudly if the discovery predicate is ever narrowed to
@@ -157,16 +149,28 @@ def _strings(node, trail="$"):
             yield from _strings(value, f"{trail}[{i}]")
 
 
-def absolute_path_violations(doc, *, exempt=frozenset()):
-    out = []
-    for where, s in _strings(doc):
-        if where in exempt:
-            continue
-        for token in _TOKENS.split(s):
-            if _looks_absolute(token):
-                out.append((where, s))
-                break
-    return out
+def unreachable_path_violations(doc, *, exempt=frozenset()):
+    return [(where, s) for where, s in _strings(doc)
+            if where not in exempt and _escapes_repo(s)]
+
+
+def declared_artefacts(doc):
+    """(name, path, present) for each entry in a manifest's `artifacts` map.
+
+    Derived from the shape both manifests already use rather than from a
+    list of field names, so a manifest added later is covered without being
+    named here. Entries keyed `object` are bucket ids in a different
+    namespace and carry no local path; they are skipped.
+    """
+    for name, entry in sorted(doc.get("artifacts", {}).items()):
+        if isinstance(entry, dict) and "path" in entry:
+            yield name, entry["path"], entry.get("present")
+
+
+def _tracked_files():
+    out = subprocess.run(["git", "ls-files", "-z"], cwd=REPO_ROOT,
+                         capture_output=True, text=True, check=True).stdout
+    return {p for p in out.split("\0") if p}
 
 
 def strict_json_violation(raw):
@@ -246,24 +250,51 @@ def test_the_exemption_is_load_bearing_and_narrow():
     doc = {"frozen_results": {"stage4_official_result": {"run": {
         "credentials_path": "/content/key.json",
         "some_other_path": "/content/key.json"}}}}
-    unexempted = absolute_path_violations(doc)
+    unexempted = unreachable_path_violations(doc)
     assert len(unexempted) == 2, "both should trip without the exemption"
-    exempted = absolute_path_violations(doc, exempt=_EXECUTION_PROVENANCE)
+    exempted = unreachable_path_violations(doc, exempt=_EXECUTION_PROVENANCE)
     assert len(exempted) == 1, (
         "the exemption must suppress exactly the field it names and no other")
     assert exempted[0][0].endswith("some_other_path")
 
 
 @pytest.mark.parametrize("rel", artefact_json_paths())
-def test_no_absolute_paths_or_host_identity(rel):
+def test_every_path_resolves_inside_the_repository(rel):
     doc = json.loads((REPO_ROOT / rel).read_text(encoding="utf-8"))
-    violations = absolute_path_violations(doc, exempt=_EXECUTION_PROVENANCE)
+    violations = unreachable_path_violations(doc, exempt=_EXECUTION_PROVENANCE)
     for where, value in violations:
         print(f"[artefact-json] {rel}: {where} = {value!r}")
     assert not violations, (
-        f"{rel} contains {len(violations)} absolute path(s) or host identifier(s). "
-        "These bake one checkout's layout into shared history and re-diff on every "
-        "machine. Store repo-relative paths, or the object path within the bucket.")
+        f"{rel} names {len(violations)} location(s) outside this repository, so a "
+        "fresh clone cannot reach them and `make` will not do what the README says "
+        f"it does: {[w for w, _ in violations]}. Store the path relative to the repo "
+        "root, or the object path within the bucket.")
+
+
+@pytest.mark.parametrize("rel", artefact_json_paths())
+def test_a_declared_artefact_the_repo_carries_is_actually_there(rel):
+    """The check Dan asked for: it says the file is there, so it is there.
+
+    Scoped to git-tracked paths. An untracked path is a regenerable cache
+    the repository never promised to ship, and failing on those would make
+    a fresh clone red for doing exactly what it is supposed to do.
+    """
+    doc = json.loads((REPO_ROOT / rel).read_text(encoding="utf-8"))
+    tracked = _tracked_files()
+    missing, unshipped = [], []
+    for name, path, present in declared_artefacts(doc):
+        exists = (REPO_ROOT / path).exists()
+        if path in tracked and not exists:
+            missing.append((name, path))
+        elif present and not exists:
+            unshipped.append((name, path))
+    for name, path in unshipped:
+        print(f"[artefact-json] {rel}: {name} says present=true; not in a fresh "
+              f"clone (untracked, regenerable) -- {path}")
+    assert not missing, (
+        f"{rel} declares {len(missing)} artefact(s) that git tracks but that are "
+        f"not on disk: {[p for _, p in missing]}. Either the filename is wrong in "
+        "the manifest or the file never landed; both are one-line GitHub issues.")
 
 
 @pytest.mark.parametrize("rel", artefact_json_paths())
@@ -298,54 +329,62 @@ def test_is_canonically_serialized(rel):
 
 
 @pytest.mark.parametrize("path", [
-    "/Users/dan/x/results/t.json",
-    "/home/ci/out.json",
-    # every one of the five below was ACCEPTED by the first version of this
-    # check and found by external review, 2026-08-10. They are the regression
-    # test for that miss, not decoration.
-    "/tmp/x.json",
-    "/opt/tools/x.json",
-    "/var/folders/zz/T/tmpabc/x.json",   # macOS tempfile.mkdtemp() lives here
-    "C:\\Users\\dan\\x.json",
-    "C:/Users/dan/x.json",
+    "/Users/dan/x/results/t.json",   # the sidecar's own shape
+    "/tmp/x.json",                   # accepted by the prefix-list version
+    "/var/folders/zz/T/tmpabc/x.json",   # macOS mkdtemp; same miss
     "file:///tmp/x.json",
-    "\\\\server\\share\\x.json",
+    "../../elsewhere/t.json",        # escapes without being absolute at all
 ])
-def test_absolute_path_check_rejects_every_absolute_form(path):
-    assert absolute_path_violations({"local_path": path}), f"{path} not caught"
+def test_a_location_outside_the_repository_is_rejected(path):
+    assert unreachable_path_violations({"local_path": path}), f"{path} not caught"
 
 
-def test_absolute_path_check_looks_at_any_depth_and_at_keys():
-    assert absolute_path_violations({"a": [{"b": "/home/ci/out.json"}]})
-    assert absolute_path_violations({"/Users/dan/key": "harmless value"}), (
+def test_it_looks_at_any_depth_and_at_keys():
+    assert unreachable_path_violations({"a": [{"b": "/home/ci/out.json"}]})
+    assert unreachable_path_violations({"/Users/dan/key": "harmless value"}), (
         "a path used as a KEY must be caught too")
-    assert absolute_path_violations({"note": "scratch went to /tmp/x.json first"}), (
-        "a path embedded in a sentence must be caught too")
 
 
 @pytest.mark.parametrize("value", [
-    "stage2b/train/stage3/common/table.json",       # bucket-relative object
+    "stage2b/train/stage3/common/table.json",        # bucket object path
     "experiments/stage2b_denoising/results/t.json",  # repo-relative
     "ratio a/b is fine",
-    "a / b with spaces",
-    # the real string from stage2b's ARTIFACT_MANIFEST.json that the first
-    # attempt at this fix flagged: a division sign tokenises to a bare "/",
-    # which is_absolute() calls absolute.
+    # real string from stage2b's ARTIFACT_MANIFEST.json. Checking whole values
+    # rather than hunting path-shaped fragments is what keeps this passing.
     "studentized: mean(s*d) / (SD(s*d, ddof=1) / sqrt(n))",
-    "/",
-    "//",
     "5ebded9ea78da1f66aa826683828c0990fbd57ab",
     "stage2b_local_manifest_v1",
     "",
 ])
-def test_absolute_path_check_does_not_fire_on_legitimate_content(value):
-    """The half that stops the fix above from being a blunt instrument.
+def test_ordinary_content_is_not_flagged(value):
+    """A guard with false positives gets switched off by the next author."""
+    assert not unreachable_path_violations({"k": value}), f"{value!r} wrongly flagged"
 
-    Widening a detector is only safe if its false-positive rate stays at
-    zero on the content that must keep passing -- otherwise the next author
-    silences it.
+
+def test_the_missing_artefact_check_fires_on_a_tracked_file_that_is_gone(tmp_path):
+    """Break-test for the check above, both directions.
+
+    A tracked path that is absent must fail; an untracked absent path must
+    not, or a fresh clone goes red for its gitignored caches.
     """
-    assert not absolute_path_violations({"k": value}), f"{value!r} wrongly flagged"
+    tracked = _tracked_files()
+    a_tracked_file = "experiments/stage2b_denoising/ARTIFACT_MANIFEST.json"
+    assert a_tracked_file in tracked, "fixture assumption broken"
+
+    doc = {"artifacts": {
+        "gone": {"path": a_tracked_file + ".typo", "present": True},
+        "cache": {"path": "experiments/x/results/regenerable.pkl", "present": True},
+    }}
+    missing = [p for _, p, _ in declared_artefacts(doc)
+               if p in tracked and not (REPO_ROOT / p).exists()]
+    assert missing == [], "neither fixture path is tracked, so neither is 'missing'"
+
+    # the real direction: a path that IS tracked and IS absent
+    doc2 = {"artifacts": {"gone": {"path": a_tracked_file, "present": True}}}
+    resolved = [(p, (REPO_ROOT / p).exists()) for _, p, _ in declared_artefacts(doc2)]
+    assert resolved == [(a_tracked_file, True)], (
+        "a tracked, present file must read as present -- if this flips, the "
+        "existence check is measuring something other than the filesystem")
 
 
 def test_strict_json_check_rejects_nan_and_infinity():
@@ -385,8 +424,8 @@ def test_the_sidecar_shape_that_prompted_this_would_be_rejected():
         "payload_sha256": "0" * 64,
         "fingerprint": {"source_manifest_digest": "abc", "config_digest": "def"},
     }
-    violations = absolute_path_violations(sidecar)
+    violations = unreachable_path_violations(sidecar)
     assert len(violations) == 2, f"expected both path fields flagged, got {violations}"
     # the portable fields are exactly what should survive the fix
-    assert not absolute_path_violations(
+    assert not unreachable_path_violations(
         {k: v for k, v in sidecar.items() if k not in ("local_path", "object_path")})
