@@ -332,15 +332,14 @@ def main(argv=None):
                 ladder_path = cand
         bucket = None
         if not args.no_upload:
-            bname = args.bucket or os.environ.get("STAGE2B_BUCKET") or os.environ.get("BUCKET")
-            if bname:
-                try:
-                    import stage2b_gcs as gcs
-                    creds = args.credentials or os.environ.get("GOOGLE_APPLICATION_CREDENTIALS")
-                    bucket = gcs.get_bucket(name=bname, credentials=creds)
-                except Exception as exc:  # noqa: BLE001
-                    print(f"[protocol2] bucket get failed ({exc}); local only")
-                    bucket = None
+            try:
+                import stage2b_gcs as gcs
+                creds = args.credentials or os.environ.get(gcs.CREDENTIALS_ENV_VAR)
+                bname = args.bucket or os.environ.get(gcs.BUCKET_ENV_VAR) or None
+                bucket = gcs.get_bucket(name=bname, credentials=creds)
+            except Exception as exc:  # noqa: BLE001
+                print(f"[protocol2] bucket get failed ({exc}); local only")
+                bucket = None
         if ladder_path is None and bucket is not None:
             try:
                 import stage2b_gcs as gcs
