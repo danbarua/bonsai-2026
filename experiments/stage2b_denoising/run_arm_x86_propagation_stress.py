@@ -56,7 +56,7 @@ TAIL_CAP = 500
 ENCODING_SANITY_MAX_ABS = 1e-12
 EXPECTED_RIDGE_GRID_TAG = "g13_88edf9ac"
 FRAMING = (
-    "adversarial upper bound on cross-architecture propagation; "
+    "maximum observed within the 287-image provisional stress set; "
     "not a corpus sample"
 )
 
@@ -1104,7 +1104,7 @@ def phase_propagate(mods, args, repo_root, work_dir, bucket, fp, record):
         return report
 
     ensure_json(mods, bucket, work_dir, report_obj, compute_report,
-                no_upload=args.no_upload)
+                fingerprint=fp, no_upload=args.no_upload)
     # optional latest convenience copy (local only, not a GCS object)
     latest = os.path.join(work_dir, "protocol1_propagation_report_latest.json")
     try:
@@ -1215,7 +1215,9 @@ def main(argv=None):
             try:
                 mods.fingerprint.revalidate_after_execution(fp, repo_root)
             except Exception as exc:  # noqa: BLE001
-                say(f"fingerprint revalidate note: {exc}")
+                raise Protocol1Fail(
+                    f"fingerprint revalidate failed: {type(exc).__name__}: {exc}"
+                ) from exc
         return rc
     except Protocol1Fail as exc:
         traceback.print_exc()
