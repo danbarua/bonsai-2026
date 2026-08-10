@@ -635,7 +635,7 @@ and was red on two tests at the moment it landed.
 | defect | `stage2b-protocol2` ran a GCS-touching driver with no `$(GCS_ENV)` | FINDINGS.md derives 60 clause candidates; the exemption still declares 59 |
 | pre-correction text | `cd $(STAGE2B_DIR) && uv run python run_abs_conv_eps_sensitivity.py` | exemption count `"FINDINGS.md": 59` |
 | also found by | **the Codex review, independently** | **nobody** |
-| corrected | yes, in `c702bae` | **no — still red** |
+| corrected | **no — see below; the guard went green, the defect did not** | yes, in `1771897` |
 
 **Event A is the guard's clearest win and simultaneously the weakest possible
 evidence for it.** Two detectors fired on one defect: this repository's
@@ -643,6 +643,30 @@ AST-walking guard, and a reviewer in another harness reading the target. The
 correction cannot be attributed to either alone. This is principle 4 arriving
 from the other direction — not choosing the strongest of several controls
 after the fact, but being unable to separate two that both fired.
+
+**Correction, 2026-08-10: event A was not corrected, and the table above said
+it was.** `c702bae` made the target export `$(GCS_ENV)`, which sets
+`BONSAI_GCS_BUCKET`. `run_abs_conv_eps_sensitivity.py:335` reads
+`STAGE2B_BUCKET` or `BUCKET`. Neither is ever set, so the documented target
+still resolves `bucket=None` and publishes locally. Found by the external
+review; verified here against both files.
+
+**The guard is green and the defect is live, and that is the finding.** Its
+predicate is *does the target export the bucket variable* — a property of the
+Makefile. The property anyone cares about is *does the driver reach the right
+bucket*, which spans the Makefile and the driver's environment lookup. The
+fix satisfied the predicate exactly and moved the real property not at all.
+
+This is a **category-D** entry in `VACUOUS_TESTS.md`'s taxonomy arriving from
+an unusual direction: not a check that never fires, but one that fires
+correctly, is satisfied correctly, and still leaves the hazard in place
+because the predicate was a proxy. It is also the third distinct instance
+today of the same shape — a stated contract broader than the predicate
+implementing it (see §5f's frequency error, and the `is_absolute` fix below).
+The generalisation worth extracting: **a guard spanning two artefacts must
+assert the relation between them, not a property of one of them.** Checking
+that the Makefile exports a name says nothing about whether anything reads
+that name.
 
 **Event B is the control.** Only a deterministic guard reported it; no human
 or LLM reviewer did; and it survived the closure commit. The obvious
