@@ -49,7 +49,8 @@ Four facts that are not guessable and that have each cost a real failure:
 | `.github/workflows/claude-code-review.yml` | fires on PRs whose BASE is `stage2b-ci`, when `tests/**` changed |
 | `docs/GITHUB_ACTIONS_NOTES.md` | what `claude-code-action` actually does, cited to file and line |
 | `docs/REVIEW_COMMENT_TEMPLATE.md` | the one sticky comment it maintains, and the rules for it |
-| `tools/ci/review_delta.sh` | what changed since the last review, and what LEFT the reviewed surface |
+| `tools/ci/review_delta.sh` | push delta + DEPARTED + sticky OUTSTANDING carry-forward |
+| `tools/ci/vacuous_review_local.sh` | local Haiku preflight; `make vacuous-review PR=N` |
 | `tools/ci/publish_review.sh` | publishes the result and fails if the review produced none |
 | `tools/ci/review_run.sh` | a run's own telemetry: artifact URL, duration, turns, cost |
 
@@ -61,6 +62,19 @@ Two things about the API that mislead if assumed:
 - `.files[].filename` from the compare API is the path **at `after`** — for a
   rename, the destination. The source is in `.previous_filename`. Filtering
   only `.filename` cannot see a file that moved OUT of a watched directory.
+
+- **Sticky carry-forward is mechanical.** `review_delta.sh` re-reads the
+  PR's vacuous-test sticky and unions *Not examined* / unchecked `- [ ]`
+  paths into the next run — even on a docs-only push. Without that, a
+  partial pass (PR #29: 6 of 12 files, $5 Sonnet) evaporates on the next
+  synchronize.
+- **Local preflight before the checkpoint PR:** `make vacuous-review PR=N`
+  (Haiku default). Measured on PR #29: local Haiku ~$0.25 / ~1 min / 12 files;
+  Actions Sonnet was ~$5 / partial; Actions Haiku re-run ~$0.32 / 12 files.
+  Do not pass `--bare` to the CLI here — bare skips OAuth and reports
+  "Not logged in" on a logged-in machine. Workflow is Haiku-pinned
+  (`--model haiku`, Agent disallowed); keep it byte-identical on `main` and
+  `stage2b` or the action SKIPS green (`check_workflow_parity.sh`).
 
 ### CI
 

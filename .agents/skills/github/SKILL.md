@@ -69,11 +69,12 @@ Two things about the API that mislead if assumed:
   partial pass (PR #29: 6 of 12 files, $5 Sonnet) evaporates on the next
   synchronize.
 - **Local preflight before the checkpoint PR:** `make vacuous-review PR=N`
-  (Haiku default). Measured on PR #29: ~$0.25 / ~1 min / 12 files vs Actions
-  Sonnet ~$5 / ~4.5 min / partial. Do not pass `--bare` to the CLI here —
-  bare skips OAuth and reports "Not logged in" on a logged-in machine.
-  Actions remains the durable sticky; local is confirmation, not a substitute
-  until the workflow is also Haiku-pinned (needs `stage2b-ci` parity).
+  (Haiku default). Measured on PR #29: local Haiku ~$0.25 / ~1 min / 12 files;
+  Actions Sonnet was ~$5 / partial; Actions Haiku re-run ~$0.32 / 12 files.
+  Do not pass `--bare` to the CLI here — bare skips OAuth and reports
+  "Not logged in" on a logged-in machine. Workflow is Haiku-pinned
+  (`--model haiku`, Agent disallowed); keep it byte-identical on `main` and
+  `stage2b` or the action SKIPS green (`check_workflow_parity.sh`).
 
 ### CI
 
