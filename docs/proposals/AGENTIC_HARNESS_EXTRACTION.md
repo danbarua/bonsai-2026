@@ -203,10 +203,35 @@ provenance probes (measurements of one harness version; the emitters lift) ·
 ### 5f. Known defect, recorded rather than frozen
 
 The review workflow re-runs on every push to an open PR into the checkpoint
-branch, at a measured **$1.2769 / 169.7 s / 26 turns / 13,751 output tokens**
-per run (from `tools/ci/review_run.sh`). Tasks #22/#23 concern this. The
-workflow's in-line prose defends the current trigger and must not be carried
-forward as settled.
+branch. Three cost points, in the order they were measured: **$1.2769 /
+169.7 s / 26 turns / 13,751 output tokens** per run from
+`tools/ci/review_run.sh`; then **$5.04** on one PR #29 run (31394098469);
+then **~$0.25** for the same surface locally on Haiku. The last two are Dan's
+measurements, recorded in `f0438cb`, not reproduced here.
+
+**The frequency defect stands; the cost defect was fixed by narrowing the
+model, not the trigger.** `f0438cb` pins the reviewer to Haiku at low effort,
+caps turns at 40, and disallows `Agent`/`Task`/`ScheduleWakeup`/web tools.
+Task #22's cost half closes; its frequency half and #23's scope question do
+not — the workflow still fires on `synchronize`. The workflow's in-line prose
+defends the current trigger and must not be carried forward as settled.
+
+**The same run is an efficacy-ledger row, and a rare one.** PR #29 run
+31394098469 spawned five background agents, waited 300 s, examined 6 of 12
+files, posted a PR comment saying the review was in progress, and **exited
+success**. That verdict was durable — a posted comment, not a transcript —
+so by §3's taxonomy it scores **RESULT WAS WRONG**, joining the six of 38 in
+the main ledger. It is also the review workflow appearing in its own ledger
+as a defect rather than a catcher, which no row before it did.
+
+Two guards landed against it, and both are narrowings — the shape principle
+21 warns about. `1d1e3ab` fails the job when the push's own test set is not
+fully examined (whole-PR partial stays report-only, correctly, since older
+files go unread on purpose); `2135f8e` carries the unfinished remainder
+forward in a sticky comment so the backlog survives the next push. `1d1e3ab`
+was break-tested in both directions — incomplete-this-push fails, complete-
+this-push-with-older-files-unread passes — which is what principle 21's
+corollary asks for and what most of this repo's narrowings did not get.
 
 ### 5g. Justified by principle, not by a caught defect
 
@@ -741,6 +766,21 @@ holds" — instead of silently breaking the link. The cost is one extra column.
 The current design teaches people not to improve their own documents, which
 is the wrong lesson to build in.
 
-And one warning is recorded rather than hidden: the automated review currently
-re-runs on every single change, at about $1.28 a time. That is a known
-problem, not a feature, and it is already on the list to fix.
+And one warning is recorded rather than hidden: the automated review re-runs
+on every single change. That is a known problem, not a feature. Part of it has
+since been fixed — the review now uses a smaller, cheaper model and is
+forbidden from spawning helpers of its own, which took one run from about $5
+down to roughly 25 cents. But it still runs on every change, and nobody has
+yet decided what it should and should not look at. Making each run cheap is
+not the same as deciding it should happen.
+
+That episode is worth recording for a second reason. The expensive run had
+looked at half the files it was given, written a note saying it was still
+working, and then reported success anyway. Nothing downstream could tell the
+difference between that and a finished review — which is precisely the failure
+this whole review process exists to catch, committed by the review process
+itself. Two fixes followed: the job now fails if it leaves any of the current
+batch unexamined, and whatever it did not get to is carried forward in writing
+so it cannot quietly vanish. The first of those was tested by breaking it on
+purpose in both directions, which is the standard this project sets and does
+not always meet.
