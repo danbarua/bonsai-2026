@@ -275,6 +275,22 @@ problems before spending money on the full-scale run.
   committed to the code repository and is regenerated on demand. Run it
   directly with: `uv run python run_abs_conv_eps_sensitivity.py`.
 
+- **`run_arm_x86_propagation_stress.py`** — runs `COMPANION_PROTOCOLS.md`
+  Protocol 1: the ARM/x86 propagation stress set. This checks whether a
+  small numerical difference between chip types, found at the encoding
+  step, stays small all the way through the pipeline. It has three
+  phases, and each phase can resume on its own: `arm-construct` (local
+  machine), `x86-encode` (Colab, x86 chip), and `propagate` (local
+  machine). It regenerates stress-set part A from encodings run on both
+  chip types over parts B, C, and D combined; evolves the graph on both
+  chip types; applies one frozen ridge model, per condition, to both
+  chip types' results; and reports the maximum difference at each of
+  five stages, halting if the final stage exceeds `CONTRAST_THRESHOLD`.
+  Each report file's kind carries a UTC run ID in its name. Run with:
+  `make stage2b-protocol1-arm-construct`,
+  `make stage2b-protocol1-x86-encode`, and
+  `make stage2b-protocol1-propagate`.
+
 - **`generate_stage2b_artifact_manifest.py`** — produces the committed
   `ARTIFACT_MANIFEST.json` file. This lists GCS object paths, payload
   SHA256 checksums, the producing code commit, and the frozen headline
@@ -638,6 +654,7 @@ make test                      # the whole repository suite
 | `test_stage2b_audit.py` | the pure amendment-audit calculations: index alignment, gauge phases, trigger verdicts, the stress-set construction, the sequencing-gate guard |
 | `test_stage2b_audit_driver.py` | the audit driver's constants, the pinned pre-contract checksum table, the sizing probe's projections and halt paths, and the fixed-versus-reselected alpha combination's completeness and its break-confirmation |
 | `test_stage2b_abs_conv_eps_sensitivity.py` | the `ABS_CONV_EPS` sensitivity table's invariance check and halt rule, plus a check that skips cleanly (rather than failing) when the real diagnostic data file is absent |
+| `test_stage2b_arm_x86_propagation.py` | Protocol 1's pure calculation functions (the cap, the ranking, the halt rule, the five-stage maximums), the construction record's regenerated-A field, run-ID kind naming, the driver's syntax-tree checks, and refusals for a bad encoding-sanity value or a row-alignment mismatch |
 | `test_stage2b_artifact_manifest.py` | the artifact-manifest generator's list shape, its break-confirmation for stripping long lists, and a real-bucket check against the committed manifest |
 
 This table is the complete list of what `make stage2b-test` runs, with

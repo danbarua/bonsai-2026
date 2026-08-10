@@ -1680,14 +1680,254 @@ here rather than re-evolved, following `PHASE_B_PLAN.md`'s Decision 4.
 
 The amendment-impact audit is now closed: no trigger fired, in either
 alpha regime, on any of the three frozen conditions. The 150-vs-1200
-encoder-budget amendment has a real, measured representational effect,
-and it is too small to change the sign, the per-graph verdict, or the
-pairwise ordering that the stage-4 confirmatory result (and Phase B's
-own ridge result) depend on. Still open: the `ABS_CONV_EPS` sensitivity
-table (run separately — see `run_abs_conv_eps_sensitivity.py`, and this
-document's own entry, once it is written up; as of this section, it has
-been computed and committed, but not yet narrated here), and the ARM/x86
-propagation stress set (`COMPANION_PROTOCOLS.md` Protocol 1, not yet
-started — it needs real ARM-encoded data and real x86-encoded data, on
-the same stress-set images, which is a substantially larger undertaking
-than this section's own audit).
+encoder-budget amendment has a real, measured representational effect.
+This effect is too small to change the sign, the per-graph verdict, or
+the pairwise ordering that the stage-4 confirmatory result (and Phase
+B's own ridge result) depend on. At the time of this audit write-up,
+two things were still open: the `ABS_CONV_EPS` sensitivity table (it
+has now run separately — see `run_abs_conv_eps_sensitivity.py`), and
+the ARM/x86 propagation stress set. Protocol 1 has since run. Its
+account is in the next section.
+
+# Stage 2B Companion Protocol 1: the ARM/x86 propagation stress set — result `PROTOCOL1_OK`
+
+`COMPANION_PROTOCOLS.md`'s consequence rule calls for an interpretation
+review before Stage 4 runs. Stage 4 has already run, and it is locked.
+So this Protocol 1 result is disclosed here as happening after Stage 4,
+not before it — following the same sequencing exception already set for
+the amendment-impact audit above.
+
+## Verdict
+
+**Result: `PROTOCOL1_OK`.** The stage-5 halt did not fire. For every
+graph, the largest observed `max |Δ Delta_g|` value (the biggest cross-
+chip-type difference in the evolved-minus-pre-evolution contrast) is
+strictly below the frozen threshold, `CONTRAST_THRESHOLD = 4.604761e-10`.
+The largest stage-5 value measured was for `curr_random`, at `1.830e-12`
+— about 252 times below the threshold.
+
+Run ID: `20260810T151245Z`. An earlier report, `20260810T124247Z`,
+existed as a JSON file, but it carried no process sentinel and no
+manifest sidecar file. A sentinel is a special marker a script prints or
+writes to show its own verdict; a manifest is a small file, published
+next to an artifact, that records exactly which code produced it. This
+run closes that gap. Later verification re-runs under the fixed driver
+(for example, `20260810T151926Z`) confirm the same scientific result,
+`PROTOCOL1_OK`, again. But `20260810T151245Z` remains the official run
+ID that this write-up, and the binding-clause inventory's discharges in
+`gates.toml`, both point to.
+
+Report file:
+`stage2b/train/stage3/common/protocol1_propagation_report_20260810T151245Z.json`
+
+Frozen ridge file:
+`stage2b/train/stage3/common/protocol1_ridge_frozen_20260810T151245Z.npz`
+
+## How the stress set was built
+
+| part | detail |
+|---|---|
+| A | **regenerated** for this run (the 100 images with the largest encoding-stage difference, found from the provisional set B∪C∪D); `component_a_source = "regenerated"` |
+| B | `true_count = 89`, `cap = 500`, `cap_applied = false`, `n_used = 89` |
+| C | the per-class floor of at least 20 images, filled using the lowest official indices |
+| D | 20 images per class, seed `42` |
+| `n_stress` (total stress-set size) | **287** |
+| `indices_refined` | **false** (the provisional B∪C∪D set already equalled the final set, once A was added back in — this is the expected path when regenerating) |
+| `indices_sha256` (checksum of the index list) | `5ebded9ea78da1f66aa826683828c0990fbd57ab3b0c9f2682f320fa9c11ead6` |
+
+The ARM stress encodings are an **index-join slice** taken from the
+production `encoded_train_s1200.npz` file (the authoritative Phase-A
+ARM encoding) — they are not a second, separate ARM encoding run. The
+x86 stress encodings used the unmodified
+`encode_stage3_local.encode_indices` function, run on Colab's x86_64
+chip.
+
+## Platforms
+
+| role | machine |
+|---|---|
+| ARM encoding (production Phase A, sliced) | Darwin, ARM64 chip |
+| x86 encoding (this protocol) | Linux, x86_64 chip (Colab) |
+| propagation (evolve + frozen ridge + report) | Darwin, ARM64 chip |
+
+## Five-stage maximum differences
+
+Every table below carries the same framing: **this is the maximum value
+observed inside the 287-image provisional stress set. It is not a
+measurement over the whole corpus.** Part A of the stress set was chosen
+specifically to make the encoding-stage difference as large as possible.
+
+### Stage 1 — encoding
+
+| quantity | max \|ARM − x86\| |
+|---|---|
+| `theta_505` | `4.441e-16` |
+
+This is the maximum observed inside the 287-image provisional stress
+set; it is not a corpus-wide measurement. The encoding-stage sanity gate
+(which refuses above `1e-12`) did not fire. The historical Phase-A
+spot-check found a maximum of about 3 ULP; this stress-set maximum is
+consistent with that same scale.
+
+### Stage 2 — evolved features (per condition, dimension 1008)
+
+| condition | max \|ARM − x86\| |
+|---|---|
+| `pre_evolution` | `4.441e-16` |
+| `T` | `1.769e-15` |
+| `lattice` | `1.554e-15` |
+| `rewired` | `1.554e-15` |
+| `curr_random` | `1.332e-15` |
+
+This is the maximum observed inside the 287-image provisional stress
+set; it is not a corpus-wide measurement.
+
+### Stage 3 — prediction (frozen ridge model, same fit and scaler on both chip types)
+
+| condition | max \|ARM − x86\| |
+|---|---|
+| `pre_evolution` | `6.661e-16` |
+| `T` | `4.610e-12` |
+| `lattice` | `1.488e-11` |
+| `rewired` | `1.711e-11` |
+| `curr_random` | `3.576e-11` |
+
+This is the maximum observed inside the 287-image provisional stress
+set; it is not a corpus-wide measurement. There is one fitted ridge
+model (`fit_final`) per condition, taken from
+`ridge_final_g13_88edf9ac.npz` at the production alpha values. The team
+never fits a separate model per chip type.
+
+### Stage 4 — per-image clipped MSE
+
+| condition | max \|ARM − x86\| |
+|---|---|
+| `pre_evolution` | `2.776e-17` |
+| `T` | `9.975e-14` |
+| `lattice` | `4.455e-13` |
+| `rewired` | `5.483e-13` |
+| `curr_random` | `1.830e-12` |
+
+This is the maximum observed inside the 287-image provisional stress
+set; it is not a corpus-wide measurement.
+
+### Stage 5 — Δ_g = MSE_evolved − MSE_pre (the halt stage)
+
+| graph | max \|Δ_g,ARM − Δ_g,x86\| | exceeds `4.604761e-10`? |
+|---|---|---|
+| `T` | `9.975e-14` | no |
+| `lattice` | `4.455e-13` | no |
+| `rewired` | `5.483e-13` | no |
+| `curr_random` | `1.830e-12` | no |
+
+This is the maximum observed inside the 287-image provisional stress
+set; it is not a corpus-wide measurement.
+
+Halt rule (frozen): if any graph's value is **strictly greater than**
+the threshold, the result is `PROTOCOL1_HALT`. A value exactly equal to
+the threshold does not halt. No graph exceeded the threshold.
+
+## Scope limitation
+
+Part A of the stress set is adversarial (deliberately worst-case) **for
+the encoding stage only**. The function `rank_discrepancy_indices` ranks
+images by comparing `theta_arm` against `theta_x86` — the encoding
+values, not anything downstream. Ranking by post-evolution difference
+instead would need evolving the full candidate population first, which
+would defeat the purpose of using a small stress subset.
+
+A clean `PROTOCOL1_OK` result shows "no unusual propagation on inputs
+chosen to stress the encoding stage." It does **not**, on its own, show
+that the evolution stage's own numerical sensitivity was stress-tested
+on its own separate terms. The two are plausibly related, because
+evolution's inputs are the encodings, but this is not guaranteed.
+
+## Artifacts
+
+| kind | object |
+|---|---|
+| stress indices | `stage2b/train/stage3/common/protocol1_stress_indices.npz` |
+| ARM stress encoding | `stage2b/train/stage3/common/protocol1_encoded_stress_arm_s1200.npz` |
+| x86 stress encoding | `stage2b/train/stage3/common/protocol1_encoded_stress_x86_s1200.npz` |
+| frozen ridge | `stage2b/train/stage3/common/protocol1_ridge_frozen_20260810T151245Z.npz` |
+| report | `stage2b/train/stage3/common/protocol1_propagation_report_20260810T151245Z.json` |
+| theta_T / features | under `stage2b/train/stage3/{pre_evolution,evolved_*}/protocol1_{theta_T,features}_{arm,x86}.npz` |
+
+Driver script: `run_arm_x86_propagation_stress.py`. Pure calculation
+functions: `stage2b_audit.capped_positive_delta_indices`,
+`rank_discrepancy_indices`, `max_abs_difference`,
+`evaluate_propagation_halt`, `propagation_stage_maxima`. Tests:
+`tests/test_stage2b_arm_x86_propagation.py`. Make targets:
+`stage2b-protocol1-arm-construct`, `stage2b-protocol1-x86-encode`,
+`stage2b-protocol1-propagate`.
+
+## Stage 2B Companion Protocol 2: the `ABS_CONV_EPS` sensitivity table — result `PROTOCOL2_OK`
+
+This ran using `run_abs_conv_eps_sensitivity.py`, on local CPU. It
+recomputes results from the stored final-Delta arrays (the diagnostic
+pickle file, plus the ladder's `encoder_gate_s1200.npz` file). No
+re-encoding happens.
+
+**Result at the locked `ENCODER_STEPS=1200`: INVARIANT** (unchanged)
+across `eps in {1e-10, 1e-11, 1e-12, 1e-13}`. No verdict flip happened.
+The `HALT` condition did not fire. `ABS_CONV_EPS=1e-12` itself does not
+change as a result.
+
+### How this was built
+
+This is a recomputation from the stored final-Delta values, not a new
+encoding run. It uses `load_final_deltas` (the diagnostic source),
+`load_ladder_encoder_gate_deltas`, and `merge_step_sources` (which
+requires agreement of `1e-15` or better at the overlapping 1,200-step
+point). It then calls `audit.sensitivity_table(...,
+gate.evaluate_rho_gate)`, unmodified.
+
+### Summary (from the published result file)
+
+- Locked encoder step count: 1200
+- Invariant at the locked step count: true
+- Halt triggered: false
+- Step sources at 1,200 steps: "diagnostic+ladder"; at other step
+  counts: "diagnostic" only
+- Ladder source object for 1,200 steps:
+  `stage2b/train/stage1/common/encoder_gate_s1200.npz`
+
+### The four justification factors (all four checked)
+
+1. **float64 precision**: the observed numerical noise is 1e-14 to
+   1e-16; 1e-12 sits above this band.
+2. **Phase update scale**: the smallest meaningful measured final-Delta
+   value is 2.177e-07 (clean images, 150 steps, stage 1); 1e-12 is five
+   or more orders of magnitude below that.
+3. **The encoder's own implementation**: the residual decays from
+   8.370e-07, to 8.062e-13, to exactly 0.0, at 300, 600, and 1,200
+   steps. It first crosses below 1e-12 somewhere between 300 and 600
+   steps.
+4. **Downstream feature sensitivity** (an analytic bound on the largest
+   possible change to the cosine and sine features, given a phase
+   residual):
+   - at eps=1e-10: the bound is 1e-10 (0.0001 times the solver's
+     relative tolerance of 1e-6; 0.405 times the largest measured
+     production final-Delta of 2.468e-10)
+   - at eps=1e-12: the bound is 1e-12 (1e-6 times the relative
+     tolerance; 0.00405 times the largest measured production value)
+   - at eps=1e-13: the bound is about 1e-13 (the bound decreases
+     steadily; all values stay far below both the relative tolerance
+     and the largest measured production value)
+   - Method: `|cos(θ+ε)-cos(θ)| ≤ 2|sin(ε/2)| ≤ |ε|`. No full ODE
+     re-evolution is needed to compute this bound.
+
+### Artifacts
+
+- Table file: `results/abs_conv_eps_sensitivity_table.json` (also
+  published in the cloud-storage style, under `stage3/common`)
+- A fingerprint is present, with source and configuration checksums.
+- Sentinel: `PROTOCOL2_OK` (program exit code 0); the re-validation
+  check passed.
+
+Driver script: `run_abs_conv_eps_sensitivity.py`. Make target:
+`stage2b-protocol2`. Tests:
+`tests/test_stage2b_abs_conv_eps_sensitivity.py` (covering the merge
+step, justification factor 4, the fingerprint-publishing check by
+reading the code's syntax tree, the re-validation sentinel, and a
+tier-2 check against the real diagnostic pickle file).
