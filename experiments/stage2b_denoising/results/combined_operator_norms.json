@@ -74,6 +74,11 @@
   ],
   "source_sha256": {
     "corpus": "9ae0a7d38cf5855053546241b8a26b14355c4616f76bcf2222aabfc45fdb4e1e",
+    "features_T": "c221ef3074f4cfa4b665c34a5d9f9e1f30813688ed71efabdd1c83bd7cacfc2b",
+    "features_curr_random": "54a6eff2111d1d898fcaeb84a1b6f5056163db79d1b7f91319c28067c6c57bb8",
+    "features_lattice": "238131a9d6721772e1f86316c1e4b8894add89833cef52fdae9a059b6b95d100",
+    "features_pre_evolution": "a59570c826eee383b97969d977f6d65dc6daf5c690469c7dcb6bd2345ecd23d7",
+    "features_rewired": "f0d36fcf8cef4571ee64b1583ef16a39f4e620b02dde6e5eeea6396d736ee296",
     "final_fit": "111273005c40cb6080febf13af7168de5f49a7aa20de3e28308ac9d8874be866",
     "topologies": "f671e63cc00b1612db0da5976c14b8880e4c4f90ae7fb192297721665f1907a4"
   }

@@ -112,11 +112,18 @@ def measure(condition, X, Y, alpha, frozen_mse=None):
     back. The reconstruction is validated against the one production
     quantity that WAS persisted. Note what that does and does not buy:
     matching per-image MSE confirms corpus alignment and that the refit
-    lands on the same predictions; it does NOT prove coefficient identity,
-    and this project's own equivalence gate treats coefficient agreement as
-    diagnostic rather than binding (stage2b_ridge.ridge_equivalence_check).
-    So the norm below is the norm of a fit that predicts identically, which
-    is the strongest claim available without the original W.
+    reproduces the frozen ERROR to ~1e-12. It does NOT prove the predictions
+    are identical -- per-image MSE is a many-to-one summary of a 505-vector,
+    so equal MSE is consistent with different predictions -- and it
+    certainly does not prove coefficient identity. This project's own
+    equivalence gate treats coefficient agreement as diagnostic rather than
+    binding (stage2b_ridge.ridge_equivalence_check), so there is no
+    established route from "same error" to "same operator".
+
+    The honest statement is therefore: the norm below belongs to a refit
+    that reproduces the frozen per-image error, on the same corpus, at the
+    frozen alpha. Whether it is the production operator is untested and
+    untestable from what was persisted.
     """
     fit, scaler = ridge.fit_final(X, Y, alpha)
     W = np.asarray(fit["W"][0], dtype=np.float64)      # (p, k)
@@ -183,6 +190,7 @@ def main(argv=None):
         row = measure(condition, X, Y, alphas[condition],
                       frozen_mse=frozen_mse.get(condition))
         del X
+        digests[f"features_{condition}"] = sha256_of(url, args.cache)
         rows.append(row)
         print(f"[{condition}] scaler={row['scaler_norm']:.3e} "
               f"ridge={row['ridge_norm']:.3e} COMBINED={row['combined_norm']:.3e}\n", flush=True)
@@ -215,22 +223,31 @@ ODE->features->readout->clipping->MSE->Delta_g composition exceeds {CLAIMED_END_
 the upstream map may never reach the maximising direction and clipping/MSE
 may contract it. This file claimed otherwise once; external review, 2026-08-11.
 
-THE FULL-CHAIN REFUTATION IS ELSEWHERE, and already measured. Protocol 1
-(FINDINGS.md:1545-1596) propagated a real ARM-vs-x86 perturbation through
-the entire chain. Its stage 2 is exactly axis 4's B; its stage 5 is
-Delta_g. max|dDelta_g| / max|B| is a valid LOWER bound on the gain, because
-the image achieving the numerator has an input perturbation no larger than
-the denominator:
+THE COUNTEREXAMPLE IS ELSEWHERE, and already measured. Protocol 1
+(FINDINGS.md:1535-1596) propagated a real ARM-vs-x86 perturbation through
+the entire pipeline. The quotient is STAGE 1 -> STAGE 5: axis 4's
+B(eps) = 2*sin(eps/2) is the IMMEDIATE cos/sin bound from an encoder phase
+residual, so the input is the stage-1 encoding difference, NOT stage 2 --
+stage 2 is post-ODE and an earlier version of this note wrongly called it
+B. At the observed eps = 4.4408921e-16, B(eps) equals eps numerically.
 
-    pre_evolution   2.776e-17 / 4.441e-16 =    0.06   (CONTRACTS)
-    T               9.975e-14 / 1.769e-15 =   56.4
-    lattice         4.455e-13 / 1.554e-15 =  286.7
-    rewired         5.483e-13 / 1.554e-15 =  352.8
-    curr_random     1.830e-12 / 1.332e-15 = 1373.9
+Ratios of global maxima are conservative and do not require numerator and
+denominator to fall on the same image:
 
-pre_evolution contracting is the mechanism the review named -- an upstream
-map that does not reach the submap's maximiser -- observed rather than
-assumed. For every evolved graph the reachable gain still exceeds {CLAIMED_END_TO_END_LIPSCHITZ:.0f}.""")
+    T               9.975e-14 / 4.441e-16 =  224.6    112x the claimed 2
+    lattice         4.455e-13 / 4.441e-16 = 1003.1    502x
+    rewired         5.483e-13 / 4.441e-16 = 1234.7    617x
+    curr_random     1.830e-12 / 4.441e-16 = 4120.0   2060x
+
+There is no pre_evolution row because Delta_g is DEFINED relative to
+pre_evolution; its stage-1 -> stage-2 ratio is 1.0.
+
+SCOPE, and it is narrower than "2B fails everywhere". This refutes the
+COEFFICIENT-2 derivation for the implemented pipeline. It does not measure
+a global Lipschitz constant, and it does not fail every swept envelope:
+against the smallest tabulated one, 2B = 2e-13 at eps = 1e-13, T stays
+below while lattice, rewired and curr_random exceed it -- and none exceeds
+2B = 2e-12 at eps = 1e-12.""")
     print(f"\nwrote {args.out}")
     return 0
 
