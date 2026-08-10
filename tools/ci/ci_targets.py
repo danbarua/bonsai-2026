@@ -116,6 +116,15 @@ NOT_RUN_IN_CI: dict[str, str] = {
                               "throughout Stage 2B and must stay so; it is "
                               "also `slow`-marked and excluded from every "
                               "other target",
+    "stage2b-test-audit-crosscheck": "reads the real, public-read bucket "
+                                     "anonymously -- no credentials, no "
+                                     "billing, but real network access CI "
+                                     "must not depend on. `slow`-marked and "
+                                     "excluded from every other target, same "
+                                     "as the round-trip probe",
+    "stage2b-test-artifact-manifest": "reads the real, public-read bucket "
+                                      "anonymously -- same reasoning as "
+                                      "stage2b-test-audit-crosscheck",
     "test-capabilities": "runs the same files as `test` with the optional "
                          "cloud group installed. CI must NOT invoke it: "
                          "`--group gpu` installs google-cloud-storage, which "

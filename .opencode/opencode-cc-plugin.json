@@ -1,0 +1,8 @@
+{
+  "disabledHooks": {
+    "UserPromptSubmit": [".*"], "PreToolUse": [".*"], "PostToolUse": [".*"],
+    "PostToolUseFailure": [".*"], "Stop": [".*"], "SessionStart": [".*"],
+    "SessionEnd": [".*"], "PreCompact": [".*"], "Notification": [".*"],
+    "PermissionRequest": [".*"], "SubagentStart": [".*"], "SubagentStop": [".*"]
+  }
+}

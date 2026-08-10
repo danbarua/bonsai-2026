@@ -80,6 +80,47 @@ if jnp.zeros(1, dtype=jnp.float64).dtype != jnp.float64:  # pragma: no cover
 ALPHA_GRID = (1e-6, 1e-5, 1e-4, 1e-3, 1e-2, 1e-1, 1.0, 10.0, 1e2, 1e3,
               1e4, 1e5, 1e6)
 ALPHA_TIE_TOL = 1e-10      # "mean validation MSE within 1e-10 absolute"
+
+# The design's RULE, computed rather than transcribed: "Thirteen values, one
+# per decade, no interpolation and no densification around an observed
+# minimum, ever" (DESIGN.md, 'Decade spacing is exact and frozen').
+#
+# Generated from the rule so there is no second literal list to drift, and
+# so this is not a constant compared against itself -- the failure recorded
+# as VACUOUS_TESTS #28, where every test read `FOLD_SEED` from the module
+# and asserted a downstream record equalled it.
+FROZEN_DECADE_EXPONENTS = range(-6, 7)
+
+
+def frozen_decade_grid():
+    """The thirteen decade values the design freezes, from the rule."""
+    return tuple(10.0 ** e for e in FROZEN_DECADE_EXPONENTS)
+
+
+def assert_frozen_grid(alphas, where="production"):
+    """Refuse any grid that is not the frozen thirteen decades.
+
+    DESIGN.md's clause is procedural and ever-scoped -- "no interpolation
+    and no densification around an observed minimum, EVER" -- and the
+    inventory's own negative attestation named the hole the Reviewer then
+    ruled on: `cross_validate_alpha` and friends accept an `alphas`
+    argument, so nothing stopped a caller passing its own list.
+
+    Placed at the DRIVER boundary rather than inside the module, on the
+    Reviewer's own wording -- "unavailable on production paths OR validated
+    against the exact frozen grid". A check inside `cross_validate_alpha`
+    would refuse the many tests that legitimately pass small custom grids,
+    or grow a test-only bypass flag, which is worse: a gate with an
+    off-switch is a gate nobody has to defeat.
+    """
+    expected = frozen_decade_grid()
+    actual = tuple(float(a) for a in alphas)
+    if actual != expected:
+        raise ValueError(
+            f"{where} would evaluate a ridge grid that is not the frozen "
+            f"thirteen decades. DESIGN.md permits no interpolation and no "
+            f"densification, ever.\n  expected: {expected}\n  got:      {actual}")
+    return actual
 N_SPLITS = 5
 FOLD_SEED = 42
 EQUIVALENCE_TOL = 1e-8     # max abs clipped-validation-prediction difference

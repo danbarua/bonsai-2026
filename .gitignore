@@ -287,3 +287,7 @@ terraform.rc
 # .terraform.lock.hcl is NOT ignored, deliberately: it is a lockfile, not
 # state, and it is what actually pins the provider build. `~> 7.0` in
 # versions.tf is the policy; the lockfile is the fact.
+
+# oh-my-openagent
+/.omo/**
+/.opencode/**

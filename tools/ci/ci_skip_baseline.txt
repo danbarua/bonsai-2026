@@ -49,5 +49,6 @@ tests.test_stage2a_topologies::test_all_topologies_symmetric  # datasets/kmnist 
 tests.test_stage2a_topologies::test_from_scratch_reconstruction_matches_cache_backed_values  # class0_constructions.pkl not present locally -- this test specifically checks the from-scratch path against it, so it cannot run without it (the OTHER tests in 
 tests.test_stage2a_topologies::test_rewired_and_curr_random_match_t_edge_count  # datasets/kmnist not present locally
 tests.test_stage2a_topologies::test_rewired_preserves_t_degree_sequence  # datasets/kmnist not present locally
+tests.test_stage2b_abs_conv_eps_sensitivity::test_the_real_diagnostic_pickle_produces_an_invariant_verdict  # encoder_gate_failure_diagnostic.pkl not present locally (gitignored, regenerable via diagnose_encoder_gate_failure.py)
 tests.test_stage2b_cnn::test_real_class0_support_builds_the_expected_mask  # datasets/kmnist not present locally
 tests.test_stage2b_cnn::test_real_mask_restricts_identically_to_stage2a_encode_and_restrict  # datasets/kmnist not present locally

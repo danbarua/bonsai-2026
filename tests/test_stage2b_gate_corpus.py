@@ -111,11 +111,65 @@ def test_each_exemption_still_contributes_the_candidate_count_it_did():
     # bindingly", and that is MORE true after the edit, not less. The
     # count fell because a candidate-generating paragraph left, not
     # because the judgement changed.
+    #
+    # FINDINGS.md moved 37 -> 46 across `9efac76`/`4bbd454`/`b0c382a`,
+    # which appended the stage-4 closing section (the official result,
+    # the floor-alpha caveat, the CNN comparison, the retraction of the
+    # "raw pixel ~ identity" reading, and the audit-status correction).
+    # Re-read all 9 new candidates individually (line > 1100) before
+    # changing this number: every one reports a fact about an
+    # already-frozen procedure's execution or result (the bootstrap CI,
+    # the alpha that was already selected in stage 3, what the driver's
+    # already-committed code does, what closed) using the same
+    # vocabulary those procedures use ("locked", "frozen", "required")
+    # -- none creates a new obligation this document did not already
+    # have narrative license to describe. The count rose because
+    # substantial new narrative content was added, not because the
+    # judgement about FINDINGS.md's bindingness changed.
+    # README.md moved 20 -> 21 at `3daea87`, which added the
+    # run_audit.py/stage2b_audit.py module-map entry. Re-read: the new
+    # paragraph describes what the code does (enforces the sequencing
+    # gate) and names AUDIT_PROTOCOL.md as the actual authority -- the
+    # same module-map genre as every other entry already counted here,
+    # not a new obligation stated in this document's own voice.
+    # README.md moved 21 -> 22 adding the run_abs_conv_eps_sensitivity.py
+    # module-map entry (companion Protocol 2's driver). Re-read: the new
+    # NEVER candidate is "never reimplemented" (`evaluate_rho_gate`
+    # called unmodified) -- the same module-map genre as the run_audit.py
+    # entry above, describing what the code does and naming
+    # COMPANION_PROTOCOLS.md as the actual authority for the protocol
+    # itself, not a new obligation this document states in its own voice.
+    # FINDINGS.md moved 46 -> 52, appending the amendment-impact audit's
+    # own closing section (the AUDIT_OK result, the stage-1/2 historical
+    # cross-check, feature distances, the protocol-required scope
+    # statement quoted verbatim, and the closed-investigation status) plus
+    # a correction to the stage-4 section's now-stale "audit has not run"
+    # paragraph. Re-read all 7 candidates individually (line > 1300)
+    # before changing this number: each reports execution or a measured
+    # result of an already-frozen procedure -- AUDIT_PROTOCOL.md's own
+    # trigger definitions, its analytic resolution threshold, and its
+    # required write-up scope statement (quoted, not restated in this
+    # document's own voice) -- using the same vocabulary those frozen
+    # documents already use. None creates a new obligation.
+    # FINDINGS.md moved 52 -> 59, appending Companion Protocol 1
+    # (PROTOCOL1_OK, five-stage maxima tables, construction sizes,
+    # sequencing-deviation disclosure, encoding-only adversarial scope
+    # limitation). Same genre: reports a measured run of an already-frozen
+    # companion protocol; does not create new obligations.
+    # README.md moved 22 -> 23 adding the generate_artifact_manifest.py
+    # module-map entry. Re-read: the new LOCKED candidate ("the frozen
+    # headline numbers behind Stage 2B's two locked results") describes
+    # what the script does and points at the two results it indexes --
+    # same module-map genre as every other entry, not a new obligation.
+    # README.md moved 23 -> 24 adding the Protocol 1 driver module-map
+    # entry (run_arm_x86_propagation_stress.py). Same genre: names the
+    # driver, points at COMPANION_PROTOCOLS.md as authority, describes
+    # phases — not a new obligation stated in README's own voice.
     at_exemption_time = {
-        "FINDINGS.md": 37,
+        "FINDINGS.md": 59,
         "NEGATIVE_PATH_EVIDENCE.md": 19,
         "PHASE_B_PLAN.md": 38,
-        "README.md": 20,
+        "README.md": 24,
     }
     assert set(at_exemption_time) == set(gate_corpus.EXEMPT), (
         "an exemption was added or removed without a candidate count")
@@ -239,14 +293,32 @@ def test_the_inventory_still_holds_a_disposition_for_every_kind():
     output ("NO CANDIDATES DERIVED -- the scan found nothing, which is not
     the same as everything being dispositioned").
     """
+    sys.path.insert(0, str(REPO_ROOT / "tools" / "gates"))
+    from gate_inventory import derive_clauses
+
     inventory = tomllib.loads((STAGE2B_DIR / "gates.toml").read_text())
-    for kind in ("binding_gate", "binding_value", "binding_claim",
-                 "not_binding"):
+    kinds = ("binding_gate", "binding_value", "binding_claim", "not_binding")
+    for kind in kinds:
         assert inventory.get(kind), f"{kind} is empty or absent"
-    total = sum(len(inventory.get(kind, {})) for kind in
-                ("binding_gate", "binding_value", "binding_claim",
-                 "not_binding"))
-    assert total == 89, (
-        f"the inventory holds {total} dispositions against 89 derived "
-        f"candidates; the corpus test pins the derivation, this pins that "
-        f"the inventory still answers it")
+
+    # Counted against the CORPUS, not against every row in the file. Child
+    # obligations mint their own ids and are additional rows rather than
+    # additional coverage -- the parent paragraph is what the corpus asked
+    # about. Written as a flat total first, which broke the moment the first
+    # composite was split: 95 rows, 89 candidates, and the honest number is
+    # neither of those on its own.
+    docs = [STAGE2B_DIR / name for name in gate_corpus.PROTOCOL_DOCS]
+    candidate_ids = {c.clause_id for c in derive_clauses(docs)}
+    answered = set()
+    for kind in kinds:
+        answered |= set(inventory.get(kind, {})) & candidate_ids
+    assert len(answered) == 89, (
+        f"the inventory answers {len(answered)} of 89 derived candidates; "
+        f"the corpus test pins the derivation, this pins that the inventory "
+        f"still answers it")
+
+    children = [cid for kind in kinds for cid, e in inventory.get(kind, {}).items()
+                if isinstance(e, dict) and e.get("parent_clause")]
+    assert set(children).isdisjoint(candidate_ids), (
+        "a child obligation collides with a corpus candidate id, so one "
+        "disposition covers two different things")

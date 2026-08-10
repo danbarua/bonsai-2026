@@ -33,7 +33,8 @@ where a shared, hardened library actually earns its cost.
   reasons unrelated to what they named, with dates, SHAs, a six-way
   taxonomy, and what actually caught each one. Principles 10, 20 and 21
   are the rules distilled from it; that document is the evidence they
-  came from and the place to add the next incident.
+  came from and the place to add the next incident. Local preflight before
+  a checkpoint PR: `make vacuous-review PR=N` (Haiku; see the github skill).
 - **`docs/MULTI_AGENT_PRACTICE.md`** -- the OPERATIONAL counterpart to
   the methodological principles below: how to run this work across
   several agents that cannot see each other, on localhost and on
@@ -133,11 +134,30 @@ where a shared, hardened library actually earns its cost.
 
 ## Running things
 
+- **The root `Makefile` is the entry point for anything that has a
+  target.** It wraps the Stage 2A and Stage 2B workflows -- local encode
+  steps, remote GPU runs via `mighty-colab` (each marked "bills while
+  running"), artifact verification, GCS staging, and the test suites.
+  `make help` lists every target grouped by section; `make stage2a-help`
+  narrows to Stage 2A. Targets resolve their own paths via
+  `git rev-parse --show-toplevel`, so they run from anywhere in the tree
+  with no `cd`. Prefer the target over reconstructing its command by
+  hand: the Makefile is the single source of truth for the actual
+  invocations, and `tools/ci/ci_targets.py` derives CI's
+  billable-vs-free classification from those same recipes.
+- Tests: `make test` for the whole default suite (slow reproduction
+  checks deselected), `make stage2a-test` / `make stage2b-test` to
+  narrow to one stage. The real test CI is `cloudbuild.yaml`, which runs
+  deliberately without credentials, datasets, or cloud libraries -- the
+  two `.github/workflows/` files are Claude review/assistant automation,
+  not test CI. No linter, formatter, or type-checker is configured;
+  `pyright` is a declared dependency but nothing invokes it.
 - Python environment: `uv`-managed `.venv` at the project root, with
-  `src/bonsai` editable-installed (`uv pip install -e .`) so
-  `from bonsai.dynamics... import ...` resolves. Use `.venv/bin/python`,
-  not bare `python3` -- the latter won't have scipy/numpy/tqdm/the
-  bonsai package installed.
+  `src/bonsai` editable-installed so
+  `from bonsai.dynamics... import ...` resolves. `uv sync` provisions
+  it; run scripts as `uv run python <path>` (what the Makefile calls
+  under the hood), not bare `python3` -- the latter won't have
+  scipy/numpy/tqdm/the bonsai package installed.
 - Existing named run configurations may reference stale paths from
   before this project's restructuring -- prefer creating a fresh one
   from `filePath`+`line` against the actual script you want to run

@@ -1,0 +1,443 @@
+{
+  "production_abs_conv_eps": 1e-12,
+  "source": {
+    "n_used": 1000,
+    "pickle": "results/encoder_gate_failure_diagnostic.pkl",
+    "step_counts": [
+      75,
+      150,
+      300,
+      600,
+      1200
+    ]
+  },
+  "summary": {
+    "consequence_rule": "COMPANION_PROTOCOLS.md Protocol 2: if the verdict at the locked ENCODER_STEPS differs across the swept eps range, that triggers renewed interpretation review before Stage 4. ABS_CONV_EPS itself does not change as a result of this table, regardless of outcome.",
+    "halt_triggered": false,
+    "invariant_at_locked_steps": true,
+    "locked_encoder_steps": 1200,
+    "per_step_count_invariance": {
+      "1200": true,
+      "150": true,
+      "300": true,
+      "600": true,
+      "75": true
+    }
+  },
+  "table": {
+    "1200": {
+      "1e-10": {
+        "abs_conv_eps": 1e-10,
+        "absolute_convergence": true,
+        "automatic_failure": false,
+        "failure_reasons": [],
+        "floor": 1e-15,
+        "median_delta_clean": 0.0,
+        "median_delta_noisy": 0.0,
+        "n_images": 1000,
+        "n_nonfinite_delta_clean": 0,
+        "n_nonfinite_delta_noisy": 0,
+        "n_nonfinite_phase_clean": 0,
+        "n_nonfinite_phase_noisy": 0,
+        "p95_delta_clean": 0.0,
+        "p95_delta_noisy": 0.0,
+        "passed": true,
+        "rho": 0.0,
+        "threshold": 10.0
+      },
+      "1e-11": {
+        "abs_conv_eps": 1e-11,
+        "absolute_convergence": true,
+        "automatic_failure": false,
+        "failure_reasons": [],
+        "floor": 1e-15,
+        "median_delta_clean": 0.0,
+        "median_delta_noisy": 0.0,
+        "n_images": 1000,
+        "n_nonfinite_delta_clean": 0,
+        "n_nonfinite_delta_noisy": 0,
+        "n_nonfinite_phase_clean": 0,
+        "n_nonfinite_phase_noisy": 0,
+        "p95_delta_clean": 0.0,
+        "p95_delta_noisy": 0.0,
+        "passed": true,
+        "rho": 0.0,
+        "threshold": 10.0
+      },
+      "1e-12": {
+        "abs_conv_eps": 1e-12,
+        "absolute_convergence": true,
+        "automatic_failure": false,
+        "failure_reasons": [],
+        "floor": 1e-15,
+        "median_delta_clean": 0.0,
+        "median_delta_noisy": 0.0,
+        "n_images": 1000,
+        "n_nonfinite_delta_clean": 0,
+        "n_nonfinite_delta_noisy": 0,
+        "n_nonfinite_phase_clean": 0,
+        "n_nonfinite_phase_noisy": 0,
+        "p95_delta_clean": 0.0,
+        "p95_delta_noisy": 0.0,
+        "passed": true,
+        "rho": 0.0,
+        "threshold": 10.0
+      },
+      "1e-13": {
+        "abs_conv_eps": 1e-13,
+        "absolute_convergence": true,
+        "automatic_failure": false,
+        "failure_reasons": [],
+        "floor": 1e-15,
+        "median_delta_clean": 0.0,
+        "median_delta_noisy": 0.0,
+        "n_images": 1000,
+        "n_nonfinite_delta_clean": 0,
+        "n_nonfinite_delta_noisy": 0,
+        "n_nonfinite_phase_clean": 0,
+        "n_nonfinite_phase_noisy": 0,
+        "p95_delta_clean": 0.0,
+        "p95_delta_noisy": 0.0,
+        "passed": true,
+        "rho": 0.0,
+        "threshold": 10.0
+      }
+    },
+    "150": {
+      "1e-10": {
+        "abs_conv_eps": 1e-10,
+        "absolute_convergence": false,
+        "automatic_failure": false,
+        "failure_reasons": [
+          "rho = 169.851 exceeds the pre-registered threshold 10 (median_clean=2.17748e-07, median_noisy=3.69848e-05, neither below the absolute-convergence floor 1.0e-10)"
+        ],
+        "floor": 1e-15,
+        "median_delta_clean": 2.1774847924760365e-07,
+        "median_delta_noisy": 3.6984797918693246e-05,
+        "n_images": 1000,
+        "n_nonfinite_delta_clean": 0,
+        "n_nonfinite_delta_noisy": 0,
+        "n_nonfinite_phase_clean": 0,
+        "n_nonfinite_phase_noisy": 0,
+        "p95_delta_clean": 9.971726330881832e-07,
+        "p95_delta_noisy": 0.00017840176097581027,
+        "passed": false,
+        "rho": 169.85100445472006,
+        "threshold": 10.0
+      },
+      "1e-11": {
+        "abs_conv_eps": 1e-11,
+        "absolute_convergence": false,
+        "automatic_failure": false,
+        "failure_reasons": [
+          "rho = 169.851 exceeds the pre-registered threshold 10 (median_clean=2.17748e-07, median_noisy=3.69848e-05, neither below the absolute-convergence floor 1.0e-11)"
+        ],
+        "floor": 1e-15,
+        "median_delta_clean": 2.1774847924760365e-07,
+        "median_delta_noisy": 3.6984797918693246e-05,
+        "n_images": 1000,
+        "n_nonfinite_delta_clean": 0,
+        "n_nonfinite_delta_noisy": 0,
+        "n_nonfinite_phase_clean": 0,
+        "n_nonfinite_phase_noisy": 0,
+        "p95_delta_clean": 9.971726330881832e-07,
+        "p95_delta_noisy": 0.00017840176097581027,
+        "passed": false,
+        "rho": 169.85100445472006,
+        "threshold": 10.0
+      },
+      "1e-12": {
+        "abs_conv_eps": 1e-12,
+        "absolute_convergence": false,
+        "automatic_failure": false,
+        "failure_reasons": [
+          "rho = 169.851 exceeds the pre-registered threshold 10 (median_clean=2.17748e-07, median_noisy=3.69848e-05, neither below the absolute-convergence floor 1.0e-12)"
+        ],
+        "floor": 1e-15,
+        "median_delta_clean": 2.1774847924760365e-07,
+        "median_delta_noisy": 3.6984797918693246e-05,
+        "n_images": 1000,
+        "n_nonfinite_delta_clean": 0,
+        "n_nonfinite_delta_noisy": 0,
+        "n_nonfinite_phase_clean": 0,
+        "n_nonfinite_phase_noisy": 0,
+        "p95_delta_clean": 9.971726330881832e-07,
+        "p95_delta_noisy": 0.00017840176097581027,
+        "passed": false,
+        "rho": 169.85100445472006,
+        "threshold": 10.0
+      },
+      "1e-13": {
+        "abs_conv_eps": 1e-13,
+        "absolute_convergence": false,
+        "automatic_failure": false,
+        "failure_reasons": [
+          "rho = 169.851 exceeds the pre-registered threshold 10 (median_clean=2.17748e-07, median_noisy=3.69848e-05, neither below the absolute-convergence floor 1.0e-13)"
+        ],
+        "floor": 1e-15,
+        "median_delta_clean": 2.1774847924760365e-07,
+        "median_delta_noisy": 3.6984797918693246e-05,
+        "n_images": 1000,
+        "n_nonfinite_delta_clean": 0,
+        "n_nonfinite_delta_noisy": 0,
+        "n_nonfinite_phase_clean": 0,
+        "n_nonfinite_phase_noisy": 0,
+        "p95_delta_clean": 9.971726330881832e-07,
+        "p95_delta_noisy": 0.00017840176097581027,
+        "passed": false,
+        "rho": 169.85100445472006,
+        "threshold": 10.0
+      }
+    },
+    "300": {
+      "1e-10": {
+        "abs_conv_eps": 1e-10,
+        "absolute_convergence": false,
+        "automatic_failure": false,
+        "failure_reasons": [
+          "rho = 19154.5 exceeds the pre-registered threshold 10 (median_clean=1.53766e-12, median_noisy=2.94531e-08, neither below the absolute-convergence floor 1.0e-10)"
+        ],
+        "floor": 1e-15,
+        "median_delta_clean": 1.5376588891058418e-12,
+        "median_delta_noisy": 2.9453069538831755e-08,
+        "n_images": 1000,
+        "n_nonfinite_delta_clean": 0,
+        "n_nonfinite_delta_noisy": 0,
+        "n_nonfinite_phase_clean": 0,
+        "n_nonfinite_phase_noisy": 0,
+        "p95_delta_clean": 2.029834078598469e-11,
+        "p95_delta_noisy": 6.812057672833658e-07,
+        "passed": false,
+        "rho": 19154.488519855597,
+        "threshold": 10.0
+      },
+      "1e-11": {
+        "abs_conv_eps": 1e-11,
+        "absolute_convergence": false,
+        "automatic_failure": false,
+        "failure_reasons": [
+          "rho = 19154.5 exceeds the pre-registered threshold 10 (median_clean=1.53766e-12, median_noisy=2.94531e-08, neither below the absolute-convergence floor 1.0e-11)"
+        ],
+        "floor": 1e-15,
+        "median_delta_clean": 1.5376588891058418e-12,
+        "median_delta_noisy": 2.9453069538831755e-08,
+        "n_images": 1000,
+        "n_nonfinite_delta_clean": 0,
+        "n_nonfinite_delta_noisy": 0,
+        "n_nonfinite_phase_clean": 0,
+        "n_nonfinite_phase_noisy": 0,
+        "p95_delta_clean": 2.029834078598469e-11,
+        "p95_delta_noisy": 6.812057672833658e-07,
+        "passed": false,
+        "rho": 19154.488519855597,
+        "threshold": 10.0
+      },
+      "1e-12": {
+        "abs_conv_eps": 1e-12,
+        "absolute_convergence": false,
+        "automatic_failure": false,
+        "failure_reasons": [
+          "rho = 19154.5 exceeds the pre-registered threshold 10 (median_clean=1.53766e-12, median_noisy=2.94531e-08, neither below the absolute-convergence floor 1.0e-12)"
+        ],
+        "floor": 1e-15,
+        "median_delta_clean": 1.5376588891058418e-12,
+        "median_delta_noisy": 2.9453069538831755e-08,
+        "n_images": 1000,
+        "n_nonfinite_delta_clean": 0,
+        "n_nonfinite_delta_noisy": 0,
+        "n_nonfinite_phase_clean": 0,
+        "n_nonfinite_phase_noisy": 0,
+        "p95_delta_clean": 2.029834078598469e-11,
+        "p95_delta_noisy": 6.812057672833658e-07,
+        "passed": false,
+        "rho": 19154.488519855597,
+        "threshold": 10.0
+      },
+      "1e-13": {
+        "abs_conv_eps": 1e-13,
+        "absolute_convergence": false,
+        "automatic_failure": false,
+        "failure_reasons": [
+          "rho = 19154.5 exceeds the pre-registered threshold 10 (median_clean=1.53766e-12, median_noisy=2.94531e-08, neither below the absolute-convergence floor 1.0e-13)"
+        ],
+        "floor": 1e-15,
+        "median_delta_clean": 1.5376588891058418e-12,
+        "median_delta_noisy": 2.9453069538831755e-08,
+        "n_images": 1000,
+        "n_nonfinite_delta_clean": 0,
+        "n_nonfinite_delta_noisy": 0,
+        "n_nonfinite_phase_clean": 0,
+        "n_nonfinite_phase_noisy": 0,
+        "p95_delta_clean": 2.029834078598469e-11,
+        "p95_delta_noisy": 6.812057672833658e-07,
+        "passed": false,
+        "rho": 19154.488519855597,
+        "threshold": 10.0
+      }
+    },
+    "600": {
+      "1e-10": {
+        "abs_conv_eps": 1e-10,
+        "absolute_convergence": true,
+        "automatic_failure": false,
+        "failure_reasons": [],
+        "floor": 1e-15,
+        "median_delta_clean": 0.0,
+        "median_delta_noisy": 1.7763568394002505e-14,
+        "n_images": 1000,
+        "n_nonfinite_delta_clean": 0,
+        "n_nonfinite_delta_noisy": 0,
+        "n_nonfinite_phase_clean": 0,
+        "n_nonfinite_phase_noisy": 0,
+        "p95_delta_clean": 0.0,
+        "p95_delta_noisy": 1.043225505981122e-11,
+        "passed": true,
+        "rho": 17.763568394002505,
+        "threshold": 10.0
+      },
+      "1e-11": {
+        "abs_conv_eps": 1e-11,
+        "absolute_convergence": true,
+        "automatic_failure": false,
+        "failure_reasons": [],
+        "floor": 1e-15,
+        "median_delta_clean": 0.0,
+        "median_delta_noisy": 1.7763568394002505e-14,
+        "n_images": 1000,
+        "n_nonfinite_delta_clean": 0,
+        "n_nonfinite_delta_noisy": 0,
+        "n_nonfinite_phase_clean": 0,
+        "n_nonfinite_phase_noisy": 0,
+        "p95_delta_clean": 0.0,
+        "p95_delta_noisy": 1.043225505981122e-11,
+        "passed": true,
+        "rho": 17.763568394002505,
+        "threshold": 10.0
+      },
+      "1e-12": {
+        "abs_conv_eps": 1e-12,
+        "absolute_convergence": true,
+        "automatic_failure": false,
+        "failure_reasons": [],
+        "floor": 1e-15,
+        "median_delta_clean": 0.0,
+        "median_delta_noisy": 1.7763568394002505e-14,
+        "n_images": 1000,
+        "n_nonfinite_delta_clean": 0,
+        "n_nonfinite_delta_noisy": 0,
+        "n_nonfinite_phase_clean": 0,
+        "n_nonfinite_phase_noisy": 0,
+        "p95_delta_clean": 0.0,
+        "p95_delta_noisy": 1.043225505981122e-11,
+        "passed": true,
+        "rho": 17.763568394002505,
+        "threshold": 10.0
+      },
+      "1e-13": {
+        "abs_conv_eps": 1e-13,
+        "absolute_convergence": true,
+        "automatic_failure": false,
+        "failure_reasons": [],
+        "floor": 1e-15,
+        "median_delta_clean": 0.0,
+        "median_delta_noisy": 1.7763568394002505e-14,
+        "n_images": 1000,
+        "n_nonfinite_delta_clean": 0,
+        "n_nonfinite_delta_noisy": 0,
+        "n_nonfinite_phase_clean": 0,
+        "n_nonfinite_phase_noisy": 0,
+        "p95_delta_clean": 0.0,
+        "p95_delta_noisy": 1.043225505981122e-11,
+        "passed": true,
+        "rho": 17.763568394002505,
+        "threshold": 10.0
+      }
+    },
+    "75": {
+      "1e-10": {
+        "abs_conv_eps": 1e-10,
+        "absolute_convergence": false,
+        "automatic_failure": false,
+        "failure_reasons": [
+          "rho = 14.9849 exceeds the pre-registered threshold 10 (median_clean=8.66285e-05, median_noisy=0.00129812, neither below the absolute-convergence floor 1.0e-10)"
+        ],
+        "floor": 1e-15,
+        "median_delta_clean": 8.662851405438765e-05,
+        "median_delta_noisy": 0.0012981191150709392,
+        "n_images": 1000,
+        "n_nonfinite_delta_clean": 0,
+        "n_nonfinite_delta_noisy": 0,
+        "n_nonfinite_phase_clean": 0,
+        "n_nonfinite_phase_noisy": 0,
+        "p95_delta_clean": 0.0002267344893912115,
+        "p95_delta_noisy": 0.0029772515770905444,
+        "passed": false,
+        "rho": 14.984894168402173,
+        "threshold": 10.0
+      },
+      "1e-11": {
+        "abs_conv_eps": 1e-11,
+        "absolute_convergence": false,
+        "automatic_failure": false,
+        "failure_reasons": [
+          "rho = 14.9849 exceeds the pre-registered threshold 10 (median_clean=8.66285e-05, median_noisy=0.00129812, neither below the absolute-convergence floor 1.0e-11)"
+        ],
+        "floor": 1e-15,
+        "median_delta_clean": 8.662851405438765e-05,
+        "median_delta_noisy": 0.0012981191150709392,
+        "n_images": 1000,
+        "n_nonfinite_delta_clean": 0,
+        "n_nonfinite_delta_noisy": 0,
+        "n_nonfinite_phase_clean": 0,
+        "n_nonfinite_phase_noisy": 0,
+        "p95_delta_clean": 0.0002267344893912115,
+        "p95_delta_noisy": 0.0029772515770905444,
+        "passed": false,
+        "rho": 14.984894168402173,
+        "threshold": 10.0
+      },
+      "1e-12": {
+        "abs_conv_eps": 1e-12,
+        "absolute_convergence": false,
+        "automatic_failure": false,
+        "failure_reasons": [
+          "rho = 14.9849 exceeds the pre-registered threshold 10 (median_clean=8.66285e-05, median_noisy=0.00129812, neither below the absolute-convergence floor 1.0e-12)"
+        ],
+        "floor": 1e-15,
+        "median_delta_clean": 8.662851405438765e-05,
+        "median_delta_noisy": 0.0012981191150709392,
+        "n_images": 1000,
+        "n_nonfinite_delta_clean": 0,
+        "n_nonfinite_delta_noisy": 0,
+        "n_nonfinite_phase_clean": 0,
+        "n_nonfinite_phase_noisy": 0,
+        "p95_delta_clean": 0.0002267344893912115,
+        "p95_delta_noisy": 0.0029772515770905444,
+        "passed": false,
+        "rho": 14.984894168402173,
+        "threshold": 10.0
+      },
+      "1e-13": {
+        "abs_conv_eps": 1e-13,
+        "absolute_convergence": false,
+        "automatic_failure": false,
+        "failure_reasons": [
+          "rho = 14.9849 exceeds the pre-registered threshold 10 (median_clean=8.66285e-05, median_noisy=0.00129812, neither below the absolute-convergence floor 1.0e-13)"
+        ],
+        "floor": 1e-15,
+        "median_delta_clean": 8.662851405438765e-05,
+        "median_delta_noisy": 0.0012981191150709392,
+        "n_images": 1000,
+        "n_nonfinite_delta_clean": 0,
+        "n_nonfinite_delta_noisy": 0,
+        "n_nonfinite_phase_clean": 0,
+        "n_nonfinite_phase_noisy": 0,
+        "p95_delta_clean": 0.0002267344893912115,
+        "p95_delta_noisy": 0.0029772515770905444,
+        "passed": false,
+        "rho": 14.984894168402173,
+        "threshold": 10.0
+      }
+    }
+  }
+}

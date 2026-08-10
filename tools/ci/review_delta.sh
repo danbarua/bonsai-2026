@@ -1,6 +1,7 @@
 #!/bin/bash
-# Which in-scope test files changed since the last review ran, and which
-# LEFT the reviewed surface entirely.
+# Which in-scope test files changed since the last review ran, which LEFT the
+# reviewed surface entirely, and which the prior sticky comment still lists as
+# unexamined.
 #
 # On a `synchronize` event GitHub hands us the two commits bracketing the
 # push -- `github.event.before` and `github.event.after` -- and the compare
@@ -45,24 +46,41 @@
 # fields, and split it on whether it exists in the tree at `after`. That
 # derivation is correct for every status, including ones GitHub adds later.
 #
+# OUTSTANDING CARRY-FORWARD. Measured on PR #29 run 31394098469: a $5.04
+# Sonnet pass examined 6 of 12 changed test files, posted an "in progress"
+# sticky listing the other six, and exited success. The next synchronize
+# only feeds this script the push delta -- so those six evaporate unless
+# something re-queues them. The sticky comment is that something: paths the
+# prior run admitted it did not finish are merged into EXAMINE whenever they
+# still exist at `after`. No workflow edit (byte-parity trap); the PR number
+# comes from GITHUB_EVENT_PATH or REVIEW_PR.
+#
 # FAIL-OPEN, LOUDLY. A force-push makes `before` unreachable and the compare
 # 404s; a first run has no previous review at all; the tree API truncates on
 # a very large repository. All fall back to reviewing everything and SAY so,
 # because a silent fallback to "review nothing" is the failure this whole
-# workflow exists to avoid.
+# workflow exists to avoid. A missing sticky, by contrast, is ordinary --
+# first run, or a comment the parser cannot read -- and is not fail-open:
+# there is simply nothing to carry forward.
 #
 # Usage: review_delta.sh <before-sha> <after-sha> <owner/repo>
 #   Writes `files` and `mode` to $GITHUB_OUTPUT when set, else to stdout.
 #
 #   mode=full         could not compute; review everything in scope
-#   mode=none         nothing in scope changed AND nothing departed
+#   mode=none         nothing in scope changed, nothing departed, nothing
+#                     outstanding on the sticky
 #   mode=incremental  something to act on; `files` says what and how
+#
+# Env:
+#   REVIEW_PR           pull request number (local runs; Actions uses the event)
+#   GITHUB_EVENT_PATH   Actions event JSON; .pull_request.number is read when set
+#   REVIEW_STICKY_FILE  path to a sticky-comment body (tests); skips the API
 #
 # The mode vocabulary is deliberately unchanged. A fourth value would have
 # to be explained in the workflow prompt, and the prompt has to stay
 # byte-identical on two branches or the action skips and reports success --
 # so a new value costs a hand-sync. `files` is free text injected into the
-# prompt, so the departed section carries its own instructions instead.
+# prompt, so the outstanding section carries its own instructions instead.
 
 set -u
 
@@ -153,17 +171,112 @@ classify() {  # classify <section>
   '
 }
 
-examine=$(classify examine)
-departed=$(classify departed)
+if ! examine=$(classify examine); then
+  fail_open "jq failed classifying the examine set"
+fi
+if ! departed=$(classify departed); then
+  fail_open "jq failed classifying the departed set"
+fi
 
 n_examine=$(printf '%s' "$examine" | grep -c . || true)
 n_departed=$(printf '%s' "$departed" | grep -c . || true)
 
-if [ "$n_examine" -eq 0 ] && [ "$n_departed" -eq 0 ]; then
-  # A real, well-formed answer: this push touched no in-scope test file and
-  # took none away. Distinct from the fail-open cases above, and the prompt
-  # treats it differently -- nothing new to read, only open findings to
-  # re-verify.
+# --------------------------------------------------------------------------
+# Outstanding paths still listed on the sticky comment
+# --------------------------------------------------------------------------
+#
+# The prior review's sticky is the only durable record of "we did not finish".
+# Push-local compare cannot see that. Reading it here -- not in the prompt --
+# means a model that ignores "re-read open findings" still gets the paths in
+# its list, and a docs-only push still resumes an unfinished pass.
+
+pr_number="${REVIEW_PR:-}"
+if [ -z "$pr_number" ] && [ -n "${GITHUB_EVENT_PATH:-}" ] && [ -r "${GITHUB_EVENT_PATH:-}" ]; then
+  pr_number=$(jq -r '.pull_request.number // empty' "$GITHUB_EVENT_PATH" 2>/dev/null || true)
+fi
+
+sticky_body=""
+if [ -n "${REVIEW_STICKY_FILE:-}" ] && [ -r "${REVIEW_STICKY_FILE}" ]; then
+  sticky_body=$(cat "${REVIEW_STICKY_FILE}")
+elif [ -n "$pr_number" ] && [ -n "$REPO" ]; then
+  # Prefer the comment the action maintains (user login claude[bot] or body
+  # marker). Take the newest match. Failure is quiet: no sticky means nothing
+  # to carry, not "review everything".
+  sticky_body=$(gh api "repos/${REPO}/issues/${pr_number}/comments" --paginate \
+    --jq '[.[] | select(.user.login == "claude[bot]" or (.body | test("Vacuous-test review"; "i"))) | .body] | last // empty' \
+    2>/dev/null || true)
+fi
+
+outstanding=""
+if [ -n "$sticky_body" ]; then
+  # Extract in-scope test paths the prior run has not cleared:
+  #   1. ### Not examined ... (template section; primary)
+  #   2. unchecked markdown tasks: - [ ] ... `path` ...
+  # Bare `test_*.py` mentions on those lines become tests/test_*.py.
+  # Never re-queue paths on checked (- [x]) lines.
+  outstanding=$(printf '%s\n' "$sticky_body" | jq -nrR --arg re "$IN_SCOPE" '
+    def norm:
+      if test("^tests/") then .
+      elif test("^test_.*\\.py$") then "tests/\(.)"
+      else empty end;
+    def paths_in:
+      [match("`([^`]+)`"; "g") | .captures[0].string | norm | select(test($re))];
+    def until_next_heading:
+      if length == 0 then []
+      elif (.[0] | test("^### ")) then []
+      else [.[0]] + (.[1:] | until_next_heading)
+      end;
+
+    [inputs] as $lines
+    | ($lines | to_entries
+        | map(select(.value | test("^### Not examined")) | .key)
+        | first) as $not_i
+    | (
+        if $not_i == null then []
+        else
+          ($lines[($not_i+1):] | until_next_heading
+            | map(paths_in)
+            | add // [])
+        end
+      ) as $from_section
+    | (
+        $lines
+        | map(select(test("^- \\[ \\]")) | paths_in)
+        | add // []
+      ) as $from_unchecked
+    | (
+        $lines
+        | map(select(test("^- \\[[xX]\\]")) | paths_in)
+        | add // []
+      ) as $from_checked
+    | ((($from_section + $from_unchecked) | unique) - ($from_checked | unique))
+    | .[]
+  ' 2>/dev/null || true)
+fi
+
+# Only paths that still exist at `after` can be examined. A sticky can lag a
+# deletion by one run; the departed section already covers real removals.
+if [ -n "$outstanding" ]; then
+  tree_paths=$(printf '%s' "$tree_json" | jq -r '[.tree[] | select(.type == "blob") | .path] | .[]')
+  outstanding=$(comm -12 \
+    <(printf '%s\n' "$outstanding" | grep . | sort -u) \
+    <(printf '%s\n' "$tree_paths" | grep . | sort -u) || true)
+fi
+
+# Drop anything already in this push's examine set -- no duplicate rows.
+if [ -n "$outstanding" ] && [ -n "$examine" ]; then
+  outstanding=$(comm -23 \
+    <(printf '%s\n' "$outstanding" | grep . | sort -u) \
+    <(printf '%s\n' "$examine" | grep . | sort -u) || true)
+fi
+
+n_outstanding=$(printf '%s' "$outstanding" | grep -c . || true)
+
+if [ "$n_examine" -eq 0 ] && [ "$n_departed" -eq 0 ] && [ "${n_outstanding:-0}" -eq 0 ]; then
+  # A real, well-formed answer: this push touched no in-scope test file, took
+  # none away, and the sticky carries no unfinished work. Distinct from the
+  # fail-open cases above, and the prompt treats it differently -- nothing new
+  # to read, only open findings to re-verify.
   emit none
   echo "[delta] no in-scope test files changed or departed in this push" >&2
   exit 0
@@ -173,6 +286,16 @@ body=""
 if [ "$n_examine" -gt 0 ]; then
   body="EXAMINE -- in-scope test files changed in this push, present in the working tree:
 ${examine}"
+fi
+
+if [ "${n_outstanding:-0}" -gt 0 ]; then
+  [ -n "$body" ] && body="${body}
+"
+  body="${body}OUTSTANDING -- in-scope tests the prior sticky comment still lists as
+unexamined (or unchecked). Carry-forward from a partial review: READ THESE
+even if this push did not touch them. Clear a path from the sticky only by
+examining it; do not drop it because the push delta is empty:
+${outstanding}"
 fi
 
 if [ "$n_departed" -gt 0 ]; then
@@ -189,4 +312,4 @@ ${departed}"
 fi
 
 emit incremental "$body"
-echo "[delta] ${n_examine} in-scope test file(s) changed, ${n_departed} departed, since ${BEFORE:0:7}" >&2
+echo "[delta] ${n_examine} changed, ${n_outstanding:-0} outstanding, ${n_departed} departed, since ${BEFORE:0:7}" >&2

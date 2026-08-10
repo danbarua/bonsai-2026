@@ -1,2 +1,15 @@
-  [mcp_servers.pycharm]
-    url = "http://127.0.0.1:64462/stream"
+[mcp_servers.pycharm]
+url = "http://127.0.0.1:64462/stream"
+
+[mcp_servers.c2c-mcp]
+url = "http://127.0.0.1:8765/mcp"
+
+[mcp_servers.mighty-colab]
+command = "uvx"
+args = [
+    "mighty-colab",
+    "mcp",
+]
+
+[mcp_servers.mighty-colab.env]
+UV_WORKING_DIR = "/Users/dan/Code/pycharm/bonsai-2026"

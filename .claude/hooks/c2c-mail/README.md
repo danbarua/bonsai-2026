@@ -1,8 +1,8 @@
 # c2c mail-awareness hooks
 
 Makes any Claude Code session in this repo aware of unread mail in the
-c2c mailbox (`.claude/claude2claude/inbox/`) automatically, so a human
-no longer has to relay "check your inbox" into a running session.
+code2code mailbox (`.claude/code2code/mailbox/`) automatically, so a
+human no longer has to relay "check your inbox" into a running session.
 
 Registered project-wide via `.claude/settings.json` (so every session
 inherits them, per this repo's convention of project-level settings
@@ -56,36 +56,30 @@ after a peek. That's the right behavior -- a peek genuinely hasn't
 handled the mail -- but worth knowing if a peek is ever used mid-turn
 expecting the Stop hook to then let the turn end.
 
-**Watched dirs are `claude2claude/inbox` and `code2code/mailbox` --
-deliberately not every mailbox channel.** This reverses an earlier
-version of this file: the first design globbed `.claude/claude2*/inbox`
+**The only watched dir is `code2code/mailbox` -- deliberately not every
+mailbox channel.** An earlier design globbed `.claude/claude2*/inbox`
 so a new channel would "just work" (principle 21 of this repo's
 `docs/VACUOUS_TESTS.md` -- a hand-maintained list standing in for a
 derivable set will silently under-cover). That principle still holds
 for "which channels get discovered" in the abstract, but it was
-solving the wrong problem here. The intended mail topology is ChatGPT
-<-> Claude Desktop <-> Claude Code (Desktop relays into
-`claude2claude/` for Code's benefit), not ChatGPT talking to Code
-directly -- so a Code session's Stop hook auto-watching
-`claude2gpt/inbox` meant it could block on raw ChatGPT traffic that
-was never addressed to it and wasn't its business to consume or
-archive. Confirmed live: a substantive ChatGPT review ruling about an
-unrelated ML pipeline stage did exactly this to an unrelated Claude
-Code session doing MCP-server engineering, with no clean way to
-unblock without either mishandling content that wasn't its business or
-getting stuck. The fix is scope, not addressing: Code only watches a
-channel where it's a genuinely intended recipient.
+solving the wrong problem here: `claude2gpt` carries raw ChatGPT
+traffic that a Code session was never the addressee of. Confirmed
+live -- a substantive ChatGPT review ruling about an unrelated ML
+pipeline stage blocked a Claude Code session doing MCP-server
+engineering, with no clean way to unblock without either mishandling
+content that wasn't its business or getting stuck.
 
-`code2code/mailbox` is watched too, added when the code2code channel
-(Claude Code sessions messaging each other directly, no fixed peer
-role) was introduced -- a different case from `claude2gpt`, not an
-exception to the reasoning above: code2code traffic is BY Claude Code
-sessions FOR Claude Code sessions, exactly what these hooks exist to
-notice. `c2c_list_unread_for` still narrows it to "addressed to me, or
-broadcast" (same addressing mechanism as `claude2claude`), plus one
-extra rule unique to this channel: a session's OWN unaddressed
-broadcast is excluded from its own unread list (via the `--from-<slug>`
-filename tag), so a session's Stop hook never blocks on the
+**So the test for adding a dir here is "is a Code session the intended
+recipient?", not "is it a mailbox".** `code2code` passes it: that
+traffic is BY Claude Code sessions FOR Claude Code sessions, exactly
+what these hooks exist to notice. `claude2claude` also passed it, and
+was watched until the channel was removed at c2c-mcp 0.8.0 -- every
+party on it had a better route once Desktop joined the mesh directly.
+
+`c2c_list_unread_for` narrows the watched dir to "addressed to me, or
+broadcast", plus one rule unique to this channel: a session's OWN
+unaddressed broadcast is excluded from its own unread list (via the
+`--from-<slug>` filename tag), so a Stop hook never blocks on the
 announcement it just sent itself. See `.claude/claude2claude/c2c-mcp/
 src/mailbox.ts`'s `makeSharedChannel`/`excludeSelfSent` for the server
 side of the same rule.
@@ -169,11 +163,12 @@ including the fail-open case and a negative proving the filter isn't
 vacuous (mail addressed only to a different session must not block
 Stop at all, not just "block less").
 
-**`outbox/` doesn't have this gap and doesn't need addressing**
+**`outbox/` didn't have this gap and didn't need addressing**
 (observation from `stage2b-lead`, a disinterested third party who
-wasn't building this feature): Claude Desktop is the sole reader of
-`claude2claude/outbox/` on this channel, so there's no multi-reader
-race for a `to:` field to resolve there. A `to:` toward Desktop on an
+wasn't building this feature): Claude Desktop was the sole reader of
+`claude2claude/outbox/`, so there was no multi-reader race for a `to:`
+field to resolve there. Kept because the reasoning generalises to any
+future single-reader channel; the channel itself is gone. A `to:` toward Desktop on an
 outbox message is cosmetic at most -- don't read its absence from this
 document as implying outbox shares the inbox-side gap; it never had
 it.
@@ -190,7 +185,7 @@ success), the `stop_hook_active` loop guard (proven non-vacuously: the
 same mail still blocks when `stop_hook_active` is false), the
 body-content injection-surface guard, section (e) (`claude2gpt/inbox`
 and a hypothetical third channel are NOT auto-watched by default, only
-`claude2claude/inbox` is), and per-session addressing (section (f):
+`code2code/mailbox` is), and per-session addressing (section (f):
 addressed-elsewhere mail excluded, broadcast and addressed-to-me mail
 still counted, the fail-open case, and a negative proving the filter
 isn't vacuous).
