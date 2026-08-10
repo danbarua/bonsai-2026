@@ -220,9 +220,14 @@ defends the current trigger and must not be carried forward as settled.
 31394098469 spawned five background agents, waited 300 s, examined 6 of 12
 files, posted a PR comment saying the review was in progress, and **exited
 success**. That verdict was durable — a posted comment, not a transcript —
-so by §3's taxonomy it scores **RESULT WAS WRONG**, joining the six of 38 in
-the main ledger. It is also the review workflow appearing in its own ledger
-as a defect rather than a catcher, which no row before it did.
+so by §3's taxonomy it scores **RESULT WAS WRONG**. It is recorded here as an
+addendum and is deliberately NOT folded into §3 — that ledger was frozen at
+`79ecd7f`, this run postdates its cut, and principle 3 says an exploratory
+addition to a corrected family is flagged as nominal rather than absorbed.
+§3 stands at 6 of 38. Read this row alongside it, not inside it.
+
+It is also the review workflow appearing in a ledger as a defect rather than
+a catcher, which no §3 row does.
 
 Two guards landed against it, and both are narrowings — the shape principle
 21 warns about. `1d1e3ab` fails the job when the push's own test set is not
@@ -776,8 +781,9 @@ not the same as deciding it should happen.
 
 That episode is worth recording for a second reason. The expensive run had
 looked at half the files it was given, written a note saying it was still
-working, and then reported success anyway. Nothing downstream could tell the
-difference between that and a finished review — which is precisely the failure
+working, and then reported success anyway. A person reading the note could
+tell it was unfinished; the pass/fail flag that everything automatic reads
+could not — which is precisely the failure
 this whole review process exists to catch, committed by the review process
 itself. Two fixes followed: the job now fails if it leaves any of the current
 batch unexamined, and whatever it did not get to is carried forward in writing
