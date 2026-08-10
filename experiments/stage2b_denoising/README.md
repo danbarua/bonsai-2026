@@ -208,6 +208,17 @@ mention here, in the same commit that creates it.
   credentials, no refit, no google-cloud-storage. Run directly:
   `uv run python measure_scaler_lipschitz.py`.
 
+- **`measure_combined_operator_norm.py`** — the composed scaler-ridge map
+  `M = diag(1/s) @ W` per condition, reported as its induced infinity-norm:
+  the max over output coordinates of the sum over input coordinates of
+  `|M|`. Refits through `stage2b_ridge.fit_final` unmodified at the
+  production alphas. Measures the composition rather than multiplying the
+  links' separate norms, because that product is an upper bound and the
+  ridge can cancel what the scaler amplifies — it does for
+  `pre_evolution` and does not for the evolved graphs. CPU only, public-read
+  inputs, ~460MB per condition streamed one at a time. Run directly:
+  `uv run python measure_combined_operator_norm.py`.
+
 - **`run_arm_x86_propagation_stress.py`** — `COMPANION_PROTOCOLS.md` Protocol
   1: ARM/x86 propagation stress set. Three resumable phases
   (`arm-construct` local, `x86-encode` Colab x86, `propagate` local):

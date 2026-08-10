@@ -1,0 +1,56 @@
+{
+  "claimed_end_to_end_lipschitz": 2.0,
+  "note": "combined_norm is the induced infinity-norm of diag(1/s) @ W: max over output coordinates of the sum over input coordinates of |M|.",
+  "rows": [
+    {
+      "alpha": 1000.0,
+      "combined_norm": 11.579596102667127,
+      "condition": "pre_evolution",
+      "n_images": 60000,
+      "raw_median_col_std": 0.27042512620209047,
+      "raw_min_col_std": 0.05217537699756229,
+      "ridge_norm": 3.683490146864878,
+      "scaler_norm": 19.16612888195751
+    },
+    {
+      "alpha": 1e-06,
+      "combined_norm": 87461.39801375233,
+      "condition": "T",
+      "n_images": 60000,
+      "raw_median_col_std": 0.12419859087147339,
+      "raw_min_col_std": 0.0009582943700647064,
+      "ridge_norm": 16801.681351535477,
+      "scaler_norm": 1043.520687628038
+    },
+    {
+      "alpha": 1e-06,
+      "combined_norm": 760193.1801853387,
+      "condition": "lattice",
+      "n_images": 60000,
+      "raw_median_col_std": 0.11776993657163583,
+      "raw_min_col_std": 0.0024257054738822895,
+      "ridge_norm": 55494.711251615525,
+      "scaler_norm": 412.2512031106239
+    },
+    {
+      "alpha": 1e-05,
+      "combined_norm": 320563.3358759041,
+      "condition": "rewired",
+      "n_images": 60000,
+      "raw_median_col_std": 0.022518833508470712,
+      "raw_min_col_std": 0.0002096115394528037,
+      "ridge_norm": 10695.53808643939,
+      "scaler_norm": 4770.729715599273
+    },
+    {
+      "alpha": 1e-05,
+      "combined_norm": 650490.3519315664,
+      "condition": "curr_random",
+      "n_images": 60000,
+      "raw_median_col_std": 0.01368143744716032,
+      "raw_min_col_std": 6.783863378172796e-05,
+      "ridge_norm": 11302.987744136115,
+      "scaler_norm": 14740.86290147762
+    }
+  ]
+}
