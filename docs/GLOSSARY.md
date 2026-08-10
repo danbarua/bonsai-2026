@@ -391,3 +391,44 @@ of the project (see the tag key above for exactly what each one covers).
   value and stop there. Would tell us how much of Stage 2A’s
   classification value comes from the encoding step alone, independent
   of any graph evolution. Not built yet.
+
+- **binding clause** *[Stage 2B]* — Stage 2B’s four planning documents are
+  long, and most of what’s in them is explanation: why a choice was made,
+  what went wrong once, what some run produced. A handful of sentences are
+  different in kind — they are *promises*. “We will stop if this happens.”
+  “This number is fixed at 100.” “We will never describe this as a random
+  sample.” A binding clause is one of those promises. Nothing about the
+  wording marks them out, so a person reads every candidate sentence and
+  decides one at a time. A computer can find the sentences worth looking
+  at; only a human can say which ones are promises.
+
+- **the inventory** *[Stage 2B]* — The list of every one of those promises,
+  kept in `gates.toml`, alongside what actually keeps each one. Its whole
+  point is that a promise with nothing keeping it has to show up as a
+  problem rather than quietly looking fine. That came from a real incident:
+  a document promised the program would stop under a particular condition,
+  nobody ever wrote that part, and a run afterwards reported “OK” — which
+  meant “no such check existed”, not “the check passed”. From the outside
+  those two look identical, and telling them apart is the job.
+
+- **the three kinds of promise** *[Stage 2B]* — Promises differ by who has
+  to keep them, which is why one form doesn’t fit all of them. Some bind
+  the *running program*: it checks something and then halts or changes
+  course. These are the only ones a machine can verify. Some bind a
+  *number*, fixed ahead of time so nobody can pick a flattering value once
+  the results are in — nothing rejects anything, so asking what such a
+  promise stops would be asking someone to invent an answer. Some bind
+  *what may be written*, like “never call this a random sample”; no code
+  can enforce those, so a person discharges them and the record says who
+  and where. You may not downgrade a promise to a weaker kind just because
+  enforcing it turned out to be hard — that rule is kept by a reviewer
+  reading the list, not by anything in the file.
+
+- **negative attestation** *[Stage 2B]* — Some promises are “never”-shaped:
+  never report this as such-and-such. You cannot keep that kind by pointing
+  at one paragraph that behaves itself, because the whole risk is the
+  paragraph you forgot. So the record has to say which body of writing was
+  searched, and how you established the forbidden thing wasn’t anywhere in
+  it. A positive promise is kept by showing something exists; a negative
+  one is broken by something nobody noticed, and absences don’t announce
+  themselves.

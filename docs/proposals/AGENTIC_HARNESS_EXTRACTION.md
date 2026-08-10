@@ -454,6 +454,15 @@ vocabulary written for humans to read was translated; the vocabulary the
 agents wrote for themselves never was — and it is the half a newcomer must
 learn before touching `gates.toml` at all.
 
+**Discharged 2026-08-10.** The twin now carries all four process entries, in
+the technical glossary's own order. The finding above stands as the state at
+review time; the asymmetry it describes no longer exists. Worth noting what
+writing them exposed: three of the four are only explicable through the
+INCIDENT that produced them — the inventory's plain-English entry is mostly
+the story of a run reporting `STAGE3_OK` for a gate that was never
+implemented. A term whose everyday reading has to recount an incident is a
+term doing real work, which is the §7 test applied by accident.
+
 **Coping mechanisms.** Those compensating for limitations *intrinsic* to
 agents generalise to any harness: convergence declared by the reviewer not the
 responder; a summary borrows authority its source never granted; commit before
