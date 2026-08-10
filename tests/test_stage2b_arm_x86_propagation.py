@@ -9,6 +9,7 @@ import ast
 import importlib
 import os
 import sys
+import types
 from pathlib import Path
 
 import numpy as np
@@ -406,3 +407,72 @@ def test_max_abs_difference_rejects_shape_and_nan():
         audit.max_abs_difference(np.zeros(3), np.zeros(2))
     with pytest.raises(audit.AuditInputError, match="finite"):
         audit.max_abs_difference(np.array([1.0, np.nan]), np.zeros(2))
+
+
+
+def test_report_ensure_json_passes_fingerprint(tree):
+    """The report publish (sole ensure_json in driver) must pass fingerprint=fp
+    (not omitted, not the literal None).
+
+    Break-confirmation: removing `fingerprint=fp` from the call site in
+    run_arm_x86_propagation_stress.py must make this test fail (pre-edit red).
+    """
+    calls = []
+    for node in ast.walk(tree):
+        if isinstance(node, ast.Call):
+            func = node.func
+            if isinstance(func, ast.Name) and func.id == "ensure_json":
+                calls.append(node)
+    assert len(calls) == 1, (
+        f"expected exactly one ensure_json call site (the report); got {len(calls)}"
+    )
+    call = calls[0]
+    fp_kw = next((kw for kw in call.keywords if kw.arg == "fingerprint"), None)
+    assert fp_kw is not None, "report ensure_json must pass fingerprint= kwarg"
+    val = fp_kw.value
+    is_none_lit = isinstance(val, ast.Constant) and val.value is None
+    assert not is_none_lit, "fingerprint= must not be the literal None"
+    # if it were omitted there would be no kw; Name('fp') or other expr is ok
+
+def test_revalidation_failure_prints_fail_sentinel_and_exits_nonzero(driver, monkeypatch, capsys, tmp_path):
+    """Drive post-phase reval block; injected SourceClosureError must produce
+    FAIL_SENTINEL on stdout and return 1 (fail-closed).
+
+    Monkeypatches reach the reval after a nominal phase success (no GCS/evolve).
+    Uses the *real* SourceClosureError so the driver's bare `except Exception`
+    still catches it.
+
+    Break-confirmation: restoring the old swallow `say(f"fingerprint revalidate note: ...")`
+    must make this test fail (the sentinel would be absent, rc would be 0).
+    """
+    import stage2b_fingerprint as sfp  # real class for the raise
+
+    def stub_load_modules(repo_root):
+        stub = types.SimpleNamespace()
+        def reval_raiser(fp, rr):
+            raise sfp.SourceClosureError("injected mismatch")
+        stub.fingerprint = types.SimpleNamespace(
+            revalidate_after_execution=reval_raiser
+        )
+        return stub
+
+    monkeypatch.setattr(
+        driver, "resolve_runtime", lambda: ("local", str(REPO_ROOT), str(tmp_path))
+    )
+    monkeypatch.setattr(driver, "load_modules", stub_load_modules)
+    monkeypatch.setattr(
+        driver, "build_fingerprint",
+        lambda mods, rr, cfg, require_clean=True: {
+            "source_manifest": {},
+            "source_manifest_digest": "x",
+            "config_digest": "y",
+        },
+    )
+    monkeypatch.setattr(driver, "phase_propagate", lambda *a, **k: 0)
+    monkeypatch.setattr(driver, "get_bucket", lambda mods, args: None)
+
+    rc = driver.main(["--phase", "propagate", "--no-upload"])
+    captured = capsys.readouterr()
+    assert rc == 1
+    assert driver.FAIL_SENTINEL in captured.out
+    assert ("revalidate" in captured.out) or ("injected mismatch" in captured.out)

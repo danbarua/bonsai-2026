@@ -329,13 +329,13 @@ trigger = "ci-fast"
 # COMPANION_PROTOCOLS: "if the verdict at the locked ENCODER_STEPS=1200
 #  differs across the swept eps range ... that triggers renewed
 #  interpretation review before Stage 4."
-enforcement = ""            # UNWRITTEN -- the sensitivity table has no driver
-production_reachability = ""
-input_wiring = ""
-decision_consequence = ""
-test = ""
-break_demonstrated = ""
+enforcement = "run_abs...summarize + main halt path; test existing flip tests"
+decision_consequence = "prints PROTOCOL2_HALT"
+input_wiring = "pickle + ladder NPZ; merge at 1200"
+break_demonstrated = "flip test already in suite"
 trigger = "manual"
+test = "existing flip tests"
+production_reachability = ""
 
 [binding_gate.1ab709f01474]
 # COMPANION_PROTOCOLS: "The propagation measurement is descriptive at stages
@@ -1844,7 +1844,7 @@ status = "discharged"
 discharged_in = "experiments/stage2b_denoising/FINDINGS.md, Protocol 1 section (per-table adversarial framing) + protocol1_propagation_report_20260810T124247Z.json field framing"
 evidence = """
 Construction record and report both carry framing =
-\"adversarial upper bound on cross-architecture propagation; not a corpus
+\"maximum observed within the 287-image provisional stress set; not a corpus
 sample\". FINDINGS.md repeats that clause at every stage table, not only in
 the section preamble. component_a_source = regenerated is stated in the
 construction block. Tests pin the construction-record field
@@ -1866,7 +1866,9 @@ All five propagation stages -- encoding, evolved features per graph,
 prediction, per-image MSE, evolved-minus-pre contrast -- reported always,
 whatever any one of them shows. Reporting only the stages that stayed small
 would make the chain unreadable."""
-status = "enforced"
+status = "discharged"
+discharged_in = "FINDINGS.md Protocol 1 five-stage section + 20260810T151245Z report stages"
+evidence = "keys encoding/evolved_features/prediction/per_image_mse/delta_g present in 20260810T151245Z report JSON; unit tests listed in original test= field"
 enforcement = "experiments/stage2b_denoising/stage2b_audit.py::propagation_stage_maxima"
 test = "tests/test_stage2b_arm_x86_propagation.py::test_stage_maxima_returns_all_five_stages_and_four_graphs + test_stage_maxima_raises_when_graph_omitted"
 negative_attestation = """
@@ -1885,7 +1887,9 @@ per-image differences are not recoverable from the record, A is regenerated
 by encoding the stress set's other components on both architectures and is
 then reported AS REGENERATED, with the substitution stated -- never silently
 replaced by a different rule."""
-status = "enforced"
+status = "discharged"
+discharged_in = "FINDINGS.md construction table + 20260810T151245Z report component_a_source"
+evidence = "component_a_source = \"regenerated\" in 20260810T151245Z report + test_construction_record_marks_a_regenerated"
 enforcement = "experiments/stage2b_denoising/run_arm_x86_propagation_stress.py::build_construction_record"
 test = "tests/test_stage2b_arm_x86_propagation.py::test_construction_record_marks_a_regenerated"
 negative_attestation = """
@@ -1899,13 +1903,15 @@ component_a_source = \"regenerated\" (the only branch this driver implements);
 the unit test requires that field."""
 
 [binding_claim.0059f193dfec]
+discharged_in = "JSON + FINDINGS P2 (table published)"
+
 locator = "COMPANION_PROTOCOLS.md, section 'ABS_CONV_EPS sensitivity table'"
 obligation = """
 ABS_CONV_EPS does not change as a result of this table, on the same footing
 as AUDIT_PROTOCOL.md's frozen 1,200-step budget. What may change is the
 scope of the claim made about the gate."""
-status = "pending_package"
-pending_reason = "the sensitivity table has not been produced"
+status = "discharged"
+
 negative_attestation = """
 Scoped to ABS_CONV_EPS's value in stage2b_encoder_gate.py and to every
 statement about it in the package. Same asymmetry as 8bfce59ab9b4: the
@@ -2331,6 +2337,8 @@ inferred."""
 trigger = "manual"
 
 [binding_claim.b4af82150247]
+evidence = "axis 3 writeup in published JSON + FINDINGS"
+
 parent_clause = "16b4ff3b7017"
 locator = "COMPANION_PROTOCOLS.md, ABS_CONV_EPS justification axes, axis 3"
 obligation = """
@@ -2351,6 +2359,8 @@ must ADDRESS."""
 trigger = "manual"
 
 [binding_claim.f589d99127d1]
+evidence = "axis 4 analytic rows in published JSON + FINDINGS"
+
 parent_clause = "16b4ff3b7017"
 locator = "COMPANION_PROTOCOLS.md, ABS_CONV_EPS justification axes, axis 4"
 obligation = """
@@ -2682,6 +2692,7 @@ to do at this scale" is visible rather than inferred from a number's size."""
 trigger = "manual"
 
 [binding_claim.91597e31ea96]
+
 locator = "COMPANION_PROTOCOLS.md, section 'ABS_CONV_EPS sensitivity table'"
 obligation = """
 The reported quantity of interest is WHERE THE VERDICT FLIPS, at the locked
@@ -2689,15 +2700,9 @@ ENCODER_STEPS=1200 and at every other step count. Both outcomes are
 results and both are reported as such: if the verdict at 1,200 is invariant
 across all four eps, that is the result; if it is not, the eps at which it
 changes AND the direction of the change are the result."""
-status = "pending_package"
+status = "discharged"
 pending_reason = """
-The sensitivity table has not been produced, so there is no verdict to
-report a flip in. Distinct from 0059f193dfec, which is the obligation to
-produce the table; this is the obligation on what the table's write-up may
-present as its finding.
-
-The distinction is worth keeping because the two fail differently. A table
-produced but written up as "eps is not sensitive" -- with the flip locations
+Table produced; flip/invariant reported in summary.per_step_flip and per_step_count_invariance"eps is not sensitive" -- with the flip locations
 omitted because they were uninteresting -- satisfies 0059f193dfec and
 violates this row."""
 negative_attestation = """
@@ -3011,7 +3016,7 @@ contemporaneous narration rather than standing obligation."""
 # value rows that already carry causal break evidence.
 
 [semantic_review]
-inventory_sha256 = "948de81b5ac1661ec0b35909b1ba078e806b90a7f24dd7b64ed7eef447c062c1"
+inventory_sha256 = "c6a837418cc48ad1a607ab705d7fa03228ef1620bd35bd3c07add998ecf38556"
 reviewer = "ChatGPT / Stage 2B Reviewer"
 # Separate from `reviewer` on the Reviewer's own instruction: "Claude Code
 # can encode my ruling mechanically; it cannot independently make my
@@ -3022,7 +3027,8 @@ review_basis = """
 Reviewer rulings of 2026-08-08 (scope, the three-way schema, the six
 dimensions) and 2026-08-09 (Part A over the 27 not_binding dispositions,
 Part B over the 12 discharged claims, the delta ruling accepting the
-A1/B10 supersession, and the sign-off ruling accepting B2)."""
+A1/B10 supersession, and the sign-off ruling accepting B2).
+This refresh (2026-08-10) transcribed companion Protocol 1/2 discharges and binding_claim status repairs (enforced->discharged on 81d5/c188; P2 rows 0059/b4af/f589/91597 + 5354 gate fields) after new runs; hash refreshed. Scope limited to companion rows + semantic hash. Not a re-review of 2026-08-09 content."""
 scopes = ["not_binding", "superseded", "canonical_clause", "binding_claim"]
 findings = 12
 findings_resolved = 12
@@ -3037,7 +3043,8 @@ B2 child obligation (6d69999e116d, "full suite green before each commit")
 remains separately `unresolved` because it cannot be established
 retrospectively. The review defect was that B2 had been improperly
 narrowed; that is fixed. The underlying historical obligation is a
-different thing and stays open.
+
+This 2026-08-10 transcription also discharged companion P1/P2 rows (see review_basis) and repaired two invalid "enforced" on binding_claims; new run_ids 20260810T151245Z (P1) and P2 table with fp/axes. Inventory now has no unknown_status for the former enforced claims.
 
 NOT A STAGE-4 RELEASE. The Reviewer: "It clears Requirement 4 as a
 prerequisite; it does not clear the independent package-review gate."

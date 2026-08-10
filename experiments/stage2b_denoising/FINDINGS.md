@@ -1497,9 +1497,9 @@ amendment-impact audit.
 `max |Δ Delta_g|` is strictly below `CONTRAST_THRESHOLD = 4.604761e-10`.
 Largest stage-5 value: `curr_random` at `1.830e-12` (~252× below threshold).
 
-Run id: `20260810T124247Z`.
-Report: `stage2b/train/stage3/common/protocol1_propagation_report_20260810T124247Z.json`
-Frozen ridge: `stage2b/train/stage3/common/protocol1_ridge_frozen_20260810T124247Z.npz`
+Run id: `20260810T151245Z`. (Prior 20260810T124247Z report JSON existed without process sentinel or manifest sidecar; this run closes that gap.)
+Report: `stage2b/train/stage3/common/protocol1_propagation_report_20260810T151245Z.json`
+Frozen ridge: `stage2b/train/stage3/common/protocol1_ridge_frozen_20260810T151245Z.npz`
 
 ## Construction
 
@@ -1528,8 +1528,8 @@ ARM realization. x86 stress encodings used unmodified
 
 ## Five-stage maxima
 
-Framing at every table: **adversarial upper bound on cross-architecture
-propagation; not a corpus sample.** Component A is selected for maximal
+Framing at every table: **maximum observed within the 287-image provisional stress set;
+not a corpus sample.** Component A is selected for maximal
 encoding-stage divergence.
 
 ### Stage 1 — encoding
@@ -1538,7 +1538,7 @@ encoding-stage divergence.
 |---|---|
 | `theta_505` | `4.441e-16` |
 
-Adversarial upper bound on cross-architecture propagation; not a corpus sample.
+maximum observed within the 287-image provisional stress set; not a corpus sample.
 Encoding-stage sanity gate (`> 1e-12` refuse) did not fire. Historical Phase-A
 spot-check max was ~3 ULP; this stress-set max is consistent with that scale.
 
@@ -1552,7 +1552,7 @@ spot-check max was ~3 ULP; this stress-set max is consistent with that scale.
 | `rewired` | `1.554e-15` |
 | `curr_random` | `1.332e-15` |
 
-Adversarial upper bound on cross-architecture propagation; not a corpus sample.
+maximum observed within the 287-image provisional stress set; not a corpus sample.
 
 ### Stage 3 — prediction (frozen ridge, same `(fit, scaler)` both arches)
 
@@ -1564,7 +1564,7 @@ Adversarial upper bound on cross-architecture propagation; not a corpus sample.
 | `rewired` | `1.711e-11` |
 | `curr_random` | `3.576e-11` |
 
-Adversarial upper bound on cross-architecture propagation; not a corpus sample.
+maximum observed within the 287-image provisional stress set; not a corpus sample.
 One `fit_final` per condition at production alphas from
 `ridge_final_g13_88edf9ac.npz`; never per architecture.
 
@@ -1578,7 +1578,7 @@ One `fit_final` per condition at production alphas from
 | `rewired` | `5.483e-13` |
 | `curr_random` | `1.830e-12` |
 
-Adversarial upper bound on cross-architecture propagation; not a corpus sample.
+maximum observed within the 287-image provisional stress set; not a corpus sample.
 
 ### Stage 5 — Δ_g = MSE_evolved − MSE_pre (halt stage)
 
@@ -1589,7 +1589,7 @@ Adversarial upper bound on cross-architecture propagation; not a corpus sample.
 | `rewired` | `5.483e-13` | no |
 | `curr_random` | `1.830e-12` | no |
 
-Adversarial upper bound on cross-architecture propagation; not a corpus sample.
+maximum observed within the 287-image provisional stress set; not a corpus sample.
 
 Halt rule (frozen): any graph **strictly greater than** threshold →
 `PROTOCOL1_HALT`. Equality does not halt. None exceeded.
@@ -1612,8 +1612,8 @@ Plausibly correlated (evolution’s inputs are the encodings) but not guaranteed
 | stress indices | `stage2b/train/stage3/common/protocol1_stress_indices.npz` |
 | ARM stress encode | `stage2b/train/stage3/common/protocol1_encoded_stress_arm_s1200.npz` |
 | x86 stress encode | `stage2b/train/stage3/common/protocol1_encoded_stress_x86_s1200.npz` |
-| frozen ridge | `stage2b/train/stage3/common/protocol1_ridge_frozen_20260810T124247Z.npz` |
-| report | `stage2b/train/stage3/common/protocol1_propagation_report_20260810T124247Z.json` |
+| frozen ridge | `stage2b/train/stage3/common/protocol1_ridge_frozen_20260810T151245Z.npz` |
+| report | `stage2b/train/stage3/common/protocol1_propagation_report_20260810T151245Z.json` |
 | theta_T / features | under `stage2b/train/stage3/{pre_evolution,evolved_*}/protocol1_{theta_T,features}_{arm,x86}.npz` |
 
 Driver: `run_arm_x86_propagation_stress.py`. Pure helpers:
@@ -1623,3 +1623,40 @@ Tests: `tests/test_stage2b_arm_x86_propagation.py`. Make:
 `stage2b-protocol1-arm-construct`, `stage2b-protocol1-x86-encode`,
 `stage2b-protocol1-propagate`.
 
+
+
+## Stage 2B Companion Protocol 2: `ABS_CONV_EPS` sensitivity table — `PROTOCOL2_OK`
+
+Run under `run_abs_conv_eps_sensitivity.py` (local CPU). Recomputation from stored final-Delta arrays (diagnostic pickle + ladder encoder_gate_s1200.npz); no re-encoding.
+
+**Verdict at locked `ENCODER_STEPS=1200`: INVARIANT across `eps in {1e-10, 1e-11, 1e-12, 1e-13}`.** No flip; `HALT` condition does not fire. `ABS_CONV_EPS=1e-12` itself does not change.
+
+### Construction framing
+Recomputation from stored final-Delta; not a new encode. Uses `load_final_deltas` (diagnostic) + `load_ladder_encoder_gate_deltas` + `merge_step_sources` (for overlap at 1200 requiring <=1e-15 agreement), then `audit.sensitivity_table(..., gate.evaluate_rho_gate)` unmodified.
+
+### Summary (from published JSON)
+- locked_encoder_steps: 1200
+- invariant_at_locked_steps: true
+- halt_triggered: false
+- step_sources (1200): "diagnostic+ladder"; others "diagnostic"
+- source.ladder_objects: {"1200": "stage2b/train/stage1/common/encoder_gate_s1200.npz"}
+
+### Justification axes (all four)
+1. float64 precision: observed dust 1e-14–1e-16; 1e-12 sits above.
+2. Phase update scale: smallest meaningful measured final-Delta 2.177e-07 (clean, 150 steps, stage 1); 1e-12 is five+ orders below.
+3. Encoder implementation: residual decay 8.370e-07 → 8.062e-13 → 0.0 (300/600/1200); first crosses 1e-12 between 300–600 steps.
+4. Downstream feature sensitivity (analytic L_inf bound on cos/sin under phase residual):
+   - 1e-10: bound=1e-10 (0.0001 × rtol=1e-6; 0.405 × prod max 2.468e-10)
+   - 1e-12: bound=1e-12 (1e-6 × rtol; 0.00405 × prod max)
+   - 1e-13: bound ~1e-13 (monotone decrease; all << rtol and prod max)
+   Method: |cos(θ+ε)-cos(θ)| ≤ 2|sin(ε/2)| ≤ |ε|; no full ODE re-evolve.
+
+### Artifacts
+- table: `results/abs_conv_eps_sensitivity_table.json` (also gcs-style under stage3/common)
+- fingerprint present with source/config digests
+- sentinel: `PROTOCOL2_OK` (exit 0); revalidate passed
+
+Driver: `run_abs_conv_eps_sensitivity.py`. Make: `stage2b-protocol2`.
+Tests: `tests/test_stage2b_abs_conv_eps_sensitivity.py` (merge, axis4, publish fingerprint AST, reval sentinel, real-pickle tier-2).
+
+(Companion to Protocol 1 closure; both now under fingerprint contract per COMPANION_PROTOCOLS.md.)

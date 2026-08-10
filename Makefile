@@ -951,6 +951,9 @@ stage2b-protocol1: stage2b-protocol1-arm-construct  ## Protocol 1 umbrella: arm-
 	@echo "[make] Then: make stage2b-protocol1-propagate"
 
 
+.PHONY: stage2b-protocol2
+stage2b-protocol2:  ## Protocol 2: ABS_CONV_EPS sensitivity table (local CPU)
+	cd $(STAGE2B_DIR) && uv run python run_abs_conv_eps_sensitivity.py
 ##@ Vacuous-test review (local preflight)
 
 # Default Haiku: the Actions path has defaulted to Sonnet and cost $5 on a
