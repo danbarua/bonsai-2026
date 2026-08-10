@@ -441,7 +441,19 @@ reader must guess whether "adjacent" means a different clause, module, or
 claim, and guessing "different module" fills two deliberately empty rows and
 flips readiness from failing to passing. Highest-risk gap. It and the
 `break_demonstrated` collision below are filed as tasks #26 and #25 **as
-defects**. The second is the more serious on reflection: it undermines the one
+defects**.
+
+**Resolved 2026-08-10, by deletion rather than definition.** The term was
+down to two uses, both added the same week by agents working without the
+wider context, and the fix drafted first was a glossary entry — which would
+have made the convention fit the outlier. Dan's ruling: *"two usages, added
+today… change it to something else."* Both uses now say what they mean in
+plain words ("discharging this row with another row's evidence"), and no
+definition is needed because no term remains. The general form is worth
+keeping even though the term is not: **a coinage that needs a glossary entry
+to be legible, and has two uses, is more cheaply removed than documented.**
+Recorded also because the draft above rated this the highest-risk vocabulary
+gap in the file, and the cheapest possible fix closed it. The second is the more serious on reflection: it undermines the one
 evidentiary field §6.3 identifies as the most transferable mechanism here.
 Then the status values `pending_consumer`/`pending_package`/`not_applicable`,
 defined only in divider comments — `pending_package` fails readiness while
@@ -975,11 +987,17 @@ that was narrowed down" changed how two tools were built.
 Some are just new names for old ideas. "Checkpoint branch" is an integration
 branch. "Self-referential pin" is a test that checks a value equals itself.
 
-Two terms are relied on and defined nowhere at all. The worse one is
-"adjacent evidence." It appears five times, always as the reason a row in a
-file is left blank, and blank rows fail the project's own readiness check. A
-new reader has to guess what it means, and a wrong guess flips the project's
-status from "not ready" to "ready."
+Two terms are relied on and defined nowhere at all. The worse one was
+"adjacent evidence." It was the reason a row in a file was left blank, and
+blank rows fail the project's own readiness check. A new reader had to guess
+what it meant, and a wrong guess flipped the project's status from "not
+ready" to "ready."
+
+It has since been deleted rather than defined. Two uses, both written the
+same week by people who had not seen the rest of the project, and both now
+simply say what they mean in ordinary words. The first fix attempted was a
+dictionary entry, which would have been the tail wagging the dog: writing a
+definition to justify a word nobody had chosen on purpose.
 
 One term is defined twice, differently, which is worse than not defining it.
 `break_demonstrated` means one thing in the first half of a file and another

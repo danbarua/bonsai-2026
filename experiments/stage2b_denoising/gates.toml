@@ -476,7 +476,8 @@ the refusal's own recovery hint is pinned alongside the refusal.
 Produced for this row rather than cited from adjacent work.
 NEGATIVE_PATH_EVIDENCE.md's recorded breakage covers the closure checks and
 the teardown signal, not this guard -- citing it here would have been
-discharge by adjacent evidence, which reads exactly like a filled row."""
+discharging this row with another row's evidence, which reads exactly like a
+filled row."""
 trigger = "ci-fast"
 
 # -- deliberately FAILING rows: the gate is documented and unenforced --------
@@ -715,7 +716,8 @@ trigger = "manual"
 # tuple is a hand-maintained list standing in for a derived set, which is
 # principle 21 exactly, and the clause exists because the derived set is what
 # closes the omitted-helper failure mode. Citing the origin check here would
-# be discharge by adjacent evidence in the shape 9bc6f9e3808a names.
+# discharge this clause with evidence for a different one, in the shape
+# 9bc6f9e3808a names.
 #
 # Neither closure is computed anywhere today, so both halves are absent --
 # not one half satisfied.
