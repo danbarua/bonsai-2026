@@ -952,10 +952,10 @@ stage2b-protocol1: stage2b-protocol1-arm-construct  ## Protocol 1 umbrella: arm-
 
 
 .PHONY: stage2b-protocol2
-stage2b-protocol2:  ## Protocol 2: ABS_CONV_EPS sensitivity table (local CPU)
-	cd $(STAGE2B_DIR) && uv run python run_abs_conv_eps_sensitivity.py
+stage2b-protocol2:  ## Protocol 2: ABS_CONV_EPS sensitivity table (local CPU; GCS_ENV enables sidecar when configured)
+	cd $(REPO_ROOT) && $(GCS_ENV) \
+		uv run python $(STAGE2B_DIR)/run_abs_conv_eps_sensitivity.py
 ##@ Vacuous-test review (local preflight)
-
 # Default Haiku: the Actions path has defaulted to Sonnet and cost $5 on a
 # partial pass (PR #29). Local preflight is the cheap half; Actions stays the
 # durable sticky. Override with MODEL=sonnet or REVIEW_MODEL.

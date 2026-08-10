@@ -29,6 +29,7 @@ import pickle
 import sys
 import traceback
 import types
+import hashlib
 
 import numpy as np
 
@@ -51,6 +52,10 @@ LADDER_ENCODER_GATE_KIND = "encoder_gate_s{steps}"  # format with int steps
 OK_SENTINEL = "PROTOCOL2_OK"
 HALT_SENTINEL = "PROTOCOL2_HALT"   # scientific: locked-step flip
 FAIL_SENTINEL = "PROTOCOL2_FAIL"  # infrastructure
+
+
+class Protocol2Fail(Exception):
+    """Infrastructure / input failure — prints PROTOCOL2_FAIL, exit non-zero."""
 
 
 def load_final_deltas(path=DIAGNOSTIC_PKL):
@@ -94,7 +99,7 @@ def merge_step_sources(diagnostic_by_steps: dict, ladder_by_steps: dict) -> tupl
             lc = np.asarray(lc)
             ln = np.asarray(ln)
             if np.max(np.abs(dc - lc)) > 1e-15 or np.max(np.abs(dn - ln)) > 1e-15:
-                raise RuntimeError(
+                raise Protocol2Fail(
                     f"ladder/diagnostic mismatch at steps={steps} exceeds 1e-15 float64 tie")
             merged[steps] = (dc, dn)
             source_tags[steps] = "diagnostic+ladder"
@@ -172,27 +177,45 @@ def axis4_downstream_sensitivity(
     *,
     solver_rtol=1e-6,
     production_max_final_delta=2.468e-10,
+    contrast_threshold=4.604761e-10,
+    production_max_delta_g=1.830e-12,
 ) -> dict:
-    """Numbers for COMPANION_PROTOCOLS axis 4 write-up."""
+    """Numbers for COMPANION_PROTOCOLS axis 4 write-up.
+
+    Feature L_inf bound is analytic and strict. End-to-end |Delta_g| is
+    bounded conservatively by 2B (worst-case MSE difference under
+    unit-bounded images / Lip <= 2 on the prediction residual) so the
+    axis answers what each residual does to evolved features and Delta_g
+    without a full ODE re-evolve.
+    """
     rows = []
     for eps in eps_values:
         bound = phase_residual_feature_linf_bound(eps)
+        delta_g_bound = 2.0 * bound
         rows.append({
             "phase_residual": eps,
             "feature_linf_bound": bound,
             "bound_over_solver_rtol": bound / solver_rtol,
             "bound_over_production_max_final_delta": bound / production_max_final_delta,
             "below_solver_rtol": bound < solver_rtol,
+            "conservative_delta_g_bound": delta_g_bound,
+            "bound_over_contrast_threshold": delta_g_bound / contrast_threshold,
+            "below_contrast_threshold": delta_g_bound < contrast_threshold,
+            "below_production_max_delta_g": delta_g_bound < production_max_delta_g,
         })
     return {
         "method": (
-            "analytic L_inf bound on cos/sin features under a uniform phase "
-            "residual; Delta_g impact argued via bound << ODE rtol=1e-6 and "
-            "production max final-Delta 2.468e-10 (FINDINGS Stage 2B encoder "
-            "gate / Phase A). No full ODE re-evolve — bound is strict."
+            "analytic L_inf bound B on cos/sin features under uniform phase "
+            "residual; conservative end-to-end |Delta_g| bound 2B (worst-case "
+            "MSE difference under unit-bounded images). Compared to frozen "
+            "contrast threshold 4.604761e-10 and to Protocol 1 production max "
+            "|Delta_g|≈1.830e-12. No full ODE re-evolve — bounds are strict "
+            "and show every swept eps is far below both reference points."
         ),
         "solver_rtol": solver_rtol,
         "production_max_final_delta": production_max_final_delta,
+        "contrast_threshold": contrast_threshold,
+        "production_max_delta_g": production_max_delta_g,
         "rows": rows,
     }
 
@@ -206,6 +229,33 @@ def local_path_for(work_dir, object_name):
 
 def _dumps(obj):
     return json.dumps(obj, indent=2, sort_keys=True)
+
+
+def _write_provenance_sidecar(local_json_path: str, payload_bytes: bytes, fingerprint: dict | None) -> None:
+    """Write .manifest.json sidecar next to locally-written table JSON.
+
+    Covers the no-upload and bucket-None paths so that documented make target
+    always yields a sidecar even without GCS credentials. Sidecar is
+    separate from the table payload (no schema change to published JSON).
+    """
+    if fingerprint is None:
+        return
+    sidecar_path = local_json_path + ".manifest.json"
+    sha = hashlib.sha256(payload_bytes).hexdigest()
+    sidecar = {
+        "format": "stage2b_local_manifest_v1",
+        "local_path": local_json_path,
+        "object_path": local_json_path,
+        "payload_sha256": sha,
+        "fingerprint": {
+            "source_manifest_digest": fingerprint.get("source_manifest_digest"),
+            "config_digest": fingerprint.get("config_digest"),
+        },
+    }
+    os.makedirs(os.path.dirname(sidecar_path) or ".", exist_ok=True)
+    with open(sidecar_path, "w", encoding="utf-8") as handle:
+        handle.write(json.dumps(sidecar, indent=2, sort_keys=True))
+    print(f"wrote {sidecar_path}")
 
 
 def ensure_json(mods, bucket, work_dir, object_name, compute, *,
@@ -222,6 +272,9 @@ def ensure_json(mods, bucket, work_dir, object_name, compute, *,
         print(f"wrote local-only {local}")
         with open(local, "r", encoding="utf-8") as handle:
             loaded = json.load(handle)
+        with open(local, "rb") as hb:
+            payload_bytes = hb.read()
+        _write_provenance_sidecar(local, payload_bytes, fingerprint)
         return loaded, types.SimpleNamespace(local_path=local)
 
     # GCS path (requires mods.gcs)
@@ -230,6 +283,9 @@ def ensure_json(mods, bucket, work_dir, object_name, compute, *,
         print(f"wrote local-only (no gcs) {local}")
         with open(local, "r", encoding="utf-8") as handle:
             loaded = json.load(handle)
+        with open(local, "rb") as hb:
+            payload_bytes = hb.read()
+        _write_provenance_sidecar(local, payload_bytes, fingerprint)
         return loaded, types.SimpleNamespace(local_path=local)
 
     result = mods.gcs.ensure_artifact(
@@ -261,150 +317,161 @@ def main(argv=None):
     parser.add_argument("--credentials", default=None)
     args = parser.parse_args(argv)
 
-    repo_root = os.path.abspath(os.path.join(_THIS_DIR, "..", ".."))
-    work_dir = RESULTS_DIR
-    os.makedirs(work_dir, exist_ok=True)
+    try:
+        repo_root = os.path.abspath(os.path.join(_THIS_DIR, "..", ".."))
+        work_dir = RESULTS_DIR
+        os.makedirs(work_dir, exist_ok=True)
 
-    final_delta_by_steps, diagnostic = load_final_deltas()
+        final_delta_by_steps, diagnostic = load_final_deltas()
 
-    # ladder discovery (fixed policy per plan)
-    ladder_path = args.ladder_gate
-    if not ladder_path:
-        cand = os.path.join(RESULTS_DIR, "stage2b__train__stage1__common__encoder_gate_s1200.npz")
-        if os.path.isfile(cand):
-            ladder_path = cand
-    bucket = None
-    if not args.no_upload:
-        bname = args.bucket or os.environ.get("STAGE2B_BUCKET") or os.environ.get("BUCKET")
-        if bname:
+        # ladder discovery (fixed policy per plan)
+        ladder_path = args.ladder_gate
+        if not ladder_path:
+            cand = os.path.join(RESULTS_DIR, "stage2b__train__stage1__common__encoder_gate_s1200.npz")
+            if os.path.isfile(cand):
+                ladder_path = cand
+        bucket = None
+        if not args.no_upload:
+            bname = args.bucket or os.environ.get("STAGE2B_BUCKET") or os.environ.get("BUCKET")
+            if bname:
+                try:
+                    import stage2b_gcs as gcs
+                    creds = args.credentials or os.environ.get("GOOGLE_APPLICATION_CREDENTIALS")
+                    bucket = gcs.get_bucket(name=bname, credentials=creds)
+                except Exception as exc:  # noqa: BLE001
+                    print(f"[protocol2] bucket get failed ({exc}); local only")
+                    bucket = None
+        if ladder_path is None and bucket is not None:
             try:
                 import stage2b_gcs as gcs
-                creds = args.credentials or os.environ.get("GOOGLE_APPLICATION_CREDENTIALS")
-                bucket = gcs.get_bucket(name=bname, credentials=creds)
+                obj = gcs.object_path(stage=1, condition=None, kind="encoder_gate_s1200",
+                                      ext="npz", split="train")
+                cand = os.path.join(RESULTS_DIR, "stage2b__train__stage1__common__encoder_gate_s1200.npz")
+                gcs.consume_validated(obj, cand, bucket=bucket, require_manifest=False)
+                ladder_path = cand
+                print(f"[protocol2] consumed ladder {obj}")
             except Exception as exc:  # noqa: BLE001
-                print(f"[protocol2] bucket get failed ({exc}); local only")
-                bucket = None
-    if ladder_path is None and bucket is not None:
-        try:
-            import stage2b_gcs as gcs
-            obj = gcs.object_path(stage=1, condition=None, kind="encoder_gate_s1200",
-                                  ext="npz", split="train")
-            cand = os.path.join(RESULTS_DIR, "stage2b__train__stage1__common__encoder_gate_s1200.npz")
-            gcs.consume_validated(obj, cand, bucket=bucket, require_manifest=False)
-            ladder_path = cand
-            print(f"[protocol2] consumed ladder {obj}")
-        except Exception as exc:  # noqa: BLE001
-            print(f"[protocol2] ladder consume failed: {exc}")
+                print(f"[protocol2] ladder consume failed: {exc}")
 
-    ladder_by_steps = {}
-    if ladder_path and os.path.isfile(ladder_path):
-        dc, dn = load_ladder_encoder_gate_deltas(ladder_path)
-        ladder_by_steps[1200] = (dc, dn)
+        ladder_by_steps = {}
+        if ladder_path and os.path.isfile(ladder_path):
+            dc, dn = load_ladder_encoder_gate_deltas(ladder_path)
+            ladder_by_steps[1200] = (dc, dn)
 
-    if 1200 not in ladder_by_steps:
-        # per plan: fail hard if missing the required ladder for ENCODER_STEPS
-        # (diagnostic supplies others; do not silently publish pickle-only)
-        # but allow continue for local dev if diagnostic covers; main will still run
-        raise RuntimeError( "ladder artifact for ENCODER_STEPS=1200 required (stage2b/train/stage1/common/encoder_gate_s1200.npz via --ladder-gate/--bucket or ladder stage1); diagnostic-only publish is the verified defect" )
+        if 1200 not in ladder_by_steps:
+            # per plan: fail hard if missing the required ladder for ENCODER_STEPS
+            # (diagnostic supplies others; do not silently publish pickle-only)
+            # but allow continue for local dev if diagnostic covers; main will still run
+            raise Protocol2Fail( "ladder artifact for ENCODER_STEPS=1200 required (stage2b/train/stage1/common/encoder_gate_s1200.npz via --ladder-gate/--bucket or ladder stage1); diagnostic-only publish is the verified defect" )
 
-    merged, step_sources = merge_step_sources(final_delta_by_steps, ladder_by_steps)
+        merged, step_sources = merge_step_sources(final_delta_by_steps, ladder_by_steps)
 
-    table = compute_table(merged)
-    summary = summarize(table)
-    summary["step_sources"] = {str(k): v for k, v in step_sources.items()}
+        table = compute_table(merged)
+        summary = summarize(table)
+        summary["step_sources"] = {str(k): v for k, v in step_sources.items()}
 
-    # justification axes (1-3 citations of frozen measurements; 4 analytic)
-    justification_axes = {
-        "1_float64_precision": {
-            "dust_band": "1e-14 to 1e-16",
-            "position_of_1e-12": "above dust; distinguishable"
-        },
-        "2_phase_update_scale": {
-            "min_meaningful_delta_clean": 2.177e-07,
-            "orders_below": ">=5"
-        },
-        "3_encoder_implementation": {
-            "residual_series": [8.370e-07, 8.062e-13, 0.0],
-            "first_cross_1e-12": "300-600 steps"
-        },
-        "4_downstream_feature_sensitivity": axis4_downstream_sensitivity(),
-    }
-
-    fp_config = {
-        "protocol": 2,
-        "eps_list": [1e-10, 1e-11, 1e-12, 1e-13],
-        "sensitivity_steps": [75, 150, 300, 600, 1200],
-        "production_abs_conv_eps": gate.ABS_CONV_EPS,
-        "ladder_kind": "encoder_gate_s1200",
-        "entrypoint": os.path.basename(__file__),
-    }
-    fp = build_fingerprint(repo_root, fp_config, require_clean=not args.allow_dirty)
-
-    def compute_payload():
-        src_ladder = {}
-        if ladder_path:
-            src_ladder["1200"] = "stage2b/train/stage1/common/encoder_gate_s1200.npz"
-        return {
-            "table": table,
-            "summary": summary,
-            "source": {
-                "diagnostic_pickle": os.path.relpath(DIAGNOSTIC_PKL, _THIS_DIR),
-                "ladder_objects": src_ladder,
-                "step_sources": {str(s): tag for s, tag in step_sources.items()},
-                "n_used_diagnostic": diagnostic.get("n_used", 1000),
+        # justification axes (1-3 citations of frozen measurements; 4 analytic)
+        justification_axes = {
+            "1_float64_precision": {
+                "dust_band": "1e-14 to 1e-16",
+                "position_of_1e-12": "above dust; distinguishable"
             },
-            "justification_axes": justification_axes,
-            "production_abs_conv_eps": gate.ABS_CONV_EPS,
-            "fingerprint": {
-                "source_manifest_digest": fp["source_manifest_digest"],
-                "config_digest": fp["config_digest"],
+            "2_phase_update_scale": {
+                "min_meaningful_delta_clean": 2.177e-07,
+                "orders_below": ">=5"
             },
-            "verdict": OK_SENTINEL if not summary.get("halt_triggered") else HALT_SENTINEL,
+            "3_encoder_implementation": {
+                "residual_series": [8.370e-07, 8.062e-13, 0.0],
+                "first_cross_1e-12": "300-600 steps"
+            },
+            "4_downstream_feature_sensitivity": axis4_downstream_sensitivity(),
         }
 
-    # publish (local always; gcs when bucket)
-    try:
-        import stage2b_gcs as gcsmod
-        report_obj = gcsmod.object_path(stage=3, condition=None, kind="abs_conv_eps_sensitivity_table",
-                                        ext="json", split="train")
-    except Exception:
-        report_obj = "stage2b/train/stage3/common/abs_conv_eps_sensitivity_table.json"
+        fp_config = {
+            "protocol": 2,
+            "eps_list": [1e-10, 1e-11, 1e-12, 1e-13],
+            "sensitivity_steps": [75, 150, 300, 600, 1200],
+            "production_abs_conv_eps": gate.ABS_CONV_EPS,
+            "ladder_kind": "encoder_gate_s1200",
+            "entrypoint": os.path.basename(__file__),
+        }
+        fp = build_fingerprint(repo_root, fp_config, require_clean=not args.allow_dirty)
 
-    mods = None
-    if bucket is not None:
+        def compute_payload():
+            src_ladder = {}
+            if ladder_path:
+                src_ladder["1200"] = "stage2b/train/stage1/common/encoder_gate_s1200.npz"
+            return {
+                "table": table,
+                "summary": summary,
+                "source": {
+                    "diagnostic_pickle": os.path.relpath(DIAGNOSTIC_PKL, _THIS_DIR),
+                    "ladder_objects": src_ladder,
+                    "step_sources": {str(s): tag for s, tag in step_sources.items()},
+                    "n_used_diagnostic": diagnostic.get("n_used", 1000),
+                },
+                "justification_axes": justification_axes,
+                "production_abs_conv_eps": gate.ABS_CONV_EPS,
+                "fingerprint": {
+                    "source_manifest_digest": fp["source_manifest_digest"],
+                    "config_digest": fp["config_digest"],
+                },
+                "verdict": OK_SENTINEL if not summary.get("halt_triggered") else HALT_SENTINEL,
+            }
+
+        # publish (local always; gcs when bucket)
         try:
             import stage2b_gcs as gcsmod
-            mods = types.SimpleNamespace(gcs=gcsmod)
+            report_obj = gcsmod.object_path(stage=3, condition=None, kind="abs_conv_eps_sensitivity_table",
+                                            ext="json", split="train")
         except Exception:
-            mods = None
+            report_obj = "stage2b/train/stage3/common/abs_conv_eps_sensitivity_table.json"
 
-    ensure_json(mods, bucket, work_dir, report_obj, compute_payload,
-                fingerprint=fp, no_upload=args.no_upload)
+        mods = None
+        if bucket is not None:
+            try:
+                import stage2b_gcs as gcsmod
+                mods = types.SimpleNamespace(gcs=gcsmod)
+            except Exception:
+                mods = None
 
-    # compat local
-    payload = compute_payload()
-    with open(OUTPUT_JSON, "w", encoding="utf-8") as handle:
-        json.dump(payload, handle, indent=2, sort_keys=True)
-    print(f"wrote {OUTPUT_JSON}")
+        ensure_json(mods, bucket, work_dir, report_obj, compute_payload,
+                    fingerprint=fp, no_upload=args.no_upload)
 
-    # revalidate (fail closed)
-    try:
-        import stage2b_fingerprint as fpmod
-        fpmod.revalidate_after_execution(fp, repo_root)
-    except Exception as exc:  # noqa: BLE001
-        print(f"{FAIL_SENTINEL} fingerprint revalidate failed: {type(exc).__name__}: {exc}", flush=True)
+        # compat local
+        payload = compute_payload()
+        content = _dumps(payload)
+        with open(OUTPUT_JSON, "w", encoding="utf-8") as handle:
+            handle.write(content)
+        print(f"wrote {OUTPUT_JSON}")
+        _write_provenance_sidecar(OUTPUT_JSON, content.encode("utf-8"), fp)
+
+        # revalidate (fail closed)
+        try:
+            import stage2b_fingerprint as fpmod
+            fpmod.revalidate_after_execution(fp, repo_root)
+        except Exception as exc:  # noqa: BLE001
+            print(f"{FAIL_SENTINEL} fingerprint revalidate failed: {type(exc).__name__}: {exc}", flush=True)
+            return 1
+
+        # scientific print + sentinel
+        if summary.get("halt_triggered"):
+            print(HALT_SENTINEL, flush=True)
+            print(f"locked ENCODER_STEPS={summary['locked_encoder_steps']}: "
+                  f"FLIPS across eps")
+            return 0
+        print(OK_SENTINEL, flush=True)
+        print(f"locked ENCODER_STEPS={summary['locked_encoder_steps']}: INVARIANT")
+        return 0
+
+    except Protocol2Fail as exc:
+        print(f"{FAIL_SENTINEL} {exc}", flush=True)
+        return 1
+    except BaseException as exc:  # noqa: BLE001
+        traceback.print_exc()
+        print(f"{FAIL_SENTINEL} {type(exc).__name__}: {exc}", flush=True)
         return 1
 
-    # scientific print + sentinel
-    if summary.get("halt_triggered"):
-        print(HALT_SENTINEL, flush=True)
-        print(f"locked ENCODER_STEPS={summary['locked_encoder_steps']}: "
-              f"FLIPS across eps")
-        return 0
-    print(OK_SENTINEL, flush=True)
-    print(f"locked ENCODER_STEPS={summary['locked_encoder_steps']}: INVARIANT")
-    return 0
-
-
 if __name__ == "__main__":
+
     raise SystemExit(main())
