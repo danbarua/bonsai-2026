@@ -2340,8 +2340,42 @@ in-sample number appearing there is visible rather than needing to be
 inferred."""
 trigger = "manual"
 
+# CORRECTED 2026-08-10: this row's `pending_reason` read "The sensitivity
+# table has not been produced, so there is no write-up for this axis to
+# appear in." That is false: PROTOCOL2_OK ran, the table is committed at
+# results/abs_conv_eps_sensitivity_table.json, and FINDINGS.md's Protocol 2
+# section already carries a 'Justification axes' write-up with a numbered
+# item 3 addressing this exact axis. `pending_package` asserts the artifact
+# does not exist; it does, and citing that non-existence while this row's
+# own `evidence` field already named "FINDINGS" was the contradiction that
+# triggered this correction.
+#
+# Reclassified `unresolved`, not `discharged`: item 3's numbers do not
+# state the disjunction's answer (see evidence below), and this project's
+# own precedent (37ae915f8e61, Reviewer Part B: "structure is not a
+# statement") is that data a reader must interpret does not discharge an
+# obligation asking the write-up itself to say which reading holds. Status
+# left for a human ruling, not asserted here as settled.
 [binding_claim.b4af82150247]
-evidence = "axis 3 writeup in published JSON + FINDINGS"
+evidence = """
+FINDINGS.md, Protocol 2 section, 'Justification axes (all four)', item 3:
+"residual decay 8.370e-07 -> 8.062e-13 -> 0.0 (300/600/1200); first crosses
+1e-12 between 300-600 steps." That answers the first half of the obligation
+(WHEN it crosses) but not the second: the write-up never states whether the
+crossing describes CONVERGENCE or the FLOAT64 FLOOR, the disjunction the
+obligation exists to force. Read against item 1's float64-dust measurement
+(1e-14..1e-16) in the same section, the crossing sits well above the dust
+floor and the residual later reaches exact 0.0 rather than settling near
+dust level -- suggestive of convergence -- but that inference is mine, not
+a sentence in the write-up, and the obligation asks for the latter.
+
+Separately, the artifact underlying this write-up is the committed
+results/abs_conv_eps_sensitivity_table.json, which carries only four
+top-level keys (production_abs_conv_eps, source, summary, table) -- no
+fingerprint, no ladder provenance. FINDINGS.md's own Protocol 2 'Artifacts'
+subsection describes a fingerprinted table; what is committed here is not
+that artifact, so evidence citing "the published JSON" cannot itself be
+verified against what is actually in the repository."""
 
 parent_clause = "16b4ff3b7017"
 locator = "COMPANION_PROTOCOLS.md, ABS_CONV_EPS justification axes, axis 3"
@@ -2354,16 +2388,43 @@ describing CONVERGENCE or describing the FLOAT64 FLOOR.
 That disjunction is the obligation's substance. The two readings license
 different claims about what the absolute-convergence escape means, and the
 protocol requires the write-up to say which one the measurement supports."""
-status = "pending_package"
-pending_reason = """
-The sensitivity table has not been produced, so there is no write-up for
-this axis to appear in. Distinct from 0059f193dfec, which is the obligation
-to produce the table; this is an obligation on what the table's write-up
-must ADDRESS."""
+status = "unresolved"
+discharged_in = """
+experiments/stage2b_denoising/FINDINGS.md, Protocol 2 section, 'Justification
+axes (all four)', item 3, plus the table.1200 residual values in
+experiments/stage2b_denoising/results/abs_conv_eps_sensitivity_table.json.
+NOT yet a discharge; see evidence above."""
 trigger = "manual"
 
+# CORRECTED 2026-08-10: same defect as b4af82150247 and the same correction.
+# `pending_reason` read "Same artifact as b4af82150247, and equally absent"
+# -- also false, and also contradicted by this row's own pre-existing
+# `evidence` field. See b4af82150247's correction comment for the shared
+# reasoning; this row's own gap is narrower (see evidence below) but the
+# disposition logic -- material exists, sufficiency is an open reviewer
+# call, so `unresolved` rather than `pending_package` or `discharged` --
+# is identical.
 [binding_claim.f589d99127d1]
-evidence = "axis 4 analytic rows in published JSON + FINDINGS"
+evidence = """
+FINDINGS.md, Protocol 2 section, 'Justification axes (all four)', item 4:
+analytic L_inf bounds on cos/sin under a phase residual of 1e-10, 1e-12 and
+1e-13, each stated as a fraction of the solver's rtol=1e-6 and of the
+measured production-max magnitude (e.g. at 1e-12: "1e-6 x rtol; 0.00405 x
+prod max"). That is close to complete -- unlike axis 3, every number needed
+to answer "large enough to matter" is present -- but the write-up frames
+the bounds as fractions rather than stating the obligation's own question
+answered: no sentence says "no eps in the swept range is large enough to
+matter downstream." Same "structure is not a statement" gap as 37ae915f8e61.
+
+It is also narrower than the obligation in one respect: the obligation
+names both the evolved features AND `Delta_g`, and item 4's bound covers
+only the cos/sin encoding (the evolved features); it says nothing about
+`Delta_g` specifically.
+
+Same artifact-completeness caveat as b4af82150247: the committed
+results/abs_conv_eps_sensitivity_table.json is the pre-closure table (no
+fingerprint, no ladder provenance), not what FINDINGS.md's 'Artifacts'
+subsection describes as published."""
 
 parent_clause = "16b4ff3b7017"
 locator = "COMPANION_PROTOCOLS.md, ABS_CONV_EPS justification axes, axis 4"
@@ -2372,13 +2433,12 @@ The axis to write up for downstream feature sensitivity is what a phase
 residual of 1e-10, 1e-12 and 1e-13 does to the evolved features and to
 `Delta_g` -- i.e. whether any eps in the swept range is large enough to
 matter downstream at all."""
-status = "pending_package"
-pending_reason = """
-Same artifact as b4af82150247, and equally absent. Recorded as its own row
-rather than merged with it because they are separate axes over separate
-quantities: one is about the encoder's own convergence, the other about
-propagation into the ODE solve. A single row covering both would let an
-answer to one read as an answer to both."""
+status = "unresolved"
+discharged_in = """
+experiments/stage2b_denoising/FINDINGS.md, Protocol 2 section, 'Justification
+axes (all four)', item 4. NOT yet a discharge; see evidence above -- the
+`Delta_g` half of the obligation is not addressed at all, and the addressed
+half states bounds rather than the obligation's own conclusion sentence."""
 trigger = "manual"
 
 [binding_claim.9e9598bd470a]
@@ -2704,13 +2764,45 @@ ENCODER_STEPS=1200 and at every other step count. Both outcomes are
 results and both are reported as such: if the verdict at 1,200 is invariant
 across all four eps, that is the result; if it is not, the eps at which it
 changes AND the direction of the change are the result."""
+# CORRECTED 2026-08-10. The disposition was right and every citation
+# supporting it was wrong -- a worse failure than the two `pending_package`
+# rows corrected above, because those claimed a present artifact was absent
+# while this claimed absent FIELDS were present, on a row already closed.
+#
+# `discharged_in` and `evidence` both named `summary.per_step_flip`, and
+# `evidence` also named `verdict`. Checked by walking every key at every
+# depth of the committed abs_conv_eps_sensitivity_table.json: NEITHER
+# EXISTS. "verdict" occurs in that file only as a word inside
+# `summary.consequence_rule`'s prose. A reader following the citation finds
+# nothing and cannot tell whether the obligation was met.
+#
+# It was met. The obligation says invariance IS the result when that is what
+# holds, and the artifact reports exactly that, under different field names
+# than the ones cited. Corrected to name the fields that exist. The
+# `pending_reason` is deleted rather than repaired: it was a mangled paste
+# (an unterminated quote mid-sentence) that concluded the reported form
+# "violates this row" while `status` said discharged -- and a discharged row
+# has no pending reason to give.
 status = "discharged"
-discharged_in = "JSON summary.per_step_flip + FINDINGS Protocol 2 section"
-evidence = "published abs_conv_eps_sensitivity_table.json carries per_step_flip / per_step_count_invariance and verdict; flip test asserts halt path"
-pending_reason = """
-Table produced; flip/invariant reported in summary.per_step_flip and per_step_count_invariance"eps is not sensitive" -- with the flip locations
-omitted because they were uninteresting -- satisfies 0059f193dfec and
-violates this row."""
+discharged_in = """
+experiments/stage2b_denoising/results/abs_conv_eps_sensitivity_table.json:
+`summary.invariant_at_locked_steps` (the verdict at the locked
+ENCODER_STEPS=1200), `summary.per_step_count_invariance` (the same question
+at every other step count), and `table` (the full grid both are derived
+from), plus FINDINGS.md's Protocol 2 section."""
+evidence = """
+`summary.per_step_count_invariance = {"75": true, "150": true, "300": true,
+"600": true, "1200": true}` and `summary.invariant_at_locked_steps = true`.
+The obligation's own text makes invariance a reportable result rather than
+an absence of one -- "if the verdict at 1,200 is invariant across all four
+eps, that is the result" -- so there are no flip locations to state, and
+the reason there are none is itself reported rather than inferred.
+
+The negative attestation asks that every cell be reported, including the
+agreeing ones, and that this be checkable by counting cells against the
+table's dimensions. `table` carries all 5 step counts x 4 eps values with
+per-cell verdicts, so the count is available to a reader without trusting
+the summary."""
 negative_attestation = """
 The must-not is selective reporting: an invariant verdict may not be
 presented as the finding while a flip elsewhere in the sweep goes unstated.
@@ -2829,10 +2921,17 @@ the system" and Reviewer Part A refused it:
 Correct. "Not executable" and "not binding" are different claims, and the
 whole point of `binding_claim` is that the second does not follow from the
 first. Both sentences are now child obligations of this paragraph --
-b4af82150247 and f589d99127d1 -- each pending the sensitivity table that
-does not exist. The paragraph itself remains RATIONALE for the value; what
-changed is that the two obligations buried inside it are no longer narrated
-away with it."""
+b4af82150247 and f589d99127d1. The paragraph itself remains RATIONALE for
+the value; what changed is that the two obligations buried inside it are no
+longer narrated away with it.
+
+CORRECTED 2026-08-10: this sentence read "each pending the sensitivity table
+that does not exist". The table exists -- Protocol 2 ran, PROTOCOL2_OK, and
+`results/abs_conv_eps_sensitivity_table.json` is committed. Both children are
+now `unresolved`, not pending: their write-ups exist and do not yet state
+either axis's required conclusion. Corrected here as well as in the children
+because a parent asserting the artifact is absent is the same defect one
+level up, and a reader who starts here would inherit it."""
 
 [not_binding.beb0ab7095d2]
 reason = """
