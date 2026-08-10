@@ -68,7 +68,7 @@ def test_capped_positive_applies_cap_and_records_true_count():
     assert selected.size == 500
     # first selected has the largest delta; within equal deltas, lower index
     selected_deltas = deltas[selected]
-    assert selected_deltas[0] == deltas.max() or True
+    assert selected_deltas[0] == deltas.max()
     # monotonic non-increasing deltas
     assert np.all(selected_deltas[:-1] >= selected_deltas[1:] - 1e-15)
 

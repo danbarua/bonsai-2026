@@ -165,8 +165,24 @@ def test_each_exemption_still_contributes_the_candidate_count_it_did():
     # entry (run_arm_x86_propagation_stress.py). Same genre: names the
     # driver, points at COMPANION_PROTOCOLS.md as authority, describes
     # phases — not a new obligation stated in README's own voice.
+    # FINDINGS.md moved 59 -> 60 across `cf5ffca`/`c702bae` (Protocol 1/2
+    # companion closure). The net +1 is four candidates added and three
+    # removed, and the three removals are the point: two are the
+    # "adversarial upper bound on cross-architecture propagation" framing
+    # narrowed to "maximum observed within the 287-image provisional stress
+    # set", and one is the run-id line superseded by a longer one naming
+    # 20260810T151245Z as authoritative. Rewordings, not new obligations.
+    # The one genuinely new candidate is Protocol 2's verdict: "Verdict at
+    # locked ENCODER_STEPS=1200: INVARIANT across eps in {1e-10 .. 1e-13}.
+    # No flip; HALT condition does not fire. ABS_CONV_EPS=1e-12 itself does
+    # not change." Re-read: it reports the measured outcome of an
+    # already-frozen procedure -- COMPANION_PROTOCOLS.md owns the protocol
+    # and gates.toml owns the HALT -- in those documents' own vocabulary
+    # ("locked", "HALT"). Saying a frozen gate did not fire is a result,
+    # not a new obligation stated in FINDINGS.md's own voice. Same genre as
+    # every FINDINGS.md bump above it.
     at_exemption_time = {
-        "FINDINGS.md": 59,
+        "FINDINGS.md": 60,
         "NEGATIVE_PATH_EVIDENCE.md": 19,
         "PHASE_B_PLAN.md": 38,
         "README.md": 24,
