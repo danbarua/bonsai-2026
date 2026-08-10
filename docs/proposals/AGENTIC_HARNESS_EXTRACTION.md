@@ -145,6 +145,16 @@ evidence the cold-read design worked:
 
 - `check_workflow_parity.sh` — `REF_B` was listed as a coupling point. It is
   `${2:-origin/stage2b}`, a positional default, already overridable.
+  **Both readings then missed the larger fact: nothing invokes it.** It is
+  named in three documents and in zero executable surfaces — no Makefile
+  target, no CI job, no test. Overridable does not help a script no caller
+  runs, and a coupling audit that only asks "could this be parameterised?"
+  cannot see that. It scores UNFIRED–untested, and its default pair
+  (`origin/main` vs `origin/stage2b`) omits `stage2b-ci`, the base branch the
+  workflow's own trigger names, so the pair most worth checking is the one a
+  bare invocation does not check. Verified 2026-08-10: all three branches
+  carry blob `3ffe0837` and both pairs report no drift, so the condition is
+  clean — this is about the instrument, not the current state.
 - `permutation.py` — rated "Med, coupled to `src/bonsai/`." It imports
   numpy/scipy/itertools/multiprocessing and nothing intra-project. Moving it
   is `git mv`.
