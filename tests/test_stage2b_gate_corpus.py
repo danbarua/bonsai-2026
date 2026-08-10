@@ -185,7 +185,15 @@ def test_each_exemption_still_contributes_the_candidate_count_it_did():
         "FINDINGS.md": 60,
         "NEGATIVE_PATH_EVIDENCE.md": 19,
         "PHASE_B_PLAN.md": 38,
-        "README.md": 24,
+        # README.md moved 24 -> 25 adding the measure_scaler_lipschitz.py
+        # module-map entry. Re-read: the new candidate is the entry itself,
+        # whose NEVER-shaped phrasing is "no GPU, no credentials, no refit,
+        # no google-cloud-storage" -- a description of what the script does
+        # not need in order to run, in the same module-map genre as every
+        # entry counted above it. It names the file, says what it reads and
+        # from where, and points at the axis-4 claim it measures against.
+        # Not a new obligation stated in README's own voice.
+        "README.md": 25,
     }
     assert set(at_exemption_time) == set(gate_corpus.EXEMPT), (
         "an exemption was added or removed without a candidate count")

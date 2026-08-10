@@ -199,6 +199,15 @@ mention here, in the same commit that creates it.
   demand rather than committed. Run directly:
   `uv run python run_abs_conv_eps_sensitivity.py`.
 
+- **`measure_scaler_lipschitz.py`** — reads the standardiser's Lipschitz
+  constant (`1 / min_col_std`) per condition out of the frozen final ridge
+  fit, where `run_ladder_stage3.py` already stores it for the centring
+  guard. Measures ONE link of the chain `run_abs_conv_eps_sensitivity.py`'s
+  axis 4 bounds end-to-end at 2; for `T` that link alone is ~1.04e3. One
+  anonymous HTTPS GET against the public-read bucket — no GPU, no
+  credentials, no refit, no google-cloud-storage. Run directly:
+  `uv run python measure_scaler_lipschitz.py`.
+
 - **`run_arm_x86_propagation_stress.py`** — `COMPANION_PROTOCOLS.md` Protocol
   1: ARM/x86 propagation stress set. Three resumable phases
   (`arm-construct` local, `x86-encode` Colab x86, `propagate` local):
