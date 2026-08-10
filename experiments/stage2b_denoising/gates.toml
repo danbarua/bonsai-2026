@@ -329,13 +329,15 @@ trigger = "ci-fast"
 # COMPANION_PROTOCOLS: "if the verdict at the locked ENCODER_STEPS=1200
 #  differs across the swept eps range ... that triggers renewed
 #  interpretation review before Stage 4."
-enforcement = "run_abs...summarize + main halt path; test existing flip tests"
-decision_consequence = "prints PROTOCOL2_HALT"
-input_wiring = "pickle + ladder NPZ; merge at 1200"
-break_demonstrated = "flip test already in suite"
+enforcement = "experiments/stage2b_denoising/run_abs_conv_eps_sensitivity.py::summarize"
+production_reachability = """
+run_abs_conv_eps_sensitivity.py::main calls summarize(table) after building the sensitivity table from diagnostic pickle + ladder NPZ; if summary['halt_triggered'] it prints PROTOCOL2_HALT (exit 0) and the published JSON carries verdict=PROTOCOL2_HALT and summary.halt_triggered=true. The load-bearing artifact is the fingerprinted abs_conv_eps_sensitivity_table JSON.
+"""
+input_wiring = "diagnostic pickle (results/encoder_gate_failure_diagnostic.pkl) + ladder encoder_gate_s1200.npz; merge_step_sources requires float64 agreement at overlapping steps"
+decision_consequence = "prints PROTOCOL2_HALT (scientific) or PROTOCOL2_OK; infrastructure failures print PROTOCOL2_FAIL and exit 1"
+test = "tests/test_stage2b_abs_conv_eps_sensitivity.py::test_summarize_triggers_the_halt_when_locked_steps_flips"
+break_demonstrated = "test_summarize_triggers_the_halt_when_locked_steps_flips constructs a locked-step flip and asserts halt_triggered and per_step_flip"
 trigger = "manual"
-test = "existing flip tests"
-production_reachability = ""
 
 [binding_gate.1ab709f01474]
 # COMPANION_PROTOCOLS: "The propagation measurement is descriptive at stages
@@ -2701,6 +2703,8 @@ results and both are reported as such: if the verdict at 1,200 is invariant
 across all four eps, that is the result; if it is not, the eps at which it
 changes AND the direction of the change are the result."""
 status = "discharged"
+discharged_in = "JSON summary.per_step_flip + FINDINGS Protocol 2 section"
+evidence = "published abs_conv_eps_sensitivity_table.json carries per_step_flip / per_step_count_invariance and verdict; flip test asserts halt path"
 pending_reason = """
 Table produced; flip/invariant reported in summary.per_step_flip and per_step_count_invariance"eps is not sensitive" -- with the flip locations
 omitted because they were uninteresting -- satisfies 0059f193dfec and
@@ -3016,7 +3020,7 @@ contemporaneous narration rather than standing obligation."""
 # value rows that already carry causal break evidence.
 
 [semantic_review]
-inventory_sha256 = "c6a837418cc48ad1a607ab705d7fa03228ef1620bd35bd3c07add998ecf38556"
+inventory_sha256 = "14cfb4074e67fae6ee2f0942878619930c69e234d1858228f430c3d3efeadfc1"
 reviewer = "ChatGPT / Stage 2B Reviewer"
 # Separate from `reviewer` on the Reviewer's own instruction: "Claude Code
 # can encode my ruling mechanically; it cannot independently make my

@@ -1497,7 +1497,7 @@ amendment-impact audit.
 `max |Δ Delta_g|` is strictly below `CONTRAST_THRESHOLD = 4.604761e-10`.
 Largest stage-5 value: `curr_random` at `1.830e-12` (~252× below threshold).
 
-Run id: `20260810T151245Z`. (Prior 20260810T124247Z report JSON existed without process sentinel or manifest sidecar; this run closes that gap.)
+Run id: `20260810T151245Z`. (Prior 20260810T124247Z report JSON existed without process sentinel or manifest sidecar; this run closes that gap.) Later verification re-runs under the fixed driver (e.g. 20260810T151926Z) reconfirm the same scientific PROTOCOL1_OK result; 20260810T151245Z remains the authoritative process-closure run_id linked to this write-up and to the gates.toml discharges.
 Report: `stage2b/train/stage3/common/protocol1_propagation_report_20260810T151245Z.json`
 Frozen ridge: `stage2b/train/stage3/common/protocol1_ridge_frozen_20260810T151245Z.npz`
 

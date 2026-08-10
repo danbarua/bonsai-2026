@@ -110,7 +110,7 @@ def test_merge_requires_ladder_overlap_agreement():
     m, t = sens.merge_step_sources(diag, ladder)
     assert 1200 in m
     bad = {1200: (np.zeros(5) + 1e-10, np.ones(5))}
-    with pytest.raises(RuntimeError, match="mismatch|required"):
+    with pytest.raises((RuntimeError, sens.Protocol2Fail), match="mismatch|required"):
         sens.merge_step_sources(diag, bad)
 
 
