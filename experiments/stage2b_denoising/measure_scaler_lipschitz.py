@@ -36,7 +36,9 @@ OBJECT = "stage2b/train/stage3/common/ridge_final_g13_88edf9ac.npz"
 PUBLIC_URL = f"https://storage.googleapis.com/{BUCKET}/{OBJECT}"
 
 # The bound axis 4 claims for the entire chain, for comparison. Not a
-# tolerance -- the point of this script is that one link exceeds it.
+# tolerance -- the point of this script is that one link exceeds it, which
+# refutes the DERIVATION without settling the composed constant. See the
+# closing note in main() for why those are different claims.
 CLAIMED_END_TO_END_LIPSCHITZ = 2.0
 
 
@@ -81,14 +83,28 @@ def main(argv=None):
     evolved = {n: lip for n, (_, lip) in table.items()
                if n in ("T", "lattice", "rewired", "curr_random")}
     worst = max(evolved.values())
-    print(f"\nWorst evolved condition: {worst:.1f}, "
-          f"{worst / CLAIMED_END_TO_END_LIPSCHITZ:.0f}x the bound axis 4 claims "
-          f"for the ENTIRE chain.")
-    print(f"T (the condition Stage 4 selected): {evolved['T']:.1f}, "
-          f"{evolved['T'] / CLAIMED_END_TO_END_LIPSCHITZ:.0f}x.")
-    print("\nOne link of five. The ODE flow and the ridge operator norm are "
-          "unmeasured;\nDelta_g's two-arm subtraction contributes a further "
-          "factor of 2 on top.")
+    print(f"\nWorst evolved condition: {worst:.1f}. "
+          f"T (selected at Stage 4): {evolved['T']:.1f}.")
+    print(f"""
+WHAT THIS DOES AND DOES NOT SHOW.
+
+Shows: axis 4's `2B` derivation omitted a link whose constant is ~1e3, not
+~1. A chain asserted to have gain {CLAIMED_END_TO_END_LIPSCHITZ:.0f} contains one stage measured at
+{evolved['T']:.0f} for T. The derivation is unsound as written.
+
+Does NOT show: that the COMPOSED chain exceeds {CLAIMED_END_TO_END_LIPSCHITZ:.0f}. Composing operator
+norms bounds a product from ABOVE -- ||AB|| <= ||A||.||B|| -- so a large
+factor here is not a floor on anything. The ridge can contract, or
+annihilate outright, the very direction the scaler maximally amplifies.
+Multiplying this by the other links' constants would state a ceiling as a
+floor, which an earlier version of this file did.
+
+The operator that settles it is the COMBINED scaler-ridge map per
+condition, A_g = diag(1/s_g) @ W_g, and the quantity is its induced
+L-infinity norm -- max absolute ROW sum of A_g, since B is an L-infinity
+bound. W_g is not persisted (run_ladder_stage3.py:1144-1156 stores only
+mse_* and summary_json), so measuring it needs a refit. That, then the ODE
+sensitivity link, is what remains.""")
     return 0
 
 
