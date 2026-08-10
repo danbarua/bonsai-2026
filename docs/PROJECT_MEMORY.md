@@ -687,9 +687,12 @@ of the two companion protocols `AUDIT_PROTOCOL.md` names, the
 full swept eps range at every step count, including the locked
 `ENCODER_STEPS=1200` -- its own halt condition does not fire); the
 ARM/x86 propagation stress set (`COMPANION_PROTOCOLS.md` Protocol 1) has
-not been started, and is a substantially larger undertaking than the
-sensitivity table -- it needs real ARM-encoded and real x86-encoded data
-on the same stress-set images. None of these are required for the
+also run (`PROTOCOL1_OK`, run_id `20260810T124247Z`, stage-5 max
+`|Δ Delta_g|` = `1.830e-12` on `curr_random` vs threshold
+`4.604761e-10`). Disclosed as post-hoc relative to Stage 4's locked
+ordering (same sequencing-deviation class as the amendment-impact
+audit). Full account: `experiments/stage2b_denoising/FINDINGS.md`
+Protocol 1 section. None of these are required for the
 stage-4 verdict itself, per `AUDIT_PROTOCOL.md`'s own scoping. Whether
 the CNN belongs in this
 design at all -- INFRA found it has no stated consumer anywhere in

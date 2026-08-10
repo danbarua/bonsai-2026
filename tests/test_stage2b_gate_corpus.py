@@ -151,6 +151,11 @@ def test_each_exemption_still_contributes_the_candidate_count_it_did():
     # required write-up scope statement (quoted, not restated in this
     # document's own voice) -- using the same vocabulary those frozen
     # documents already use. None creates a new obligation.
+    # FINDINGS.md moved 52 -> 59, appending Companion Protocol 1
+    # (PROTOCOL1_OK, five-stage maxima tables, construction sizes,
+    # sequencing-deviation disclosure, encoding-only adversarial scope
+    # limitation). Same genre: reports a measured run of an already-frozen
+    # companion protocol; does not create new obligations.
     # README.md moved 22 -> 23 adding the generate_artifact_manifest.py
     # module-map entry. Re-read: the new LOCKED candidate ("the frozen
     # headline numbers behind Stage 2B's two locked results") describes
@@ -161,7 +166,7 @@ def test_each_exemption_still_contributes_the_candidate_count_it_did():
     # driver, points at COMPANION_PROTOCOLS.md as authority, describes
     # phases — not a new obligation stated in README's own voice.
     at_exemption_time = {
-        "FINDINGS.md": 52,
+        "FINDINGS.md": 59,
         "NEGATIVE_PATH_EVIDENCE.md": 19,
         "PHASE_B_PLAN.md": 38,
         "README.md": 24,

@@ -1824,16 +1824,15 @@ protocol has been seen. What each protocol measures, how its inputs are
 constructed, and what consequences follow are fixed in advance."""
 status = "pending_package"
 pending_reason = """
-Neither companion protocol has produced a number, so the constraint has not
-been tested. Same shape as 0ac873652382 for AUDIT_PROTOCOL.md, and
-dispositioned separately because they are separate documents with separate
-histories -- one row covering both would be a single disposition over two
-clause ids."""
+Protocol 1 has produced PROTOCOL1_OK (run_id 20260810T124247Z) and Protocol 2
+has produced its sensitivity table, so the freeze is now in force. The
+mechanical attestation (no COMPANION_PROTOCOLS.md edit after first result)
+has not yet been packaged as a discharged row; same shape as
+0ac873652382 for AUDIT_PROTOCOL.md, dispositioned separately."""
 negative_attestation = """
 Scoped to COMPANION_PROTOCOLS.md's commit history from the first result of
-EITHER protocol onward. Currently empty. The check is mechanical: no commit
-touching this file dated after the first stress-set or sensitivity-table
-artifact."""
+EITHER protocol onward. The check is mechanical: no commit touching this
+file dated after the first stress-set or sensitivity-table artifact."""
 
 [binding_claim.aa0198915e6b]
 locator = "COMPANION_PROTOCOLS.md, section 'ARM/x86 propagation stress set'"
@@ -1841,8 +1840,16 @@ obligation = """
 The stress set is built to be adversarial, so its numbers are an UPPER BOUND
 on propagation and are not representative of the corpus. It is not a random
 sample and must never be reported as one."""
-status = "pending_package"
-pending_reason = "the propagation stress set has not been run"
+status = "discharged"
+discharged_in = "experiments/stage2b_denoising/FINDINGS.md, Protocol 1 section (per-table adversarial framing) + protocol1_propagation_report_20260810T124247Z.json field framing"
+evidence = """
+Construction record and report both carry framing =
+\"adversarial upper bound on cross-architecture propagation; not a corpus
+sample\". FINDINGS.md repeats that clause at every stage table, not only in
+the section preamble. component_a_source = regenerated is stated in the
+construction block. Tests pin the construction-record field
+(test_construction_record_marks_a_regenerated); the package claim itself
+required the FINDINGS write-up and is discharged only with it present."""
 negative_attestation = """
 Scoped to every presentation of a propagation figure in the readiness
 package and FINDINGS.md. The prohibited claim has a quiet form worth naming:
@@ -1850,6 +1857,7 @@ reporting a stress-set number WITHOUT its qualification reads as a corpus
 statistic to anyone who does not already know the set is adversarial. So the
 attestation is that every such figure carries the upper-bound framing at the
 point it appears, not that a caveat exists somewhere in the document."""
+
 
 [binding_claim.81d50983153e]
 locator = "COMPANION_PROTOCOLS.md, section 'What to report'"

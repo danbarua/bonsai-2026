@@ -1477,10 +1477,149 @@ regime, on any of the three frozen conditions. The 150-vs-1200
 encoder-budget amendment has a real, measured representational effect,
 and it is too small to change the sign, per-graph verdict, or pairwise
 ordering the stage-4 confirmatory result (and Phase B's own ridge
-result) depend on. Still open: the `ABS_CONV_EPS` sensitivity table (run
-separately, see `run_abs_conv_eps_sensitivity.py` and this document's
-own entry once written up -- as of this section, computed and committed
-but not yet narrated here) and the ARM/x86 propagation stress set
-(`COMPANION_PROTOCOLS.md` Protocol 1, not yet started -- needs real
-ARM-encoded and real x86-encoded data on the same stress-set images, a
-substantially larger undertaking than this section's audit).
+result) depend on. Still open at the time of the audit write-up: the
+`ABS_CONV_EPS` sensitivity table (now run separately — see
+`run_abs_conv_eps_sensitivity.py`) and the ARM/x86 propagation stress set.
+Protocol 1 has since run; its account is the next section.
+
+
+# Stage 2B Companion Protocol 1: ARM/x86 propagation stress set — PROTOCOL1_OK
+
+COMPANION_PROTOCOLS.md's consequence rule specifies interpretation review
+before Stage 4. Stage 4 has already run and is locked. A Protocol 1 result
+here is therefore disclosed as post-hoc relative to that ordering, following
+the same sequencing-deviation precedent already established for the
+amendment-impact audit.
+
+## Verdict
+
+**`PROTOCOL1_OK`** — stage-5 halt did not fire. Every graph's
+`max |Δ Delta_g|` is strictly below `CONTRAST_THRESHOLD = 4.604761e-10`.
+Largest stage-5 value: `curr_random` at `1.830e-12` (~252× below threshold).
+
+Run id: `20260810T124247Z`.
+Report: `stage2b/train/stage3/common/protocol1_propagation_report_20260810T124247Z.json`
+Frozen ridge: `stage2b/train/stage3/common/protocol1_ridge_frozen_20260810T124247Z.npz`
+
+## Construction
+
+| component | detail |
+|---|---|
+| A | **regenerated** (top-100 max-abs encoding discrepancy on provisional B∪C∪D); `component_a_source = "regenerated"` |
+| B | `true_count = 89`, `cap = 500`, `cap_applied = false`, `n_used = 89` |
+| C | class floor ≥20 via lowest official indices |
+| D | 20/class, `seed = 42` |
+| `n_stress` | **287** |
+| `indices_refined` | **false** (provisional B∪C∪D equalled final after A re-injection — expected regenerate path) |
+| `indices_sha256` | `5ebded9ea78da1f66aa826683828c0990fbd57ab3b0c9f2682f320fa9c11ead6` |
+
+ARM stress encodings are an **index-join slice** of production
+`encoded_train_s1200.npz` (authoritative Phase-A ARM encode) — not a second
+ARM realization. x86 stress encodings used unmodified
+`encode_stage3_local.encode_indices` on Colab x86_64.
+
+## Platforms
+
+| role | machine |
+|---|---|
+| ARM encode (production Phase A, sliced) | Darwin arm64 |
+| x86 encode (this protocol) | Linux x86_64 (Colab) |
+| propagate (evolve + frozen ridge + report) | Darwin arm64 |
+
+## Five-stage maxima
+
+Framing at every table: **adversarial upper bound on cross-architecture
+propagation; not a corpus sample.** Component A is selected for maximal
+encoding-stage divergence.
+
+### Stage 1 — encoding
+
+| quantity | max \|ARM − x86\| |
+|---|---|
+| `theta_505` | `4.441e-16` |
+
+Adversarial upper bound on cross-architecture propagation; not a corpus sample.
+Encoding-stage sanity gate (`> 1e-12` refuse) did not fire. Historical Phase-A
+spot-check max was ~3 ULP; this stress-set max is consistent with that scale.
+
+### Stage 2 — evolved features (per condition, dim 1008)
+
+| condition | max \|ARM − x86\| |
+|---|---|
+| `pre_evolution` | `4.441e-16` |
+| `T` | `1.769e-15` |
+| `lattice` | `1.554e-15` |
+| `rewired` | `1.554e-15` |
+| `curr_random` | `1.332e-15` |
+
+Adversarial upper bound on cross-architecture propagation; not a corpus sample.
+
+### Stage 3 — prediction (frozen ridge, same `(fit, scaler)` both arches)
+
+| condition | max \|ARM − x86\| |
+|---|---|
+| `pre_evolution` | `6.661e-16` |
+| `T` | `4.610e-12` |
+| `lattice` | `1.488e-11` |
+| `rewired` | `1.711e-11` |
+| `curr_random` | `3.576e-11` |
+
+Adversarial upper bound on cross-architecture propagation; not a corpus sample.
+One `fit_final` per condition at production alphas from
+`ridge_final_g13_88edf9ac.npz`; never per architecture.
+
+### Stage 4 — per-image clipped MSE
+
+| condition | max \|ARM − x86\| |
+|---|---|
+| `pre_evolution` | `2.776e-17` |
+| `T` | `9.975e-14` |
+| `lattice` | `4.455e-13` |
+| `rewired` | `5.483e-13` |
+| `curr_random` | `1.830e-12` |
+
+Adversarial upper bound on cross-architecture propagation; not a corpus sample.
+
+### Stage 5 — Δ_g = MSE_evolved − MSE_pre (halt stage)
+
+| graph | max \|Δ_g,ARM − Δ_g,x86\| | exceeds `4.604761e-10`? |
+|---|---|---|
+| `T` | `9.975e-14` | no |
+| `lattice` | `4.455e-13` | no |
+| `rewired` | `5.483e-13` | no |
+| `curr_random` | `1.830e-12` | no |
+
+Adversarial upper bound on cross-architecture propagation; not a corpus sample.
+
+Halt rule (frozen): any graph **strictly greater than** threshold →
+`PROTOCOL1_HALT`. Equality does not halt. None exceeded.
+
+## Scope limitation
+
+Component A is adversarial **for encoding-stage** discrepancy only
+(`rank_discrepancy_indices` ranks on `theta_arm` vs `theta_x86`). Ranking on
+post-evolution divergence would require evolving the full candidate population
+first and would defeat a small stress subset. A clean `PROTOCOL1_OK`
+establishes “no anomalous propagation on inputs adversarial for encoding
+divergence”; it does **not** independently establish that evolution-stage
+numerical sensitivity was adversarially stress-tested on its own terms.
+Plausibly correlated (evolution’s inputs are the encodings) but not guaranteed.
+
+## Artifacts
+
+| kind | object |
+|---|---|
+| stress indices | `stage2b/train/stage3/common/protocol1_stress_indices.npz` |
+| ARM stress encode | `stage2b/train/stage3/common/protocol1_encoded_stress_arm_s1200.npz` |
+| x86 stress encode | `stage2b/train/stage3/common/protocol1_encoded_stress_x86_s1200.npz` |
+| frozen ridge | `stage2b/train/stage3/common/protocol1_ridge_frozen_20260810T124247Z.npz` |
+| report | `stage2b/train/stage3/common/protocol1_propagation_report_20260810T124247Z.json` |
+| theta_T / features | under `stage2b/train/stage3/{pre_evolution,evolved_*}/protocol1_{theta_T,features}_{arm,x86}.npz` |
+
+Driver: `run_arm_x86_propagation_stress.py`. Pure helpers:
+`stage2b_audit.capped_positive_delta_indices`, `rank_discrepancy_indices`,
+`max_abs_difference`, `evaluate_propagation_halt`, `propagation_stage_maxima`.
+Tests: `tests/test_stage2b_arm_x86_propagation.py`. Make:
+`stage2b-protocol1-arm-construct`, `stage2b-protocol1-x86-encode`,
+`stage2b-protocol1-propagate`.
+
