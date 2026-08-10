@@ -593,6 +593,48 @@ gates.toml row records supersession without invalidation. The FINDINGS record
 of the same amendment does the invalidation work in prose. The defect is that
 the two live in different documents and only one of them is machine-checkable.
 
+### 8b. The first two blocked-then-corrected events, and why they disagree
+
+§8 says the log that would settle this "does not exist here." It still
+doesn't. But on 2026-08-10 the repository produced the first two entries it
+*would* have contained, and git retains the pre-correction text, so they can
+be read now without building anything — which matters, because §8's own
+instruction is not to build this speculatively.
+
+Both arose from `cf5ffca`, the Protocol 1/2 closure commit, which was pushed
+described as "code, tests, FINDINGS, gates, verification, commit and push"
+and was red on two tests at the moment it landed.
+
+| | event A | event B |
+|---|---|---|
+| guard | `test_stage2b_gcs_makefile.py` | `test_stage2b_gate_corpus.py` |
+| defect | `stage2b-protocol2` ran a GCS-touching driver with no `$(GCS_ENV)` | FINDINGS.md derives 60 clause candidates; the exemption still declares 59 |
+| pre-correction text | `cd $(STAGE2B_DIR) && uv run python run_abs_conv_eps_sensitivity.py` | exemption count `"FINDINGS.md": 59` |
+| also found by | **the Codex review, independently** | **nobody** |
+| corrected | yes, in `c702bae` | **no — still red** |
+
+**Event A is the guard's clearest win and simultaneously the weakest possible
+evidence for it.** Two detectors fired on one defect: this repository's
+AST-walking guard, and a reviewer in another harness reading the target. The
+correction cannot be attributed to either alone. This is principle 4 arriving
+from the other direction — not choosing the strongest of several controls
+after the fact, but being unable to separate two that both fired.
+
+**Event B is the control, and it is the one that did not get fixed.** Only a
+deterministic guard reported it; no human or LLM reviewer did; and it survived
+the closure commit. The obvious hypothesis is that a defect surfaced by a
+reviewer someone is reading gets attention, and one surfaced only by a red
+test in a suite nobody ran does not. Two events is not evidence for that, and
+it is recorded as a hypothesis with a cheap test attached: **watch whether
+event B is still red at the next checkpoint merge.**
+
+What both events do establish, against §8's stronger phrasing: the guards are
+capable of catching genuinely new defects on the day they are introduced,
+which the ledger to that point had not shown. Neither would have become a
+wrong scientific claim — A misroutes artifacts, B stales an exemption — so
+both score **WOULD HAVE BEEN WRONG (operational)**, and §2's headline about
+deterministic guards and wrong *results* is untouched.
+
 This does not license building a lines-of-enquiry tool. §6's rule still binds
 — the first move is the format, not the machinery, and §6.2's citation
 convention plus §6.4's outside reader are what caught the prose-claim class
