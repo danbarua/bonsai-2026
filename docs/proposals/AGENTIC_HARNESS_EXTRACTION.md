@@ -302,6 +302,41 @@ advice in §5e.5 — that advice remains correct *for this repository*, where
 89 rows already carry content-derived ids and changing the scheme now is its
 own migration.
 
+### 5i. A gate this document argued for, which the event then did not need
+
+The DAG extraction of `DESIGN.md` found that rung 3 → rung 4 — the edge into
+the one-shot confirmatory evaluation, the single most consequential edge in
+the design — has **no stated exit gate**. Its only protection is an ACCESS
+rule ("no test-side result accessed before stage 4"), which is a permission
+rather than an acceptance criterion: it says who may look, not what must hold
+before looking is warranted. That was written up as the clearest case of the
+gates-on-edges model earning its keep, since a prose reader notices nothing —
+no section is missing, the ladder describes rung 4 fully, and the gap appears
+only when you ask what *opens* the edge.
+
+**Stage 4 has since run. The edge was traversed ungated and the result was
+clean.** Recorded here because it cuts against the argument this document
+makes, and a ledger that only accumulates confirmations is the thing §1 warns
+about. Scored **UNFIRED — hazard absent**, not "a gate we got away with
+missing"; the distinction is the whole point of separating those two verdicts,
+and claiming the stronger one here would be unfalsifiable.
+
+What actually protected rung 4 was a different mechanism entirely: the
+feasibility ladder. Part 1 returned an honest FAIL at 150 steps and caught an
+under-converged encoder *before* the A100 run, which would otherwise have
+spent the one-shot evaluation on it. A staged ladder that can fail cheaply and
+an exit gate on the final edge are not substitutes — but on the evidence here,
+the ladder is the one that paid, and a greenfield harness told to build both
+should build the ladder first.
+
+Three findings of identical shape came out of the same extraction and remain
+unadjudicated, now also historical: `active_indices` (the 505 restriction) has
+no stated producer; the Stage-2 condition-number diagnostic requires a table
+but names no threshold that would overturn the float64 choice; CNN
+"best-of-3" states a selection rule with no acceptance criterion. An agent
+cannot distinguish "the document omits this" from "the document assumes it
+obvious", which is why none of the four is asserted as a defect.
+
 ## 6. Greenfield: what to define up front
 
 Binding rule applied: nothing enters this list without a ledger defect it
@@ -713,6 +748,31 @@ readers found specific errors; one form field exposed two broken checks.
 What we genuinely cannot measure is the only question that settles the whole
 argument: **how many mistakes would have happened without any of it.** That
 number is unknown, and nothing here was built to find out.
+
+## A check we argued for, which turned out not to be needed
+
+Mapping the plan as a diagram turned up what looked like the best find of the
+whole exercise. The final experiment can only be run once — look at the
+answer, and you have used up your one look. The plan says clearly *who* is
+allowed to look and *when*, but never says what has to be true first. That is
+a permission, not a standard. Reading the plan as prose you notice nothing
+missing, because nothing is missing; the section describing the final run is
+complete. The hole only appears when you ask what opens the door.
+
+The final run has since happened, with no such check in place, and it went
+fine.
+
+That is recorded here rather than quietly dropped, because it argues against
+the case this document makes, and a list that only ever collects wins is the
+exact problem described at the start. It is scored as "the bad thing never
+happened", not as "we got away with it" — those are different claims and only
+the first one is supported.
+
+What did protect the final run was something else: the practice of doing a
+small cheap version first. The small version failed honestly, which caught a
+problem before the expensive run rather than after. If a new project could
+only build one of the two — the cheap rehearsal or the door check — the
+evidence here says build the rehearsal.
 
 ## The words the team invented
 
