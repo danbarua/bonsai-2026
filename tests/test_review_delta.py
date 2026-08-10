@@ -100,6 +100,8 @@ def _run_delta(
     script: Path | None = None,
     before: str = "7a5dfaf",
     after: str = "b1d1018",
+    sticky: str | None = None,
+    env_extra: dict[str, str] | None = None,
 ) -> tuple[dict[str, str], str]:
     """Run the script against replayed payloads; return (outputs, stderr)."""
     bin_dir = tmp_path / "bin"
@@ -112,6 +114,16 @@ def _run_delta(
     env = dict(os.environ)
     env["PATH"] = f"{bin_dir}{os.pathsep}{env['PATH']}"
     env["GITHUB_OUTPUT"] = str(out_file)
+    # Isolate from a developer's shell: carry-forward must be opt-in per test.
+    env.pop("REVIEW_PR", None)
+    env.pop("REVIEW_STICKY_FILE", None)
+    env.pop("GITHUB_EVENT_PATH", None)
+    if sticky is not None:
+        sticky_path = tmp_path / "sticky.md"
+        sticky_path.write_text(sticky)
+        env["REVIEW_STICKY_FILE"] = str(sticky_path)
+    if env_extra:
+        env.update(env_extra)
 
     proc = subprocess.run(
         ["bash", str(script or SCRIPT), before, after, "owner/repo"],
@@ -444,6 +456,21 @@ def test_a_missing_jq_fails_open_loudly_rather_than_reviewing_nothing(
     assert "reviewing everything in scope" in proc.stderr
 
 
+def test_malformed_compare_json_fails_open_rather_than_reviewing_nothing(
+    tmp_path: Path, real_tree: dict
+) -> None:
+    """A compare payload with no `.files` key makes `.files[]` a jq runtime
+    error inside `classify`. Before the fix, neither call site checks jq's
+    exit status, both come back empty, and the script reports `mode=none`
+    -- exactly the silent fallback to reviewing nothing this script exists
+    to avoid."""
+    malformed_compare = {"url": "https://example.invalid/compare"}  # no "files"
+    outputs, stderr = _run_delta(tmp_path, malformed_compare, real_tree)
+    assert outputs["mode"] == "full"
+    assert "jq failed" in stderr.lower()
+    assert "reviewing everything in scope" in stderr
+
+
 @pytest.mark.parametrize(
     "before, why",
     [
@@ -570,3 +597,192 @@ def test_the_script_is_executable_and_has_no_git_calls() -> None:
         token in code for token in ("git rev-parse", "git diff", "git log", "git merge-base")
     ), "review_delta.sh must not shell out to git -- the checkout may be shallow"
     assert os.access(SCRIPT, os.X_OK), "review_delta.sh must be executable"
+
+
+# --------------------------------------------------------------------------
+# Outstanding carry-forward from the sticky comment
+# --------------------------------------------------------------------------
+#
+# Measured on PR #29 run 31394098469: a partial review listed six unfinished
+# files on the sticky and exited success. The next push only fed the compare
+# delta into this script, so those six evaporated. The sticky is the durable
+# record; these tests pin that it is re-queued.
+
+
+_PR29_STYLE_STICKY = textwrap.dedent(
+    """\
+    ### Vacuous-test review
+
+    - [x] Manually reviewed: `test_stage2b_abs_conv_eps_sensitivity.py`, `test_review_delta.py`
+    - [ ] Parallel review in progress: `test_stage2b_gcs.py`, `test_stage2b_arm_x86_propagation.py`, `test_stage2b_audit_driver.py`
+    - [ ] Post inline comments for findings
+    """
+)
+
+
+_TEMPLATE_NOT_EXAMINED = textwrap.dedent(
+    """\
+    ## Vacuous-test review
+
+    ### Examined
+
+    | file | last examined | verdict |
+    |---|---|---|
+    | `tests/test_x.py` | run 1 | clean |
+
+    ### Not examined
+
+    | file | why |
+    |---|---|
+    | `tests/test_y.py` | timed out mid-pass |
+    | `tests/test_z.py` | still queued |
+
+    ### Run log
+
+    - run 1 · partial
+    """
+)
+
+
+def test_unchecked_sticky_paths_are_requeued_when_push_touches_nothing(
+    tmp_path: Path,
+) -> None:
+    """A docs-only push must still resume an unfinished sticky inventory.
+
+    Without this, mode=none and the unfinished half of a partial review is
+    dropped forever -- the $5 PR #29 failure mode on the next synchronize.
+    """
+    compare = {
+        "files": [
+            {
+                "status": "modified",
+                "filename": "docs/README.md",
+                "previous_filename": None,
+            }
+        ]
+    }
+    tree = _tree_of(
+        "docs/README.md",
+        "tests/test_stage2b_gcs.py",
+        "tests/test_stage2b_arm_x86_propagation.py",
+        "tests/test_stage2b_audit_driver.py",
+        "tests/test_stage2b_abs_conv_eps_sensitivity.py",
+        "tests/test_review_delta.py",
+    )
+
+    outputs, stderr = _run_delta(tmp_path, compare, tree, sticky=_PR29_STYLE_STICKY)
+
+    assert outputs["mode"] == "incremental", stderr
+    assert "OUTSTANDING" in outputs["files"]
+    assert "tests/test_stage2b_gcs.py" in outputs["files"]
+    assert "tests/test_stage2b_arm_x86_propagation.py" in outputs["files"]
+    assert "tests/test_stage2b_audit_driver.py" in outputs["files"]
+    # Checked lines must not be re-queued.
+    assert "tests/test_stage2b_abs_conv_eps_sensitivity.py" not in outputs["files"]
+    assert "tests/test_review_delta.py" not in outputs["files"]
+
+
+def test_not_examined_section_paths_are_requeued(tmp_path: Path) -> None:
+    """The template's *Not examined* section is the primary backlog surface."""
+    compare = {
+        "files": [
+            {
+                "status": "modified",
+                "filename": "docs/README.md",
+                "previous_filename": None,
+            }
+        ]
+    }
+    tree = _tree_of(
+        "docs/README.md",
+        "tests/test_x.py",
+        "tests/test_y.py",
+        "tests/test_z.py",
+    )
+
+    outputs, _ = _run_delta(tmp_path, compare, tree, sticky=_TEMPLATE_NOT_EXAMINED)
+
+    assert outputs["mode"] == "incremental"
+    assert "tests/test_y.py" in outputs["files"]
+    assert "tests/test_z.py" in outputs["files"]
+    # Examined table must not spill into outstanding.
+    assert "tests/test_x.py" not in outputs["files"]
+
+
+def test_outstanding_paths_gone_from_tree_are_not_requeued(tmp_path: Path) -> None:
+    """A sticky can lag a deletion; only paths present at after are examineable."""
+    compare = {
+        "files": [
+            {
+                "status": "removed",
+                "filename": "tests/test_y.py",
+                "previous_filename": None,
+            }
+        ]
+    }
+    tree = _tree_of("tests/test_z.py")
+    sticky = textwrap.dedent(
+        """\
+        ### Not examined
+
+        - `tests/test_y.py`
+        - `tests/test_z.py`
+        """
+    )
+
+    outputs, _ = _run_delta(tmp_path, compare, tree, sticky=sticky)
+
+    assert outputs["mode"] == "incremental"
+    assert "DEPARTED" in outputs["files"]
+    assert "tests/test_y.py" in outputs["files"]
+    assert "tests/test_z.py" in outputs["files"]
+    if "OUTSTANDING" in outputs["files"]:
+        out_part = outputs["files"].split("OUTSTANDING", 1)[1].split("DEPARTED", 1)[0]
+        assert "tests/test_y.py" not in out_part
+        assert "tests/test_z.py" in out_part
+
+
+def test_outstanding_does_not_duplicate_examine_paths(tmp_path: Path) -> None:
+    """A path both pushed and sticky-listed appears once, under EXAMINE."""
+    compare = {
+        "files": [
+            {
+                "status": "modified",
+                "filename": "tests/test_stage2b_gcs.py",
+                "previous_filename": None,
+            }
+        ]
+    }
+    tree = _tree_of("tests/test_stage2b_gcs.py", "tests/test_stage2b_audit_driver.py")
+
+    outputs, _ = _run_delta(tmp_path, compare, tree, sticky=_PR29_STYLE_STICKY)
+
+    assert outputs["mode"] == "incremental"
+    assert "EXAMINE" in outputs["files"]
+    assert "tests/test_stage2b_gcs.py" in outputs["files"]
+    assert "tests/test_stage2b_audit_driver.py" in outputs["files"]
+    if "OUTSTANDING" in outputs["files"]:
+        out_part = outputs["files"].split("OUTSTANDING", 1)[1]
+        if "DEPARTED" in out_part:
+            out_part = out_part.split("DEPARTED", 1)[0]
+        assert "tests/test_stage2b_gcs.py" not in out_part
+
+
+def test_no_sticky_keeps_prior_none_behaviour(tmp_path: Path) -> None:
+    """Without a sticky, a docs-only push is still mode=none -- not fail-open."""
+    compare = {
+        "files": [
+            {
+                "status": "modified",
+                "filename": "docs/README.md",
+                "previous_filename": None,
+            }
+        ]
+    }
+    tree = _tree_of("docs/README.md", "tests/test_x.py")
+
+    outputs, stderr = _run_delta(tmp_path, compare, tree)
+
+    assert outputs["mode"] == "none"
+    assert outputs["files"] == ""
+    assert "departed" in stderr.lower()

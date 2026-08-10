@@ -343,7 +343,7 @@ def test_infrastructure_constants():
     assert gcs.ROOT_PREFIX == "stage2b"
     assert gcs.TRAIN_ROOT == "stage2b/train"
     assert gcs.TEST_SPLIT_ROOT == "stage2b/testsplit"
-    assert gcs.LADDER_STAGES == (1, 2, 3, 4)
+    assert gcs.LADDER_STAGES == (1, 2, 3, 4, 5)
     assert gcs.TEST_SPLIT_STAGE == 4
 
 
@@ -545,7 +545,7 @@ def test_stage_and_condition_prefixes_are_prefixes_of_the_object_path():
     assert condition.startswith(stage + "/")
 
 
-@pytest.mark.parametrize("stage", [0, 5, -1, "1", 1.0, True, None])
+@pytest.mark.parametrize("stage", [0, 6, -1, "1", 1.0, True, None])
 def test_object_path_rejects_a_stage_outside_the_ladder(stage):
     """`1.0` and `True` are both `== 1`, so a plain membership test would
     accept them and render "stage1" from something nobody wrote."""
@@ -2952,3 +2952,106 @@ def test_a_structured_annotation_among_prose_ones_still_decides(bucket, tmp_path
     status, evidence = gcs.verdict_validity(name, bucket=bucket)
     assert status == gcs.VERDICT_SUPERSEDED
     assert len(evidence) == 1
+
+
+# ---- the test-split refusal, derived rather than listed ---------------------
+
+RAW_TEST_SPLIT = "stage2b/testsplit/stage4/evolved_T/predictions.npz"
+
+
+def _functions_that_check_the_path():
+    """Every function in `stage2b_gcs` that calls `_check_object_path_allowed`.
+
+    Derived from the AST, because the alternative is what this replaces.
+    `test_transport_functions_recheck_a_hand_assembled_path` exercises five
+    functions by hand and the inventory row claimed the guard sits on
+    "every transport function", naming eight. The real set is sixteen. That
+    is principle 21 in its usual costume -- a hand-maintained list standing
+    in for a derivable one -- and the row's whole reachability claim rested
+    on it.
+    """
+    import ast
+    source = (Path(gcs.__file__)).read_text()
+    found = set()
+    for node in ast.walk(ast.parse(source)):
+        if not isinstance(node, ast.FunctionDef):
+            continue
+        for sub in ast.walk(node):
+            if (isinstance(sub, ast.Call) and isinstance(sub.func, ast.Name)
+                    and sub.func.id == "_check_object_path_allowed"):
+                found.add(node.name)
+    return found
+
+
+# Each entry calls its function with a hand-assembled test-split path and no
+# opt-in. Explicit because the signatures differ; kept honest by
+# `test_the_refusal_matrix_matches_the_derived_set`, which asserts this
+# mapping equals the AST-derived set in BOTH directions.
+def _refusal_calls(bucket, tmp_path):
+    local = _write(tmp_path / "payload.bin")
+    raw = RAW_TEST_SPLIT
+    return {
+        "object_exists": lambda: gcs.object_exists(raw, bucket=bucket),
+        "upload_file": lambda: gcs.upload_file(local, raw, bucket=bucket),
+        "upload_file_chunked": lambda: gcs.upload_file_chunked(local, raw, bucket=bucket),
+        "download_file": lambda: gcs.download_file(raw, str(tmp_path / "d.bin"), bucket=bucket),
+        "list_objects": lambda: gcs.list_objects(raw, bucket=bucket),
+        "ensure_artifact": lambda: gcs.ensure_artifact(
+            raw, local, produce=lambda p: None, bucket=bucket),
+        "object_checksum": lambda: gcs.object_checksum(raw, bucket=bucket),
+        "verify_object": lambda: gcs.verify_object(raw, local, bucket=bucket),
+        "current_generation": lambda: gcs.current_generation(raw, bucket=bucket),
+        "delete_prefix": lambda: gcs.delete_prefix(raw, bucket=bucket),
+        "_delete_parts": lambda: gcs._delete_parts(bucket, raw, False),
+        "publish_manifest": lambda: gcs.publish_manifest(
+            local, raw, bucket=bucket, fingerprint={}),
+        "read_manifest": lambda: gcs.read_manifest(raw, bucket=bucket),
+        "discard_uncommitted": lambda: gcs.discard_uncommitted(raw, bucket=bucket),
+        "annotation_names_for": lambda: gcs.annotation_names_for(raw, bucket=bucket),
+        "consume_validated": lambda: gcs.consume_validated(
+            raw, str(tmp_path / "c.bin"), bucket=bucket),
+    }
+
+
+def test_the_refusal_matrix_matches_the_derived_set(bucket, tmp_path):
+    """Both directions, per principle 21: no function checks the path
+    without being exercised here, and no entry here names a function that
+    stopped checking."""
+    derived = _functions_that_check_the_path()
+    listed = set(_refusal_calls(bucket, tmp_path))
+    assert listed - derived == set(), (
+        f"the refusal matrix exercises {sorted(listed - derived)}, which no "
+        f"longer calls _check_object_path_allowed")
+    assert derived - listed == set(), (
+        f"{sorted(derived - listed)} check the path and are never exercised "
+        f"against a hand-assembled test-split name -- the gap this test "
+        f"exists to make impossible")
+
+
+@pytest.mark.parametrize("fname", sorted(_functions_that_check_the_path()))
+def test_every_checking_function_refuses_a_hand_assembled_test_split_path(
+        fname, bucket, tmp_path):
+    """The Stage-4 boundary, per production route rather than per sample.
+
+    The Reviewer's standard for this gate is that access must fail
+    "through every production route", and a source grep does not establish
+    it. Each function is called with a name it never built, so the refusal
+    can only come from the transport-side re-check.
+    """
+    with pytest.raises(PermissionError, match="test"):
+        _refusal_calls(bucket, tmp_path)[fname]()
+    assert bucket.objects == {}, f"{fname} wrote despite refusing"
+
+
+def test_the_opt_in_is_what_changes_the_authorization_state(bucket, tmp_path):
+    """The other direction, and the one the ruling actually names: access
+    fails UNTIL explicit release changes the authorization state.
+
+    Without this the refusal could be unconditional, and an unconditional
+    refusal is not a gate -- it is a wall, and it would equally 'pass' a
+    test suite that never needed the door to open."""
+    name = gcs.object_path(stage=4, condition="evolved_T", kind="predictions",
+                           ext="npz", split="test", allow_test_split=True)
+    with pytest.raises(PermissionError):
+        gcs.object_exists(name, bucket=bucket)
+    assert gcs.object_exists(name, bucket=bucket, allow_test_split=True) is False

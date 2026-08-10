@@ -6,13 +6,19 @@
 # distinction is the whole reason this script was rewritten: the first
 # version asked the prompt to write a markdown file, which produces nothing
 # at all if the model simply does not comply.
-#
 # What it gates on, precisely:
 #
 #   ABSENCE fails.   No structured output, unparseable output, or a report
 #                    claiming neither "no tests changed" nor any file
 #                    examined, means the review did not happen. That is a
 #                    fact about the run, not a judgement about the code.
+#   INCOMPLETE PUSH
+#   COVERAGE fails.  When GITHUB_EVENT_PATH lets us name the test files in
+#                    THIS push, every one of them must appear in
+#                    files_examined (unless no_tests_changed). Measured on
+#                    PR #29 run 31394098469: 6 of 12 examined, $5, success.
+#                    Whole-PR partial without a resolvable push stays a
+#                    REPORT — incremental reviews only re-read the delta.
 #   FINDINGS do not. However many vacuous tests it reports, the build stays
 #                    green. An LLM verdict that can turn a build red is the
 #                    failure this repository has spent the most effort
@@ -147,6 +153,7 @@ fi
 # no change to the workflow file -- which has to stay byte-identical across
 # two branches.
 n_pushed=-1   # -1 means "could not determine"; never treated as zero
+pushed_tests=""
 if [ -n "${GITHUB_EVENT_PATH:-}" ] && [ -r "${GITHUB_EVENT_PATH:-}" ] \
    && command -v gh >/dev/null 2>&1 && command -v jq >/dev/null 2>&1; then
   before=$(jq -r '.before // empty' "$GITHUB_EVENT_PATH" 2>/dev/null)
@@ -155,8 +162,8 @@ if [ -n "${GITHUB_EVENT_PATH:-}" ] && [ -r "${GITHUB_EVENT_PATH:-}" ] \
   if [ -n "$before" ] && [ "$before" != "$ZERO_SHA" ] && [ -n "$after" ]; then
     if pushed=$(gh api "repos/${GITHUB_REPOSITORY:-}/compare/${before}...${after}" \
                   --jq '.files[] | .filename, (.previous_filename // empty)' 2>/dev/null); then
-      n_pushed=$(printf '%s\n' "$pushed" | grep -E '(^|/)tests?/' | sort -u \
-                   | grep -c . || true)
+      pushed_tests=$(printf '%s\n' "$pushed" | grep -E '(^|/)tests?/' | sort -u)
+      n_pushed=$(printf '%s' "$pushed_tests" | grep -c . || true)
     fi
   fi
 fi
@@ -257,22 +264,23 @@ fi
 # and summarised as "no vacuous tests found in this diff" -- describing a
 # subset as the whole.
 #
-# The cause is structural rather than a lazy model, which is why it needs a
-# mechanism. `gh pr diff` returns HTTP 406 above 20,000 lines and that is an
-# allowlisted tool the review reaches for; on a large PR it simply cannot
-# retrieve the diff and proceeds on what it could reach. Nothing in the
-# report distinguishes that from a thorough pass.
+# Two denominators, two consequences:
 #
-# The changed-file list comes from GitHub, via `gh pr diff --name-only`, not
-# from git. The context is already in GitHub: a PR has a base, a head and a
-# file list, and reaching for git plumbing inside a GitHub Action to
-# reconstruct what the platform already knows is how the range-based design
-# this replaced went wrong three separate times.
+#   WHOLE PR (`changed`)     REPORT only when incomplete. An incremental
+#                            review is *supposed* to leave older files
+#                            alone; failing that would train route-around.
+#   THIS PUSH (`pushed_tests`) FAIL when incomplete and the push set is
+#                            known. PR #29 run 31394098469 examined 6 of 12
+#                            on a full pass and exited success — the sticky
+#                            said "in progress" and nothing turned red.
 #
-# It REPORTS and does not fail. Partial coverage on a large diff is often
-# legitimate, and failing it would train route-around -- the one outcome
-# worse than not measuring. Absence still fails, above; this quantifies.
+# When the push set cannot be resolved (no event path, force-push, …),
+# whole-PR partial stays a report. Absence still fails, above.
 coverage_note=""
+n_missed=0
+missed=""
+n_push_missed=0
+push_missed=""
 if [ "$no_tests" != "true" ]; then
     # A zero here means GitHub was not reachable or named no test files --
     # NOT that the review was thorough. Say so rather than reporting
@@ -295,6 +303,19 @@ if [ "$no_tests" != "true" ]; then
       fi
     else
       coverage_note="Coverage could not be computed (GitHub named no changed test paths), so the scope of this review is unverified."
+      examined=$(printf '%s' "$RAW" | jq -r '(.files_examined // [])[]' \
+                 | sort -u)
+    fi
+
+    # Push-scoped shortfall — the one that fails. Only when we know the set.
+    if [ "${n_pushed:-(-1)}" -ge 0 ] && [ -n "$pushed_tests" ]; then
+      if [ -z "${examined:-}" ]; then
+        examined=$(printf '%s' "$RAW" | jq -r '(.files_examined // [])[]' \
+                   | sort -u)
+      fi
+      push_missed=$(comm -23 <(printf '%s\n' "$pushed_tests") \
+                            <(printf '%s\n' "$examined") 2>/dev/null | grep . || true)
+      n_push_missed=$(printf '%s' "$push_missed" | grep -c . || true)
     fi
 fi
 
@@ -328,6 +349,19 @@ fi
         echo "</details>"
       fi
     fi
+    if [ "${n_push_missed:-0}" -gt 0 ]; then
+      echo
+      echo "**This push: ${n_push_missed} test file(s) not examined** (of ${n_pushed})."
+      echo "That is a failed review, not a partial one — the delta named work"
+      echo "this run did not finish. Carry-forward will re-queue them only if"
+      echo "the sticky lists them under Not examined."
+      echo
+      echo "<details><summary>Unexamined in this push</summary>"
+      echo
+      printf '%s\n' "$push_missed" | sed 's/^/- `/; s/$/`/'
+      echo
+      echo "</details>"
+    fi
     echo
     echo "<details><summary>Files examined</summary>"
     echo
@@ -350,4 +384,17 @@ fi
     echo "_Advisory. These do not fail the build; deterministic checks gate._"
   fi
 } >> "$SUMMARY"
+
+# Fail AFTER writing the summary so the shortfall is visible on the run page,
+# not only in stderr. Findings stay advisory; unfinished push scope does not.
+if [ "${n_push_missed:-0}" -gt 0 ]; then
+  fail "This push changed ${n_pushed} test file(s) and the review left
+${n_push_missed} unexamined:
+$(printf '%s\n' "$push_missed" | sed 's/^/  /')
+
+A green run that finished half the delta is how PR #29 spent \$5 and posted
+\"in progress\". Re-run, or shrink the batch; do not read this as coverage
+of the push."
+fi
+
 exit 0

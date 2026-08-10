@@ -127,8 +127,18 @@ scope and is not counted.
    PR, so a comment elsewhere can refer to "finding 2" and still be right
    next week.
 5. **Only examine what changed since your last run**, plus anything with an
-   open finding. Re-reading an unchanged file you already cleared is the
-   cost this structure exists to remove.
+   open finding, plus anything still listed under *Not examined* (or on an
+   unchecked `- [ ]` line). Re-reading an unchanged file you already cleared
+   is the cost this structure exists to remove.
+
+   **Carry-forward is mechanical.** `tools/ci/review_delta.sh` re-reads this
+   comment on every run and unions those unfinished paths into the next
+   review's file list — even on a push that touches no tests. That is what
+   keeps a partial pass (PR #29 run 31394098469: 6 of 12 files, $5, "in
+   progress") from evaporating on the next synchronize. A path leaves that
+   backlog only when a later run actually examines it and drops it from this
+   comment. Leaving *Not examined* empty while files remain unread is a
+   silent drop.
 6. **If a previous run reported clean and you find something, say so
    explicitly** in the run log. Two runs of this review have disagreed about
    the same file on the same PR, and a disagreement is information — the

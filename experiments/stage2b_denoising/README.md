@@ -148,6 +148,81 @@ mention here, in the same commit that creates it.
   the JAX and sklearn cost legs separately and halts against budgets fixed
   before it ran; thetas and features are persisted per graph and per
   condition because the amendment audit consumes those exact objects.
+- **`run_ladder_stage4.py`** — the stage-4 driver, DESIGN.md's ONE locked
+  evaluation on the official 10,000-image KMNIST test corpus. Ran
+  2026-08-09 (`STAGE4_OK`, three attempts, two real bugs caught and fixed
+  by the first two) — the official, locked confirmatory result; full
+  account in `FINDINGS.md`'s stage-4 section. `make stage2b-ladder-stage4`
+  refuses to run without a separate `STAGE4_RELEASE_CONFIRMED=1`, and
+  `AUDIT_PROTOCOL.md`'s "evaluated once" is enforced by the driver's own
+  one-shot lock, not merely stated. The only file permitted to pass
+  `allow_test_split=True` for scientific work (`smoke_stage2b_gcs.py` also
+  carries the literal, as a named exemption -- it is a hand-run transport
+  probe, not a driver). Refits ridge fresh from stage 3's persisted TRAIN
+  features at the frozen production alpha (a deterministic SVD solve,
+  bit-exact by construction); retrains the CNN from the same three fixed
+  seeds on the same locked split and VERIFIES the reproduction against
+  stage 3's persisted `(best_seed, best_epoch)` before trusting it for
+  test-corpus inference, because stage 3 persisted training histories and
+  a summary but not the fitted coefficients, scaler, or model weights
+  themselves. Refuses to compute the official result a second time if it
+  already exists.
+
+- **`run_audit.py` / `stage2b_audit.py`** — the amendment-impact audit
+  driver and its pure calculations, mirroring stage 3/4's
+  bootstrap-fetched-commit architecture rather than a local CLI. Evolves
+  ONLY the 150-step budget; the 1,200-step side is Phase B's own persisted
+  evolved-feature artifacts, consumed rather than re-evolved
+  (`PHASE_B_PLAN.md`'s Decision 4). No test-split data anywhere. Diagnostic
+  by design — no one-shot lock: every artifact resumes ordinarily like
+  stage 3, unlike stage 4's single locked confirmatory result. A sizing
+  probe (this driver's own cost shape: pure JAX, no sklearn leg, 100
+  fold-level SVDs) gates the 60,000-image OOF ridge step before it runs.
+  Reproduces stage 1's and stage 2's own stored fold-aggregate values with
+  the new out-of-fold machinery, on each stage's own pre-amendment
+  nine-decade alpha grid, before trusting that machinery at 60,000. Ran
+  2026-08-09 (`AUDIT_OK`, ~29.4 minutes of GPU, one real attempt after an
+  earlier one caught a genuine bug -- `stage2b_gcs.py`'s `LADDER_STAGES`
+  validation tuple never having been extended for this driver's own
+  `LADDER_STAGE=5`, fixed and re-run): no trigger fired in either alpha
+  regime. Full account in `FINDINGS.md`'s audit section. `make
+  stage2b-audit` refuses to run without `STAGE2B_AUDIT_RELEASE_CONFIRMED=1`.
+
+- **`run_abs_conv_eps_sensitivity.py`** — `COMPANION_PROTOCOLS.md` Protocol
+  2: the encoder gate's verdict recomputed from stored per-image final-Delta
+  arrays, no re-encoding, at `eps in {1e-10, 1e-11, 1e-12, 1e-13}` across
+  every step count `diagnose_encoder_gate_failure.py`'s diagnostic pickle
+  covers. Pure CPU, no network — `stage2b_audit.sensitivity_table` and
+  `stage2b_encoder_gate.evaluate_rho_gate` are both called unmodified, never
+  reimplemented. Its one input is reproducible from committed code
+  (`diagnose_encoder_gate_failure.py`), gitignored and regenerated on
+  demand rather than committed. Run directly:
+  `uv run python run_abs_conv_eps_sensitivity.py`.
+
+- **`run_arm_x86_propagation_stress.py`** — `COMPANION_PROTOCOLS.md` Protocol
+  1: ARM/x86 propagation stress set. Three resumable phases
+  (`arm-construct` local, `x86-encode` Colab x86, `propagate` local):
+  regenerate component A from dual-arch encodings of B∪C∪D, evolve both
+  arches, apply one frozen ridge fit per condition to both, five-stage
+  max-abs report, stage-5 halt vs `CONTRAST_THRESHOLD`. Synthesis kinds
+  embed a UTC `run_id`. `make stage2b-protocol1-arm-construct`,
+  `make stage2b-protocol1-x86-encode`, `make stage2b-protocol1-propagate`.
+
+
+- **`generate_stage2b_artifact_manifest.py`** — produces the committed
+  `ARTIFACT_MANIFEST.json`: GCS object paths, payload SHA256, producing
+  commit, and the frozen headline numbers behind Stage 2B's two locked
+  results (stage 4's official confirmatory result, stage 5's
+  amendment-impact audit), so provenance is checkable from a clone with
+  no GCS credentials and no re-running anything. Mirrors
+  `stage2a_dynamics_classification/generate_artifact_manifest.py`'s
+  purpose, adapted to this project's GCS-native architecture: reads
+  already-published GCS manifests (anonymous, public-read, no billing)
+  rather than hashing local scratch files, since that is where Stage 2B's
+  artifacts actually live. Long arrays (e.g. the primary test's 20,000
+  bootstrap resamples) are stripped to a count for manifest brevity — the
+  full arrays stay in the GCS artifacts this file points at. Run via
+  `make stage2b-generate-artifact-manifest`.
 
 - **`gate_corpus.py`** — pins which documents the binding-clause
   inventory ranges over, and asserts that list against the `.md` files
@@ -444,7 +519,13 @@ make test                      # the whole repository suite
 | `test_stage2b_ladder_stage1.py` | the stage-1 driver's constants, call sites and Makefile agreement |
 | `test_stage2b_ladder_stage2.py` | the stage-2 driver's constants, call sites (including the CNN closure) and Makefile agreement |
 | `test_stage2b_ladder_stage3.py` | the stage-3 driver's constants, the sizing probe's projections and halt paths, the pinned pre-contract consumes, and Makefile agreement |
+| `test_stage2b_ladder_stage4.py` | the stage-4 driver's constants, the CNN reproduction gate, and the single-opt-in-site invariant derived from every `.py` file's AST, in both directions |
 | `test_stage2b_gate_corpus.py` | which documents the binding-clause inventory ranges over — corpus against on-disk, both directions |
+| `test_stage2b_audit.py` | the pure amendment-audit calculations — index alignment, gauge phases, trigger verdicts, the stress-set construction, the sequencing-gate guard |
+| `test_stage2b_audit_driver.py` | the audit driver's constants, the pinned pre-contract digest table, the sizing probe's projections and halt paths, and the fixed/reselected OR-combination's completeness and break-confirmation |
+| `test_stage2b_abs_conv_eps_sensitivity.py` | the `ABS_CONV_EPS` sensitivity table's invariance check and halt rule, plus a skip-cleanly-when-absent check against the real diagnostic pickle |
+| `test_stage2b_arm_x86_propagation.py` | Protocol 1 pure helpers (cap/rank/halt/five-stage maxima), construction-record regenerated-A field, run-id kind naming, driver AST contracts, encoding-sanity/row-alignment refusals |
+| `test_stage2b_artifact_manifest.py` | the artifact-manifest generator's list shape, the long-list-stripping break-confirmation, and a real-bucket check against the committed manifest |
 
 This table is the whole of what `make stage2b-test` runs, and the one
 exclusion is the slow round trip. It carries no test counts, deliberately:

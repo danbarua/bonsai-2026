@@ -5,9 +5,10 @@
 # real once it's been shown to have teeth, not just written and trusted.
 #
 # Uses its own throwaway C2C_MAIL_WATCH_DIRS under a temp directory, never
-# the real .claude/claude2claude/inbox or .claude/claude2gpt/inbox -- this
-# repo has already been bitten once this session by a test writing into a
-# real, shared mailbox/registry instead of an isolated one.
+# a real mailbox -- this repo has already been bitten once by a test
+# writing into a real, shared mailbox/registry instead of an isolated one.
+# The fixture dirs are named after former channels; they are arbitrary
+# paths under $TMP_ROOT, not those channels.
 #
 # Usage: bash test/break-tests.sh   (from c2c-mail/, or anywhere)
 set -uo pipefail
@@ -256,14 +257,13 @@ rm -f "$C2C_MAIL_SESSIONS_DIR/424242.json"
 
 # ============================================================
 echo "== (g) code2code end-to-end through the Stop hook: self-broadcast exclusion AND addressing both work, together =="
-# reset_mailboxes clears claude2claude/inbox and claude2gpt/inbox --
-# REQUIRED here, not optional cleanup: this section deliberately runs with
-# the suite's C2C_MAIL_WATCH_DIRS override unset (env -u below) to exercise
-# the real default watch set, which includes claude2claude/inbox too. Left
-# over files from section (f2) (still sitting there -- nothing before this
-# point ever cleared them) would otherwise block Stop for reasons that have
-# nothing to do with code2code, and did exactly that the first time this
-# section was written.
+# reset_mailboxes clears this suite's two fixture dirs -- REQUIRED here,
+# not optional cleanup. This section deliberately runs with the suite's
+# C2C_MAIL_WATCH_DIRS override unset (env -u below) to exercise the real
+# default watch set, which is code2code/mailbox alone. Left-over files from
+# section (f2) (nothing before this point clears them) would otherwise
+# block Stop for reasons that have nothing to do with code2code, and did
+# exactly that the first time this section was written.
 reset_mailboxes
 cat > "$C2C_MAIL_SESSIONS_DIR/424242.json" <<'EOF'
 {"pid":424242,"sessionId":"test","name":"me-session","status":"idle"}

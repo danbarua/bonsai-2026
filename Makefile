@@ -321,7 +321,13 @@ STAGE2B_TEST_FILES := tests/test_stage2b_corruption.py tests/test_stage2b_encode
                       tests/test_stage2b_encode_stage3_local.py \
                       tests/test_stage2b_compare_stage3.py \
                       tests/test_stage2b_ladder_stage3.py \
-                      tests/test_stage2b_gate_corpus.py
+                      tests/test_stage2b_ladder_stage4.py \
+                      tests/test_stage2b_gate_corpus.py \
+                      tests/test_stage2b_audit.py \
+                      tests/test_stage2b_audit_driver.py \
+                      tests/test_stage2b_abs_conv_eps_sensitivity.py \
+                      tests/test_stage2b_arm_x86_propagation.py \
+                      tests/test_stage2b_artifact_manifest.py
 
 .PHONY: stage2b-test
 stage2b-test:  ## Run the Stage 2B test suite (fast only; the Colab round trip is excluded)
@@ -386,6 +392,21 @@ GCS_EXEC_ENV := --env BONSAI_GCS_BUCKET="$(BONSAI_GCS_BUCKET)" \
 stage2b-test-roundtrip:  ## Real Colab+GCS round trip -- provisions a CPU runtime, bills while running
 	cd $(REPO_ROOT) && $(GCS_ENV) \
 		uv run --group gpu pytest tests/test_stage2b_gcs_roundtrip.py -m slow -s
+
+.PHONY: stage2b-test-audit-crosscheck
+stage2b-test-audit-crosscheck:  ## The audit driver's stage-1/2 historical cross-check against the REAL bucket -- reads only, anonymous, no billing
+	cd $(REPO_ROOT) && $(GCS_ENV) \
+		uv run --group gpu pytest tests/test_stage2b_audit_driver.py -m slow -s
+
+.PHONY: stage2b-generate-artifact-manifest
+stage2b-generate-artifact-manifest:  ## Regenerate the committed ARTIFACT_MANIFEST.json from the real bucket -- anonymous read, no credentials, no billing
+	cd $(REPO_ROOT) && $(GCS_ENV) \
+		uv run --group gpu python $(STAGE2B_DIR)/generate_stage2b_artifact_manifest.py
+
+.PHONY: stage2b-test-artifact-manifest
+stage2b-test-artifact-manifest:  ## The artifact-manifest generator's test against the REAL bucket -- anonymous, no billing
+	cd $(REPO_ROOT) && $(GCS_ENV) \
+		uv run --group gpu pytest tests/test_stage2b_artifact_manifest.py -m slow -s
 
 # A TARGET MEANS THE SAME THING EVERYWHERE. `test` and `stage2b-test` run
 # capability-free, locally and in CI alike, so "green here" and "green in
@@ -740,6 +761,224 @@ stage2b-ladder-stage3:  ## Run Stage 2B ladder stage 3 Phase B (n=60,000) on a C
 	fi; \
 	$(call check_teardown,$(SESSION_2B_LADDER3)); \
 	exit $$rc
+
+SESSION_2B_LADDER4 ?= stage2b-ladder4
+
+# `EXEC_TIMEOUT` override, by the same reasoning as stage 3's. No stage-4
+# run has happened -- this is not itself a measurement -- but two of its
+# legs ARE grounded in real numbers pulled from stage 3's own committed
+# artifacts (`gsutil cat` against the public-read bucket, no session
+# needed) rather than a fresh guess:
+#   - CNN (3 seeds, 54,000/6,000 fit/validation, A100): stage 3's own
+#     `stage3_report_20260807T155651Z.json` records total_wallclock_s =
+#     639.6s (228.4/219.2/192.0 per seed) -- this driver retrains from
+#     scratch a second time (see run_ladder_stage4.py's module docstring)
+#     at the SAME scale, so that recorded total is the right anchor, not
+#     the ~1,200s FINDINGS.md projection table itself flags as unvalidated
+#     ("CNN cost scales with epochs x batches, not simply n").
+#   - Ridge (7 conditions, refit on the full 60,000-row training scale):
+#     the SAME report's "7_ridge" step (recomputing at production scale
+#     under the amended thirteen-decade grid) took 1,716.3s -- this driver
+#     performs the same operation once more, so budgeted at that figure
+#     rather than a fresh estimate.
+# Evolution and features are population-scaled from that report's own
+# "5_evolution" (393.5s) and "6_features" (513.8s) legs, at 10,000/60,000
+# of the population. Stage 3's TRAIN-side artifacts (corpus, five features
+# arrays, ridge_final, cnn_production) downloaded fresh into this session
+# are unmeasured but bounded by the ~3.4GB stage 3 itself uploaded. Summed
+# and rounded up generously, 7200s leaves a wide margin; it is a harness
+# safety net, not a scientific tolerance, exactly as stage 3's own comment
+# states -- the driver's own halts are what actually gate correctness.
+STAGE4_EXEC_TIMEOUT ?= 7200
+
+# A second, EXPLICIT confirmation beyond typing the command, because this
+# target is different in kind from stages 1-3: it is the one-shot official
+# result (AUDIT_PROTOCOL.md: "Stage 4 stays blocked behind the package
+# review and explicit release"), and `refuse_if_official_result_exists`
+# only protects against a SECOND run, not a first one launched before the
+# package review has actually happened. This is a structural speed bump,
+# not a substitute for that review.
+.PHONY: stage2b-ladder-stage4
+stage2b-ladder-stage4:  ## Run Stage 2B ladder stage 4, the ONE locked evaluation on the official test corpus -- bills while running, and requires STAGE4_RELEASE_CONFIRMED=1
+	@if [ "$(STAGE4_RELEASE_CONFIRMED)" != "1" ]; then \
+		echo "[make] REFUSING: this is the one-shot official Stage 4 evaluation on the"; \
+		echo "[make] official KMNIST test corpus. AUDIT_PROTOCOL.md requires the"; \
+		echo "[make] pre-Stage-4 package review plus Dan's explicit release before this"; \
+		echo "[make] runs. Re-invoke as: STAGE4_RELEASE_CONFIRMED=1 make stage2b-ladder-stage4"; \
+		echo "[make] only once both of those have actually happened."; \
+		exit 1; \
+	fi
+	rc=0; src=0; \
+	cd $(REPO_ROOT) && \
+	if ! $(CLOSURE_CHECK) $(STAGE2B_DIR)/run_ladder_stage4.py; then \
+		exit 1; \
+	fi; \
+	commit=$$($(GIT) rev-parse HEAD); \
+	if ! $(GIT) branch -r --contains $$commit 2>/dev/null | grep -q .; then \
+		echo "[make] REFUSING: HEAD $$commit is not on any remote. Push before running -- the runtime can only fetch what origin has."; \
+		exit 1; \
+	fi; \
+	driver_sha=$$(shasum -a 256 $(STAGE2B_DIR)/run_ladder_stage4.py | cut -d' ' -f1); \
+	echo "[make] commit $$commit, driver sha256 $$driver_sha"; \
+	cd $(STAGE2B_DIR) && \
+	$(MIGHTY_COLAB) sessions && \
+	if $(MIGHTY_COLAB) status -s $(SESSION_2B_LADDER4) 2>&1 | grep -q "not found"; then \
+		$(MIGHTY_COLAB) new -s $(SESSION_2B_LADDER4) --gpu $(LADDER_GPU); \
+	else \
+		echo "[make] Reusing existing session $(SESSION_2B_LADDER4)"; \
+	fi && \
+	$(MIGHTY_COLAB) reinstall -s $(SESSION_2B_LADDER4) jax[cuda12]==0.11.0 diffrax==0.7.2 google-cloud-storage equinox optax && \
+	$(MIGHTY_COLAB) upload -s $(SESSION_2B_LADDER4) $(BONSAI_GCS_CREDENTIALS) $(REMOTE_KEY_PATH) && \
+	rc=0; out=$$($(MIGHTY_COLAB) exec -s $(SESSION_2B_LADDER4) -f run_ladder_stage4.py --timeout $(STAGE4_EXEC_TIMEOUT) $(GCS_EXEC_ENV) --env BONSAI_COMMIT="$$commit" --env BONSAI_DRIVER_SHA256="$$driver_sha" --env JAX_ENABLE_X64=1 2>&1) || rc=$$?; \
+	echo "$$out"; \
+	src=0; $(MIGHTY_COLAB) stop -s $(SESSION_2B_LADDER4) || src=$$?; \
+	if [ $$rc -ne 0 ] || ! echo "$$out" | grep -q STAGE4_OK; then \
+		echo "[make] FAILED: ladder stage 4 did not report success (exec rc=$$rc)."; \
+		if [ $$rc -eq 0 ]; then rc=1; fi; \
+	fi; \
+	$(call check_teardown,$(SESSION_2B_LADDER4)); \
+	exit $$rc
+
+SESSION_2B_AUDIT ?= stage2b-audit
+
+# No measured timing exists for this driver yet (nothing has run) -- the
+# budget matches the driver's OWN sizing-probe reasoning
+# (`run_audit.py`'s `PROBE_RIDGE_BUDGET_S`/`PROBE_RUN_BUDGET_S` comments):
+# a pure-JAX ridge step at ~2.86x stage 3's fold-level SVD count but with
+# NO sklearn oracle leg (stage 3's own dominant cost, "315 oracle SVDs
+# against 35 production ones"), so expected markedly cheaper wall-clock
+# than stage 3's 1,716.3s ridge step despite the higher SVD count. A
+# harness safety net, not a scientific tolerance -- the driver's own
+# sizing probe and step halts are what actually gate correctness.
+STAGE2B_AUDIT_EXEC_TIMEOUT ?= 5400
+
+# Mirrors stage 4's speed bump exactly: a SECOND, EXPLICIT confirmation
+# beyond typing the command. This audit is not the one-shot official
+# result stage 4 is, but it is still real, metered GPU compute that
+# nothing in this repository may launch without Dan's release.
+.PHONY: stage2b-audit
+stage2b-audit:  ## Run the Stage 2B amendment-impact audit -- bills while running, and requires STAGE2B_AUDIT_RELEASE_CONFIRMED=1
+	@if [ "$(STAGE2B_AUDIT_RELEASE_CONFIRMED)" != "1" ]; then \
+		echo "[make] REFUSING: this launches real, metered GPU compute (evolving the"; \
+		echo "[make] 150-step budget and the 60,000-image OOF ridge in two alpha"; \
+		echo "[make] regimes). Re-invoke as: STAGE2B_AUDIT_RELEASE_CONFIRMED=1 make stage2b-audit"; \
+		echo "[make] only once Dan has explicitly released this run."; \
+		exit 1; \
+	fi
+	rc=0; src=0; \
+	cd $(REPO_ROOT) && \
+	if ! $(CLOSURE_CHECK) $(STAGE2B_DIR)/run_audit.py; then \
+		exit 1; \
+	fi; \
+	commit=$$($(GIT) rev-parse HEAD); \
+	if ! $(GIT) branch -r --contains $$commit 2>/dev/null | grep -q .; then \
+		echo "[make] REFUSING: HEAD $$commit is not on any remote. Push before running -- the runtime can only fetch what origin has."; \
+		exit 1; \
+	fi; \
+	driver_sha=$$(shasum -a 256 $(STAGE2B_DIR)/run_audit.py | cut -d' ' -f1); \
+	echo "[make] commit $$commit, driver sha256 $$driver_sha"; \
+	cd $(STAGE2B_DIR) && \
+	$(MIGHTY_COLAB) sessions && \
+	if $(MIGHTY_COLAB) status -s $(SESSION_2B_AUDIT) 2>&1 | grep -q "not found"; then \
+		$(MIGHTY_COLAB) new -s $(SESSION_2B_AUDIT) --gpu $(LADDER_GPU); \
+	else \
+		echo "[make] Reusing existing session $(SESSION_2B_AUDIT)"; \
+	fi && \
+	$(MIGHTY_COLAB) reinstall -s $(SESSION_2B_AUDIT) jax[cuda12]==0.11.0 diffrax==0.7.2 google-cloud-storage equinox optax && \
+	$(MIGHTY_COLAB) upload -s $(SESSION_2B_AUDIT) $(BONSAI_GCS_CREDENTIALS) $(REMOTE_KEY_PATH) && \
+	rc=0; out=$$($(MIGHTY_COLAB) exec -s $(SESSION_2B_AUDIT) -f run_audit.py --timeout $(STAGE2B_AUDIT_EXEC_TIMEOUT) $(GCS_EXEC_ENV) --env BONSAI_COMMIT="$$commit" --env BONSAI_DRIVER_SHA256="$$driver_sha" --env JAX_ENABLE_X64=1 2>&1) || rc=$$?; \
+	echo "$$out"; \
+	src=0; $(MIGHTY_COLAB) stop -s $(SESSION_2B_AUDIT) || src=$$?; \
+	if [ $$rc -ne 0 ] || ! echo "$$out" | grep -q AUDIT_OK; then \
+		echo "[make] FAILED: the amendment audit did not report success (exec rc=$$rc)."; \
+		if [ $$rc -eq 0 ]; then rc=1; fi; \
+	fi; \
+	$(call check_teardown,$(SESSION_2B_AUDIT)); \
+	exit $$rc
+
+
+##@ Stage 2B Companion Protocol 1 (ARM/x86 propagation)
+
+SESSION_2B_PROTOCOL1 ?= stage2b-protocol1
+
+.PHONY: stage2b-protocol1-arm-construct
+stage2b-protocol1-arm-construct:  ## Protocol 1: build stress set + slice ARM encodings (local CPU, free)
+	cd $(REPO_ROOT) && $(GCS_ENV) \
+		uv run --group gpu python $(STAGE2B_DIR)/run_arm_x86_propagation_stress.py --phase arm-construct
+
+.PHONY: stage2b-protocol1-x86-encode
+stage2b-protocol1-x86-encode:  ## Protocol 1: encode stress set on Colab x86 (bills while running)
+	rc=0; src=0; \
+	cd $(REPO_ROOT) && \
+	if ! $(CLOSURE_CHECK) $(STAGE2B_DIR)/run_arm_x86_propagation_stress.py; then \
+		exit 1; \
+	fi; \
+	commit=$$($(GIT) rev-parse HEAD); \
+	if ! $(GIT) branch -r --contains $$commit 2>/dev/null | grep -q .; then \
+		echo "[make] REFUSING: HEAD $$commit is not on any remote. Push before running -- the runtime can only fetch what origin has."; \
+		exit 1; \
+	fi; \
+	driver_sha=$$(shasum -a 256 $(STAGE2B_DIR)/run_arm_x86_propagation_stress.py | cut -d' ' -f1); \
+	echo "[make] commit $$commit, driver sha256 $$driver_sha"; \
+	cd $(STAGE2B_DIR) && \
+	$(MIGHTY_COLAB) sessions && \
+	if $(MIGHTY_COLAB) status -s $(SESSION_2B_PROTOCOL1) 2>&1 | grep -q "not found"; then \
+		$(MIGHTY_COLAB) new -s $(SESSION_2B_PROTOCOL1) --gpu $(LADDER_GPU); \
+	else \
+		echo "[make] Reusing existing session $(SESSION_2B_PROTOCOL1)"; \
+	fi && \
+	$(MIGHTY_COLAB) reinstall -s $(SESSION_2B_PROTOCOL1) jax[cuda12]==0.11.0 diffrax==0.7.2 google-cloud-storage && \
+	$(MIGHTY_COLAB) upload -s $(SESSION_2B_PROTOCOL1) $(BONSAI_GCS_CREDENTIALS) $(REMOTE_KEY_PATH) && \
+	rc=0; out=$$($(MIGHTY_COLAB) exec -s $(SESSION_2B_PROTOCOL1) -f run_arm_x86_propagation_stress.py --timeout $(EXEC_TIMEOUT) $(GCS_EXEC_ENV) --env BONSAI_COMMIT="$$commit" --env BONSAI_DRIVER_SHA256="$$driver_sha" --env JAX_ENABLE_X64=1 --env PROTOCOL1_PHASE=x86-encode 2>&1) || rc=$$?; \
+	echo "$$out"; \
+	src=0; $(MIGHTY_COLAB) stop -s $(SESSION_2B_PROTOCOL1) || src=$$?; \
+	if [ $$rc -ne 0 ] || ! echo "$$out" | grep -q PROTOCOL1_X86_ENCODE_OK; then \
+		echo "[make] FAILED: protocol1 x86-encode did not report success (exec rc=$$rc)."; \
+		if [ $$rc -eq 0 ]; then rc=1; fi; \
+	fi; \
+	$(call check_teardown,$(SESSION_2B_PROTOCOL1)); \
+	exit $$rc
+
+.PHONY: stage2b-protocol1-propagate
+stage2b-protocol1-propagate:  ## Protocol 1: evolve both arches, frozen ridge, five-stage report (local)
+	cd $(REPO_ROOT) && $(GCS_ENV) \
+		uv run --group gpu python $(STAGE2B_DIR)/run_arm_x86_propagation_stress.py --phase propagate
+
+.PHONY: stage2b-protocol1
+stage2b-protocol1: stage2b-protocol1-arm-construct  ## Protocol 1 umbrella: arm-construct, then print next steps
+	@echo "[make] Protocol 1 arm-construct done."
+	@echo "[make] Next: push HEAD, then: make stage2b-protocol1-x86-encode"
+	@echo "[make] Then: make stage2b-protocol1-propagate"
+
+
+.PHONY: stage2b-protocol2
+stage2b-protocol2:  ## Protocol 2: ABS_CONV_EPS sensitivity table (local CPU; GCS_ENV enables sidecar when configured)
+	cd $(REPO_ROOT) && $(GCS_ENV) \
+		uv run python $(STAGE2B_DIR)/run_abs_conv_eps_sensitivity.py
+##@ Vacuous-test review (local preflight)
+# Default Haiku: the Actions path has defaulted to Sonnet and cost $5 on a
+# partial pass (PR #29). Local preflight is the cheap half; Actions stays the
+# durable sticky. Override with MODEL=sonnet or REVIEW_MODEL.
+REVIEW_PR ?=
+MODEL ?= haiku
+
+.PHONY: vacuous-review
+vacuous-review:  ## Local vacuous-test review on Haiku. Usage: make vacuous-review PR=29
+	@if [ -z "$(PR)$(REVIEW_PR)" ]; then \
+		echo "[make] Usage: make vacuous-review PR=<n>   (optional: MODEL=haiku|sonnet)"; \
+		exit 2; \
+	fi
+	cd $(REPO_ROOT) && \
+		REVIEW_MODEL=$(MODEL) \
+		bash tools/ci/vacuous_review_local.sh --pr $(or $(PR),$(REVIEW_PR)) --model $(MODEL)
+
+.PHONY: vacuous-review-delta
+vacuous-review-delta:  ## Print review_delta only (no model). Usage: make vacuous-review-delta PR=29
+	@if [ -z "$(PR)$(REVIEW_PR)" ]; then \
+		echo "[make] Usage: make vacuous-review-delta PR=<n>"; \
+		exit 2; \
+	fi
+	cd $(REPO_ROOT) && bash tools/ci/vacuous_review_local.sh --pr $(or $(PR),$(REVIEW_PR)) --delta-only
 
 .PHONY: help
 help:  ## List every target in this file, grouped by section

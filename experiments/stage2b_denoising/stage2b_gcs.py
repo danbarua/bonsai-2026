@@ -188,7 +188,11 @@ TEST_SPLIT_ROOT = "stage2b/testsplit"
 COMMON_CONDITION = "common"       # reserved segment for non-condition-specific artifacts
 
 VALID_SPLITS = ("train", "test")
-LADDER_STAGES = (1, 2, 3, 4)      # DESIGN.md's feasibility ladder
+LADDER_STAGES = (1, 2, 3, 4, 5)   # DESIGN.md's feasibility ladder (1-4) plus
+                                   # the amendment-impact audit (5, run_audit.py),
+                                   # which PHASE_B_PLAN.md's Decision 4 sequences
+                                   # after stage 3 and AUDIT_PROTOCOL.md treats as
+                                   # its own rung with its own train-side artifacts
 TEST_SPLIT_STAGE = 4              # the one locked confirmatory evaluation
 
 # Condition and kind tokens are validated by shape, not against a fixed

@@ -209,7 +209,10 @@ FULL='{"no_tests_changed":false,
        "findings":[],"summary":"All good."}'
 
 run_cov "$PARTIAL"
-expect_rc "partial coverage does NOT fail the build" 0
+# Whole-PR partial WITHOUT a resolvable push stays report-only: incremental
+# reviews are supposed to leave older files alone. Failing that would train
+# route-around (the comment this guard replaced).
+expect_rc "whole-PR partial without push scope does NOT fail" 0
 check "reports the shortfall"        "PARTIAL: 1 of 2"
 check "names what was not examined"  "tests/test_b.py"
 check "warns a clean result is scoped" "covers what was examined"
@@ -234,6 +237,78 @@ if grep -qF "PARTIAL" "$OUT"; then
 else
   echo "  ok    a fully-covered review is not reported as partial"
 fi
+
+# --- push-scoped incomplete coverage FAILS --------------------------------
+#
+# PR #29 run 31394098469: full pass, 6 of 12 examined, $5, sticky "in
+# progress", job success. Whole-PR PARTIAL is still report-only (above);
+# when GITHUB_EVENT_PATH names THIS push's test files, every one must be
+# examined or the run is red. That is the unfinished-review failure mode,
+# not the legitimate incremental subset.
+
+echo
+echo "publish_review.sh -- push-scoped coverage fails"
+
+EVENT_PUSH="$TMP/event_push_partial.json"
+cat > "$EVENT_PUSH" <<'EVENTEOF'
+{"before":"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+ "after":"bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"}
+EVENTEOF
+
+STUB_PUSH_PARTIAL="$TMP/bin_push_partial"
+mkdir -p "$STUB_PUSH_PARTIAL"
+cat > "$STUB_PUSH_PARTIAL/gh" <<'STUBEOF'
+#!/bin/bash
+# pr diff --name-only: whole PR (may be larger than the push)
+# api .../compare/ --jq ...: this push only. Stub emits the jq result
+# (path lines), not raw JSON — same shape as the docs-only stub below.
+for arg in "$@"; do
+  case "$arg" in
+    */compare/*)
+      printf 'tests/test_a.py\ntests/test_b.py\n'
+      exit 0
+      ;;
+  esac
+done
+if [ "${1:-}" = "pr" ] && [ "${2:-}" = "diff" ]; then
+  printf 'tests/test_a.py\ntests/test_b.py\ntests/test_old.py\nsrc/thing.py\n'
+  exit 0
+fi
+echo "stub gh: unexpected: $*" >&2
+exit 1
+STUBEOF
+chmod +x "$STUB_PUSH_PARTIAL/gh"
+
+n=$((n + 1)); OUT="$TMP/cov_$n"; : > "$OUT"
+PATH="$STUB_PUSH_PARTIAL:$PATH" PR_NUMBER=99 \
+  GITHUB_EVENT_PATH="$EVENT_PUSH" GITHUB_REPOSITORY="o/r" \
+  bash "$SCRIPT" "$PARTIAL" "$OUT"
+RC=$?
+expect_rc "incomplete THIS-push coverage fails the build" 1
+check "names unexamined-in-this-push" "Unexamined in this push"
+check "lists the missed push file"    "tests/test_b.py"
+check "forbids reading as coverage"   "do not read this as coverage"
+check "still wrote the coverage note" "PARTIAL:"
+
+# Non-vacuity: examining every file in THIS push passes even if older PR
+# files were not re-read (legitimate incremental).
+PUSH_COMPLETE='{"no_tests_changed":false,
+  "files_examined":["tests/test_a.py","tests/test_b.py"],
+  "findings":[],"summary":"This push fully covered."}'
+n=$((n + 1)); OUT="$TMP/cov_$n"; : > "$OUT"
+PATH="$STUB_PUSH_PARTIAL:$PATH" PR_NUMBER=99 \
+  GITHUB_EVENT_PATH="$EVENT_PUSH" GITHUB_REPOSITORY="o/r" \
+  bash "$SCRIPT" "$PUSH_COMPLETE" "$OUT"
+RC=$?
+expect_rc "full THIS-push coverage passes despite older PR files" 0
+if grep -qF "Unexamined in this push" "$OUT"; then
+  echo "  FAIL  a push-complete review was reported as push-incomplete"
+  fails=$((fails + 1))
+else
+  echo "  ok    push-complete is not reported as push-incomplete"
+fi
+# Whole-PR partial may still be noted (test_old.py) without failing.
+check "may still report whole-PR partial" "PARTIAL:"
 
 # --- the contradiction: an honest "no tests changed" over a large PR -------
 #

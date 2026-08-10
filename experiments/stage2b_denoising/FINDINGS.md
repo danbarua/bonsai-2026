@@ -1098,3 +1098,565 @@ document and the driver had the same author, in the same session, hours
 apart. There was no handoff to blame, which is what rules out "be more
 careful" as the remedy and motivated the binding-gate inventory now
 required before the package.
+
+---
+
+# Stage 2B: Feasibility Ladder Stage 4 -- the official result
+
+**Status: THE locked confirmatory result.** `DESIGN.md`'s ONE evaluation
+on the official 10,000-image KMNIST test corpus, run under the locked
+statistical procedure, evaluated once. Everything upstream of this
+section -- stages 1 through 3 -- was feasibility work; stage 3 was
+labeled "SMOKE OF THE MACHINERY ONLY... NOT A RESULT" throughout. This
+section is the first and only place in Stage 2B where that label does
+not apply.
+
+**`STAGE4_OK`, `run_ladder_stage4.py`, commit `431d90a`.** Official
+result: `stage2b/testsplit/stage4/common/official_result.json`.
+
+## Result: T is the unique winner
+
+**Primary test** (`d_i = MSE_i(T) - MSE_i(pre_evolution)`, active-support,
+post-clip, 20,000-resample paired class-stratified bootstrap, `seed=42`):
+95% CI **[-0.0046028, -0.0043002]**, mean **-0.0044509**, entirely below
+zero. **Verdict: evolution improves reconstruction.** Uncorrected -- the
+primary test sits outside both multiplicity families, per the locked
+design.
+
+**Denoising gate** (Level 2 of the hierarchical identity gate, evaluated
+because the primary succeeded): `T` vs. identity (`clip(x_t)`,
+active-support, post-clip), CI **[-0.1335739, -0.1328960]**, mean
+**-0.1332334**, entirely below zero. **Gate passed** -- the "actual
+denoising" claim is added to the primary reconstruction claim, not just
+the weaker relative-improvement one. Context, reported independently and
+outside the gate: `pre_evolution` vs. identity, CI [-0.1291310,
+-0.1284354], mean -0.1287826 -- pre-evolution already denoises
+substantially on its own; evolution adds a further, statistically
+resolved margin on top.
+
+**Family 1** (three controls vs. `pre_evolution`, Holm across three, all
+favorable): `curr_random` mean -0.002872, raw/Holm p=1.851e-252/3.702e-252;
+`rewired` mean -0.002179, raw/Holm p=1.395e-144/1.395e-144; `lattice` mean
+-0.004073, raw and Holm p reported as `0.0` -- a float64 underflow of the
+analytic t-tail (`t=-55.58`, df=9999), not an exact zero (CLAUDE.md
+principle 6). All three Holm-rejected.
+
+**Family 2** (six pairwise among the four evolved graphs, Holm across
+six): all six Holm-rejected, every raw p underflowing or near it
+(largest surviving p, `rewired_vs_curr_random`: 1.549e-30). Directional
+picture -- `T` beats all three others (vs. `lattice` t=-8.74,
+p=2.73e-18; vs. `rewired` t=-38.10; vs. `curr_random` t=-26.85);
+`lattice` beats `rewired` and `curr_random` but loses to `T`;
+`curr_random` beats `rewired` but loses to `T` and `lattice`; `rewired`
+loses to everyone. Sign-flip robustness check (100,000 flips, `seed=42`,
+studentized statistic) agrees in direction and significance on all six,
+each landing at the Monte Carlo floor (`p=9.9999e-06`); reported per
+DESIGN.md's own framing as robustness only, not a second corrected
+family, and with the sign-exchangeability assumption stated per pair
+rather than asserted once and applied silently.
+
+**`one_graph_wins`: `unique_winner = "T"`.** `T` qualifies via the primary
+rule (bootstrap interval entirely below zero) and outperforms each of the
+three other evolved graphs after Family-2 Holm correction. This is
+`DESIGN.md`'s named watched-for outcome #2 ("one evolved graph qualifies
+per the branched rule AND outperforms each of the other three after
+Family-2 correction"), realized rather than one of the other four named
+outcomes.
+
+## The caveat this result inherits from Stage 3, stated again rather than left implicit
+
+Stage 3's amended-grid result (above) already states it for the training-
+side number and it applies unchanged here, because stage 4 REFITS at the
+exact frozen alpha stage 3 selected, not a re-selected one: **`T` and
+`lattice` both sit at the ridge grid FLOOR (`alpha=1e-6`)**; `rewired` and
+`curr_random` sit at genuine interior minima (`alpha=1e-5`);
+`pre_evolution` at `alpha=1e+03`. `T`'s continuous-domain ridge optimum is
+therefore **not established, and not known to equal, lie below, or lie
+near `1e-6`** -- the grid says nothing about alpha values between sampled
+decades, let alone below the smallest one.
+
+What this does and does not license, stated in the same terms Stage 3
+used: `T` beating `lattice` is a floor-vs-floor comparison, so that
+particular result is not confounded by asymmetric regularization freedom
+between the two. `T` beating `rewired` and `curr_random` compares a
+floor-pinned condition against two conditions with room to move, and the
+comparison is therefore of the four pipelines **as selected under the
+frozen discrete grid**, not of the four graphs under continuously optimal
+regularization each. A denser or extended grid could in principle move
+`T`'s number in either direction; nothing here bounds by how much. The
+primary test and the denoising gate, both stated in terms of `T` alone
+against `pre_evolution` and against identity respectively, do not depend
+on this comparison and are unaffected by it.
+
+## CNN: retrained and verified, reported descriptively
+
+Per `run_ladder_stage4.py`'s design (stage 3 persisted no trained
+weights, only training histories and a summary -- see that file's module
+docstring), the CNN was retrained from the same three fixed seeds on the
+same locked 54,000/6,000 fit/validation split, then verified against
+stage 3's persisted selection before being trusted for test-corpus
+inference. **Reproduction confirmed**: seed 1, epoch 99, matching stage
+3 exactly on both (the structural gate `cnn_reproduction_mismatch_reason`
+requires exact equality on these two); `best_clipped_val_mse` differed
+by **2.385e-07** -- reported, not gated, per the module's own refusal to
+invent a numeric tolerance with no measured basis. This is now real,
+repeated evidence (three separate real-GPU retrains across this run's
+three attempts, differing by 9.328e-07 and 2.385e-07 respectively from
+stage 3's own number) that this iterative, float32, cross-session
+training procedure reproduces its seed/epoch selection reliably in
+practice, though the module deliberately does not claim this as a proven
+guarantee.
+
+CNN test-corpus mean clipped MSE: **0.063069**. Reported descriptively
+throughout this file and this driver, per DESIGN.md's own framing -- the
+CNN is in neither statistics family and is not part of the inference this
+section's verdict rests on.
+
+**Stated plainly, because "T is the unique winner" above is easy to
+over-read: the CNN's mean MSE is LOWER (better) than `T`'s, not higher.**
+`T`'s mean clipped MSE (recovered from the identity-gate contrast:
+identity's 0.198856 minus the gate's observed mean 0.133233) is
+**0.065623**; the CNN's is **0.063069** -- a difference of 0.002554
+(~3.9% relative) in the CNN's favor, the CNN winning on 5,814 of 10,000
+images against `T`'s 4,186. `DESIGN.md` never places the CNN in either
+statistics family or in any named watched-for outcome, so no corrected,
+locked test exists between it and `T` or any ridge condition --
+`one_graph_wins`'s verdict is scoped to the four ridge-based evolved-graph
+conditions only, and correctly says nothing about the CNN. A
+**descriptive-only** paired bootstrap computed after the fact for this
+write-up (20,000 resamples, `seed=42`, NOT part of the locked design, not
+Holm-corrected, not a second confirmatory family) puts the CNN-minus-T
+gap's 95% CI at **[-0.00276, -0.00235]**, entirely below zero -- offered
+as a magnitude estimate, not a second locked verdict. The honest claim
+this section supports is narrower than "T is the best model overall": `T`
+is established as the best-performing condition **among the ridge-based,
+phase-representation conditions**, via the locked procedure; a
+categorically different, nonlinear model class does numerically better on
+the same corpus and was never tested against it.
+
+## Descriptive baselines, official test corpus
+
+| condition | mean clipped MSE |
+|---|---:|
+| `T` (recovered from the identity-gate contrast) | 0.065623 |
+| `raw_505` | 0.198856 |
+| `raw_784` | 0.198856 |
+| rescaled identity (`clip(x_t_clip / sqrt(0.5), 0, 1)`) | 0.246952 |
+| CNN | 0.063069 |
+| identity (`clip(x_t)`, hierarchical-gate baseline) | 0.198856 |
+
+Raw-pixel ridge and the identity baseline sit within rounding of each
+other (0.198856 vs. 0.198856) -- no sign here that the phase
+representation is reconstruction-lossy relative to doing nothing to the
+corrupted pixels directly; named watched-for outcome #5 (raw-pixel ridge
+dominating every phase-based condition) is not what was observed.
+Corruption diagnostics, full 10,000-image test corpus: pre-clip MSE
+0.515888 (505-support) / 0.513274 (784); post-clip 0.198856 / 0.196559.
+
+## What it took to get a clean run
+
+Three attempts, `commit`s `6e7f811` -> `1b2e58b` -> `431d90a`, roughly 44
+minutes of A100 time in total (not the 72-hour/$3,000 scale this would
+cost without the resumability contract every earlier ladder stage
+already established -- the first two attempts' correctly-computed
+artifacts were reused, not recomputed, by the attempt that finally
+completed). Two real bugs, both caught by the first real execution rather
+than by review, both fixed and pinned as regression tests before the next
+attempt:
+
+1. `parent_map` never threaded `allow_test_split` through to
+   `read_manifest` -- every parent this driver records is a test-side
+   object, unlike stage 3's `parent_map`, which never touches the test
+   split. Surfaced at `2_test_corruption`, 42 seconds in, before any real
+   cost was incurred.
+2. `step7_test_cnn` called `clipped_validation_per_image_mse` directly on
+   raw `(n, 28, 28)` arrays without `as_image_batch`'s channel-first cast
+   -- the exact mistake that function's own docstring names and warns
+   against. Surfaced 663.65 seconds into the CNN step, after a full,
+   successful three-seed retrain -- confirming the retrain-and-verify
+   design works, only to fail one call later on shape. Pinned with a real,
+   executable regression test (`test_cnn_test_evaluation_runs_on_raw_corpus_arrays`)
+   that actually runs JAX/equinox on CPU, not a static check -- this was
+   the one bug static review could not have caught.
+
+A third defect was caught and fixed before it could matter: `step11_report`
+originally wrote `official_result` unconditionally, including on a FAIL
+verdict, which would have let the first attempt's halted, pre-inference
+run permanently occupy the one-shot slot and block every subsequent
+attempt via `refuse_if_official_result_exists` -- including a correct
+one. Fixed to gate on `verdict == OK_SENTINEL` before the second attempt
+ran; confirmed working when the second attempt's own failure correctly
+wrote no `official_result`.
+
+## Code and artifacts
+
+`run_ladder_stage4.py`, `tests/test_stage2b_ladder_stage4.py`. Official
+result: `stage2b/testsplit/stage4/common/official_result.json` /
+`.txt`. Per-attempt reports (all three, including the two failures, kept
+as history): `stage4_report_20260809T033701Z`,
+`stage4_report_20260809T034509Z`, `stage4_report_20260809T041415Z`.
+Test-side intermediate artifacts (corpus, corruption, encoded phases,
+evolved thetas per graph, features per condition, the ridge test MSEs,
+the CNN reproduction and test evaluation) all under
+`stage2b/testsplit/stage4/`.
+
+## Status of the investigation
+
+This closes DESIGN.md's feasibility ladder. The question the whole of
+Stage 2B was built to ask -- does runtime oscillator-network evolution on
+a learned topology improve single-step active-support denoising relative
+to the same representation before evolution -- has a locked, confirmatory,
+positive answer on the official held-out test corpus: yes, and the
+stronger "actual denoising" claim holds too. What remains open, tracked
+separately rather than folded into this result: whether a denser or
+extended ridge grid would move `T`'s floor-pinned alpha (the caveat
+above); the two companion protocols `AUDIT_PROTOCOL.md` names
+(`COMPANION_PROTOCOLS.md`'s ARM/x86 propagation stress set and the
+`ABS_CONV_EPS` sensitivity table -- the latter now run, see this file's
+own section below; the former not yet started); none of these results
+were part of this evaluation and none were required to be, per
+`AUDIT_PROTOCOL.md`'s own scoping of what the confirmatory test itself
+needs. **The 150-vs-1200 amendment-impact audit itself has since run --
+see "Stage 2B: the amendment-impact audit" below, which supersedes the
+"has not run" framing this paragraph previously carried.** And INFRA's
+still-open finding that the CNN has no stated consumer
+in `DESIGN.md`'s own text, which this result treats as settled in the
+"descriptive comparator" reading rather than resolving the ambiguity
+INFRA named -- sharpened by this section's own descriptive finding that
+the CNN's mean MSE is numerically lower than `T`'s, since a design that
+gave the CNN a stated consumer would have had to reckon with that
+directly rather than reporting it as a footnote. **"T is the unique
+winner" names the winner among the ridge-based, phase-representation
+conditions -- the comparison `DESIGN.md`'s statistics families and
+`one_graph_wins` actually run. It is not a claim that `T` is the
+best-performing condition in this file, and the CNN's descriptive number
+says it is not.**
+
+# Stage 2B: the amendment-impact audit -- no trigger
+
+`AUDIT_PROTOCOL.md`'s own core apparatus, run 2026-08-09 (`AUDIT_OK`, A100,
+one attempt, ~29.4 minutes of GPU). Quantifies the representational impact
+of the encoder-budget amendment (150 -> 1,200 steps) made after ladder
+stage 1's gate failure -- a prospective, disclosed, post-failure amendment,
+not a preregistered component of the original design. Per the protocol:
+this is not a model-selection knob and the 1,200-step budget stays frozen
+regardless of what follows; what can change is the scope of the claim.
+
+## Result: none of the three triggers fired, in either alpha regime
+
+| quantity | 150-step | 1,200-step | change |
+|---|---|---|---|
+| primary contrast (`T` vs. `pre_evolution`, fixed alpha) | -0.0052076071 | -0.0052073732 | +2.339e-7 |
+| primary contrast (`T` vs. `pre_evolution`, reselected alpha) | -0.0052076071 | -0.0052073732 | +2.339e-7 |
+
+Both regimes: `primary_sign_reversal = False`; all four
+`graph_sign_reversals` (`T`, `lattice`, `rewired`, `curr_random`)
+`= False`; every one of the six pairwise comparisons has
+`order_reversed = False` (so `resolved` is `False` throughout --
+`resolved` requires an order reversal in the first place, the frozen
+threshold is what would matter had one occurred). `combined_triggered =
+False` -- the explicit OR over both regimes that `AUDIT_PROTOCOL.md`
+requires ("either alpha regime triggers review... a reversal seen under
+fixed-alpha alone, or under reselected-alpha alone, is sufficient").
+
+Reading the number: the change in the primary contrast is real and
+measured, not zero, and sits roughly 2.7 orders of magnitude above the
+frozen analytic resolution threshold (`4.604761e-10`) --
+`2.339e-7 / 4.604761e-10 ~= 508` -- but the change itself is ~2.3e-7,
+about 0.0045% of the contrast's own magnitude (-0.0052). A clean double
+bound: well-resolved (real margin above the threshold, not a coin-flip
+near it) AND scientifically immaterial (four-and-a-half-thousandths of a
+percent of the quantity it changes) -- the two readings do not trade off
+against each other here. The amendment moved the number by an amount the
+audit can resolve, in a direction and scale that changes no sign, no
+per-graph verdict, and no pairwise ordering. The 150-step and 1,200-step
+representations tell the same qualitative story about which evolved
+graph does best; the 1,200-step budget's own confirmatory result (the
+stage-4 section above) is not put in question by this measurement.
+
+## Stage-1/2 historical cross-check: the new OOF machinery reproduces trusted numbers
+
+`gates.toml`'s `binding_gate.9bc6f9e3808a` (out-of-fold per-image MSEs
+must reproduce the already-stored fold-aggregate values from the stage-1
+and stage-2 runs, not merely agree with a within-run recomputation on
+synthetic data). Run against each stage's OWN stored `ridge_cv.json` and
+OWN pre-amendment nine-decade alpha grid (not the 1,200-step run's
+thirteen-decade `ALPHA_GRID` -- the two grids have different column
+counts, so using the wrong one fails on shape before comparing a single
+value). All ten (stage x condition) checks passed, at or near float64
+dust:
+
+| stage | max abs diff across 5 conditions |
+|---|---|
+| 1 (n=1,000) | 1.388e-17 -- 2.776e-17 |
+| 2 (n=5,000) | 0.0 (exact, 4 of 5 conditions) -- negligible |
+
+This is the gate that discharges before the 60,000-image OOF ridge step
+is trusted to mean anything: new machinery, pinned against numbers this
+project already trusted, before being run at a scale ten times larger
+than anything it had been checked against.
+
+## Feature distances: real but small, and the amendment's own magnitude
+
+150-vs-1200 distance per condition (gauge-fixed, reference node 363),
+NOT the pre-vs-evolved distance within one budget -- the quantity that
+answers "how much did the amendment change the representation", not
+"how much does evolution change the representation":
+
+| condition | cos/sin Euclidean, median | p95 | max |
+|---|---|---|---|
+| `pre_evolution` | 0.001761 | 0.005419 | 0.05987 |
+| `T` | 0.001269 | 0.003926 | 0.03857 |
+| `lattice` | 0.001286 | 0.004027 | 0.04247 |
+| `rewired` | 0.000180 | 0.000588 | 0.01049 |
+| `curr_random` | 0.000250 | 0.000812 | 0.01420 |
+
+`pre_evolution` shows the largest median distance of the five -- the
+raw encoding itself differs more between 150 and 1,200 steps than the
+EVOLVED representations do, for three of the four graphs (`rewired` and
+`curr_random`, the two most strongly synchronizing graphs per Stage 2A's
+order-parameter measurements, show markedly smaller distances than
+`pre_evolution`; `T` and `lattice` sit closer to `pre_evolution`'s own
+scale). Consistent with graph evolution partially washing out
+budget-dependent encoding differences for the graphs that synchronize
+most, rather than amplifying them -- offered as a descriptive reading of
+this table, not a claim this audit's own triggers test for.
+
+## The scope statement the protocol requires in any write-up, stated verbatim
+
+Per-budget fold-fitted `StandardScaler`s are retained (production
+preprocessing). Fixed-alpha therefore isolates **the effect of alpha
+reselection** -- it does **not** completely isolate raw representation
+change. A shared-scaler comparison is optional secondary work, not
+required, and must not be presented as the primary probe.
+
+## What it took
+
+One attempt, `AUDIT_OK` on the first real run. A prior attempt (same
+commit, before `LADDER_STAGE=5` was added to `stage2b_gcs.py`'s
+`LADDER_STAGES` validation tuple) failed at the first artifact write in
+the 150-step evolution step, after ~163s of real evolution compute --
+caught non-fatally once already (inside the sizing probe's own publish
+step, which logs and continues) before failing fatally; fixed, pinned
+with a regression test, and re-run. The session tore down cleanly both
+times; no billing leak.
+
+Total wall-clock 1,764.1s (~29.4 min): bootstrap 17.1s, load train-side
+artifacts 54.6s, topologies 1.9s, consume stage 3's 1,200-step
+thetas/features 313.2s, production alphas 9.1s, sizing probe 8.0s,
+evolve the 150-step budget (4 graphs x 60,000 images) 307.8s, 150-step
+features 460.3s, stage-1/2 cross-check 66.0s, the 60,000-image OOF ridge
+(both alpha regimes, both budgets, 5 conditions) 507.5s, feature
+distances 14.0s, trigger verdict 4.3s. The sizing probe's own projection
+(516.8s for the OOF ridge step, measured from one JAX SVD at production
+shape before anything expensive ran) came in within 2% of that step's
+actual 507.5s -- the probe's methodology validated by the run it gated.
+
+Production (1,200-step) alphas the fixed-alpha regime applied
+identically to both budgets: `pre_evolution=1000.0`, `T=1e-6`,
+`lattice=1e-6`, `rewired=1e-5`, `curr_random=1e-5` -- `T` and `lattice`
+at the grid floor, the same caveat the stage-4 section above already
+carries forward from Phase B's amendment.
+
+## Code and artifacts
+
+`run_audit.py`, `stage2b_audit.py`, `tests/test_stage2b_audit.py`,
+`tests/test_stage2b_audit_driver.py`. Run report:
+`stage2b/train/stage5/common/audit_report_20260809T192835Z.json` / `.txt`.
+Per-condition, per-budget artifacts (150-step evolved thetas and
+features, the 60,000-image OOF results in both alpha regimes, feature
+distances, trigger verdict) all under `stage2b/train/stage5/`. The
+1,200-step thetas and features are Phase B's own persisted artifacts
+under `stage2b/train/stage3/`, consumed rather than re-evolved, per
+`PHASE_B_PLAN.md`'s Decision 4.
+
+## Status of the investigation
+
+The amendment-impact audit is closed: no trigger fired, in either alpha
+regime, on any of the three frozen conditions. The 150-vs-1200
+encoder-budget amendment has a real, measured representational effect,
+and it is too small to change the sign, per-graph verdict, or pairwise
+ordering the stage-4 confirmatory result (and Phase B's own ridge
+result) depend on. Still open at the time of the audit write-up: the
+`ABS_CONV_EPS` sensitivity table (now run separately — see
+`run_abs_conv_eps_sensitivity.py`) and the ARM/x86 propagation stress set.
+Protocol 1 has since run; its account is the next section.
+
+
+# Stage 2B Companion Protocol 1: ARM/x86 propagation stress set — PROTOCOL1_OK
+
+COMPANION_PROTOCOLS.md's consequence rule specifies interpretation review
+before Stage 4. Stage 4 has already run and is locked. A Protocol 1 result
+here is therefore disclosed as post-hoc relative to that ordering, following
+the same sequencing-deviation precedent already established for the
+amendment-impact audit.
+
+## Verdict
+
+**`PROTOCOL1_OK`** — stage-5 halt did not fire. Every graph's
+`max |Δ Delta_g|` is strictly below `CONTRAST_THRESHOLD = 4.604761e-10`.
+Largest stage-5 value: `curr_random` at `1.830e-12` (~252× below threshold).
+
+Run id: `20260810T151245Z`. (Prior 20260810T124247Z report JSON existed without process sentinel or manifest sidecar; this run closes that gap.) Later verification re-runs under the fixed driver (e.g. 20260810T151926Z) reconfirm the same scientific PROTOCOL1_OK result; 20260810T151245Z remains the authoritative process-closure run_id linked to this write-up and to the gates.toml discharges.
+Report: `stage2b/train/stage3/common/protocol1_propagation_report_20260810T151245Z.json`
+Frozen ridge: `stage2b/train/stage3/common/protocol1_ridge_frozen_20260810T151245Z.npz`
+
+## Construction
+
+| component | detail |
+|---|---|
+| A | **regenerated** (top-100 max-abs encoding discrepancy on provisional B∪C∪D); `component_a_source = "regenerated"` |
+| B | `true_count = 89`, `cap = 500`, `cap_applied = false`, `n_used = 89` |
+| C | class floor ≥20 via lowest official indices |
+| D | 20/class, `seed = 42` |
+| `n_stress` | **287** |
+| `indices_refined` | **false** (provisional B∪C∪D equalled final after A re-injection — expected regenerate path) |
+| `indices_sha256` | `5ebded9ea78da1f66aa826683828c0990fbd57ab3b0c9f2682f320fa9c11ead6` |
+
+ARM stress encodings are an **index-join slice** of production
+`encoded_train_s1200.npz` (authoritative Phase-A ARM encode) — not a second
+ARM realization. x86 stress encodings used unmodified
+`encode_stage3_local.encode_indices` on Colab x86_64.
+
+## Platforms
+
+| role | machine |
+|---|---|
+| ARM encode (production Phase A, sliced) | Darwin arm64 |
+| x86 encode (this protocol) | Linux x86_64 (Colab) |
+| propagate (evolve + frozen ridge + report) | Darwin arm64 |
+
+## Five-stage maxima
+
+Framing at every table: **maximum observed within the 287-image provisional stress set;
+not a corpus sample.** Component A is selected for maximal
+encoding-stage divergence.
+
+### Stage 1 — encoding
+
+| quantity | max \|ARM − x86\| |
+|---|---|
+| `theta_505` | `4.441e-16` |
+
+maximum observed within the 287-image provisional stress set; not a corpus sample.
+Encoding-stage sanity gate (`> 1e-12` refuse) did not fire. Historical Phase-A
+spot-check max was ~3 ULP; this stress-set max is consistent with that scale.
+
+### Stage 2 — evolved features (per condition, dim 1008)
+
+| condition | max \|ARM − x86\| |
+|---|---|
+| `pre_evolution` | `4.441e-16` |
+| `T` | `1.769e-15` |
+| `lattice` | `1.554e-15` |
+| `rewired` | `1.554e-15` |
+| `curr_random` | `1.332e-15` |
+
+maximum observed within the 287-image provisional stress set; not a corpus sample.
+
+### Stage 3 — prediction (frozen ridge, same `(fit, scaler)` both arches)
+
+| condition | max \|ARM − x86\| |
+|---|---|
+| `pre_evolution` | `6.661e-16` |
+| `T` | `4.610e-12` |
+| `lattice` | `1.488e-11` |
+| `rewired` | `1.711e-11` |
+| `curr_random` | `3.576e-11` |
+
+maximum observed within the 287-image provisional stress set; not a corpus sample.
+One `fit_final` per condition at production alphas from
+`ridge_final_g13_88edf9ac.npz`; never per architecture.
+
+### Stage 4 — per-image clipped MSE
+
+| condition | max \|ARM − x86\| |
+|---|---|
+| `pre_evolution` | `2.776e-17` |
+| `T` | `9.975e-14` |
+| `lattice` | `4.455e-13` |
+| `rewired` | `5.483e-13` |
+| `curr_random` | `1.830e-12` |
+
+maximum observed within the 287-image provisional stress set; not a corpus sample.
+
+### Stage 5 — Δ_g = MSE_evolved − MSE_pre (halt stage)
+
+| graph | max \|Δ_g,ARM − Δ_g,x86\| | exceeds `4.604761e-10`? |
+|---|---|---|
+| `T` | `9.975e-14` | no |
+| `lattice` | `4.455e-13` | no |
+| `rewired` | `5.483e-13` | no |
+| `curr_random` | `1.830e-12` | no |
+
+maximum observed within the 287-image provisional stress set; not a corpus sample.
+
+Halt rule (frozen): any graph **strictly greater than** threshold →
+`PROTOCOL1_HALT`. Equality does not halt. None exceeded.
+
+## Scope limitation
+
+Component A is adversarial **for encoding-stage** discrepancy only
+(`rank_discrepancy_indices` ranks on `theta_arm` vs `theta_x86`). Ranking on
+post-evolution divergence would require evolving the full candidate population
+first and would defeat a small stress subset. A clean `PROTOCOL1_OK`
+establishes “no anomalous propagation on inputs adversarial for encoding
+divergence”; it does **not** independently establish that evolution-stage
+numerical sensitivity was adversarially stress-tested on its own terms.
+Plausibly correlated (evolution’s inputs are the encodings) but not guaranteed.
+
+## Artifacts
+
+| kind | object |
+|---|---|
+| stress indices | `stage2b/train/stage3/common/protocol1_stress_indices.npz` |
+| ARM stress encode | `stage2b/train/stage3/common/protocol1_encoded_stress_arm_s1200.npz` |
+| x86 stress encode | `stage2b/train/stage3/common/protocol1_encoded_stress_x86_s1200.npz` |
+| frozen ridge | `stage2b/train/stage3/common/protocol1_ridge_frozen_20260810T151245Z.npz` |
+| report | `stage2b/train/stage3/common/protocol1_propagation_report_20260810T151245Z.json` |
+| theta_T / features | under `stage2b/train/stage3/{pre_evolution,evolved_*}/protocol1_{theta_T,features}_{arm,x86}.npz` |
+
+Driver: `run_arm_x86_propagation_stress.py`. Pure helpers:
+`stage2b_audit.capped_positive_delta_indices`, `rank_discrepancy_indices`,
+`max_abs_difference`, `evaluate_propagation_halt`, `propagation_stage_maxima`.
+Tests: `tests/test_stage2b_arm_x86_propagation.py`. Make:
+`stage2b-protocol1-arm-construct`, `stage2b-protocol1-x86-encode`,
+`stage2b-protocol1-propagate`.
+
+
+
+## Stage 2B Companion Protocol 2: `ABS_CONV_EPS` sensitivity table — `PROTOCOL2_OK`
+
+Run under `run_abs_conv_eps_sensitivity.py` (local CPU). Recomputation from stored final-Delta arrays (diagnostic pickle + ladder encoder_gate_s1200.npz); no re-encoding.
+
+**Verdict at locked `ENCODER_STEPS=1200`: INVARIANT across `eps in {1e-10, 1e-11, 1e-12, 1e-13}`.** No flip; `HALT` condition does not fire. `ABS_CONV_EPS=1e-12` itself does not change.
+
+### Construction framing
+Recomputation from stored final-Delta; not a new encode. Uses `load_final_deltas` (diagnostic) + `load_ladder_encoder_gate_deltas` + `merge_step_sources` (for overlap at 1200 requiring <=1e-15 agreement), then `audit.sensitivity_table(..., gate.evaluate_rho_gate)` unmodified.
+
+### Summary (from published JSON)
+- locked_encoder_steps: 1200
+- invariant_at_locked_steps: true
+- halt_triggered: false
+- step_sources (1200): "diagnostic+ladder"; others "diagnostic"
+- source.ladder_objects: {"1200": "stage2b/train/stage1/common/encoder_gate_s1200.npz"}
+
+### Justification axes (all four)
+1. float64 precision: observed dust 1e-14–1e-16; 1e-12 sits above.
+2. Phase update scale: smallest meaningful measured final-Delta 2.177e-07 (clean, 150 steps, stage 1); 1e-12 is five+ orders below.
+3. Encoder implementation: residual decay 8.370e-07 → 8.062e-13 → 0.0 (300/600/1200); first crosses 1e-12 between 300–600 steps.
+4. Downstream feature sensitivity (analytic L_inf bound on cos/sin under phase residual):
+   - 1e-10: bound=1e-10 (0.0001 × rtol=1e-6; 0.405 × prod max 2.468e-10)
+   - 1e-12: bound=1e-12 (1e-6 × rtol; 0.00405 × prod max)
+   - 1e-13: bound ~1e-13 (monotone decrease; all << rtol and prod max)
+   Method: |cos(θ+ε)-cos(θ)| ≤ 2|sin(ε/2)| ≤ |ε|; no full ODE re-evolve.
+
+### Artifacts
+- table: `results/abs_conv_eps_sensitivity_table.json` (also gcs-style under stage3/common)
+- fingerprint present with source/config digests
+- sentinel: `PROTOCOL2_OK` (exit 0); revalidate passed
+
+Driver: `run_abs_conv_eps_sensitivity.py`. Make: `stage2b-protocol2`.
+Tests: `tests/test_stage2b_abs_conv_eps_sensitivity.py` (merge, axis4, publish fingerprint AST, reval sentinel, real-pickle tier-2).
+
+(Companion to Protocol 1 closure; both now under fingerprint contract per COMPANION_PROTOCOLS.md.)

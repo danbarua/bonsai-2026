@@ -395,10 +395,29 @@ Full detail: `experiments/stage2a_dynamics_classification/FINDINGS.md`
 and every disclosed caveat above); `DESIGN.md` (the locked design, read
 before the result).
 
-**Stage 2B (denoising, #13): design locked; feasibility-ladder stages 1
-and 2 complete (`STAGE2_OK`); stage 3 Phase A complete and regenerated at
-the full 60,000; Phase B planned, implemented-around, and awaiting
-release.**
+### Stage 2B (denoising, #13): CLOSED, positively -- Level 3 ESTABLISHED.
+The full feasibility ladder ran to completion: stages 1-2, Phase A/B of
+stage 3, and stage 4, the one locked confirmatory evaluation on the
+official 10,000-image KMNIST test corpus. `T` (the learned topology,
+runtime-evolved) is the unique winner among the ridge-based,
+phase-representation conditions: the primary test (evolution vs.
+pre-evolution) is entirely below zero (95% CI [-0.0046, -0.0043]), the
+denoising gate against the identity baseline also passes, and `T`
+outperforms all three control graphs after Holm correction in both
+prespecified families. **Not established: that `T` is the best
+condition overall** -- the CNN, a separate model class tested against
+nothing here, has a numerically lower mean MSE. Full account, including
+that comparison, below and in
+`experiments/stage2b_denoising/FINDINGS.md`'s stage-4 section.
+The 150-vs-1200 encoder-budget amendment-impact audit has since run
+(2026-08-09, `AUDIT_OK`): none of the three frozen triggers fired in
+either alpha regime -- the amendment's representational effect is real
+and measured (~2.3e-7 shift in the primary contrast, ~2.7 orders above
+the frozen analytic resolution threshold, ~0.0045% of the contrast's own
+magnitude) but changes no sign, no
+per-graph verdict, and no pairwise ordering, so it does not put the
+stage-4 result above in question. Full account:
+`experiments/stage2b_denoising/FINDINGS.md`'s audit section.**
 `experiments/stage2b_denoising/DESIGN.md` -- seven drafts, four external
 review rounds plus an adversarial blind-spot review and an outsider peer
 review, all incorporated; asks the Stage-2A-shaped question (does
@@ -413,8 +432,9 @@ sklearn as oracle, the confirmatory statistics (studentized sign-flip,
 two Holm families, branched winner rule), the equinox+optax CNN
 baseline, the partition/nested-ladder draw, GCS transport with resumable
 chunked upload and crc32c content verification on every transfer, and
-now the two ladder drivers (`run_ladder_stage1.py`, `run_ladder_stage2.py`)
-that compose all of the above into a runnable pipeline. Fast test count
+now all four ladder drivers (`run_ladder_stage1.py` through
+`run_ladder_stage4.py`) that compose all of the above into a runnable
+pipeline. Fast test count
 is intentionally not restated here -- `make stage2b-test` reports it;
 per-file counts drifted stale four times before that convention was
 adopted (`experiments/stage2b_denoising/README.md`). Execution-environment
@@ -593,11 +613,95 @@ statistics sitting at zero never established "every image is zero", and at
 convergence below any practically relevant tolerance**, never exact
 convergence as a universal claim.
 
-**Not yet started**: Phase B (evolution, ridge and CNN at full scale) and
-stage 4 (the single locked evaluation against the official 10,000-image
-test set). Phase B is planned in full and its supporting contracts are
-implemented and tested; what it waits on is Dan's explicit release, not
-missing work. Stage 4 stays blocked behind the pre-test package review.
+**Phase B ran, 2026-08-07/08 (`STAGE3_OK`, A100).** Six of seven
+conditions selected the ridge grid's minimum alpha at n=60,000 (none had
+at n=5,000) -- a pre-registered review item, not a halt, per the frozen
+plan. The reviewer's amendment extended the grid four decades downward
+(thirteen decades total, `{1e-6..1e6}`) and re-ran the ridge step only
+(evolution/features/CNN reused from cache); the amended grid resolved
+`rewired` and `curr_random` to genuine interior minima (`alpha=1e-5`) but
+`T` and `lattice` both remained at the new floor (`alpha=1e-6`) --
+disclosed as a qualification on optimization scope, not a protocol
+defect: their continuous-domain ridge optima are not established. A
+separate defect surfaced in the same review: `DESIGN.md`'s own frozen
+"HALT for review if any production condition selects 1e-6" was never
+implemented in the driver, so the amended re-run selected the floor on
+two conditions and reported `STAGE3_OK` anyway -- the verdict recorded
+that no such gate existed, not that one was evaluated and cleared. Fixed
+(`floor_halt_reason()`, break-confirmed against the exact driver that
+produced the un-gated report) after the fact; the numerical artifacts
+from that run remain admissible; full account in `FINDINGS.md`.
+
+**Stage 4 ran, 2026-08-09 (`STAGE4_OK`, A100, three attempts, ~44 minutes
+of GPU total).** The official result: primary test `T` vs.
+`pre_evolution` entirely below zero (CI [-0.0046028, -0.0043002]); the
+denoising gate against identity also entirely below zero (gate passed,
+so the "actual denoising" claim is licensed, not just relative
+improvement); both prespecified Holm-corrected families (three controls
+vs. `pre_evolution`; six pairwise among the four evolved graphs) reject
+uniformly favorably for `T`; `one_graph_wins.unique_winner = "T"` --
+`DESIGN.md`'s named watched-for outcome #2, realized -- **among the
+ridge-based, phase-representation conditions specifically**, the
+comparison the statistics families and `one_graph_wins` actually run.
+Raw-pixel ridge and the identity baseline sit within rounding of each
+other (0.198856 vs. 0.198856), so named outcome #5 (raw pixel dominating)
+did not obtain. **Not established: that `T` is the best-performing
+condition overall.** The CNN -- a categorically different, nonlinear
+model class, in neither statistics family, never tested against `T` or
+any ridge condition -- has a LOWER mean clipped MSE than `T` (0.063069
+vs. 0.065623, ~3.9% relative, CNN winning on 5,814/10,000 images); a
+descriptive-only paired bootstrap computed post hoc puts that gap's CI at
+[-0.00276, -0.00235], entirely favoring the CNN, offered as a magnitude
+estimate only, not a locked result. "T is the unique winner" names the
+winner within its own comparison, not across model classes.
+**Caveat carried forward from Phase B's amendment, restated because it
+still applies**: `T` and `lattice` both refit at their stage-3
+grid-floor alpha (`1e-6`, unre-selected, per the driver's frozen
+refit-at-production-alpha design), so `T` beating `lattice` is a
+floor-vs-floor comparison unconfounded by regularization freedom, while
+`T` beating `rewired`/`curr_random` (both at genuine interior minima)
+compares pipelines as selected under the frozen discrete grid, not under
+continuously optimal regularization each. The primary test and the
+denoising gate do not depend on this comparison. Two real bugs surfaced
+by the first two attempts (a missing `allow_test_split` thread in a
+parent-provenance helper; a missing image-batch shape cast before a
+direct CNN evaluation call, the exact mistake that function's own
+docstring warns against) were each caught within seconds to low
+hundreds of seconds of GPU time, fixed, and pinned as regression tests
+before the next attempt -- not the 72-hour/$3,000 scale this would have
+cost without the resumability contract every earlier ladder stage had
+already established. Full account, every number, and the complete
+caveat: `experiments/stage2b_denoising/FINDINGS.md`'s stage-4 section.
+
+**Closed since**: the **150-vs-1200 amendment-impact audit itself** --
+`AUDIT_PROTOCOL.md`'s own core apparatus, which `PHASE_B_PLAN.md`'s
+Decision 4 sequenced to run after Phase B against Phase B's own
+persisted artifacts -- ran 2026-08-09 (`AUDIT_OK`, one attempt after a
+first attempt caught a real bug, `LADDER_STAGE=5` never having been
+added to `stage2b_gcs.py`'s stage-validation tuple, and was fixed and
+re-run). No trigger fired in either alpha regime. Full account:
+`experiments/stage2b_denoising/FINDINGS.md`'s audit section.
+**Genuinely still open, not required by the confirmatory result above**:
+of the two companion protocols `AUDIT_PROTOCOL.md` names, the
+`ABS_CONV_EPS` sensitivity table has run (verdict invariant across the
+full swept eps range at every step count, including the locked
+`ENCODER_STEPS=1200` -- its own halt condition does not fire); the
+ARM/x86 propagation stress set (`COMPANION_PROTOCOLS.md` Protocol 1) has
+also run (`PROTOCOL1_OK`, run_id `20260810T124247Z`, stage-5 max
+`|Δ Delta_g|` = `1.830e-12` on `curr_random` vs threshold
+`4.604761e-10`). Disclosed as post-hoc relative to Stage 4's locked
+ordering (same sequencing-deviation class as the amendment-impact
+audit). Full account: `experiments/stage2b_denoising/FINDINGS.md`
+Protocol 1 section. None of these are required for the
+stage-4 verdict itself, per `AUDIT_PROTOCOL.md`'s own scoping. Whether
+the CNN belongs in this
+design at all -- INFRA found it has no stated consumer anywhere in
+`DESIGN.md`'s text, in neither statistics family nor any named
+watched-for outcome -- is unresolved; this result treats it as the
+descriptive comparator `DESIGN.md`'s own framing implies, without
+resolving the ambiguity INFRA named. Whether `T`'s floor-pinned alpha
+would move under a denser or further-extended grid, and by how much, is
+untested.
 
 ## Part 4: Infrastructure and execution environment
 

@@ -613,6 +613,112 @@ def _check_claim(clause_id: str, entry: dict, clause: Clause | None) -> list[Fin
     return findings
 
 
+_SEMANTIC_REVIEW_FIELDS = ("inventory_sha256", "reviewer", "recorded_by",
+                           "review_basis", "scopes", "findings",
+                           "findings_resolved")
+
+# `reviewer` and `recorded_by` are separate fields on the Reviewer's ruling
+# of 2026-08-09, and the distinction is not bookkeeping:
+#
+#   "The distinction is between AUTHORSHIP OF THE TOML RECORD and SOURCE OF
+#   THE REVIEW DECISION. Claude Code can encode my ruling mechanically; it
+#   cannot independently make my attestation."
+#
+# One field would have made those indistinguishable, and the failure mode is
+# specific: an agent transcribing a ruling and an agent asserting one look
+# identical in a record that has room for only the second. This inventory
+# exists because a disposition can be honest or convenient and no check can
+# tell -- collapsing the reviewer into the recorder rebuilds that ambiguity
+# at the top of the file.
+
+# Kinds whose dispositions a machine cannot settle. The Reviewer's ruling of
+# 2026-08-09 is that these, not "every row", are what human review is FOR:
+#
+#   "whether a not_binding disposition really is non-binding; whether a
+#   superseded amendment preserves the material purpose of the original
+#   freeze; whether canonical_clause genuinely restates rather than weakens
+#   or adds to its target; whether a binding_claim is actually discharged by
+#   the cited evidence. Those are semantic review decisions."
+#
+# And the converse, which is what replaced the old boolean: "machine-enforced
+# binding_gate/binding_value rows with causal break evidence do not need
+# ritual human rereading simply to turn a boolean green."
+_SEMANTIC_SCOPES = ("not_binding", "superseded", "canonical_clause",
+                    "binding_claim")
+
+
+def inventory_digest(text: str) -> str:
+    """SHA-256 of the inventory with its own review block removed.
+
+    Circular otherwise: an attestation that covered itself would change the
+    hash it records by recording it. Everything ABOVE `[semantic_review]` is
+    the reviewed content, and the block is the signature over it.
+    """
+    # Line-anchored, not a bare substring: this file MENTIONS
+    # `[semantic_review]` in prose above the table, and splitting on the
+    # first occurrence cut the body short -- the attestation then hashed a
+    # prefix and reported itself stale on the run that wrote it.
+    body = re.split(r"^\[semantic_review\]", text, flags=re.M)[0]
+    return hashlib.sha256(body.encode()).hexdigest()
+
+
+def check_semantic_review(inventory: dict, text: str | None = None) -> list[Finding]:
+    """The review attestation, versioned against what it reviewed.
+
+    Replaces a naked `reviewed = true` boolean, on the Reviewer's ruling:
+    "I would not use a naked global `reviewed = true` boolean at all unless
+    its meaning is extremely explicit. Prefer a versioned review attestation
+    tied to the inventory commit/hash, recording the reviewed scope and
+    outcome."
+
+    The boolean's defect was that it said nothing about WHAT was reviewed or
+    WHEN, so it kept meaning "reviewed" across every subsequent edit. A hash
+    makes it expire on the next change to the rows it covered, which is the
+    only property that makes an attestation worth anything.
+    """
+    findings: list[Finding] = []
+    review = inventory.get("semantic_review")
+    if not isinstance(review, dict):
+        findings.append(Finding(
+            "no_semantic_review",
+            "the inventory carries no `[semantic_review]` block. A draft -- "
+            "machine-generated or half-finished -- cannot produce a clean run "
+            "no matter what its rows contain"))
+        return findings
+
+    for field_name in _SEMANTIC_REVIEW_FIELDS:
+        if review.get(field_name) in (None, "", []):
+            findings.append(Finding(
+                "incomplete_semantic_review",
+                f"`[semantic_review]` has no `{field_name}`"))
+
+    if text is not None and review.get("inventory_sha256"):
+        actual = inventory_digest(text)
+        if review["inventory_sha256"] != actual:
+            findings.append(Finding(
+                "stale_semantic_review",
+                f"the review attests to inventory "
+                f"{str(review['inventory_sha256'])[:12]} and the rows now "
+                f"hash to {actual[:12]}. Rows changed after they were "
+                f"reviewed; the attestation does not cover what is here"))
+
+    missing = [k for k in _SEMANTIC_SCOPES if k not in (review.get("scopes") or [])]
+    if missing:
+        findings.append(Finding(
+            "unreviewed_semantic_scope",
+            f"`[semantic_review]` does not cover {missing}. These are the "
+            f"dispositions a machine cannot settle, and an attestation that "
+            f"omits one leaves exactly the judgements review exists for"))
+
+    unresolved = (review.get("findings") or 0) - (review.get("findings_resolved") or 0)
+    if unresolved > 0:
+        findings.append(Finding(
+            "unresolved_review_findings",
+            f"{unresolved} of {review['findings']} review findings are "
+            f"recorded as unresolved"))
+    return findings
+
+
 def _binding_rows(inventory: dict) -> dict[str, tuple[str, dict]]:
     """Every row in a binding kind, keyed by id."""
     rows: dict[str, tuple[str, dict]] = {}
@@ -758,7 +864,8 @@ def check_ids_unique(clauses: list[Clause]) -> list[Finding]:
 
 
 def reconcile(clauses: list[Clause], inventory: dict,
-              repo_root: Path = REPO_ROOT) -> list[Finding]:
+              repo_root: Path = REPO_ROOT,
+              inventory_text: str | None = None) -> list[Finding]:
     """Every way a documented gate and its enforcement can fail to agree.
 
     Checked in BOTH directions. A one-directional check passes happily
@@ -773,12 +880,7 @@ def reconcile(clauses: list[Clause], inventory: dict,
     # green. `reviewed` defaults to false, so a file that never says a human
     # read it cannot pass -- an artifact carrying evidence of the thing it
     # claims, rather than being trusted for looking finished.
-    if not inventory.get("reviewed", False):
-        findings.append(Finding(
-            "unreviewed_inventory",
-            "the inventory does not carry `reviewed = true`. A draft -- "
-            "machine-generated or half-finished -- cannot produce a clean "
-            "run no matter what its rows contain"))
+    findings.extend(check_semantic_review(inventory, inventory_text))
 
     dispositions: dict[str, tuple[str, dict]] = {}
     for kind in _REQUIRED_BY_KIND:
@@ -952,7 +1054,8 @@ def main(argv=None) -> int:
 
     clauses = derive_clauses(args.doc, args.root)
     inventory = load_inventory(args.inventory)
-    findings = reconcile(clauses, inventory, args.root)
+    findings = reconcile(clauses, inventory, args.root,
+                         inventory_text=args.inventory.read_text())
     done, total = coverage(clauses, inventory)
 
     claims = unenforceable(clauses, inventory)
