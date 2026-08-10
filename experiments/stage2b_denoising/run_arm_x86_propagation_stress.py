@@ -1228,3 +1228,9 @@ def main(argv=None):
         print(f"{FAIL_SENTINEL} {type(exc).__name__}: {exc}", flush=True)
         return 1
 
+
+if __name__ == "__main__" or os.environ.get(ENV_COMMIT):
+    _status = main()
+    if _status:
+        sys.exit(_status)
+
