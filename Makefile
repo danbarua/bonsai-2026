@@ -950,6 +950,33 @@ stage2b-protocol1: stage2b-protocol1-arm-construct  ## Protocol 1 umbrella: arm-
 	@echo "[make] Next: push HEAD, then: make stage2b-protocol1-x86-encode"
 	@echo "[make] Then: make stage2b-protocol1-propagate"
 
+
+##@ Vacuous-test review (local preflight)
+
+# Default Haiku: the Actions path has defaulted to Sonnet and cost $5 on a
+# partial pass (PR #29). Local preflight is the cheap half; Actions stays the
+# durable sticky. Override with MODEL=sonnet or REVIEW_MODEL.
+REVIEW_PR ?=
+MODEL ?= haiku
+
+.PHONY: vacuous-review
+vacuous-review:  ## Local vacuous-test review on Haiku. Usage: make vacuous-review PR=29
+	@if [ -z "$(PR)$(REVIEW_PR)" ]; then \
+		echo "[make] Usage: make vacuous-review PR=<n>   (optional: MODEL=haiku|sonnet)"; \
+		exit 2; \
+	fi
+	cd $(REPO_ROOT) && \
+		REVIEW_MODEL=$(MODEL) \
+		bash tools/ci/vacuous_review_local.sh --pr $(or $(PR),$(REVIEW_PR)) --model $(MODEL)
+
+.PHONY: vacuous-review-delta
+vacuous-review-delta:  ## Print review_delta only (no model). Usage: make vacuous-review-delta PR=29
+	@if [ -z "$(PR)$(REVIEW_PR)" ]; then \
+		echo "[make] Usage: make vacuous-review-delta PR=<n>"; \
+		exit 2; \
+	fi
+	cd $(REPO_ROOT) && bash tools/ci/vacuous_review_local.sh --pr $(or $(PR),$(REVIEW_PR)) --delta-only
+
 .PHONY: help
 help:  ## List every target in this file, grouped by section
 	@awk 'BEGIN {FS = ":.*##"} /^##@/ {printf "\n%s\n", substr($$0, 5)} /^[a-zA-Z0-9_-]+:.*##/ {printf "  %-28s %s\n", $$1, $$2}' $(MAKEFILE_LIST)
