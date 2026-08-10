@@ -39,8 +39,16 @@ EXEMPT = {
     "gh": (
         "CI never calls the real `gh`. The scripts that need it are exercised "
         "only through a stub on PATH (tests/test_review_delta.py, "
-        "tests/test_review_run.py), because a build that could reach the "
-        "GitHub API would also need a credential CI deliberately does not have."
+        "tests/test_review_run.py, tests/test_publish_review.sh), because a "
+        "build that could reach the GitHub API would also need a credential "
+        "CI deliberately does not have."
+    ),
+    "claude": (
+        "CI never invokes `tools/ci/vacuous_review_local.sh`. That script is a "
+        "developer preflight (`make vacuous-review`); the Actions review runs "
+        "claude-code-action on a GitHub runner, not this image. Installing the "
+        "Claude CLI here would pull a second auth surface into a credential-free "
+        "build for a path nothing in cloudbuild.yaml calls."
     ),
 }
 
@@ -161,12 +169,13 @@ def test_every_command_the_ci_scripts_need_is_installed_or_exempt():
     Derived from the scripts, not from a list somebody remembered to update.
     """
     missing = missing_commands()
+    installed = sorted(installed_packages())
     assert not missing, (
         "the CI image does not install command(s) the CI scripts guard on. "
         "Each will fail open at runtime -- the safe direction, but it means "
         "the affected tests pin nothing, and a break-confirmation cannot tell "
         f"a fixed script from a broken one: {missing}. "
-        f"Installed: {sorted(installed)}"
+        f"Installed: {installed}"
     )
 
 
@@ -245,6 +254,25 @@ def test_each_exemption_still_describes_something_real():
         "absence nobody reasoned about"
     )
 
+
+def test_the_claude_exemption_rests_on_ci_never_calling_the_local_runner():
+    """`claude` is only required by vacuous_review_local.sh — keep it out of CI.
+
+    If cloudbuild (or a Makefile target CI invokes) starts calling that
+    script, this exemption becomes a missing-install bug disguised as policy.
+    """
+    cloudbuild = CLOUDBUILD.read_text()
+    assert "vacuous_review_local" not in cloudbuild, (
+        "cloudbuild.yaml now references vacuous_review_local.sh; either install "
+        "claude in the suite image or stop calling the local runner from CI"
+    )
+    assert "command -v claude" not in cloudbuild
+    # ci_targets is the spend/allow guard over make targets CI may run.
+    ci_targets = (REPO_ROOT / "tools" / "ci" / "ci_targets.py").read_text()
+    assert "vacuous-review" not in ci_targets and "vacuous_review" not in ci_targets, (
+        "ci_targets.py now allows a vacuous-review make target; that would pull "
+        "the local claude runner into CI without an image install"
+    )
 
 def test_the_gh_exemption_rests_on_a_stub_that_actually_exists():
     """The `gh` exemption is only sound while the tests really stub `gh`.
