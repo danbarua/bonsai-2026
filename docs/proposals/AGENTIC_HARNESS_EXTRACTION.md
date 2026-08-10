@@ -586,6 +586,28 @@ required report — was never reported at all.
 
 **The apparatus was built for the aspect with the fewest defects.**
 
+**Read as misallocation in the draft above; that reading is too strong.**
+Dan, 2026-08-10: *"Why does Stage 2A not use GCS buckets, and Stage 2B does?
+Because Stage 2B learned from Stage 2A. Why doesn't Stage 2A follow the same
+practices? Because evolution."* The gate apparatus exists BECAUSE of Stage
+2A — it targets the defect class its authors had already been burned by. On
+that reading the table does not show a bad allocation; it shows a tool aimed
+at the previous stage's pain, which is what any tool built from experience is
+aimed at. Lines of enquiry went untooled because nobody had been bitten there
+yet, not because someone weighed the two aspects and chose wrong.
+
+The two readings differ in what they predict, which is the only reason to
+keep both. Misallocation predicts the imbalance persists after the
+lines-of-enquiry defects are known. Learning-curve predicts it corrects
+itself in the next stage without anyone arguing for it. That is a real
+observation to make later, not a claim this document can settle — and the
+comparison it needs is Stage 2C against 2B, not 2B against 2A.
+
+What survives either way, and is the part worth carrying: **the aspect with
+the most defects had no tooling at all**, and nothing in the process would
+have surfaced that. It took a retrospective on a closed stage. A harness
+that scored its own coverage by defect class would not have needed one.
+
 **Correction to how this section justified itself.** An earlier version said
 no Stage 2B line has closed, so only Stage 2A could show this. That is false
 and the error was mine: `experiments/stage2b_denoising/FINDINGS.md` is 8,328
