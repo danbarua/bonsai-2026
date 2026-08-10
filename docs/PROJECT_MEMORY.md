@@ -395,7 +395,7 @@ Full detail: `experiments/stage2a_dynamics_classification/FINDINGS.md`
 and every disclosed caveat above); `DESIGN.md` (the locked design, read
 before the result).
 
-**Stage 2B (denoising, #13): CLOSED, positively -- Level 3 ESTABLISHED.
+### Stage 2B (denoising, #13): CLOSED, positively -- Level 3 ESTABLISHED.
 The full feasibility ladder ran to completion: stages 1-2, Phase A/B of
 stage 3, and stage 4, the one locked confirmatory evaluation on the
 official 10,000-image KMNIST test corpus. `T` (the learned topology,
