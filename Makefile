@@ -326,6 +326,7 @@ STAGE2B_TEST_FILES := tests/test_stage2b_corruption.py tests/test_stage2b_encode
                       tests/test_stage2b_audit.py \
                       tests/test_stage2b_audit_driver.py \
                       tests/test_stage2b_abs_conv_eps_sensitivity.py \
+                      tests/test_stage2b_arm_x86_propagation.py \
                       tests/test_stage2b_artifact_manifest.py
 
 .PHONY: stage2b-test
@@ -894,6 +895,60 @@ stage2b-audit:  ## Run the Stage 2B amendment-impact audit -- bills while runnin
 	fi; \
 	$(call check_teardown,$(SESSION_2B_AUDIT)); \
 	exit $$rc
+
+
+##@ Stage 2B Companion Protocol 1 (ARM/x86 propagation)
+
+SESSION_2B_PROTOCOL1 ?= stage2b-protocol1
+
+.PHONY: stage2b-protocol1-arm-construct
+stage2b-protocol1-arm-construct:  ## Protocol 1: build stress set + slice ARM encodings (local CPU, free)
+	cd $(REPO_ROOT) && $(GCS_ENV) \
+		uv run --group gpu python $(STAGE2B_DIR)/run_arm_x86_propagation_stress.py --phase arm-construct
+
+.PHONY: stage2b-protocol1-x86-encode
+stage2b-protocol1-x86-encode:  ## Protocol 1: encode stress set on Colab x86 (bills while running)
+	rc=0; src=0; \
+	cd $(REPO_ROOT) && \
+	if ! $(CLOSURE_CHECK) $(STAGE2B_DIR)/run_arm_x86_propagation_stress.py; then \
+		exit 1; \
+	fi; \
+	commit=$$($(GIT) rev-parse HEAD); \
+	if ! $(GIT) branch -r --contains $$commit 2>/dev/null | grep -q .; then \
+		echo "[make] REFUSING: HEAD $$commit is not on any remote. Push before running -- the runtime can only fetch what origin has."; \
+		exit 1; \
+	fi; \
+	driver_sha=$$(shasum -a 256 $(STAGE2B_DIR)/run_arm_x86_propagation_stress.py | cut -d' ' -f1); \
+	echo "[make] commit $$commit, driver sha256 $$driver_sha"; \
+	cd $(STAGE2B_DIR) && \
+	$(MIGHTY_COLAB) sessions && \
+	if $(MIGHTY_COLAB) status -s $(SESSION_2B_PROTOCOL1) 2>&1 | grep -q "not found"; then \
+		$(MIGHTY_COLAB) new -s $(SESSION_2B_PROTOCOL1) --gpu $(LADDER_GPU); \
+	else \
+		echo "[make] Reusing existing session $(SESSION_2B_PROTOCOL1)"; \
+	fi && \
+	$(MIGHTY_COLAB) reinstall -s $(SESSION_2B_PROTOCOL1) jax[cuda12]==0.11.0 diffrax==0.7.2 google-cloud-storage && \
+	$(MIGHTY_COLAB) upload -s $(SESSION_2B_PROTOCOL1) $(BONSAI_GCS_CREDENTIALS) $(REMOTE_KEY_PATH) && \
+	rc=0; out=$$($(MIGHTY_COLAB) exec -s $(SESSION_2B_PROTOCOL1) -f run_arm_x86_propagation_stress.py --timeout $(EXEC_TIMEOUT) $(GCS_EXEC_ENV) --env BONSAI_COMMIT="$$commit" --env BONSAI_DRIVER_SHA256="$$driver_sha" --env JAX_ENABLE_X64=1 --env PROTOCOL1_PHASE=x86-encode 2>&1) || rc=$$?; \
+	echo "$$out"; \
+	src=0; $(MIGHTY_COLAB) stop -s $(SESSION_2B_PROTOCOL1) || src=$$?; \
+	if [ $$rc -ne 0 ] || ! echo "$$out" | grep -q PROTOCOL1_X86_ENCODE_OK; then \
+		echo "[make] FAILED: protocol1 x86-encode did not report success (exec rc=$$rc)."; \
+		if [ $$rc -eq 0 ]; then rc=1; fi; \
+	fi; \
+	$(call check_teardown,$(SESSION_2B_PROTOCOL1)); \
+	exit $$rc
+
+.PHONY: stage2b-protocol1-propagate
+stage2b-protocol1-propagate:  ## Protocol 1: evolve both arches, frozen ridge, five-stage report (local)
+	cd $(REPO_ROOT) && $(GCS_ENV) \
+		uv run --group gpu python $(STAGE2B_DIR)/run_arm_x86_propagation_stress.py --phase propagate
+
+.PHONY: stage2b-protocol1
+stage2b-protocol1: stage2b-protocol1-arm-construct  ## Protocol 1 umbrella: arm-construct, then print next steps
+	@echo "[make] Protocol 1 arm-construct done."
+	@echo "[make] Next: push HEAD, then: make stage2b-protocol1-x86-encode"
+	@echo "[make] Then: make stage2b-protocol1-propagate"
 
 .PHONY: help
 help:  ## List every target in this file, grouped by section

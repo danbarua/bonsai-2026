@@ -9,7 +9,7 @@ import os
 
 import numpy as np
 
-from stage2b_conditions import EVOLVED_GRAPHS, PRE_EVOLUTION
+from stage2b_conditions import ALL_CONDITIONS, EVOLVED_GRAPHS, PRE_EVOLUTION
 
 AUDIT_STEPS = (150, 1200)
 N_OFFICIAL_TRAIN = 60_000
@@ -258,6 +258,179 @@ def build_stress_indices(official_indices, labels, largest_discrepancy_indices,
         present = sum(int(labels[i] == cls) for i in selected)
         selected.update(map(int, members[:max(0, 20 - present)]))
     return np.asarray(sorted(selected), dtype=np.int64)
+
+
+def capped_positive_delta_indices(train_indices, deltas, *, tail_cap=500):
+    """Official indices with final-Delta strictly > 0, capped/ranked for build_stress_indices.
+
+    Rank by delta descending; ties broken by official index ascending.
+    Record true_count before cap. Returns (indices_int64_len_le_tail_cap, meta_dict)
+    where meta_dict = {"true_count": int, "cap": int, "cap_applied": bool}.
+    """
+    indices = np.asarray(train_indices, dtype=np.int64)
+    values = np.asarray(deltas, dtype=np.float64)
+    if indices.ndim != 1 or values.shape != indices.shape:
+        raise AuditInputError(
+            f"train_indices and deltas must be 1-D and aligned, got "
+            f"{indices.shape} vs {values.shape}")
+    if not np.all(np.isfinite(values)):
+        raise AuditInputError("deltas must be finite")
+    if tail_cap < 0:
+        raise AuditInputError("tail_cap must be non-negative")
+    mask = values > 0.0
+    positive_indices = indices[mask]
+    positive_deltas = values[mask]
+    true_count = int(positive_indices.size)
+    # lexsort: last key is primary. Primary = -delta, secondary = index asc.
+    order = np.lexsort((positive_indices, -positive_deltas))
+    ranked = positive_indices[order]
+    cap_applied = true_count > int(tail_cap)
+    selected = ranked[:int(tail_cap)] if cap_applied else ranked
+    meta = {
+        "true_count": true_count,
+        "cap": int(tail_cap),
+        "cap_applied": bool(cap_applied),
+    }
+    return selected.astype(np.int64, copy=False), meta
+
+
+def rank_discrepancy_indices(official_indices, thetas_left, thetas_right):
+    """Order official indices by per-image max abs coordinate difference.
+
+    thetas_* shape (n, d), rows aligned to official_indices.
+    Sort key: (-max_abs_diff, official_index). Returns int64 array length n.
+    """
+    indices = np.asarray(official_indices, dtype=np.int64)
+    left = np.asarray(thetas_left, dtype=np.float64)
+    right = np.asarray(thetas_right, dtype=np.float64)
+    if indices.ndim != 1:
+        raise AuditInputError("official_indices must be 1-D")
+    if left.shape != right.shape:
+        raise AuditInputError(
+            f"thetas_left/right shape mismatch: {left.shape} vs {right.shape}")
+    if left.ndim != 2 or left.shape[0] != indices.shape[0]:
+        raise AuditInputError(
+            f"thetas must be (n, d) aligned to official_indices; got "
+            f"{left.shape} vs n={indices.shape[0]}")
+    if not (np.all(np.isfinite(left)) and np.all(np.isfinite(right))):
+        raise AuditInputError("thetas must be finite")
+    max_abs = np.max(np.abs(left - right), axis=1)
+    order = np.lexsort((indices, -max_abs))
+    return indices[order].astype(np.int64, copy=False)
+
+
+def max_abs_difference(left, right):
+    """Finite max abs elementwise difference; raises AuditInputError on shape/non-finite."""
+    a = np.asarray(left, dtype=np.float64)
+    b = np.asarray(right, dtype=np.float64)
+    if a.shape != b.shape:
+        raise AuditInputError(
+            f"max_abs_difference shape mismatch: {a.shape} vs {b.shape}")
+    if not (np.all(np.isfinite(a)) and np.all(np.isfinite(b))):
+        raise AuditInputError("max_abs_difference requires finite inputs")
+    if a.size == 0:
+        return 0.0
+    return float(np.max(np.abs(a - b)))
+
+
+def evaluate_propagation_halt(delta_g_max_abs_by_graph, *, threshold=CONTRAST_THRESHOLD):
+    """Protocol 1 stage-5 halt.
+
+    delta_g_max_abs_by_graph: dict graph -> float (max over stress images of
+    |Delta_g_arm - Delta_g_x86|).
+    Returns {
+      "halt_triggered": bool,  # True if ANY graph value > threshold (strict >)
+      "threshold": float,
+      "per_graph": {g: {"max_abs_delta_g_diff": float, "exceeds": bool}},
+      "exceeding_graphs": [str, ...],  # stable EVOLVED_GRAPHS order
+    }
+    """
+    if not isinstance(delta_g_max_abs_by_graph, dict):
+        raise AuditInputError("delta_g_max_abs_by_graph must be a dict")
+    threshold = float(threshold)
+    per_graph = {}
+    exceeding = []
+    for graph in EVOLVED_GRAPHS:
+        if graph not in delta_g_max_abs_by_graph:
+            raise AuditInputError(
+                f"delta_g_max_abs_by_graph missing graph {graph!r}")
+        value = float(delta_g_max_abs_by_graph[graph])
+        if not np.isfinite(value):
+            raise AuditInputError(
+                f"delta_g max-abs for {graph} is not finite: {value!r}")
+        exceeds = bool(value > threshold)  # strict; equality does not halt
+        per_graph[graph] = {
+            "max_abs_delta_g_diff": value,
+            "exceeds": exceeds,
+        }
+        if exceeds:
+            exceeding.append(graph)
+    return {
+        "halt_triggered": bool(exceeding),
+        "threshold": threshold,
+        "per_graph": per_graph,
+        "exceeding_graphs": exceeding,
+    }
+
+
+def propagation_stage_maxima(
+        *,
+        theta_arm, theta_x86,
+        features_arm, features_x86,
+        pred_arm, pred_x86,
+        mse_arm, mse_x86,
+        delta_g_arm, delta_g_x86,
+):
+    """Return the frozen five-stage max-abs cross-arch report.
+
+    Stages (always all five):
+      1. encoding: max_abs_difference(theta_arm, theta_x86)
+      2. evolved_features: per EVOLVED_GRAPHS + pre_evolution
+      3. prediction: per ALL_CONDITIONS
+      4. per_image_mse: per condition
+      5. delta_g: per EVOLVED_GRAPHS
+    """
+    encoding = max_abs_difference(theta_arm, theta_x86)
+
+    feature_keys = (PRE_EVOLUTION, *EVOLVED_GRAPHS)
+    evolved_features = {}
+    for key in feature_keys:
+        if key not in features_arm or key not in features_x86:
+            raise AuditInputError(
+                f"features missing condition {key!r} on one or both arches")
+        evolved_features[key] = max_abs_difference(
+            features_arm[key], features_x86[key])
+
+    prediction = {}
+    per_image_mse = {}
+    for condition in ALL_CONDITIONS:
+        if condition not in pred_arm or condition not in pred_x86:
+            raise AuditInputError(
+                f"predictions missing condition {condition!r}")
+        if condition not in mse_arm or condition not in mse_x86:
+            raise AuditInputError(
+                f"mse missing condition {condition!r}")
+        prediction[condition] = max_abs_difference(
+            pred_arm[condition], pred_x86[condition])
+        per_image_mse[condition] = max_abs_difference(
+            mse_arm[condition], mse_x86[condition])
+
+    delta_g = {}
+    for graph in EVOLVED_GRAPHS:
+        if graph not in delta_g_arm or graph not in delta_g_x86:
+            raise AuditInputError(
+                f"delta_g missing graph {graph!r} on one or both arches")
+        delta_g[graph] = max_abs_difference(
+            delta_g_arm[graph], delta_g_x86[graph])
+
+    return {
+        "encoding": encoding,
+        "evolved_features": evolved_features,
+        "prediction": prediction,
+        "per_image_mse": per_image_mse,
+        "delta_g": delta_g,
+    }
+
 
 
 def sensitivity_table(final_delta_by_steps, evaluate_gate):

@@ -340,13 +340,25 @@ trigger = "manual"
 [binding_gate.1ab709f01474]
 # COMPANION_PROTOCOLS: "The propagation measurement is descriptive at stages
 #  1-4. Stage 5 has one pre-committed halt condition."
-enforcement = ""            # UNWRITTEN -- no stress-set driver exists
-production_reachability = ""
-input_wiring = ""
-decision_consequence = ""
-test = ""
-break_demonstrated = ""
-trigger = "manual"
+enforcement = "experiments/stage2b_denoising/stage2b_audit.py::evaluate_propagation_halt"
+production_reachability = """
+run_arm_x86_propagation_stress.py::phase_propagate calls
+audit.evaluate_propagation_halt(stages["delta_g"]) after
+propagation_stage_maxima, and prints PROTOCOL1_OK or PROTOCOL1_HALT
+from the returned halt_triggered flag (exit 0 either way)."""
+input_wiring = """
+delta_g_max_abs_by_graph is stages["delta_g"] from
+propagation_stage_maxima — per-graph max abs of
+|Delta_g_arm - Delta_g_x86| over the stress set. threshold defaults to
+CONTRAST_THRESHOLD = 4.604761e-10."""
+decision_consequence = """
+halt_triggered True -> print PROTOCOL1_HALT (scientific consequence,
+exit 0). False -> PROTOCOL1_OK. Infrastructure failures print
+PROTOCOL1_FAIL and exit non-zero. Equality at threshold does not halt
+(strict >)."""
+test = "tests/test_stage2b_arm_x86_propagation.py::test_halt_false_when_all_at_or_below_threshold + test_halt_true_when_one_graph_exceeds_by_eps + test_halt_break_confirmation_stage5_only"
+break_demonstrated = "tests/test_stage2b_arm_x86_propagation.py::test_halt_true_when_one_graph_exceeds_by_eps (T = threshold + 1e-18 -> halt; T == threshold -> no halt)"
+trigger = "ci-fast"
 
 [binding_gate.9bc6f9e3808a]
 # AUDIT_PROTOCOL: "the per-fold mean of the new per-image OOF MSEs must
@@ -1846,13 +1858,16 @@ All five propagation stages -- encoding, evolved features per graph,
 prediction, per-image MSE, evolved-minus-pre contrast -- reported always,
 whatever any one of them shows. Reporting only the stages that stayed small
 would make the chain unreadable."""
-status = "pending_package"
-pending_reason = "no propagation measurement exists to report"
+status = "enforced"
+enforcement = "experiments/stage2b_denoising/stage2b_audit.py::propagation_stage_maxima"
+test = "tests/test_stage2b_arm_x86_propagation.py::test_stage_maxima_returns_all_five_stages_and_four_graphs + test_stage_maxima_raises_when_graph_omitted"
 negative_attestation = """
 Scoped to the propagation section of the package. This is a completeness
 obligation, so the failure is a MISSING row rather than a wrong one, and
 nothing in a written section reveals what was left out of it. The check is
-the reported stage list against the frozen five, both directions."""
+the reported stage list against the frozen five, both directions. The pure
+helper raises AuditInputError if any graph/condition key is omitted, and the
+unit test asserts the returned key set equals the frozen five."""
 
 [binding_claim.c188b4e50c99]
 locator = "COMPANION_PROTOCOLS.md, section 'Where component A comes from'"
@@ -1862,15 +1877,18 @@ per-image differences are not recoverable from the record, A is regenerated
 by encoding the stress set's other components on both architectures and is
 then reported AS REGENERATED, with the substitution stated -- never silently
 replaced by a different rule."""
-status = "pending_package"
-pending_reason = "the stress set has not been constructed"
+status = "enforced"
+enforcement = "experiments/stage2b_denoising/run_arm_x86_propagation_stress.py::build_construction_record"
+test = "tests/test_stage2b_arm_x86_propagation.py::test_construction_record_marks_a_regenerated"
 negative_attestation = """
 Scoped to component A's provenance statement in the package. The prohibited
 outcome is a substitution that happened and was not disclosed, which by
 construction leaves no trace in the artifact -- a regenerated A and a
 recovered A look identical. So the attestation must rest on the
 CONSTRUCTION record (which branch of the rule ran), not on inspection of
-the number."""
+the number. build_construction_record always sets
+component_a_source = \"regenerated\" (the only branch this driver implements);
+the unit test requires that field."""
 
 [binding_claim.0059f193dfec]
 locator = "COMPANION_PROTOCOLS.md, section 'ABS_CONV_EPS sensitivity table'"
@@ -1896,18 +1914,15 @@ the 500 largest by final-Delta, ties broken by official index ascending, and
 record both the cap and the true count. The 54,000-image run measured 79
 (0.146%), so the cap is expected to be INERT; it exists so the set size
 cannot be decided after seeing the number."""
-production_consumers = ""   # the stress-set builder is unwritten
-status = "pending_consumer"
-pending_reason = """
-The ARM/x86 stress-set construction does not exist. production_consumers is
-empty and stays empty until it does. Worth noting what makes this row
-unusual: the value is expected never to bind (79 << 500), which is precisely
-why it had to be frozen in advance -- a cap chosen after seeing the count is
-not a cap, and one that never fires is indistinguishable from one that was
-never set unless the freeze predates the measurement."""
-enforcement = ""
-break_demonstrated = ""
-trigger = "manual"
+production_consumers = """
+stage2b_audit.py::capped_positive_delta_indices (ranks/caps B);
+run_arm_x86_propagation_stress.py::phase_arm_construct and
+phase_propagate call it, then pass the capped array into
+build_stress_indices as positive_delta_indices."""
+status = "enforced"
+enforcement = "experiments/stage2b_denoising/stage2b_audit.py::capped_positive_delta_indices"
+break_demonstrated = "tests/test_stage2b_arm_x86_propagation.py::test_capped_positive_applies_cap_and_records_true_count (true_count=600 > 500 -> cap_applied True, len==500)"
+trigger = "ci-fast"
 
 [binding_claim.97abb4852e88]
 locator = "DESIGN.md, section 'Numerical precision' -- 'Stage-2 diagnostic (required)'"

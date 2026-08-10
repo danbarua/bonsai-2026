@@ -199,6 +199,16 @@ mention here, in the same commit that creates it.
   demand rather than committed. Run directly:
   `uv run python run_abs_conv_eps_sensitivity.py`.
 
+- **`run_arm_x86_propagation_stress.py`** — `COMPANION_PROTOCOLS.md` Protocol
+  1: ARM/x86 propagation stress set. Three resumable phases
+  (`arm-construct` local, `x86-encode` Colab x86, `propagate` local):
+  regenerate component A from dual-arch encodings of B∪C∪D, evolve both
+  arches, apply one frozen ridge fit per condition to both, five-stage
+  max-abs report, stage-5 halt vs `CONTRAST_THRESHOLD`. Synthesis kinds
+  embed a UTC `run_id`. `make stage2b-protocol1-arm-construct`,
+  `make stage2b-protocol1-x86-encode`, `make stage2b-protocol1-propagate`.
+
+
 - **`generate_stage2b_artifact_manifest.py`** — produces the committed
   `ARTIFACT_MANIFEST.json`: GCS object paths, payload SHA256, producing
   commit, and the frozen headline numbers behind Stage 2B's two locked
@@ -514,6 +524,7 @@ make test                      # the whole repository suite
 | `test_stage2b_audit.py` | the pure amendment-audit calculations — index alignment, gauge phases, trigger verdicts, the stress-set construction, the sequencing-gate guard |
 | `test_stage2b_audit_driver.py` | the audit driver's constants, the pinned pre-contract digest table, the sizing probe's projections and halt paths, and the fixed/reselected OR-combination's completeness and break-confirmation |
 | `test_stage2b_abs_conv_eps_sensitivity.py` | the `ABS_CONV_EPS` sensitivity table's invariance check and halt rule, plus a skip-cleanly-when-absent check against the real diagnostic pickle |
+| `test_stage2b_arm_x86_propagation.py` | Protocol 1 pure helpers (cap/rank/halt/five-stage maxima), construction-record regenerated-A field, run-id kind naming, driver AST contracts, encoding-sanity/row-alignment refusals |
 | `test_stage2b_artifact_manifest.py` | the artifact-manifest generator's list shape, the long-list-stripping break-confirmation, and a real-bucket check against the committed manifest |
 
 This table is the whole of what `make stage2b-test` runs, and the one

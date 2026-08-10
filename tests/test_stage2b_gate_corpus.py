@@ -156,11 +156,15 @@ def test_each_exemption_still_contributes_the_candidate_count_it_did():
     # headline numbers behind Stage 2B's two locked results") describes
     # what the script does and points at the two results it indexes --
     # same module-map genre as every other entry, not a new obligation.
+    # README.md moved 23 -> 24 adding the Protocol 1 driver module-map
+    # entry (run_arm_x86_propagation_stress.py). Same genre: names the
+    # driver, points at COMPANION_PROTOCOLS.md as authority, describes
+    # phases — not a new obligation stated in README's own voice.
     at_exemption_time = {
         "FINDINGS.md": 52,
         "NEGATIVE_PATH_EVIDENCE.md": 19,
         "PHASE_B_PLAN.md": 38,
-        "README.md": 23,
+        "README.md": 24,
     }
     assert set(at_exemption_time) == set(gate_corpus.EXEMPT), (
         "an exemption was added or removed without a candidate count")
