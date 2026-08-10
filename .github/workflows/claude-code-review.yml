@@ -195,7 +195,21 @@ jobs:
           # Findings stay advisory, because an LLM verdict that can turn a
           # build red is the failure mode this repository has spent the most
           # effort avoiding. Deterministic checks gate; this reports.
+          #
+          # Cost control (PR #29 run 31394098469: $5.04 Sonnet, 6 of 12 files,
+          # nested Agent fan-out, sticky "in progress", job success):
+          #   * haiku -- local preflight of the same surface was ~$0.25 / 12 files
+          #   * max-turns -- prefer an honest partial inventory over a long spend
+          #   * disallowed Agent/Task/ScheduleWakeup -- the $5 was five nested
+          #     Sonnets + a 300s wait that never finished the remaining files
+          # publish_review.sh now fails incomplete THIS-push coverage; the
+          # sticky + review_delta OUTSTANDING carry unfinished paths forward.
+          # Keep this file byte-identical on main and stage2b (parity guard).
           claude_args: |
+            --model haiku
+            --effort low
+            --max-turns 40
+            --disallowed-tools 'Agent,Task,ScheduleWakeup,WebSearch,WebFetch'
             --allowed-tools 'Read,Grep,Glob,mcp__github_comment__update_claude_comment,mcp__github_inline_comment__create_inline_comment,Bash(gh pr comment:*)'
             --json-schema '{"type":"object","properties":{"no_tests_changed":{"type":"boolean","description":"True if the PR changed no test files at all"},"files_examined":{"type":"array","items":{"type":"string"},"description":"Every test file actually read, by path"},"findings":{"type":"array","items":{"type":"object","properties":{"file":{"type":"string","description":"Path of the file CONTAINING the test -- not the file the test examines. These differ whenever a test inspects another file, which most of this suite does."},"test":{"type":"string","description":"Name of the test function, as written in that file"},"category":{"type":"string","description":"VACUOUS_TESTS.md taxonomy letter, or none"},"what_would_have_to_change":{"type":"string","description":"What would have to change for this test to fail; say nothing if the answer is nothing"}},"required":["file","test","category","what_would_have_to_change"]}},"summary":{"type":"string"}},"required":["no_tests_changed","files_examined","findings","summary"]}'
           prompt: |
@@ -226,18 +240,24 @@ jobs:
 
             CHANGED SINCE YOUR LAST REVIEW (mode `${{ steps.delta.outputs.mode }}`):
             ${{ steps.delta.outputs.files }}
-
-            `incremental` -- examine those files, plus any file carrying an
-            open finding. `none` -- nothing new; re-verify open findings and
-            stop. `full` -- the delta could not be computed (first run, or a
-            force-push), so review everything in scope and SAY you did.
+            `incremental` -- examine those files (EXAMINE + OUTSTANDING), plus
+            any file carrying an open finding. `none` -- nothing new; re-verify
+            open findings and stop. `full` -- the delta could not be computed
+            (first run, or a force-push), so review everything in scope and SAY
+            you did.
 
             The PR branch is checked out: read files from the working tree
             with Read, Grep and Glob. The ONLY shell command you may run is
             `gh pr comment`, for step 4. Everything else is already in your
-            context or on disk -- no git, and do not run the test suite:
-            every test in the catalogue passed, so running one tells you
-            nothing about whether it can fail.
+            context or on disk -- no git, no subagents, no background agents,
+            and do not run the test suite: every test in the catalogue passed,
+            so running one tells you nothing about whether it can fail.
+
+            If you cannot finish every path in this run, list the remainder
+            under **Not examined** on the sticky (and in structured output via
+            omitting them from files_examined). Do not post success over a
+            half-done pass -- publish_review fails incomplete this-push
+            coverage. The next run re-queues Not examined paths automatically.
 
             Your own previous reviews in `<comments>` and `<review_comments>`
             are YOUR PRIOR STATE, not background. The general guidance that
