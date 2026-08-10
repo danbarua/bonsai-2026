@@ -1,15 +1,82 @@
 {
+  "fingerprint": {
+    "config_digest": "ddc0f2baa39b8478eeb9b4497aa6dac5f029bae953fd64f99b9274875068607f",
+    "source_manifest_digest": "88b3ed486f76b128c1b8295c7d210b5fc574243fe20c2e3c0a1de8b8e8eaa0b4"
+  },
+  "justification_axes": {
+    "1_float64_precision": {
+      "dust_band": "1e-14 to 1e-16",
+      "position_of_1e-12": "above dust; distinguishable"
+    },
+    "2_phase_update_scale": {
+      "min_meaningful_delta_clean": 2.177e-07,
+      "orders_below": ">=5"
+    },
+    "3_encoder_implementation": {
+      "first_cross_1e-12": "300-600 steps",
+      "residual_series": [
+        8.37e-07,
+        8.062e-13,
+        0.0
+      ]
+    },
+    "4_downstream_feature_sensitivity": {
+      "contrast_threshold": 4.604761e-10,
+      "method": "analytic L_inf bound B on cos/sin features under uniform phase residual; conservative end-to-end |Delta_g| bound 2B (worst-case MSE difference under unit-bounded images). Compared to frozen contrast threshold 4.604761e-10 and to Protocol 1 production max |Delta_g|\u22481.830e-12. No full ODE re-evolve \u2014 bounds are strict. Every swept eps's 2B bound is below the frozen contrast threshold. It is NOT true that every swept eps is below both reference points: at eps=1e-10, 2B\u22482.000e-10 is ~109x the production max |Delta_g|; at eps=1e-12, 2B\u22482.000e-12 is ~1.09x it. Only eps=1e-13 (2B\u22482.000e-13) is below both. See each row's own below_contrast_threshold / below_production_max_delta_g fields for the per-eps verdict.",
+      "production_max_delta_g": 1.83e-12,
+      "production_max_final_delta": 2.468e-10,
+      "rows": [
+        {
+          "below_contrast_threshold": true,
+          "below_production_max_delta_g": false,
+          "below_solver_rtol": true,
+          "bound_over_contrast_threshold": 0.43433307396409937,
+          "bound_over_production_max_final_delta": 0.4051863857374392,
+          "bound_over_solver_rtol": 0.0001,
+          "conservative_delta_g_bound": 2e-10,
+          "feature_linf_bound": 1e-10,
+          "phase_residual": 1e-10
+        },
+        {
+          "below_contrast_threshold": true,
+          "below_production_max_delta_g": false,
+          "below_solver_rtol": true,
+          "bound_over_contrast_threshold": 0.004343330739640994,
+          "bound_over_production_max_final_delta": 0.004051863857374392,
+          "bound_over_solver_rtol": 1e-06,
+          "conservative_delta_g_bound": 2e-12,
+          "feature_linf_bound": 1e-12,
+          "phase_residual": 1e-12
+        },
+        {
+          "below_contrast_threshold": true,
+          "below_production_max_delta_g": true,
+          "below_solver_rtol": true,
+          "bound_over_contrast_threshold": 0.00043433307396409935,
+          "bound_over_production_max_final_delta": 0.0004051863857374392,
+          "bound_over_solver_rtol": 1.0000000000000001e-07,
+          "conservative_delta_g_bound": 2e-13,
+          "feature_linf_bound": 1e-13,
+          "phase_residual": 1e-13
+        }
+      ],
+      "solver_rtol": 1e-06
+    }
+  },
   "production_abs_conv_eps": 1e-12,
   "source": {
-    "n_used": 1000,
-    "pickle": "results/encoder_gate_failure_diagnostic.pkl",
-    "step_counts": [
-      75,
-      150,
-      300,
-      600,
-      1200
-    ]
+    "diagnostic_pickle": "results/encoder_gate_failure_diagnostic.pkl",
+    "ladder_objects": {
+      "1200": "stage2b/train/stage1/common/encoder_gate_s1200.npz"
+    },
+    "n_used_diagnostic": 1000,
+    "step_sources": {
+      "1200": "diagnostic+ladder",
+      "150": "diagnostic",
+      "300": "diagnostic",
+      "600": "diagnostic",
+      "75": "diagnostic"
+    }
   },
   "summary": {
     "consequence_rule": "COMPANION_PROTOCOLS.md Protocol 2: if the verdict at the locked ENCODER_STEPS differs across the swept eps range, that triggers renewed interpretation review before Stage 4. ABS_CONV_EPS itself does not change as a result of this table, regardless of outcome.",
@@ -22,6 +89,14 @@
       "300": true,
       "600": true,
       "75": true
+    },
+    "per_step_flip": {},
+    "step_sources": {
+      "1200": "diagnostic+ladder",
+      "150": "diagnostic",
+      "300": "diagnostic",
+      "600": "diagnostic",
+      "75": "diagnostic"
     }
   },
   "table": {
@@ -439,5 +514,6 @@
         "threshold": 10.0
       }
     }
-  }
+  },
+  "verdict": "PROTOCOL2_OK"
 }
