@@ -236,6 +236,23 @@ addendum and is deliberately NOT folded into §3 — that ledger was frozen at
 addition to a corrected family is flagged as nominal rather than absorbed.
 §3 stands at 6 of 38. Read this row alongside it, not inside it.
 
+**And then, in the same PR, it caught something.** Run 31403231653 — Haiku,
+1 m 28 s — examined 2 of 2 changed test files, reported `Not examined: None`,
+and found `assert selected_deltas[0] == deltas.max() or True` at
+`tests/test_stage2b_arm_x86_propagation.py:71`. The `or True` makes the
+assertion unfalsifiable. Verified here that the assertion would **pass**
+unaided (`selected_deltas[0]` is exactly `deltas.max()`), so it is a leftover
+debug escape, not a disabled check concealing a defect — which is why it
+scores **LATENT**, not a wrong result.
+
+Two things about that row matter more than the finding itself. First, the
+same workflow appears in this addendum as both the defect and, one commit
+later, the catcher — the narrowing worked, on its first real surface. Second,
+it does not disturb §2's headline. That headline is about **deterministic
+guards** catching **wrong results**; this is an LLM reviewer catching a latent
+one. A cheap complete pass beat an expensive partial one, which is a claim
+about coverage, not about the class of thing automation can find.
+
 It is also the review workflow appearing in a ledger as a defect rather than
 a catcher, which no §3 row does.
 
