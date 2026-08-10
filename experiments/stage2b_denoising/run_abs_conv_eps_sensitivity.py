@@ -182,6 +182,16 @@ def axis4_downstream_sensitivity(
 ) -> dict:
     """Numbers for COMPANION_PROTOCOLS axis 4 write-up.
 
+    `eps_values` defaults to the three eps COMPANION_PROTOCOLS.md's own
+    axis-4 prose names -- "what a phase residual of 1e-10, 1e-12 and
+    1e-13 does to the evolved features and to Delta_g" -- not the
+    four-value {1e-10, 1e-11, 1e-12, 1e-13} sweep used elsewhere in
+    Protocol 2 for the PASS/FAIL gate-verdict recomputation
+    (`compute_table`/`summarize`, and `fp_config["eps_list"]` in `main`).
+    Those are two different computations over two different eps sets by
+    the frozen protocol's own design, not an accidental mismatch: this
+    axis is a documented three-point subset of the full sweep.
+
     Feature L_inf bound is analytic and strict. End-to-end |Delta_g| is
     bounded conservatively by 2B (worst-case MSE difference under
     unit-bounded images / Lip <= 2 on the prediction residual) so the
@@ -209,8 +219,14 @@ def axis4_downstream_sensitivity(
             "residual; conservative end-to-end |Delta_g| bound 2B (worst-case "
             "MSE difference under unit-bounded images). Compared to frozen "
             "contrast threshold 4.604761e-10 and to Protocol 1 production max "
-            "|Delta_g|≈1.830e-12. No full ODE re-evolve — bounds are strict "
-            "and show every swept eps is far below both reference points."
+            "|Delta_g|≈1.830e-12. No full ODE re-evolve — bounds are strict. "
+            "Every swept eps's 2B bound is below the frozen contrast threshold. "
+            "It is NOT true that every swept eps is below both reference "
+            "points: at eps=1e-10, 2B≈2.000e-10 is ~109x the production max "
+            "|Delta_g|; at eps=1e-12, 2B≈2.000e-12 is ~1.09x it. Only "
+            "eps=1e-13 (2B≈2.000e-13) is below both. See each row's own "
+            "below_contrast_threshold / below_production_max_delta_g fields "
+            "for the per-eps verdict."
         ),
         "solver_rtol": solver_rtol,
         "production_max_final_delta": production_max_final_delta,
