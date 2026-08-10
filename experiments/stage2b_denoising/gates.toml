@@ -3121,7 +3121,7 @@ contemporaneous narration rather than standing obligation."""
 # value rows that already carry causal break evidence.
 
 [semantic_review]
-inventory_sha256 = "f0f0befb96830a34bf5682b408183c76ebeac3533b3096797ae6681ddb8c5f63"
+inventory_sha256 = "b5fb6a8323dbaf59d26a07e037501c5eec6106bc1db363249b7183257c3a6aed"
 reviewer = "Dan Barua (2026-08-10); earlier rulings by ChatGPT / Stage 2B Reviewer"
 # Separate from `reviewer` on the Reviewer's own instruction: "Claude Code
 # can encode my ruling mechanically; it cannot independently make my
@@ -3159,7 +3159,27 @@ Reviewer rulings of 2026-08-08 (scope, the three-way schema, the six
 dimensions) and 2026-08-09 (Part A over the 27 not_binding dispositions,
 Part B over the 12 discharged claims, the delta ruling accepting the
 A1/B10 supersession, and the sign-off ruling accepting B2).
-This refresh (2026-08-10) transcribed companion Protocol 1/2 discharges and binding_claim status repairs (enforced->discharged on 81d5/c188; P2 rows 0059/b4af/f589/91597 + 5354 gate fields) after new runs; hash refreshed. Scope limited to companion rows + semantic hash. Not a re-review of 2026-08-09 content."""
+This refresh (2026-08-10) transcribed companion Protocol 1/2 discharges and binding_claim status repairs (enforced->discharged on 81d5/c188; P2 rows 0059/b4af/f589/91597 + 5354 gate fields) after new runs; hash refreshed. Scope limited to companion rows + semantic hash. Not a re-review of 2026-08-09 content.
+
+SECOND REFRESH, same day, hash f0f0befb9683 -> b5fb6a8323db. A DISPOSITION
+CHANGE, so it took a ruling rather than the mechanical refresh the protocol
+above permits for prose. Dan, 2026-08-10: "If the status is different then
+the document is stale and should be updated to reflect the actual status."
+
+What changed, and it is small: b4af82150247 and f589d99127d1 moved
+`pending_package` -> `unresolved` (one word, twice), because their stated
+reason -- that the sensitivity table does not exist -- was false; and
+91597e31ea96 kept `discharged` while every citation supporting it was
+replaced, because `summary.per_step_flip` and `verdict` are not fields of
+the artifact it named. Corrections to records that disagreed with the
+artifact, not new scientific judgements: no obligation was reinterpreted,
+no threshold moved, and nothing was reclassified between binding kinds.
+
+The one judgement inside it, flagged rather than buried: `unresolved` was
+chosen over `discharged` for the two rows, on the precedent at 37ae915f8e61
+that structure is not a statement. If a reviewer reads those write-ups as
+already stating their axes' required conclusions, those two rows discharge
+and this attestation should be refreshed again."""
 scopes = ["not_binding", "superseded", "canonical_clause", "binding_claim"]
 findings = 12
 findings_resolved = 12
