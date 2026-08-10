@@ -3022,12 +3022,38 @@ contemporaneous narration rather than standing obligation."""
 # value rows that already carry causal break evidence.
 
 [semantic_review]
-inventory_sha256 = "14cfb4074e67fae6ee2f0942878619930c69e234d1858228f430c3d3efeadfc1"
-reviewer = "ChatGPT / Stage 2B Reviewer"
+inventory_sha256 = "f0f0befb96830a34bf5682b408183c76ebeac3533b3096797ae6681ddb8c5f63"
+reviewer = "Dan Barua (2026-08-10); earlier rulings by ChatGPT / Stage 2B Reviewer"
 # Separate from `reviewer` on the Reviewer's own instruction: "Claude Code
 # can encode my ruling mechanically; it cannot independently make my
 # attestation." This row is a transcription, and says so where a reader
 # meets it rather than somewhere else in the repository.
+#
+# 2026-08-10: the ChatGPT side has been forked repeatedly and there is no
+# longer a single continuous "Stage 2B Reviewer" to attest. Dan ruled
+# directly -- "just take it from me it's signed off" -- so `reviewer` now
+# names him, with the earlier rulings kept because `review_basis` still
+# rests on them. An attestation whose signer no longer exists as a
+# continuous entity cannot be refreshed by citing that signer again.
+#
+# THE RE-ATTESTATION PROTOCOL, written down because it was previously
+# undocumented and was being applied anyway -- Dan, 2026-08-10: "this
+# smells like an undocumented protocol". It did, and it was one:
+#
+#   MECHANICAL REFRESH is permitted when the parsed rows are unchanged in
+#   every disposition-bearing field (`enforcement`, `test`, `trigger`,
+#   `input_wiring`, `production_reachability`, `decision_consequence`,
+#   `kind`, `status`) and only prose moved -- a reworded rationale, a
+#   corrected comment. Show the parsed-row diff, then refresh the hash.
+#   The signature then covers reworded text, not a changed judgement.
+#
+#   A FRESH RULING is required whenever any of those fields changes, a row
+#   is added or removed, or a status moves. No diff excuses that.
+#
+# The distinction exists because `inventory_digest` hashes every byte above
+# this block, comments included -- so a typo fix and a status change are
+# indistinguishable to it. That is correct for a signature and useless as a
+# triage rule, which is why the rule has to live here in prose.
 recorded_by = "stage2b-lead (Claude Code), transcribing the ruling"
 review_basis = """
 Reviewer rulings of 2026-08-08 (scope, the three-way schema, the six
