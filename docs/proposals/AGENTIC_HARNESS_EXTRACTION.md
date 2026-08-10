@@ -644,13 +644,24 @@ correction cannot be attributed to either alone. This is principle 4 arriving
 from the other direction — not choosing the strongest of several controls
 after the fact, but being unable to separate two that both fired.
 
-**Event B is the control, and it is the one that did not get fixed.** Only a
-deterministic guard reported it; no human or LLM reviewer did; and it survived
-the closure commit. The obvious hypothesis is that a defect surfaced by a
-reviewer someone is reading gets attention, and one surfaced only by a red
-test in a suite nobody ran does not. Two events is not evidence for that, and
-it is recorded as a hypothesis with a cheap test attached: **watch whether
-event B is still red at the next checkpoint merge.**
+**Event B is the control.** Only a deterministic guard reported it; no human
+or LLM reviewer did; and it survived the closure commit. The obvious
+hypothesis is that a defect surfaced by a reviewer someone is reading gets
+attention, and one surfaced only by a red test in a suite nobody ran does not.
+
+**That hypothesis was stated here with a cheap test attached — whether event B
+was still red at the next checkpoint merge — and the test is void, because
+this document's author then fixed event B.** Commit `1771897`, same day, on
+Dan's instruction. Event B's survival was about four hours and ended by
+intervention, not by neglect, so it measures nothing about attention.
+
+Left in rather than deleted, with the failure named, because an unmarked dead
+test is worse than no test: a later reader finds a stated hypothesis, observes
+event B green, and concludes it was refuted. It was never run. The design
+error is worth keeping too — **the observer was also the fixer**, and a test
+whose outcome depends on the tester declining to act is not a test anyone
+should have written down. If the question matters, it needs a fresh pair and
+someone else's hands.
 
 What both events do establish, against §8's stronger phrasing: the guards are
 capable of catching genuinely new defects on the day they are introduced,
