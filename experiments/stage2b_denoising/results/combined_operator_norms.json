@@ -1,14 +1,21 @@
 {
   "claimed_end_to_end_lipschitz": 2.0,
+  "environment": {
+    "numpy": "2.5.1",
+    "platform": "macOS-26.5.2-arm64-arm-64bit-Mach-O"
+  },
   "note": "combined_norm is the induced infinity-norm of diag(1/s) @ W: max over output coordinates of the sum over input coordinates of |M|.",
   "rows": [
     {
       "alpha": 1000.0,
       "combined_norm": 11.579596102667127,
       "condition": "pre_evolution",
+      "frozen_mean_mse": 0.06685791187005567,
       "n_images": 60000,
       "raw_median_col_std": 0.27042512620209047,
       "raw_min_col_std": 0.05217537699756229,
+      "refit_vs_frozen_max_abs_mse_diff": 3.0253577421035516e-15,
+      "refit_vs_frozen_mean_abs_mse_diff": 1.3798019439977456e-16,
       "ridge_norm": 3.683490146864878,
       "scaler_norm": 19.16612888195751
     },
@@ -16,9 +23,12 @@
       "alpha": 1e-06,
       "combined_norm": 87461.39801375233,
       "condition": "T",
+      "frozen_mean_mse": 0.061458741076726504,
       "n_images": 60000,
       "raw_median_col_std": 0.12419859087147339,
       "raw_min_col_std": 0.0009582943700647064,
+      "refit_vs_frozen_max_abs_mse_diff": 3.774786039301148e-12,
+      "refit_vs_frozen_mean_abs_mse_diff": 2.695253370603908e-13,
       "ridge_norm": 16801.681351535477,
       "scaler_norm": 1043.520687628038
     },
@@ -26,9 +36,12 @@
       "alpha": 1e-06,
       "combined_norm": 760193.1801853387,
       "condition": "lattice",
+      "frozen_mean_mse": 0.062306622673478265,
       "n_images": 60000,
       "raw_median_col_std": 0.11776993657163583,
       "raw_min_col_std": 0.0024257054738822895,
+      "refit_vs_frozen_max_abs_mse_diff": 8.030964782079764e-12,
+      "refit_vs_frozen_mean_abs_mse_diff": 6.917915038271808e-13,
       "ridge_norm": 55494.711251615525,
       "scaler_norm": 412.2512031106239
     },
@@ -36,9 +49,12 @@
       "alpha": 1e-05,
       "combined_norm": 320563.3358759041,
       "condition": "rewired",
+      "frozen_mean_mse": 0.06429256272696708,
       "n_images": 60000,
       "raw_median_col_std": 0.022518833508470712,
       "raw_min_col_std": 0.0002096115394528037,
+      "refit_vs_frozen_max_abs_mse_diff": 1.9993035005327897e-12,
+      "refit_vs_frozen_mean_abs_mse_diff": 1.6055395606756618e-13,
       "ridge_norm": 10695.53808643939,
       "scaler_norm": 4770.729715599273
     },
@@ -46,11 +62,19 @@
       "alpha": 1e-05,
       "combined_norm": 650490.3519315664,
       "condition": "curr_random",
+      "frozen_mean_mse": 0.06356539921167409,
       "n_images": 60000,
       "raw_median_col_std": 0.01368143744716032,
       "raw_min_col_std": 6.783863378172796e-05,
+      "refit_vs_frozen_max_abs_mse_diff": 3.4025421369321407e-12,
+      "refit_vs_frozen_mean_abs_mse_diff": 1.7937186221293292e-13,
       "ridge_norm": 11302.987744136115,
       "scaler_norm": 14740.86290147762
     }
-  ]
+  ],
+  "source_sha256": {
+    "corpus": "9ae0a7d38cf5855053546241b8a26b14355c4616f76bcf2222aabfc45fdb4e1e",
+    "final_fit": "111273005c40cb6080febf13af7168de5f49a7aa20de3e28308ac9d8874be866",
+    "topologies": "f671e63cc00b1612db0da5976c14b8880e4c4f90ae7fb192297721665f1907a4"
+  }
 }

@@ -40,9 +40,11 @@ streamed and released one at a time. `fit_final` is called unmodified
     uv run python experiments/stage2b_denoising/measure_combined_operator_norm.py
 """
 import argparse
+import hashlib
 import io
 import json
 import os
+import platform
 import sys
 import urllib.request
 
@@ -78,6 +80,19 @@ def load_npz(url, cache_dir):
     return np.load(local, allow_pickle=False)
 
 
+def sha256_of(url, cache_dir):
+    """SHA-256 of the cached payload for `url`, so the committed result
+    records WHICH bytes it was computed from. The objects carry no
+    manifests to validate against, so this identifies rather than verifies
+    -- a later reader can at least tell whether they hold the same input."""
+    local = os.path.join(cache_dir, url.rsplit("/", 2)[-2] + "__" + url.rsplit("/", 1)[-1])
+    digest = hashlib.sha256()
+    with open(local, "rb") as handle:
+        for chunk in iter(lambda: handle.read(8 << 20), b""):
+            digest.update(chunk)
+    return digest.hexdigest()
+
+
 def induced_inf_norm(M):
     """max over output coordinates of sum over input coordinates of |M|.
 
@@ -87,7 +102,22 @@ def induced_inf_norm(M):
     return float(np.abs(M).sum(axis=0).max())
 
 
-def measure(condition, X, Y, alpha):
+def measure(condition, X, Y, alpha, frozen_mse=None):
+    """Refit and measure. `frozen_mse` is the production `mse_<condition>`
+    array from the final-fit npz, used to check that this refit reproduces
+    the frozen result.
+
+    W is NOT persisted by run_ladder_stage3 (only mse_* and summary_json),
+    so this operator is a RECONSTRUCTION, not the production matrix read
+    back. The reconstruction is validated against the one production
+    quantity that WAS persisted. Note what that does and does not buy:
+    matching per-image MSE confirms corpus alignment and that the refit
+    lands on the same predictions; it does NOT prove coefficient identity,
+    and this project's own equivalence gate treats coefficient agreement as
+    diagnostic rather than binding (stage2b_ridge.ridge_equivalence_check).
+    So the norm below is the norm of a fit that predicts identically, which
+    is the strongest claim available without the original W.
+    """
     fit, scaler = ridge.fit_final(X, Y, alpha)
     W = np.asarray(fit["W"][0], dtype=np.float64)      # (p, k)
     s = np.asarray(scaler.scale_, dtype=np.float64)    # (p,)
@@ -95,7 +125,7 @@ def measure(condition, X, Y, alpha):
     M = W / s[:, None]                                 # diag(1/s) @ W
     raw_std = np.asarray(X, dtype=np.float64).std(axis=0)
 
-    return {
+    row = {
         "condition": condition,
         "alpha": float(alpha),
         "n_images": int(X.shape[0]),
@@ -105,6 +135,17 @@ def measure(condition, X, Y, alpha):
         "raw_min_col_std": float(raw_std.min()),
         "raw_median_col_std": float(np.median(raw_std)),
     }
+
+    if frozen_mse is not None:
+        prediction = ridge.ridge_predict(fit, scaler.transform(X), 0)
+        refit_mse = ridge.clipped_per_image_mse(prediction, Y)
+        frozen = np.asarray(frozen_mse, dtype=np.float64)
+        row["refit_vs_frozen_max_abs_mse_diff"] = float(
+            np.max(np.abs(refit_mse - frozen)))
+        row["refit_vs_frozen_mean_abs_mse_diff"] = float(
+            np.mean(np.abs(refit_mse - frozen)))
+        row["frozen_mean_mse"] = float(np.mean(frozen))
+    return row
 
 
 def main(argv=None):
@@ -117,6 +158,8 @@ def main(argv=None):
 
     with load_npz(FINAL_FIT, args.cache) as final:
         alphas = json.loads(str(final["summary_json"]))["alphas"]
+        frozen_mse = {c: np.asarray(final[f"mse_{c}"]) for c in args.conditions
+                      if f"mse_{c}" in final.files}
     with load_npz(TOPOLOGIES, args.cache) as topo:
         active_indices = np.asarray(topo["active_indices"])
     with load_npz(CORPUS, args.cache) as corpus:
@@ -124,6 +167,9 @@ def main(argv=None):
     n = images.shape[0]
     Y = images.reshape(n, FULL_GRID)[:, active_indices]
     del images
+    digests = {name: sha256_of(url, args.cache)
+               for name, url in (("final_fit", FINAL_FIT), ("corpus", CORPUS),
+                                 ("topologies", TOPOLOGIES))}
     print(f"corpus n={n}, Y={Y.shape}, active={active_indices.size}\n", flush=True)
 
     rows = []
@@ -134,7 +180,8 @@ def main(argv=None):
         with load_npz(url, args.cache) as handle:
             X = np.asarray(handle["X"], dtype=np.float64)
         print(f"[{condition}] X={X.shape}, fitting at alpha={alphas[condition]} ...", flush=True)
-        row = measure(condition, X, Y, alphas[condition])
+        row = measure(condition, X, Y, alphas[condition],
+                      frozen_mse=frozen_mse.get(condition))
         del X
         rows.append(row)
         print(f"[{condition}] scaler={row['scaler_norm']:.3e} "
@@ -151,11 +198,39 @@ def main(argv=None):
 
     with open(args.out, "w", encoding="utf-8") as handle:
         handle.write(json.dumps({"rows": rows,
+                                 "source_sha256": digests,
+                                 "environment": {"numpy": np.__version__,
+                                                 "platform": platform.platform()},
                                  "claimed_end_to_end_lipschitz": CLAIMED_END_TO_END_LIPSCHITZ,
                                  "note": "combined_norm is the induced infinity-norm of "
                                          "diag(1/s) @ W: max over output coordinates of the "
                                          "sum over input coordinates of |M|."},
                                 indent=2, sort_keys=True))
+    print(f"""
+WHAT THIS IS AND IS NOT. `combined_norm` is the exact worst-case gain from
+raw features to unclipped prediction, over ARBITRARY feature perturbations.
+It is a MIDDLE SUBMAP. A value above {CLAIMED_END_TO_END_LIPSCHITZ:.0f} shows axis 4's published
+derivation is invalid; it does NOT by itself show the full
+ODE->features->readout->clipping->MSE->Delta_g composition exceeds {CLAIMED_END_TO_END_LIPSCHITZ:.0f}, because
+the upstream map may never reach the maximising direction and clipping/MSE
+may contract it. This file claimed otherwise once; external review, 2026-08-11.
+
+THE FULL-CHAIN REFUTATION IS ELSEWHERE, and already measured. Protocol 1
+(FINDINGS.md:1545-1596) propagated a real ARM-vs-x86 perturbation through
+the entire chain. Its stage 2 is exactly axis 4's B; its stage 5 is
+Delta_g. max|dDelta_g| / max|B| is a valid LOWER bound on the gain, because
+the image achieving the numerator has an input perturbation no larger than
+the denominator:
+
+    pre_evolution   2.776e-17 / 4.441e-16 =    0.06   (CONTRACTS)
+    T               9.975e-14 / 1.769e-15 =   56.4
+    lattice         4.455e-13 / 1.554e-15 =  286.7
+    rewired         5.483e-13 / 1.554e-15 =  352.8
+    curr_random     1.830e-12 / 1.332e-15 = 1373.9
+
+pre_evolution contracting is the mechanism the review named -- an upstream
+map that does not reach the submap's maximiser -- observed rather than
+assumed. For every evolved graph the reachable gain still exceeds {CLAIMED_END_TO_END_LIPSCHITZ:.0f}.""")
     print(f"\nwrote {args.out}")
     return 0
 
