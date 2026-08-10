@@ -219,12 +219,27 @@ branch. Three cost points, in the order they were measured: **$1.2769 /
 then **~$0.25** for the same surface locally on Haiku. The last two are Dan's
 measurements, recorded in `f0438cb`, not reproduced here.
 
-**The frequency defect stands; the cost defect was fixed by narrowing the
-model, not the trigger.** `f0438cb` pins the reviewer to Haiku at low effort,
-caps turns at 40, and disallows `Agent`/`Task`/`ScheduleWakeup`/web tools.
-Task #22's cost half closes; its frequency half and #23's scope question do
-not — the workflow still fires on `synchronize`. The workflow's in-line prose
-defends the current trigger and must not be carried forward as settled.
+**The cost defect was fixed by narrowing the model, not the trigger.**
+`f0438cb` pins the reviewer to Haiku at low effort, caps turns at 40, and
+disallows `Agent`/`Task`/`ScheduleWakeup`/web tools.
+
+**The frequency "defect" was not one, and this is a correction to the
+analysis rather than a change in the code.** Ruled on by Dan, 2026-08-10:
+*"Frequency is controlled by the length a PR is left open. If I wanted less
+frequent checks, I don't leave PRs open for a long time."* The trigger is
+not the control surface. `synchronize` fires per push to an OPEN PR, so the
+run count is set by how long a PR stays open and how many pushes land in
+that window — both of which the author already governs, without editing a
+workflow that has to stay byte-identical across three branches.
+
+Worth extracting as a general point, because it is the kind of error a
+component-by-component audit invites: **this review measured a rate and
+called it a defect without identifying what actually sets the rate.** A
+knob that appears to control X may be downstream of a human behaviour that
+controls X better, and changing the knob would have removed a lever nobody
+was pulling while leaving the real one untouched. Tasks #22 and #23 close
+on this basis; #23's scope question was blocked on a frequency change that
+should not happen.
 
 **The same run is an efficacy-ledger row, and a rare one.** PR #29 run
 31394098469 spawned five background agents, waited 300 s, examined 6 of 12
@@ -909,13 +924,19 @@ holds" — instead of silently breaking the link. The cost is one extra column.
 The current design teaches people not to improve their own documents, which
 is the wrong lesson to build in.
 
-And one warning is recorded rather than hidden: the automated review re-runs
-on every single change. That is a known problem, not a feature. Part of it has
-since been fixed — the review now uses a smaller, cheaper model and is
-forbidden from spawning helpers of its own, which took one run from about $5
-down to roughly 25 cents. But it still runs on every change, and nobody has
-yet decided what it should and should not look at. Making each run cheap is
-not the same as deciding it should happen.
+One thing recorded here was written up as a problem and turned out not to be
+one. The automated review re-runs on every change, and this document called
+that a defect. Part of it was a real cost problem and was fixed: the review
+now uses a smaller, cheaper model and cannot spawn helpers of its own, which
+took one run from about $5 to roughly 25 cents.
+
+The rest was a misreading. It re-runs on every change *to a pull request that
+is still open* — so how often it runs is set by how long someone leaves a
+request open, which the person opening it already controls. The setting that
+looked like the dial was not the dial. That is worth remembering as a general
+hazard of reviewing a system part by part: you can measure a rate, decide it
+is too high, and reach for the nearest adjustable thing without ever asking
+what is actually setting the rate.
 
 That episode is worth recording for a second reason. The expensive run had
 looked at half the files it was given, written a note saying it was still
