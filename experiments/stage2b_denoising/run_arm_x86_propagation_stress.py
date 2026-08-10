@@ -327,12 +327,10 @@ def load_modules(repo_root):
 
 
 def local_path_for(work_dir, object_name):
-    base = os.path.basename(object_name)
-    return os.path.join(work_dir, base)
+    # Full object path, not basename: condition-scoped kinds share basenames
+    # (features.npz, theta_T.npz) and must not clobber each other on disk.
+    return os.path.join(work_dir, object_name.replace("/", "__"))
 
-
-def results_mirror(work_dir, basename):
-    return os.path.join(work_dir, basename)
 
 
 def _obj(mods, kind, ext, condition=None, stage=LADDER_STAGE):
