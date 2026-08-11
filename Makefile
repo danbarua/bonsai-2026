@@ -807,6 +807,51 @@ stage2b-backfill-cnn-weights:  ## Add the trained CNN weights to stage 3's cnn_p
 stage2b-backfill-cnn-weights-dry:  ## The same run, stopping before the upload -- bills while running
 	$(MAKE) stage2b-backfill-cnn-weights BACKFILL_EXTRA_ENV='--env BONSAI_BACKFILL_DRYRUN=1'
 
+SESSION_2B_CNNARCH ?= stage2b-cnn-arch
+# A forward pass over 512 images on a 9,857-parameter net. The clone, the
+# pip install and two public-read fetches dominate; the compute is
+# seconds.
+CNNARCH_EXEC_TIMEOUT ?= 1800
+CNNARCH_REMOTE_OUT ?= /content/cnn_forward_x86.npz
+CNNARCH_LOCAL_OUT ?= $(STAGE2B_DIR)/results/cnn_forward_x86.npz
+
+.PHONY: stage2b-cnn-arch-x86
+stage2b-cnn-arch-x86:  ## CNN forward pass on Colab x86, downloaded for comparison -- bills while running
+	rc=0; src=0; \
+	cd $(REPO_ROOT) && \
+	commit=$$($(GIT) rev-parse HEAD); \
+	if ! $(GIT) branch -r --contains $$commit 2>/dev/null | grep -q .; then \
+		echo "[make] REFUSING: HEAD $$commit is not on any remote. Push before running -- the runtime can only fetch what origin has."; \
+		exit 1; \
+	fi; \
+	echo "[make] commit $$commit"; \
+	cd $(STAGE2B_DIR) && \
+	$(MIGHTY_COLAB) sessions && \
+	if $(MIGHTY_COLAB) status -s $(SESSION_2B_CNNARCH) 2>&1 | grep -q "not found"; then \
+		$(MIGHTY_COLAB) new -s $(SESSION_2B_CNNARCH) --gpu $(LADDER_GPU); \
+	else \
+		echo "[make] Reusing existing session $(SESSION_2B_CNNARCH)"; \
+	fi && \
+	$(MIGHTY_COLAB) reinstall -s $(SESSION_2B_CNNARCH) jax[cuda12]==0.11.0 diffrax==0.7.2 equinox optax && \
+	rc=0; out=$$($(MIGHTY_COLAB) exec -s $(SESSION_2B_CNNARCH) -f measure_cnn_arch_agreement.py --timeout $(CNNARCH_EXEC_TIMEOUT) --env BONSAI_COMMIT="$$commit" --env JAX_ENABLE_X64=1 --args "--phase run --out $(CNNARCH_REMOTE_OUT) --cache-dir /content/cnn_arch_cache" 2>&1) || rc=$$?; \
+	echo "$$out"; \
+	if [ $$rc -eq 0 ] && echo "$$out" | grep -q CNN_ARCH_OK; then \
+		$(MIGHTY_COLAB) download -s $(SESSION_2B_CNNARCH) $(CNNARCH_REMOTE_OUT) $(CNNARCH_LOCAL_OUT) || rc=$$?; \
+	else \
+		echo "[make] FAILED: the x86 forward pass did not report success (exec rc=$$rc)."; \
+		if [ $$rc -eq 0 ]; then rc=1; fi; \
+	fi; \
+	src=0; $(MIGHTY_COLAB) stop -s $(SESSION_2B_CNNARCH) || src=$$?; \
+	$(call check_teardown,$(SESSION_2B_CNNARCH)); \
+	exit $$rc
+
+.PHONY: stage2b-cnn-arch-compare
+stage2b-cnn-arch-compare:  ## Compare the ARM and x86 forward passes (free, local)
+	cd $(STAGE2B_DIR) && \
+	uv run --group gpu python measure_cnn_arch_agreement.py --phase compare \
+		--a results/cnn_forward_arm.npz --b results/cnn_forward_x86.npz \
+		--json-out results/cnn_arch_agreement.json
+
 SESSION_2B_LADDER4 ?= stage2b-ladder4
 
 # `EXEC_TIMEOUT` override, by the same reasoning as stage 3's. No stage-4
