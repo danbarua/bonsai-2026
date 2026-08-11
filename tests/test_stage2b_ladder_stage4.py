@@ -177,6 +177,20 @@ _NON_DRIVER_EXEMPTIONS = {
         "same validated consume path everything else uses, with the same "
         "named require_manifest=False opt-out run-scoped reports need. "
         "Read-only provenance indexing, not a driver and not new science.",
+    "plot_cnn_denoising.py":
+        "renders ten held-out characters as PIXELS. Corrupts test images "
+        "to draw them; computes no metric, writes no artifact, and no "
+        "number it prints enters any record. DESIGN.md's lock is on "
+        "EVALUATING against the test corpus, and held-out images are the "
+        "honest choice for a demonstration -- training-split characters "
+        "would show in-sample behaviour. Dan's ruling, 2026-08-11: "
+        "\"erm, I don't see why not? It's just for visualisation\".",
+    "animate_graph_dynamics.py":
+        "the same ten corrupted inputs under four topologies, animated as "
+        "a phase field. Same standing as plot_cnn_denoising.py above and "
+        "the same ruling: pixels, no metric, no artifact. The order "
+        "parameters it prints are descriptive readings of ten images at "
+        "one encoder seed, not a result.",
 }
 
 

@@ -222,6 +222,44 @@ mention here, in the same commit that creates it.
   inputs, ~460MB per condition streamed one at a time. Run directly:
   `uv run python measure_combined_operator_norm.py`.
 
+- **`backfill_cnn_weights.py`** — publishes the trained CNN. `train_cnn`
+  has always returned its best checkpoint and every caller dropped it, so
+  the network was trained and discarded four times before anyone noticed.
+  Retrains the three locked seeds on a GPU, halts unless the retrain
+  reproduces stage 3's `(best_seed, best_epoch)` exactly, then writes
+  `stage3/common/cnn_weights.npz` — all three seeds, a `weights_json`
+  provenance block, `cnn_production.npz` as a pinned parent. That
+  companion is NOT modified and cannot be: it is LINEAGE-class and
+  create-once, so `force` raises `WriteOnceViolation`. Fresh runs of
+  stage 3 now persist weights inline and need none of this.
+  `make stage2b-backfill-cnn-weights` — bills while running.
+
+- **`plot_cnn_denoising.py`** — the CNN on ten held-out KMNIST
+  characters: clean target, corrupted input, output, and the residual it
+  adds, since `x_hat_0 = x_t_clip + f_psi(x_t_clip)` makes that last row
+  literally the network's contribution. Weights over plain HTTPS from the
+  public-read bucket, so it runs from a fresh clone with no credentials
+  and no retraining. Prints one thing worth knowing: mean `|residual|` is
+  2.60e-01 inside the active support and 2.48e-01 outside it. Those 279
+  coordinates get no training signal, and convolutional weight sharing
+  writes to them anyway — untrained outputs are unconstrained, not inert.
+  No Stage 2B number is affected, since all scoring is masked, but the
+  CNN's picture is not the CNN's evaluated output.
+  `uv run python plot_cnn_denoising.py`.
+
+- **`animate_graph_dynamics.py`** — the same ten corrupted inputs under
+  all four topologies, evolved from an identical encoded state so every
+  row-to-row difference is topology alone. Animates the PHASE FIELD in
+  the locked reference-node gauge, not denoising: only
+  `theta_0 -> theta_T` has a time axis, and features are read at the
+  final frame. The CNN has no comparable animation — one feedforward
+  pass, no intermediate state — and inventing frames for it would be a
+  fabrication. Descriptive, ten images, one encoder seed: the controls
+  synchronise nearly completely (`R(T)` 0.9992 rewired, 0.9975 random)
+  while `T` and lattice do not (0.9730, 0.9738), and `R -> 1` is a state
+  whose phases have collapsed together and carry no spatial information.
+  `uv run python animate_graph_dynamics.py`.
+
 - **`run_arm_x86_propagation_stress.py`** — `COMPANION_PROTOCOLS.md` Protocol
   1: ARM/x86 propagation stress set. Three resumable phases
   (`arm-construct` local, `x86-encode` Colab x86, `propagate` local):

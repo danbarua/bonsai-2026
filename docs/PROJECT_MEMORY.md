@@ -1096,6 +1096,28 @@ KMNIST IDX files (`stage2b/train/stage1/common/kmnist_*.idx`),
 `stage3/common/corpus.npz`, `stage3/common/ridge_final_g13_88edf9ac.npz`,
 and each condition's `stage3/<condition>/features.npz` (~457MB each).
 
+Added 2026-08-11: `stage3/common/cnn_weights.npz` (113KB), the trained CNN
+itself. Until then the weights existed nowhere — `train_cnn` returned the
+best checkpoint and every caller dropped it, so stage 4 retrained all
+three seeds to get a model back and the network had been trained and
+discarded four times over. The object carries all three seeds, a
+`weights_json` provenance block, and `cnn_production.npz` as a pinned
+parent; load a model with `stage2b_cnn.deserialise_model`. Written by
+`experiments/stage2b_denoising/backfill_cnn_weights.py`
+(`make stage2b-backfill-cnn-weights`), which halts before writing unless
+the retrain reproduces stage 3's `(best_seed, best_epoch)` exactly. It
+does not modify `cnn_production.npz`, and could not: that object is
+LINEAGE-class and create-once, so `force` raises `WriteOnceViolation`.
+
+That retrain also produced evidence FINDINGS did not have. The selection
+reproduced on an **L4** — `seed=1`, `epoch=99`, and all three seeds'
+stopping epochs `[98, 99, 77]` — where every prior retrain had been on an
+A100. `best_clipped_val_mse` differed by 2.290e-06 and 3.442e-05 on two
+L4 runs, against 9.328e-07 and 2.385e-07 same-hardware. Early stopping
+runs at `MIN_DELTA=0.0` with a strict `<` and so has no tolerance band to
+absorb a moved metric, which is what makes cross-hardware agreement worth
+recording rather than assuming.
+
 **Regenerable locally, and verified.** `diagnose_encoder_gate_failure.py`
 rebuilds `results/encoder_gate_failure_diagnostic.pkl` in ~44s on CPU, and
 checks itself: identity-baseline MSE `0.19945944496779283` against the

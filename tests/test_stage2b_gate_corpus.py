@@ -200,7 +200,19 @@ def test_each_exemption_still_contributes_the_candidate_count_it_did():
         # a MEASUREMENT turned out to show, not an obligation on anything.
         # Same module-map genre as every entry above it; a description of a
         # script's finding cannot bind the system.
-        "README.md": 26,
+        # README.md moved 26 -> 28 adding the plot_cnn_denoising.py and
+        # animate_graph_dynamics.py module-map entries. Re-read, both: the
+        # CNN entry's NEVER-shaped text is "untrained outputs are
+        # unconstrained, not inert" and "no Stage 2B number is affected" --
+        # a measured description of where a residual lands and an explicit
+        # statement that it binds NOTHING. The animation entry's is "the CNN
+        # has no comparable animation" and "features are read at the final
+        # frame" -- a fact about what the pipeline's time axis covers, and a
+        # restatement of the locked feature point rather than a new
+        # obligation. Both are module-map entries in the same genre as every
+        # one above; a script that renders pixels and computes no metric has
+        # nothing to bind.
+        "README.md": 28,
     }
     assert set(at_exemption_time) == set(gate_corpus.EXEMPT), (
         "an exemption was added or removed without a candidate count")
