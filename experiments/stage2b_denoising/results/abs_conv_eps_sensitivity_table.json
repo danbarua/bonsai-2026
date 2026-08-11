@@ -1,7 +1,7 @@
 {
   "fingerprint": {
     "config_digest": "ddc0f2baa39b8478eeb9b4497aa6dac5f029bae953fd64f99b9274875068607f",
-    "source_manifest_digest": "88b3ed486f76b128c1b8295c7d210b5fc574243fe20c2e3c0a1de8b8e8eaa0b4"
+    "source_manifest_digest": "2c7d7f2318a072ef575508ec37bcb4de538fcd2c02039aa0df26967c5cfc339a"
   },
   "justification_axes": {
     "1_float64_precision": {
@@ -22,41 +22,63 @@
     },
     "4_downstream_feature_sensitivity": {
       "contrast_threshold": 4.604761e-10,
-      "method": "analytic L_inf bound B on cos/sin features under uniform phase residual; conservative end-to-end |Delta_g| bound 2B (worst-case MSE difference under unit-bounded images). Compared to frozen contrast threshold 4.604761e-10 and to Protocol 1 production max |Delta_g|\u22481.830e-12. No full ODE re-evolve \u2014 bounds are strict. Every swept eps's 2B bound is below the frozen contrast threshold. It is NOT true that every swept eps is below both reference points: at eps=1e-10, 2B\u22482.000e-10 is ~109x the production max |Delta_g|; at eps=1e-12, 2B\u22482.000e-12 is ~1.09x it. Only eps=1e-13 (2B\u22482.000e-13) is below both. See each row's own below_contrast_threshold / below_production_max_delta_g fields for the per-eps verdict.",
+      "method": "Analytic L_inf bound B on the cos/sin FEATURES under a uniform phase residual, gauge-corrected: the reference-node gauge means both theta_i and theta_ref carry the residual, so B = 2*sin(eps), twice the previously published 2*sin(eps/2). No full ODE re-evolve; this half is analytic and strict. The Delta_g half asserts NO BOUND. The previously published conservative_delta_g_bound = 2B is WITHDRAWN and not replaced -- see protocol1_measured_propagation for what a real perturbation actually did end to end, and its `scope` for the limits of that.",
       "production_max_delta_g": 1.83e-12,
       "production_max_final_delta": 2.468e-10,
+      "protocol1_measured_propagation": {
+        "gauge_corrected_B_at_that_eps": 8.8817842e-16,
+        "per_condition": {
+          "T": {
+            "below_contrast_threshold": true,
+            "observed_max_abs_delta_g_difference": 9.975e-14,
+            "times_contrast_threshold": 0.00021662362063959456,
+            "times_withdrawn_2B_envelope": 56.15425783481657
+          },
+          "curr_random": {
+            "below_contrast_threshold": true,
+            "observed_max_abs_delta_g_difference": 1.83e-12,
+            "times_contrast_threshold": 0.003974147626771509,
+            "times_withdrawn_2B_envelope": 1030.1984144131761
+          },
+          "lattice": {
+            "below_contrast_threshold": true,
+            "observed_max_abs_delta_g_difference": 4.455e-13,
+            "times_contrast_threshold": 0.0009674769222550313,
+            "times_withdrawn_2B_envelope": 250.7942041645191
+          },
+          "rewired": {
+            "below_contrast_threshold": true,
+            "observed_max_abs_delta_g_difference": 5.483e-13,
+            "times_contrast_threshold": 0.0011907241222725783,
+            "times_withdrawn_2B_envelope": 308.665459356691
+          }
+        },
+        "perturbation": "real ARM vs x86 floating-point difference",
+        "scope": "Empirical counterexample to the universal claim |dDelta_g| <= 2B for the implemented pipeline. NO REPLACEMENT BOUND IS ESTABLISHED: these are observed maxima on one perturbation family at one eps, not a Lipschitz constant, and extrapolation across the swept eps range is unmeasured. Every observed |dDelta_g| remains far below the frozen contrast threshold, so the withdrawal changes no verdict -- it removes an unsupported derivation, not a result.",
+        "source": "Protocol 1, FINDINGS.md:1535-1596; 287-image stress set",
+        "stage1_theta_max_abs_difference": 4.4408921e-16,
+        "withdrawn_2B_envelope_at_that_eps": 1.77635684e-15
+      },
       "rows": [
         {
-          "below_contrast_threshold": true,
-          "below_production_max_delta_g": false,
           "below_solver_rtol": true,
-          "bound_over_contrast_threshold": 0.43433307396409937,
-          "bound_over_production_max_final_delta": 0.4051863857374392,
-          "bound_over_solver_rtol": 0.0001,
-          "conservative_delta_g_bound": 2e-10,
-          "feature_linf_bound": 1e-10,
+          "bound_over_production_max_final_delta": 0.8103727714748784,
+          "bound_over_solver_rtol": 0.0002,
+          "feature_linf_bound": 2e-10,
           "phase_residual": 1e-10
         },
         {
-          "below_contrast_threshold": true,
-          "below_production_max_delta_g": false,
           "below_solver_rtol": true,
-          "bound_over_contrast_threshold": 0.004343330739640994,
-          "bound_over_production_max_final_delta": 0.004051863857374392,
-          "bound_over_solver_rtol": 1e-06,
-          "conservative_delta_g_bound": 2e-12,
-          "feature_linf_bound": 1e-12,
+          "bound_over_production_max_final_delta": 0.008103727714748784,
+          "bound_over_solver_rtol": 2e-06,
+          "feature_linf_bound": 2e-12,
           "phase_residual": 1e-12
         },
         {
-          "below_contrast_threshold": true,
-          "below_production_max_delta_g": true,
           "below_solver_rtol": true,
-          "bound_over_contrast_threshold": 0.00043433307396409935,
-          "bound_over_production_max_final_delta": 0.0004051863857374392,
-          "bound_over_solver_rtol": 1.0000000000000001e-07,
-          "conservative_delta_g_bound": 2e-13,
-          "feature_linf_bound": 1e-13,
+          "bound_over_production_max_final_delta": 0.0008103727714748784,
+          "bound_over_solver_rtol": 2.0000000000000002e-07,
+          "feature_linf_bound": 2e-13,
           "phase_residual": 1e-13
         }
       ],
