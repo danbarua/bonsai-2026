@@ -110,6 +110,8 @@ A T4 run does NOT establish this either way -- T4 has no TF32 hardware,
 so it cannot exhibit the effect, and it reported agreement at default
 precision. A100 is this project's default GPU.
 """
+import io
+
 import equinox as eqx
 import jax
 import jax.numpy as jnp
@@ -365,6 +367,76 @@ def make_model(key, dtype=CNN_DTYPE):
             f"equinox resolves dtype=None against jax_enable_x64, so an implicit dtype "
             f"would depend on module import order")
     return model
+
+
+# ---- Persisting a trained model ----
+#
+# `train_cnn` returns its best checkpoint under `"model"`, and until now
+# every caller dropped it: stage 3's `compute_cnn` built an array dict of
+# loss histories, and stage 4 retrained all three seeds from scratch to
+# get a model back. That cost was paid four times (stage 3 once, stage
+# 4's three attempts) before anyone noticed it was avoidable, which is
+# the same shape as principle 24 -- a quantity whose generator ran and
+# whose output was not kept.
+#
+# Serialised through equinox's own leaf writer rather than by naming the
+# nine arrays by hand: a hand-written flatten/unflatten pair is exactly
+# the reimplemented-helper hazard of principle 16, and it would silently
+# break the day the architecture gains a layer. The bytes go into an npz
+# as `uint8` so `allow_pickle=False` -- the contract every reader in this
+# stage uses -- keeps holding.
+
+def serialise_model(model):
+    """The model's leaves as a `uint8` array, suitable for `np.savez`.
+
+    Round-trips through `deserialise_model`. Verify with
+    `model_round_trip_mismatch` before trusting a written file: a blob
+    that has never been read back is a write, not a persisted model."""
+    buf = io.BytesIO()
+    eqx.tree_serialise_leaves(buf, model)
+    return np.frombuffer(buf.getvalue(), dtype=np.uint8).copy()
+
+
+def deserialise_model(blob, dtype=CNN_DTYPE):
+    """Rebuild a model from `serialise_model`'s bytes.
+
+    The skeleton's key is fixed and arbitrary -- `tree_deserialise_leaves`
+    overwrites every leaf, so initialization cannot survive into the
+    result. What the skeleton does carry is the architecture, and
+    `make_model` asserts its parameter count and dtype, so a blob from a
+    different architecture fails on shape here rather than loading into a
+    quietly wrong model."""
+    skeleton = make_model(jr.PRNGKey(0), dtype=dtype)
+    return eqx.tree_deserialise_leaves(io.BytesIO(np.asarray(blob, dtype=np.uint8).tobytes()),
+                                       skeleton)
+
+
+def model_round_trip_mismatch(model, blob, probe):
+    """`None` if `blob` reloads into a model whose forward pass on `probe`
+    is bit-identical to `model`'s, else the reason it is not.
+
+    A pure function returning a reason, like `floor_halt_reason` and
+    `cnn_reproduction_mismatch_reason`, so the decision is testable rather
+    than an assertion buried in a driver.
+
+    Bit-identical is the right bar and not a strict one: this is the SAME
+    weights on the SAME device through the SAME `forward`, so any
+    difference at all means the serialization lost something. It is not
+    the cross-hardware reproduction question -- that is
+    `cnn_reproduction_mismatch_reason`'s, and it deliberately tolerates
+    float32 drift because retraining is iterative. Nothing here is."""
+    reloaded = deserialise_model(blob)
+    original_out = np.asarray(forward(model, probe))
+    reloaded_out = np.asarray(forward(reloaded, probe))
+    if original_out.shape != reloaded_out.shape:
+        return (f"reloaded forward pass has shape {reloaded_out.shape}, "
+                f"original {original_out.shape}")
+    if not np.array_equal(original_out, reloaded_out):
+        worst = float(np.max(np.abs(original_out - reloaded_out)))
+        return (f"reloaded forward pass differs from the original by up to {worst:.6e} "
+                f"on {int(np.count_nonzero(original_out != reloaded_out))} of "
+                f"{original_out.size} outputs; serialization is lossy")
+    return None
 
 
 def make_optimizer():

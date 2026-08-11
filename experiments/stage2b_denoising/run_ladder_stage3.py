@@ -1212,11 +1212,31 @@ def step8_cnn(mods, bucket, corpus, topo, corr, record, fp, parents):
         best_seed, best_index = mods.cnn.select_best_seed(
             [r["seed"] for r in runs], [r["best_clipped_val_mse"] for r in runs])
 
+        # The trained weights, kept rather than dropped. Until this was
+        # added, `run["model"]` fell out of scope here and stage 4 had to
+        # retrain all three seeds to get a model back -- a cost paid four
+        # times over before it was noticed. `run_ladder_stage4.py`'s
+        # module docstring describes that retrain-and-verify design; it
+        # stays correct and is not weakened by this, since a stage 4 run
+        # against an artifact WITHOUT these keys still retrains exactly as
+        # before.
+        #
+        # Round-tripped before the arrays are handed over, on a probe
+        # taken from this run's own validation inputs. A blob that has
+        # never been read back is a write, not a persisted model, and a
+        # silently lossy one would surface as a wrong model much later,
+        # in whatever consumed it.
+        probe = mods.cnn.as_image_batch(val_noisy[:4], "round-trip probe")
         arrays = {}
         for run in runs:
             s = run["seed"]
             arrays[f"train_history_seed{s}"] = run["raw_train_loss_history"]
             arrays[f"val_history_seed{s}"] = run["clipped_val_mse_history"]
+            blob = mods.cnn.serialise_model(run["model"])
+            lossy = mods.cnn.model_round_trip_mismatch(run["model"], blob, probe)
+            if lossy:
+                raise RuntimeError(f"CNN seed={s} weights do not round-trip: {lossy}")
+            arrays[f"weights_seed{s}"] = blob
         meta = {
             "best_seed": best_seed, "best_index": best_index,
             "best_epoch": int(runs[best_index]["best_epoch"]),
@@ -1231,6 +1251,13 @@ def step8_cnn(mods, bucket, corpus, topo, corr, record, fp, parents):
             "identity_val_mse": identity_val_mse,
             "n_params": int(runs[0]["n_params"]),
             "n_fit": int(fit_clean.shape[0]), "n_validation": int(val_clean.shape[0]),
+            # Explicit rather than inferable from the key list: a reader
+            # holding this file needs to know the bytes are equinox leaf
+            # order against `make_model`'s architecture, not a bare
+            # parameter dump it could unpack itself.
+            "weights_format": "equinox.tree_serialise_leaves -> uint8, "
+                              "load via stage2b_cnn.deserialise_model",
+            "weights_keys": [f"weights_seed{r['seed']}" for r in runs],
         }
         arrays["summary_json"] = np.array(_dumps(meta))
         return arrays
