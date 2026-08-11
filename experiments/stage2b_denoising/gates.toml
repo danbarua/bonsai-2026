@@ -288,12 +288,10 @@ trigger = "ci-fast"
 #  index, never by positional prefix."
 enforcement = "experiments/stage2b_denoising/stage2b_partition.py::index_join"
 production_reachability = """
-Three call sites in run_ladder_stage3.py (the encoded-array join, and the
-CNN fit/validation row joins) plus compare_stage3_regeneration.py::align.
-Reachability is ASSERTED rather than assumed: the test resolves the calls
-from the driver's AST and then checks the enclosing functions against the
-transitive closure of what main() calls, so three joins parked in a helper
-nothing invokes fail rather than count."""
+Three call sites: the encoded-array join in run_ladder_stage3.py, the CNN
+fit/validation row joins in stage2b_cnn.training_inputs (shared by the
+stage-3 driver and the weights backfill, so the two cannot drift apart),
+and compare_stage3_regeneration.py::align."""
 input_wiring = """
 `source_indices` and `target_indices` are the official KMNIST index arrays
 travelling beside each artifact -- the second half of Freeze 2
@@ -306,23 +304,26 @@ decision_consequence = """
 ValueError before any comparison, on a missing image or on duplicate target
 indices (an ambiguous join). At `align`, a prefix alignment is refused
 outright. Nothing downstream sees rows."""
-test = "tests/test_stage2b_ladder_stage3.py::test_the_driver_joins_through_the_shared_helper"
+test = "tests/test_stage2b_ladder_stage3.py::test_index_join_agrees_with_a_brute_force_join"
 break_demonstrated = """
-The second defect this inventory has turned up, and the same shape as
-VACUOUS_TESTS #17. The test WAS a source grep -- `"partition.index_join(" in
-source`. Replacing all three joins with a hand-rolled positional one and
-leaving the old call in a comment left it GREEN: the exact substitution this
-clause forbids, undetected, because a comment satisfies a substring search.
+`rows` replaced by `np.arange(source.size)` -- the positional prefix this
+clause exists to forbid, and the shape the protocol names: two artifacts
+built from differently-ordered index lists align row-for-row, agree on
+shape, and compare wrong numbers with nothing raised. 5 tests FAIL across
+two files, including the brute-force test above and
+test_stage2b_compare_stage3's single-changed-coordinate and
+comparison-is-on-bytes tests -- so the break is caught at the consumers,
+not only at the predicate.
 
-Rewritten to resolve calls from the AST, where comments do not exist, and
-each of its three assertions confirmed by an independent break:
-(a) reimplemented join + comment -> "makes no call to index_join anywhere in
-its AST"; (b) two joins reimplemented, one left in a dead helper -> "found 1"
-against the expected 3; (c) all three joins present but inside a function
-main() never reaches -> "called only in ['_dead_join_helper'], which main()
-never reaches". (c) matters because (b) tripped the COUNT check first, so
-the reachability assertion had to be exercised on its own or it would have
-been an untested guard sitting inside a tested test."""
+An earlier AST-walking test guarded the DRIVER's spelling instead: it
+counted `index_join` call nodes and checked their enclosing functions
+against the transitive closure of main(). It was deleted 2026-08-11 as
+brittle, having failed on a refactor that moved two of those calls into
+`stage2b_cnn.training_inputs` -- a change that shares the join more widely
+rather than bypassing it. A test that fails when the code gets better is
+measuring the wrong thing. What survives is the behavioural evidence
+above: the join is exercised against an independent implementation, and
+breaking it fails real consumers."""
 trigger = "ci-fast"
 
 [binding_gate.5354bdafe541]
@@ -3199,7 +3200,7 @@ contemporaneous narration rather than standing obligation."""
 # value rows that already carry causal break evidence.
 
 [semantic_review]
-inventory_sha256 = "43215cc6ff72eb863d5d21c08ba3d9a501ab65ed025c94e77983964459e75d61"
+inventory_sha256 = "RECOMPUTE_AFTER_MERGE"
 reviewer = "Dan Barua (2026-08-10, 2026-08-11); earlier rulings by ChatGPT / Stage 2B Reviewer"
 # Separate from `reviewer` on the Reviewer's own instruction: "Claude Code
 # can encode my ruling mechanically; it cannot independently make my
@@ -3293,7 +3294,35 @@ history that already existed, the same character as the second refresh's
 own corrections. PROJECT_MEMORY.md's citation of Protocol 1's run_id
 (`20260810T124247Z` -> `20260810T151245Z`, matching FINDINGS.md's own
 "authoritative process-closure run_id" statement) was corrected in the
-same pass, outside this inventory but for the same reason."""
+same pass, outside this inventory but for the same reason.
+
+FOURTH REFRESH, 2026-08-11, hash 43215cc6ff72 -> RECOMPUTE_AFTER_MERGE.
+Concurrent with the third, not after it: two sessions each refreshed this
+attestation the same day for unrelated changes, and both are recorded
+rather than one silently winning the merge. A FRESH
+RULING, not a mechanical one: `test` and `production_reachability` both
+changed on binding_gate.fc246f4fab3c, and the protocol above requires a
+ruling for either. Dan, 2026-08-11, on being shown the cascade the change
+implied: "it's a ridiculous and brittle test. delete it" and "finish that
+cascade."
+
+What changed: `test_the_driver_joins_through_the_shared_helper` was
+DELETED, and the row now cites `test_index_join_agrees_with_a_brute_force_
+join` instead. The deleted test walked the stage-3 driver's AST counting
+`index_join` call nodes; it failed when two of those calls moved into
+`stage2b_cnn.training_inputs` so the driver and the CNN weights backfill
+would share one derivation -- a change that widens use of the shared
+helper, which is what this gate wants. A guard that fires on the code
+improving is measuring the wrong property.
+
+The gate itself is UNCHANGED and is now evidenced behaviourally rather
+than syntactically: `index_join` against an independent implementation,
+plus a demonstrated break (`rows` -> `np.arange(source.size)`, the
+positional prefix AUDIT_PROTOCOL forbids) failing 5 tests across two
+files, at the consumers and not only at the predicate. No obligation was
+reinterpreted, no threshold moved, and `enforcement`, `kind`, `status` and
+`trigger` are untouched. `production_reachability` changed only to name
+the call sites where they now live."""
 scopes = ["not_binding", "superseded", "canonical_clause", "binding_claim"]
 findings = 12
 findings_resolved = 12

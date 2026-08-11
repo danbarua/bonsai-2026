@@ -127,6 +127,23 @@ specifically for it: all three joins present, all inside a helper nothing
 invokes. **When one assertion shadows another, the shadowed one has not
 been demonstrated, whatever the test's overall red/green says.**
 
+**Postscript, 2026-08-11: the AST replacement was itself deleted.** It
+failed on a refactor that moved two of the driver's three joins into
+`stage2b_cnn.training_inputs`, so that the stage-3 driver and the CNN
+weights backfill would share one derivation instead of two — a change that
+spreads the shared helper *wider*, which is what the gate wants. The test
+counted call nodes in one file, so it read that as the violation.
+
+The lesson is not that AST resolution was the wrong instrument; against a
+substring search it plainly was better. It is that **both versions
+measured the driver's spelling rather than the join's behaviour**, and any
+such test opposes refactoring by construction. What replaced it is the
+behavioural evidence that was always available: `index_join` checked
+against an independent implementation, plus a demonstrated break —
+replacing `rows` with `np.arange(source.size)` fails 5 tests across two
+files, at the consumers rather than only at the predicate. Recorded at
+`gates.toml`'s `binding_gate.fc246f4fab3c`.
+
 **B. The predicate cannot match.** Session incidents: `perl` patterns that
 matched nothing; `line.startswith("FAILED")` against pytest output that
 was ANSI-coloured, so every line began with an escape sequence. A filter

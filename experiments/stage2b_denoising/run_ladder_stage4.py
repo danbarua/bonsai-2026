@@ -544,34 +544,16 @@ def refuse_if_official_result_exists(mods, bucket, name):
 
 
 def cnn_reproduction_mismatch_reason(reproduced, original):
-    """Whether a freshly-retrained best-of-3 CNN selection reproduces
-    stage 3's persisted one, structurally.
+    """This driver's binding of `stage2b_cnn`'s check, at `TRAIN_STAGE`.
 
-    Compares `best_seed` and `best_epoch` for EXACT equality -- both are
-    integer selections (an argmin over three seeds; an early-stopping
-    epoch count), not floating-point measurements, so exact equality is
-    the right comparison and not a fragile one. Deliberately does NOT
-    gate on `best_clipped_val_mse` with an invented numeric tolerance:
-    `AUDIT_PROTOCOL.md`'s Freeze 1 already rejected choosing a tolerance
-    after seeing a number, and this driver has no measured basis for one.
-    The MSE difference is reported by the caller for human review, never
-    used here to pass or fail anything.
-
-    Returns a halt-reason string, or None if seed and epoch both match."""
-    r_seed, o_seed = int(reproduced["best_seed"]), int(original["best_seed"])
-    if r_seed != o_seed:
-        return (f"CNN retraining selected seed={r_seed}, stage {TRAIN_STAGE} selected "
-                f"seed={o_seed}. Same three fixed seeds, same fit/validation data -- a "
-                f"different argmin means the training run did not reproduce, not that "
-                f"a coin landed differently.")
-    r_epoch, o_epoch = int(reproduced["best_epoch"]), int(original["best_epoch"])
-    if r_epoch != o_epoch:
-        return (f"CNN retraining's selected seed ({r_seed}) stopped at "
-                f"best_epoch={r_epoch}, stage {TRAIN_STAGE}'s stopped at "
-                f"best_epoch={o_epoch}. Early stopping is deterministic given the "
-                f"validation trajectory; a different stopping point means the "
-                f"trajectory itself differed.")
-    return None
+    The implementation moved to the library so the weights backfill could
+    call the SAME one: this module executes `main()` at import time when
+    `BONSAI_COMMIT` is set, so importing it from a Colab runtime to reach
+    one function would launch a stage-4 run. Kept as a name here because
+    the tests and the step below both reach for it on this module."""
+    import stage2b_cnn
+    return stage2b_cnn.cnn_reproduction_mismatch_reason(
+        reproduced, original, train_stage=TRAIN_STAGE)
 
 
 # ------------------------------------------------------------------ steps

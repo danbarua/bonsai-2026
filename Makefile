@@ -762,6 +762,51 @@ stage2b-ladder-stage3:  ## Run Stage 2B ladder stage 3 Phase B (n=60,000) on a C
 	$(call check_teardown,$(SESSION_2B_LADDER3)); \
 	exit $$rc
 
+SESSION_2B_BACKFILL ?= stage2b-cnn-backfill
+# Stage 3 measured the whole three-seed train at 639.6s on an A100
+# (`wallclock_s_per_seed` in cnn_production.npz: 228.4 / 219.2 / 192.0).
+# 3600 covers that plus the clone, the pip install and the corpus download,
+# without inheriting stage 3's 10800 -- this trains and uploads one object,
+# it does not run a ladder.
+BACKFILL_EXEC_TIMEOUT ?= 3600
+
+.PHONY: stage2b-backfill-cnn-weights
+stage2b-backfill-cnn-weights:  ## Add the trained CNN weights to stage 3's cnn_production.npz on a Colab GPU -- bills while running
+	rc=0; src=0; \
+	cd $(REPO_ROOT) && \
+	if ! $(CLOSURE_CHECK) $(STAGE2B_DIR)/backfill_cnn_weights.py; then \
+		exit 1; \
+	fi; \
+	commit=$$($(GIT) rev-parse HEAD); \
+	if ! $(GIT) branch -r --contains $$commit 2>/dev/null | grep -q .; then \
+		echo "[make] REFUSING: HEAD $$commit is not on any remote. Push before running -- the runtime can only fetch what origin has."; \
+		exit 1; \
+	fi; \
+	driver_sha=$$(shasum -a 256 $(STAGE2B_DIR)/backfill_cnn_weights.py | cut -d' ' -f1); \
+	echo "[make] commit $$commit, driver sha256 $$driver_sha"; \
+	cd $(STAGE2B_DIR) && \
+	$(MIGHTY_COLAB) sessions && \
+	if $(MIGHTY_COLAB) status -s $(SESSION_2B_BACKFILL) 2>&1 | grep -q "not found"; then \
+		$(MIGHTY_COLAB) new -s $(SESSION_2B_BACKFILL) --gpu $(LADDER_GPU); \
+	else \
+		echo "[make] Reusing existing session $(SESSION_2B_BACKFILL)"; \
+	fi && \
+	$(MIGHTY_COLAB) reinstall -s $(SESSION_2B_BACKFILL) jax[cuda12]==0.11.0 diffrax==0.7.2 google-cloud-storage equinox optax && \
+	$(MIGHTY_COLAB) upload -s $(SESSION_2B_BACKFILL) $(BONSAI_GCS_CREDENTIALS) $(REMOTE_KEY_PATH) && \
+	rc=0; out=$$($(MIGHTY_COLAB) exec -s $(SESSION_2B_BACKFILL) -f backfill_cnn_weights.py --timeout $(BACKFILL_EXEC_TIMEOUT) $(GCS_EXEC_ENV) --env BONSAI_COMMIT="$$commit" --env BONSAI_DRIVER_SHA256="$$driver_sha" --env JAX_ENABLE_X64=1 $(BACKFILL_EXTRA_ENV) 2>&1) || rc=$$?; \
+	echo "$$out"; \
+	src=0; $(MIGHTY_COLAB) stop -s $(SESSION_2B_BACKFILL) || src=$$?; \
+	if [ $$rc -ne 0 ] || ! echo "$$out" | grep -q BACKFILL_OK; then \
+		echo "[make] FAILED: the CNN weights backfill did not report success (exec rc=$$rc)."; \
+		if [ $$rc -eq 0 ]; then rc=1; fi; \
+	fi; \
+	$(call check_teardown,$(SESSION_2B_BACKFILL)); \
+	exit $$rc
+
+.PHONY: stage2b-backfill-cnn-weights-dry
+stage2b-backfill-cnn-weights-dry:  ## The same run, stopping before the upload -- bills while running
+	$(MAKE) stage2b-backfill-cnn-weights BACKFILL_EXTRA_ENV='--env BONSAI_BACKFILL_DRYRUN=1'
+
 SESSION_2B_LADDER4 ?= stage2b-ladder4
 
 # `EXEC_TIMEOUT` override, by the same reasoning as stage 3's. No stage-4

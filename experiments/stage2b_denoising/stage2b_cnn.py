@@ -369,6 +369,90 @@ def make_model(key, dtype=CNN_DTYPE):
     return model
 
 
+def cnn_reproduction_mismatch_reason(reproduced, original, train_stage=3):
+    """Whether a freshly-retrained best-of-3 CNN selection reproduces the
+    persisted one, structurally.
+
+    Compares `best_seed` and `best_epoch` for EXACT equality -- both are
+    integer selections (an argmin over three seeds; an early-stopping
+    epoch count), not floating-point measurements, so exact equality is
+    the right comparison and not a fragile one. Deliberately does NOT
+    gate on `best_clipped_val_mse` with an invented numeric tolerance:
+    `AUDIT_PROTOCOL.md`'s Freeze 1 already rejected choosing a tolerance
+    after seeing a number, and there is no measured basis for one. The MSE
+    difference is reported by the caller for human review, never used here
+    to pass or fail anything.
+
+    Lives here rather than in `run_ladder_stage4.py`, where it was
+    written, because that driver executes `main()` at import time whenever
+    `BONSAI_COMMIT` is set -- so a second caller reaching for it on Colab
+    would launch a full stage-4 run. Stage 4 imports it from here; the
+    behaviour is unchanged, and `train_stage` only names the stage in the
+    message text.
+
+    Returns a halt-reason string, or None if seed and epoch both match."""
+    r_seed, o_seed = int(reproduced["best_seed"]), int(original["best_seed"])
+    if r_seed != o_seed:
+        return (f"CNN retraining selected seed={r_seed}, stage {train_stage} selected "
+                f"seed={o_seed}. Same three fixed seeds, same fit/validation data -- a "
+                f"different argmin means the training run did not reproduce, not that "
+                f"a coin landed differently.")
+    r_epoch, o_epoch = int(reproduced["best_epoch"]), int(original["best_epoch"])
+    if r_epoch != o_epoch:
+        return (f"CNN retraining's selected seed ({r_seed}) stopped at "
+                f"best_epoch={r_epoch}, stage {train_stage}'s stopped at "
+                f"best_epoch={o_epoch}. Early stopping is deterministic given the "
+                f"validation trajectory; a different stopping point means the "
+                f"trajectory itself differed.")
+    return None
+
+
+# ---- The training inputs, derived once ----
+
+def training_inputs(*, images, x_t_clip, active_indices, train_indices,
+                    fit_indices, validation_indices, index_join,
+                    expect_n_active=None):
+    """The mask and the four fit/validation tensors the locked procedure
+    consumes, from a corpus and its corruption.
+
+    Extracted from `run_ladder_stage3.step8_cnn` so that anything else
+    retraining against stage 3's artifact -- the weights backfill, in
+    particular -- runs the SAME derivation rather than a second one
+    written to agree with it. Principle 16 is specifically about this: the
+    simulator being correct did not save Stage 1D, because the glue around
+    it had quietly reimplemented a helper.
+
+    It lives here, in the library module, and NOT in the stage-3 driver,
+    which executes `main()` at import time whenever `BONSAI_COMMIT` is set
+    -- the environment every Colab run has. Importing that driver to reach
+    one function would launch a full ladder run on the GPU box.
+
+    `index_join` is passed in rather than imported: this module
+    deliberately depends on no other stage-2B module, and every caller
+    already holds `stage2b_partition.index_join`. The join is by OFFICIAL
+    INDEX, never by row position -- the corpus is in ascending official
+    order, so a positional slice would silently become a different set the
+    moment that order changed.
+
+    Corruption arrives as `x_t_clip` rather than being computed here,
+    because stage 3 loads it from its persisted artifact while stage 4
+    recomputes it via `corrupt_corpus`. Those are genuinely two routes to
+    the same tensor -- stage 4's CNN reproduction verifying against stage
+    3's selection is the evidence they agree -- and hiding the choice
+    inside this function would misrepresent it as settled here."""
+    mask = build_active_support_mask(active_indices, expect_n_active=expect_n_active)
+    fit_rows, _ = index_join(np.asarray(fit_indices), np.asarray(train_indices),
+                             source_name="the fit role", target_name="the corpus")
+    val_rows, _ = index_join(np.asarray(validation_indices), np.asarray(train_indices),
+                             source_name="the validation role", target_name="the corpus")
+    images, x_t_clip = np.asarray(images), np.asarray(x_t_clip)
+    return {
+        "mask": mask, "fit_rows": fit_rows, "val_rows": val_rows,
+        "fit_clean": images[fit_rows], "val_clean": images[val_rows],
+        "fit_noisy": x_t_clip[fit_rows], "val_noisy": x_t_clip[val_rows],
+    }
+
+
 # ---- Persisting a trained model ----
 #
 # `train_cnn` returns its best checkpoint under `"model"`, and until now

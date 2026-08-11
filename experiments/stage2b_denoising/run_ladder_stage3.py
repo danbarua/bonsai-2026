@@ -1170,20 +1170,19 @@ def step8_cnn(mods, bucket, corpus, topo, corr, record, fp, parents):
     ascending official order, so a positional slice would silently be a
     different set the moment that order ever changed."""
     active_indices = np.asarray(topo["active_indices"])
-    mask = mods.cnn.build_active_support_mask(active_indices,
-                                              expect_n_active=EXPECTED_N_ACTIVE)
-    train_indices = np.asarray(corpus["train_indices"])
-    fit_rows, _ = mods.partition.index_join(
-        np.asarray(corpus["fit_indices"]), train_indices,
-        source_name="the fit role", target_name="the corpus")
-    val_rows, _ = mods.partition.index_join(
-        np.asarray(corpus["validation_indices"]), train_indices,
-        source_name="the validation role", target_name="the corpus")
-
-    images = np.asarray(corpus["images_01"])
-    x_t_clip = np.asarray(corr["x_t_clip"])
-    fit_clean, val_clean = images[fit_rows], images[val_rows]
-    fit_noisy, val_noisy = x_t_clip[fit_rows], x_t_clip[val_rows]
+    # One derivation, shared with the weights backfill -- see
+    # `stage2b_cnn.training_inputs` for why it lives there and not here.
+    inputs = mods.cnn.training_inputs(
+        images=corpus["images_01"], x_t_clip=corr["x_t_clip"],
+        active_indices=active_indices, train_indices=corpus["train_indices"],
+        fit_indices=corpus["fit_indices"],
+        validation_indices=corpus["validation_indices"],
+        index_join=mods.partition.index_join,
+        expect_n_active=EXPECTED_N_ACTIVE)
+    mask = inputs["mask"]
+    val_rows = inputs["val_rows"]
+    fit_clean, val_clean = inputs["fit_clean"], inputs["val_clean"]
+    fit_noisy, val_noisy = inputs["fit_noisy"], inputs["val_noisy"]
     val_x_t = np.asarray(corr["x_t"])[val_rows]
 
     # Identity baseline on the locked validation partition, active support
