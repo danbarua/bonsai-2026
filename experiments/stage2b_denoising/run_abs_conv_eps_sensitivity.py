@@ -167,9 +167,76 @@ def summarize(table, locked_steps=gate.ENCODER_STEPS):
 
 def phase_residual_feature_linf_bound(eps: float) -> float:
     """Max |Δ| in any cos or sin coordinate under phase residual eps.
-    |cos(θ+ε)-cos(θ)| = |-2 sin((2θ+ε)/2) sin(ε/2)| ≤ 2|sin(ε/2)| ≤ |ε|.
+
+    GAUGE-CORRECTED 2026-08-11. The features are not cos/sin of the phases
+    themselves: `stage2a_core.reference_node_features` builds cos/sin of
+    (theta_i - theta_ref), the locked reference-node gauge. BOTH phases
+    carry the residual, so the argument moves by up to 2*eps in the worst
+    case, not eps.
+
+        |cos(phi + d) - cos(phi)| = |-2 sin((2 phi + d)/2) sin(d/2)|
+                                  <= 2|sin(d/2)|,  with |d| <= 2*eps
+                                  => 2|sin(eps)|
+
+    This returns twice the previous value. It is a LOOSER bound and
+    therefore strictly more conservative -- the earlier 2*sin(eps/2)
+    understated the feature perturbation by a factor of 2 for every eps.
     """
-    return float(2.0 * abs(math.sin(eps / 2.0)))
+    return float(2.0 * abs(math.sin(eps)))
+
+
+# Protocol 1's five-stage propagation maxima, FINDINGS.md:1535-1596. A REAL
+# ARM-vs-x86 perturbation carried through the entire implemented pipeline.
+# Constants rather than a fetch: the report objects are not public-read, and
+# these are the committed values a reader can check against that table.
+_P1_STAGE1_THETA_MAX = 4.4408921e-16          # FINDINGS.md:1539
+_P1_STAGE5_DELTA_G_MAX = {                    # FINDINGS.md:1586-1590
+    "T": 9.975e-14,
+    "lattice": 4.455e-13,
+    "rewired": 5.483e-13,
+    "curr_random": 1.830e-12,
+}
+
+
+def _protocol1_measured_propagation(contrast_threshold=4.604761e-10):
+    """What a real perturbation did end to end, replacing the withdrawn bound.
+
+    The quotient is STAGE 1 -> STAGE 5. B is the immediate cos/sin bound at
+    ENCODING, so the input is the stage-1 theta difference; stage 2 is
+    post-ODE and is NOT B. Ratios of global maxima are conservative and do
+    not require numerator and denominator to fall on the same image: the
+    image achieving max|dDelta_g| carries an input perturbation no larger
+    than max|dtheta|.
+    """
+    eps = _P1_STAGE1_THETA_MAX
+    b_gauge = phase_residual_feature_linf_bound(eps)
+    withdrawn_envelope = 2.0 * b_gauge
+    per_condition = {}
+    for graph, dg in sorted(_P1_STAGE5_DELTA_G_MAX.items()):
+        per_condition[graph] = {
+            "observed_max_abs_delta_g_difference": dg,
+            "times_withdrawn_2B_envelope": dg / withdrawn_envelope,
+            "below_contrast_threshold": dg < contrast_threshold,
+            "times_contrast_threshold": dg / contrast_threshold,
+        }
+    return {
+        "source": "Protocol 1, FINDINGS.md:1535-1596; 287-image stress set",
+        "perturbation": "real ARM vs x86 floating-point difference",
+        "stage1_theta_max_abs_difference": eps,
+        "gauge_corrected_B_at_that_eps": b_gauge,
+        "withdrawn_2B_envelope_at_that_eps": withdrawn_envelope,
+        "per_condition": per_condition,
+        "scope": (
+            "Empirical counterexample to the universal claim |dDelta_g| <= 2B "
+            "for the implemented pipeline. NO REPLACEMENT BOUND IS "
+            "ESTABLISHED: these are observed maxima on one perturbation "
+            "family at one eps, not a Lipschitz constant, and extrapolation "
+            "across the swept eps range is unmeasured. Every observed "
+            "|dDelta_g| remains far below the frozen contrast threshold, so "
+            "the withdrawal changes no verdict -- it removes an unsupported "
+            "derivation, not a result."
+        ),
+    }
 
 
 def axis4_downstream_sensitivity(
@@ -192,42 +259,49 @@ def axis4_downstream_sensitivity(
     the frozen protocol's own design, not an accidental mismatch: this
     axis is a documented three-point subset of the full sweep.
 
-    Feature L_inf bound is analytic and strict. End-to-end |Delta_g| is
-    bounded conservatively by 2B (worst-case MSE difference under
-    unit-bounded images / Lip <= 2 on the prediction residual) so the
-    axis answers what each residual does to evolved features and Delta_g
-    without a full ODE re-evolve.
+    THE AXIS HAS TWO HALVES AND THEY ARE ANSWERED DIFFERENTLY.
+
+    FEATURES: analytic, strict, and now gauge-corrected. See
+    `phase_residual_feature_linf_bound`.
+
+    Delta_g: NO BOUND IS ASSERTED. A `conservative_delta_g_bound = 2B` was
+    published here and is WITHDRAWN, not replaced. It assumed every link
+    between features and Delta_g had gain <= 1; the composed scaler-ridge
+    submap alone measures 1.16e1 to 7.60e5
+    (`measure_combined_operator_norm.py`), and Delta_g is a DIFFERENCE of
+    two independently-fitted arms, which the coefficient never accounted
+    for. No replacement coefficient is offered -- measured or asserted --
+    because a measured maximum presented as an envelope invites the same
+    failure one level down.
+
+    What replaces it is measurement: `protocol1_measured_propagation`
+    reports what a real perturbation actually did through the real
+    pipeline, end to end. See that key's `scope` for what it does and does
+    not establish.
     """
     rows = []
     for eps in eps_values:
         bound = phase_residual_feature_linf_bound(eps)
-        delta_g_bound = 2.0 * bound
         rows.append({
             "phase_residual": eps,
             "feature_linf_bound": bound,
             "bound_over_solver_rtol": bound / solver_rtol,
             "bound_over_production_max_final_delta": bound / production_max_final_delta,
             "below_solver_rtol": bound < solver_rtol,
-            "conservative_delta_g_bound": delta_g_bound,
-            "bound_over_contrast_threshold": delta_g_bound / contrast_threshold,
-            "below_contrast_threshold": delta_g_bound < contrast_threshold,
-            "below_production_max_delta_g": delta_g_bound < production_max_delta_g,
         })
     return {
         "method": (
-            "analytic L_inf bound B on cos/sin features under uniform phase "
-            "residual; conservative end-to-end |Delta_g| bound 2B (worst-case "
-            "MSE difference under unit-bounded images). Compared to frozen "
-            "contrast threshold 4.604761e-10 and to Protocol 1 production max "
-            "|Delta_g|≈1.830e-12. No full ODE re-evolve — bounds are strict. "
-            "Every swept eps's 2B bound is below the frozen contrast threshold. "
-            "It is NOT true that every swept eps is below both reference "
-            "points: at eps=1e-10, 2B≈2.000e-10 is ~109x the production max "
-            "|Delta_g|; at eps=1e-12, 2B≈2.000e-12 is ~1.09x it. Only "
-            "eps=1e-13 (2B≈2.000e-13) is below both. See each row's own "
-            "below_contrast_threshold / below_production_max_delta_g fields "
-            "for the per-eps verdict."
+            "Analytic L_inf bound B on the cos/sin FEATURES under a uniform "
+            "phase residual, gauge-corrected: the reference-node gauge means "
+            "both theta_i and theta_ref carry the residual, so B = 2*sin(eps), "
+            "twice the previously published 2*sin(eps/2). No full ODE "
+            "re-evolve; this half is analytic and strict. "
+            "The Delta_g half asserts NO BOUND. The previously published "
+            "conservative_delta_g_bound = 2B is WITHDRAWN and not replaced -- "
+            "see protocol1_measured_propagation for what a real perturbation "
+            "actually did end to end, and its `scope` for the limits of that."
         ),
+        "protocol1_measured_propagation": _protocol1_measured_propagation(),
         "solver_rtol": solver_rtol,
         "production_max_final_delta": production_max_final_delta,
         "contrast_threshold": contrast_threshold,

@@ -193,7 +193,14 @@ def test_each_exemption_still_contributes_the_candidate_count_it_did():
         # entry counted above it. It names the file, says what it reads and
         # from where, and points at the axis-4 claim it measures against.
         # Not a new obligation stated in README's own voice.
-        "README.md": 25,
+        # README.md moved 25 -> 26 adding the cancellation sentence to the
+        # measure_combined_operator_norm.py module-map entry. Re-read: the
+        # new candidate is that sentence's NEVER -- "it never drops the
+        # result below either factor alone" -- which is a statement of what
+        # a MEASUREMENT turned out to show, not an obligation on anything.
+        # Same module-map genre as every entry above it; a description of a
+        # script's finding cannot bind the system.
+        "README.md": 26,
     }
     assert set(at_exemption_time) == set(gate_corpus.EXEMPT), (
         "an exemption was added or removed without a candidate count")
