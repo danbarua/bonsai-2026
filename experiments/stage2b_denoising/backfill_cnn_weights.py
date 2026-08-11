@@ -70,6 +70,24 @@ ENV_CREDENTIALS = "BONSAI_GCS_CREDENTIALS"
 ENV_DRYRUN = "BONSAI_BACKFILL_DRYRUN"
 
 EXPECTED_N_ACTIVE = 505
+
+# Ladder stage 1 wrote `topologies.npz` before the fingerprint contract
+# existed, so it carries no manifest and `consume_validated` refuses it
+# under the default. The opt-out alone would be worse than the refusal:
+# `require_manifest=False` disables EVERY provenance check, and these are
+# exactly the names nothing else guards, stages 1 and 2 being closed and
+# write-once having no purchase on objects written before it existed. So
+# the opt-out is paired with a pinned digest, as
+# `run_ladder_stage3.consume_pinned` does.
+#
+# The value is copied from `run_ladder_stage3.PINNED_SHA256` rather than
+# imported, because importing that module executes `main()` whenever
+# BONSAI_COMMIT is set -- which is every Colab run, including this one. If
+# the two ever drift apart this run HALTS, which is the safe direction.
+# Do not update this to make a failure pass; find out what changed.
+PINNED_TOPOLOGIES_SHA256 = \
+    "f671e63cc00b1612db0da5976c14b8880e4c4f90ae7fb192297721665f1907a4"
+
 _T0 = time.time()
 
 
@@ -131,9 +149,22 @@ def load_modules(clone_dir):
     return types.SimpleNamespace(cnn=cnn, gcs=gcs, partition=partition)
 
 
-def fetch(mods, bucket, name):
+def fetch(mods, bucket, name, pinned_sha256=None):
+    """Consume one artifact. `pinned_sha256` selects the pre-contract route
+    -- the manifest opt-out plus a digest check, never the opt-out alone."""
     local = local_path_for(name)
-    mods.gcs.consume_validated(name, local, bucket=bucket)
+    mods.gcs.consume_validated(name, local, bucket=bucket,
+                               require_manifest=pinned_sha256 is None)
+    if pinned_sha256 is not None:
+        digest = sha256_of(local)
+        if digest != pinned_sha256:
+            raise BackfillHalt(
+                f"{name!r} does not match its pinned digest: expected "
+                f"{pinned_sha256}, got {digest}. This object carries no manifest "
+                f"(pre-contract history), so the pin is the only thing standing "
+                f"between this run and silently different input. Do not update the "
+                f"pin to make this pass -- find out what changed.")
+        say(f"consumed {name} (pre-contract, pinned sha256 {digest[:16]}...)")
     with np.load(local, allow_pickle=False) as handle:
         loaded = {key: handle[key] for key in handle.files}
     say(f"fetched {name} ({len(loaded)} arrays)")
@@ -167,7 +198,8 @@ def main():
 
     corpus, _ = fetch(mods, bucket, obj("corpus"))
     corr, _ = fetch(mods, bucket, obj("corruption"))
-    topo, _ = fetch(mods, bucket, obj("topologies", KMNIST_STAGING_STAGE))
+    topo, _ = fetch(mods, bucket, obj("topologies", KMNIST_STAGING_STAGE),
+                    pinned_sha256=PINNED_TOPOLOGIES_SHA256)
     cnn_name = obj("cnn_production")
     original, cnn_local = fetch(mods, bucket, cnn_name)
 
