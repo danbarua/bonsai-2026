@@ -1077,6 +1077,47 @@ default), but has only been built and verified for class 0.
    rewiring comparison specifically (e.g. extending seed count) would be
    a new, separately-justified follow-up, not a continuation of this one.
 
+### What a fresh clone can and cannot get
+
+Measured 2026-08-11 from a checkout with an empty `datasets/`, no
+credentials and no cached pickles, because "regenerable in principle" had
+never been tested and turned out to be three different situations wearing
+one word.
+
+**Public-read, fetchable with a plain HTTPS GET.** No credentials, no
+`google-cloud-storage`, no Colab. Under
+`https://storage.googleapis.com/bonsai-2026-stage2b-cache/`: the four
+KMNIST IDX files (`stage2b/train/stage1/common/kmnist_*.idx`),
+`stage1/common/topologies.npz`, `stage1/common/encoder_gate_s1200.npz`,
+`stage3/common/corpus.npz`, `stage3/common/ridge_final_g13_88edf9ac.npz`,
+and each condition's `stage3/<condition>/features.npz` (~457MB each).
+
+**Regenerable locally, and verified.** `diagnose_encoder_gate_failure.py`
+rebuilds `results/encoder_gate_failure_diagnostic.pkl` in ~44s on CPU, and
+checks itself: identity-baseline MSE `0.19945944496779283` against the
+cloud run's `0.19945944496779283`, relative difference exactly zero. This
+is the one place the repository's self-sufficiency has actually been
+demonstrated end to end rather than assumed.
+
+**NOT obtainable, and this is the part worth knowing before you plan
+around it.** `experiments/stage1b2_structured_transformation/results/
+class0_constructions.pkl` is gitignored and returns 404 from the bucket
+under every prefix tried. It exists only on whichever machine last wrote
+it. `build_and_verify_T()` defaults to `require_historical_verification=
+True` and raises `FileNotFoundError` without it, so three Tier-2 tests
+fail rather than skip once `datasets/` is present — the outer
+missing-dataset skip had been hiding an inner missing-artifact
+dependency. What is lost is a byte-exact VERIFICATION step, not the
+science: T reconstructs from scratch and matches. Pass
+`require_historical_verification=False` to proceed, and know that you are
+skipping a check, not reproducing one.
+
+Protocol 1's report objects (`protocol1_propagation_report_*.json`) are
+also 404 to an anonymous client; their numbers survive in
+`experiments/stage2b_denoising/FINDINGS.md:1535-1596`, which is why
+`measure_combined_operator_norm.py` cites that table as constants rather
+than fetching.
+
 ## How to use this document
 
 Read this first in any future session touching Bonsai, before reading
