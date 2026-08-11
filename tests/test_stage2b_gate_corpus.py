@@ -68,195 +68,77 @@ def test_every_exemption_carries_a_substantive_reason():
             f"{name} is exempted with no reason a reviewer can weigh")
 
 
-def test_the_corpus_derives_the_scoped_candidate_count():
-    """89 is the number the Reviewer scoped requirement 4 to.
+def test_the_corpus_derives_candidates_at_all():
+    """Anti-vacuity only. The `== 89` this used to assert is gone.
 
-    Pinned because it is the one quantity that would move silently: a
-    document dropped from the corpus, or a frozen paragraph reflowed into
-    two, changes it while every other test here still passes.
+    89 was the number the Reviewer scoped requirement 4 to, pinned on the
+    theory that it was the one quantity able to move silently. In practice
+    it moved whenever a frozen document was legitimately edited -- task
+    #49's `AUDIT_PROTOCOL.md` correction being the most recent -- and each
+    move was resolved by setting the constant to whatever the derivation
+    now returned. A snapshot of reviewer scope, frozen into the suite,
+    that never caught a corpus shrink.
 
-    Expected to change when the protocol documents genuinely change -- and
-    that is the point. It fails, somebody looks, and updates it knowing
-    what moved rather than discovering later that the corpus drifted.
+    What it was reaching for is covered without an integer:
+    `test_no_clause_in_the_real_corpus_is_left_undispositioned` fails if a
+    clause appears with no row, and the membership tests above fail if a
+    document joins or leaves. A count adds only the ability to notice that
+    prose was reflowed.
+
+    The floor stays because deriving NOTHING is a different failure --
+    `derive_clauses` says so itself ("NO CANDIDATES DERIVED -- the scan
+    found nothing, which is not the same as everything being
+    dispositioned"), and an empty derivation would let the disposition
+    test pass over an empty set.
     """
     sys.path.insert(0, str(REPO_ROOT / "tools" / "gates"))
     from gate_inventory import derive_clauses
 
     docs = [STAGE2B_DIR / name for name in gate_corpus.PROTOCOL_DOCS]
-    assert len(derive_clauses(docs)) == 89
+    assert len(derive_clauses(docs)) >= 1, (
+        "the scan derived no candidates at all, which is not the same as "
+        "everything being dispositioned")
 
 
-def test_each_exemption_still_contributes_the_candidate_count_it_did():
-    """The exemption that grows clauses is the one nothing else catches.
+def test_the_exempt_set_is_exactly_these_documents():
+    """Membership, with no integers.
 
-    Both direction tests are satisfied by a document that is DECLARED,
-    and the 89-count pin only moves when the corpus changes -- so an
-    exempt document quietly acquiring binding obligations is invisible to
-    every other check here. Judging that a document states no obligations
-    is as unmechanisable as judging a sentence non-binding; noticing that
-    the judgement now covers different content is not.
+    This REPLACES `test_each_exemption_still_contributes_the_candidate_
+    count_it_did`, deleted 2026-08-11 on Dan's ruling after an audit of
+    blocking guards under `tests/`. That test pinned, per exempt document,
+    how many MUST/HALT-shaped sentences it derived when it was exempted,
+    on the theory that a changed count meant the exemption's reason had
+    been written about different text.
 
-    These counts are what each exempt document contributed when it was
-    exempted. A change means the reason on that exemption was written
-    about different text and needs re-reading -- not that anything is
-    broken. Update the number with the re-read, never ahead of it.
+    Its ledger: 15 commits moved a pinned count. README travelled
+    21 -> 20 -> 21 -> 22 -> 23 -> 24 -> 25 -> 26 -> 28 -> 29, FINDINGS
+    37 -> 46 -> 52 -> 59 -> 60 -> 61 -> 63. Every one was an honest
+    narrative or module-map append, and the fix was identical each time:
+    re-derive the integer, paste it in, paste a paragraph explaining that
+    the new sentences still bind nothing. Zero named a real obligation
+    smuggled into an exempt document. The test body had accumulated ~120
+    lines of that changelog by the end, and the audit's own snapshot of
+    the counts went stale twice while it was being reviewed.
+
+    What it actually measured was the WORD COUNT of MUST-shaped English in
+    documents whose entire job is narrative -- so it fired on exactly the
+    commits that close real science, and trained a reflex of bumping
+    integers to get the suite green. That reflex is the cost: the same
+    operators must not rubber-stamp a genuine `allow_test_split` or
+    undispositioned-clause failure.
+
+    What it protected that is worth keeping is MEMBERSHIP: the exempt set
+    cannot drift silently. That forks on substance -- a new exempt
+    document is a deliberate decision needing a written reason -- and it
+    needs no integers. Binding force lives in `PROTOCOL_DOCS` and
+    `gates.toml`, where `test_no_clause_in_the_real_corpus_is_left_
+    undispositioned` covers it.
     """
-    sys.path.insert(0, str(REPO_ROOT / "tools" / "gates"))
-    from gate_inventory import derive_clauses
-
-    # README.md moved 21 -> 20 at `8ad0ddd`, which removed the status
-    # restatement from its header. Re-read before the number was changed,
-    # which is the whole protocol here: the exemption reads "orientation
-    # for a reader arriving cold ... restates none of their obligations
-    # bindingly", and that is MORE true after the edit, not less. The
-    # count fell because a candidate-generating paragraph left, not
-    # because the judgement changed.
-    #
-    # FINDINGS.md moved 37 -> 46 across `9efac76`/`4bbd454`/`b0c382a`,
-    # which appended the stage-4 closing section (the official result,
-    # the floor-alpha caveat, the CNN comparison, the retraction of the
-    # "raw pixel ~ identity" reading, and the audit-status correction).
-    # Re-read all 9 new candidates individually (line > 1100) before
-    # changing this number: every one reports a fact about an
-    # already-frozen procedure's execution or result (the bootstrap CI,
-    # the alpha that was already selected in stage 3, what the driver's
-    # already-committed code does, what closed) using the same
-    # vocabulary those procedures use ("locked", "frozen", "required")
-    # -- none creates a new obligation this document did not already
-    # have narrative license to describe. The count rose because
-    # substantial new narrative content was added, not because the
-    # judgement about FINDINGS.md's bindingness changed.
-    # README.md moved 20 -> 21 at `3daea87`, which added the
-    # run_audit.py/stage2b_audit.py module-map entry. Re-read: the new
-    # paragraph describes what the code does (enforces the sequencing
-    # gate) and names AUDIT_PROTOCOL.md as the actual authority -- the
-    # same module-map genre as every other entry already counted here,
-    # not a new obligation stated in this document's own voice.
-    # README.md moved 21 -> 22 adding the run_abs_conv_eps_sensitivity.py
-    # module-map entry (companion Protocol 2's driver). Re-read: the new
-    # NEVER candidate is "never reimplemented" (`evaluate_rho_gate`
-    # called unmodified) -- the same module-map genre as the run_audit.py
-    # entry above, describing what the code does and naming
-    # COMPANION_PROTOCOLS.md as the actual authority for the protocol
-    # itself, not a new obligation this document states in its own voice.
-    # FINDINGS.md moved 46 -> 52, appending the amendment-impact audit's
-    # own closing section (the AUDIT_OK result, the stage-1/2 historical
-    # cross-check, feature distances, the protocol-required scope
-    # statement quoted verbatim, and the closed-investigation status) plus
-    # a correction to the stage-4 section's now-stale "audit has not run"
-    # paragraph. Re-read all 7 candidates individually (line > 1300)
-    # before changing this number: each reports execution or a measured
-    # result of an already-frozen procedure -- AUDIT_PROTOCOL.md's own
-    # trigger definitions, its analytic resolution threshold, and its
-    # required write-up scope statement (quoted, not restated in this
-    # document's own voice) -- using the same vocabulary those frozen
-    # documents already use. None creates a new obligation.
-    # FINDINGS.md moved 52 -> 59, appending Companion Protocol 1
-    # (PROTOCOL1_OK, five-stage maxima tables, construction sizes,
-    # sequencing-deviation disclosure, encoding-only adversarial scope
-    # limitation). Same genre: reports a measured run of an already-frozen
-    # companion protocol; does not create new obligations.
-    # README.md moved 22 -> 23 adding the generate_artifact_manifest.py
-    # module-map entry. Re-read: the new LOCKED candidate ("the frozen
-    # headline numbers behind Stage 2B's two locked results") describes
-    # what the script does and points at the two results it indexes --
-    # same module-map genre as every other entry, not a new obligation.
-    # README.md moved 23 -> 24 adding the Protocol 1 driver module-map
-    # entry (run_arm_x86_propagation_stress.py). Same genre: names the
-    # driver, points at COMPANION_PROTOCOLS.md as authority, describes
-    # phases — not a new obligation stated in README's own voice.
-    # FINDINGS.md moved 59 -> 60 across `cf5ffca`/`c702bae` (Protocol 1/2
-    # companion closure). The net +1 is four candidates added and three
-    # removed, and the three removals are the point: two are the
-    # "adversarial upper bound on cross-architecture propagation" framing
-    # narrowed to "maximum observed within the 287-image provisional stress
-    # set", and one is the run-id line superseded by a longer one naming
-    # 20260810T151245Z as authoritative. Rewordings, not new obligations.
-    # The one genuinely new candidate is Protocol 2's verdict: "Verdict at
-    # locked ENCODER_STEPS=1200: INVARIANT across eps in {1e-10 .. 1e-13}.
-    # No flip; HALT condition does not fire. ABS_CONV_EPS=1e-12 itself does
-    # not change." Re-read: it reports the measured outcome of an
-    # already-frozen procedure -- COMPANION_PROTOCOLS.md owns the protocol
-    # and gates.toml owns the HALT -- in those documents' own vocabulary
-    # ("locked", "HALT"). Saying a frozen gate did not fire is a result,
-    # not a new obligation stated in FINDINGS.md's own voice. Same genre as
-    # every FINDINGS.md bump above it.
-    # FINDINGS.md moved 60 -> 61 extending the CNN reproduction section
-    # across GPU classes. Re-read: the new candidate is "still not a proven
-    # guarantee, and the drift growing with hardware distance is the
-    # direction that would eventually break it" -- a statement of what two
-    # further measurements do and do not license, in the same hedging voice
-    # the paragraph already used before this edit. It weakens a claim rather
-    # than imposing anything; a sentence saying evidence is not proof cannot
-    # bind the system. Same genre as every FINDINGS.md bump above it.
-    # FINDINGS.md moved 61 -> 63 adding the ARM/x86 forward-pass section.
-    # Re-read, both: "the absolute error is FLAT ... rather than a defect"
-    # and "Near a floor the ratio is the wrong statistic" are readings of a
-    # measurement and a restatement of principle 23, which CLAUDE.md already
-    # owns. Neither states an obligation in FINDINGS.md's own voice, and the
-    # section explicitly declines to set a threshold rather than setting
-    # one. Same genre as every FINDINGS.md bump above it.
-    at_exemption_time = {
-        "FINDINGS.md": 63,
-        "NEGATIVE_PATH_EVIDENCE.md": 19,
-        "PHASE_B_PLAN.md": 38,
-        # README.md moved 24 -> 25 adding the measure_scaler_lipschitz.py
-        # module-map entry. Re-read: the new candidate is the entry itself,
-        # whose NEVER-shaped phrasing is "no GPU, no credentials, no refit,
-        # no google-cloud-storage" -- a description of what the script does
-        # not need in order to run, in the same module-map genre as every
-        # entry counted above it. It names the file, says what it reads and
-        # from where, and points at the axis-4 claim it measures against.
-        # Not a new obligation stated in README's own voice.
-        # README.md moved 25 -> 26 adding the cancellation sentence to the
-        # measure_combined_operator_norm.py module-map entry. Re-read: the
-        # new candidate is that sentence's NEVER -- "it never drops the
-        # result below either factor alone" -- which is a statement of what
-        # a MEASUREMENT turned out to show, not an obligation on anything.
-        # Same module-map genre as every entry above it; a description of a
-        # script's finding cannot bind the system.
-        # README.md moved 26 -> 28 adding the plot_cnn_denoising.py and
-        # animate_graph_dynamics.py module-map entries. Re-read, both: the
-        # CNN entry's NEVER-shaped text is "untrained outputs are
-        # unconstrained, not inert" and "no Stage 2B number is affected" --
-        # a measured description of where a residual lands and an explicit
-        # statement that it binds NOTHING. The animation entry's is "the CNN
-        # has no comparable animation" and "features are read at the final
-        # frame" -- a fact about what the pipeline's time axis covers, and a
-        # restatement of the locked feature point rather than a new
-        # obligation. Both are module-map entries in the same genre as every
-        # one above; a script that renders pixels and computes no metric has
-        # nothing to bind.
-        # README.md moved 28 -> 29 adding the measure_cnn_arch_agreement.py
-        # module-map entry. Re-read: the new candidate is "No threshold is
-        # applied -- there is no measured basis for one", which is a refusal
-        # to impose a gate, not a gate. Same module-map genre as every entry
-        # above it.
-        "README.md": 29,
-    }
-    assert set(at_exemption_time) == set(gate_corpus.EXEMPT), (
-        "an exemption was added or removed without a candidate count")
-
-    # EVERY drifted document in one report, not the first one found.
-    # Asserting inside the loop meant a session that edited two exempt
-    # documents learned about the second only after fixing the first and
-    # re-running the whole suite -- measured at ~3.5 minutes a cycle, paid
-    # twice in one evening for a two-file edit, with neither bump finding a
-    # defect. The check is unchanged; only how much of the answer it gives
-    # per run.
-    drifted = []
-    for name, expected in sorted(at_exemption_time.items()):
-        actual = len(derive_clauses([STAGE2B_DIR / name]))
-        if actual != expected:
-            drifted.append((name, expected, actual))
-    assert not drifted, (
-        "these documents no longer derive the candidate count their exemption "
-        "reason was written about:\n"
-        + "\n".join(f"  {name}: {expected} -> {actual} "
-                    f"({actual - expected:+d})" for name, expected, actual in drifted)
-        + "\n\nThis is not a defect report. Re-read the new or removed "
-          "candidates, satisfy yourself the exemption's reason still holds, "
-          "and only then update the number -- never ahead of the re-reading.")
+    assert set(gate_corpus.EXEMPT) == {
+        "FINDINGS.md", "NEGATIVE_PATH_EVIDENCE.md", "PHASE_B_PLAN.md",
+        "README.md",
+    }, ("the exempt set changed; a document was exempted or un-exempted, "
+        "which is a judgement needing a written reason, not a drift")
 
 
 def test_every_binds_at_pointer_names_a_clause_in_a_binding_kind():
@@ -383,18 +265,24 @@ def test_the_inventory_still_holds_a_disposition_for_every_kind():
     # Counted against the CORPUS, not against every row in the file. Child
     # obligations mint their own ids and are additional rows rather than
     # additional coverage -- the parent paragraph is what the corpus asked
-    # about. Written as a flat total first, which broke the moment the first
-    # composite was split: 95 rows, 89 candidates, and the honest number is
-    # neither of those on its own.
+    # about.
+    #
+    # `len(answered) == 89` used to sit here and is gone, with the corpus
+    # test's matching pin: it locksteps this file to the same frozen
+    # snapshot of reviewer scope, so a legitimate edit to a protocol
+    # document failed BOTH and was resolved by bumping BOTH. The property
+    # worth asserting is that the inventory answers everything derived,
+    # which is a relation and not a number -- and that is exactly
+    # `test_no_clause_in_the_real_corpus_is_left_undispositioned`. What
+    # stays here is the anti-vacuity that test cannot provide for itself.
     docs = [STAGE2B_DIR / name for name in gate_corpus.PROTOCOL_DOCS]
     candidate_ids = {c.clause_id for c in derive_clauses(docs)}
     answered = set()
     for kind in kinds:
         answered |= set(inventory.get(kind, {})) & candidate_ids
-    assert len(answered) == 89, (
-        f"the inventory answers {len(answered)} of 89 derived candidates; "
-        f"the corpus test pins the derivation, this pins that the inventory "
-        f"still answers it")
+    assert answered, (
+        "the inventory answers none of the derived candidates, so the "
+        "disposition check above would pass over an empty set")
 
     children = [cid for kind in kinds for cid, e in inventory.get(kind, {}).items()
                 if isinstance(e, dict) and e.get("parent_clause")]

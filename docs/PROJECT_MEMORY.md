@@ -1159,6 +1159,38 @@ also 404 to an anonymous client; their numbers survive in
 `measure_combined_operator_norm.py` cites that table as constants rather
 than fetching.
 
+### The blocking test suite has been audited for ceremony
+
+Audited 2026-08-11 across all blocking guards under `tests/`, on a
+predicate declared before looking: does the guard name a harm, does it
+fire when that harm occurs, does the fix fork on the verdict, and does it
+pin an OUTCOME or a DESCRIPTION. Full evidence, including the verdict
+table and the git ledger, is `docs/TEST_CEREMONY_AUDIT.md`. Distinct from
+`docs/VACUOUS_TESTS.md`, which asks whether a test passes for reasons
+unrelated to what it names — a guard can be entirely non-vacuous and
+still measure something nobody needs measured.
+
+Forty-eight guards matched the ceremony predicate; **one was deleted and
+two narrowed**, and everything else was found to fork on substance. The
+deleted guard pinned, per exempt document, how many MUST-shaped sentences
+it derived. Fifteen commits moved one of those counts —
+`README.md` 21 → 20 → 21 → … → 29 and `FINDINGS.md` 37 → … → 63 — and
+none named an obligation smuggled into an exempt document. What it
+measured was the word count of MUST-shaped English in documents whose job
+is narrative, so it fired on exactly the commits that closed real science.
+Membership of the exempt set is now asserted without integers; binding
+force was always covered by `PROTOCOL_DOCS` and `gates.toml`.
+
+Two results from the audit are worth carrying beyond the deletions. The
+science and system pins (`ENCODER_STEPS == 1200`, `REF_IDX == 363`,
+n = 60,000, feature dimension 1008) were enumerated and explicitly
+EXCLUDED: they fail when the experiment changes meaning, and the fix is
+never to bump the test. And the cost was never spread across the suite —
+it concentrated in a single test body that had accumulated ~120 lines of
+its own re-pin changelog, which is the worst place for it, because the
+attention it consumed came from the same budget that must take a real
+`allow_test_split` or undispositioned-clause failure seriously.
+
 ## How to use this document
 
 Read this first in any future session touching Bonsai, before reading
