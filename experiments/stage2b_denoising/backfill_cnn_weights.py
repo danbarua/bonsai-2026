@@ -10,30 +10,41 @@ recurs -- but only on a FRESH run, and `cnn_production.npz` already exists,
 so `ensure_artifact` skips that step forever. This driver is the one-off
 that fixes the object already in the bucket.
 
-## Why this MERGES rather than regenerates
+## Why a NEW object, and not weights added to `cnn_production.npz`
 
-Retraining does not reproduce those histories bit-exactly. FINDINGS
-measures the drift across real-GPU retrains at 9.328e-07 and 2.385e-07 in
-`best_clipped_val_mse`. Regenerating the artifact would therefore replace
-numbers this project has already reported with slightly different ones --
-silently, and for no gain.
+That was the intent, and the bucket refused it -- correctly. On the first
+run that got as far as uploading, `ensure_artifact(force=True)` raised
+`WriteOnceViolation`: `cnn_production.npz` is a LINEAGE artifact, lineage
+artifacts are create-once, and object versioning is off on this bucket, so
+replacing it destroys a reference another manifest may hold as a parent.
+The error prescribes the remedy this driver now takes -- "To regenerate,
+write a NEW name" -- the same move Phase A made when it produced
+`encoded_train_s1200` rather than overwriting `encoded_fit_s1200`.
 
-So the seven arrays stage 3 wrote are carried through BYTE-IDENTICAL, and
-only new keys are added. The weights come from a retrain that is verified
-to reproduce stage 3's SELECTION (`best_seed`, `best_epoch`) before
-anything is written, via the same `cnn_reproduction_mismatch_reason` stage
-4 uses. `backfill_json` records that the weights and the histories come
-from different runs, because they do, and a reader must not have to infer
-it.
+A second reason points the same way. Retraining does not reproduce stage
+3's loss histories bit-exactly (FINDINGS measures 9.328e-07 and 2.385e-07
+of drift across real-GPU retrains; this run measured 2.290e-06), so
+rewriting that object would have replaced reported numbers with slightly
+different ones. Keeping the histories where they are and the weights
+beside them avoids the question entirely.
+
+## What licenses these weights as stage 3's model
+
+They come from a retrain verified to reproduce stage 3's SELECTION --
+`best_seed` and `best_epoch`, exactly -- through the same
+`cnn_reproduction_mismatch_reason` stage 4 uses. Nothing is written if
+that check fails. `cnn_production.npz` is recorded as this object's PARENT
+with its payload digest, so the pairing is pinned rather than implied, and
+`weights_json` states plainly that the weights and those histories come
+from different runs, because they do.
 
 ## What this does not carry
 
 The manifest is written with no `fingerprint`: this driver cannot rebuild
 stage 3's without duplicating its `build_fingerprint`, and a fabricated
-one would be worse than none. Provenance lives in `backfill_json` instead
--- the source commit, the digest of the object as it stood BEFORE this
-run, per-seed wallclock, and the reproduction outcome -- so the byte change
-is auditable rather than mysterious.
+one would be worse than none. Provenance lives in `weights_json` instead
+-- the source commit, per-seed wallclock, the GPU it ran on, and the
+reproduction outcome.
 
 Run:  mighty-colab exec -s <session> -f backfill_cnn_weights.py \\
           --env BONSAI_COMMIT=<sha> --env JAX_ENABLE_X64=1 ...
@@ -207,8 +218,6 @@ def main():
     original_summary = json.loads(original["summary_json"].item())
     say(f"stage {TRAIN_STAGE} selected seed={original_summary['best_seed']} "
         f"epoch={original_summary['best_epoch']}, sha256={before_sha[:12]}")
-    if any(key.startswith("weights_seed") for key in original):
-        raise BackfillHalt(f"{cnn_name} already carries weights; nothing to backfill")
 
     # The SAME derivation stage 3 uses -- not a second one written to agree
     # with it (CLAUDE.md principle 16).
@@ -251,57 +260,64 @@ def main():
     say(f"reproduction VERIFIED: seed={best_seed} epoch={reproduced['best_epoch']}; "
         f"best_clipped_val_mse differs by {mse_diff:.3e} (reported, not gated)")
 
-    # Every original array carried through untouched; only new keys added.
-    merged = dict(original)
+    arrays = {}
     probe = mods.cnn.as_image_batch(inputs["val_noisy"][:4], "round-trip probe")
     for run in runs:
         blob = mods.cnn.serialise_model(run["model"])
         lossy = mods.cnn.model_round_trip_mismatch(run["model"], blob, probe)
         if lossy:
             raise BackfillHalt(f"seed={run['seed']} weights do not round-trip: {lossy}")
-        merged[f"weights_seed{run['seed']}"] = blob
+        arrays[f"weights_seed{run['seed']}"] = blob
     say(f"serialised {len(mods.cnn.SEEDS)} models, each round-trip verified")
 
-    merged["backfill_json"] = np.array(json.dumps({
-        "what": "CNN weights added to an artifact stage 3 wrote without them",
-        "weights_from": "a retrain on this run, NOT the run that produced the "
-                        "histories in this file -- iterative float32 training does "
-                        "not reproduce bit-exactly, so the histories were carried "
-                        "through unchanged rather than regenerated",
+    arrays["weights_json"] = np.array(json.dumps({
+        "what": "the trained CNN weights stage 3 produced and did not persist",
+        "companion_to": cnn_name,
+        "weights_from": "a retrain on this run, NOT the run that produced the loss "
+                        "histories in the companion -- iterative float32 training "
+                        "does not reproduce bit-exactly, which is why those "
+                        "histories were left where they are rather than rewritten",
         "reproduction": {"verified": True, "matched_on": ["best_seed", "best_epoch"],
                          "best_clipped_val_mse_difference": mse_diff,
                          "reproduced": reproduced, "original": original_summary},
         "weights_format": "equinox.tree_serialise_leaves -> uint8, load via "
                           "stage2b_cnn.deserialise_model",
         "weights_keys": [f"weights_seed{r['seed']}" for r in runs],
-        "object_sha256_before_backfill": before_sha,
+        "best_weights_key": f"weights_seed{best_seed}",
+        "companion_sha256": before_sha,
         "commit": head, "driver": DRIVER_FILENAME,
         "wallclock_s_per_seed": wallclock,
-        "platform": {"python": sys.version, "numpy": np.__version__},
+        "platform": {"python": sys.version, "numpy": np.__version__,
+                     "gpu": os.environ.get("BONSAI_GPU", "unrecorded")},
         "utc": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()),
     }, indent=2, sort_keys=True))
 
-    # `.npz` already, so savez_compressed does not append a second one.
     def produce(path):
-        np.savez_compressed(path, **merged)
+        np.savez_compressed(path, **arrays)
         with np.load(path, allow_pickle=False) as handle:
             reloaded = {key: handle[key] for key in handle.files}
-        for key, value in original.items():
+        for key, value in arrays.items():
             if not np.array_equal(reloaded[key], value):
-                raise BackfillHalt(f"merge altered the original array {key!r}")
-        say(f"wrote {len(reloaded)} arrays; all {len(original)} originals unchanged")
+                raise BackfillHalt(f"written array {key!r} does not read back equal")
+        say(f"wrote {len(reloaded)} arrays, all verified on readback")
 
+    weights_name = obj("cnn_weights")
     if dry_run:
-        check = local_path_for(cnn_name) + ".merged.npz"
+        check = local_path_for(weights_name) + ".dryrun.npz"
         produce(check)
-        say(f"{ENV_DRYRUN} set -- not uploading. Merged file at {check}")
+        say(f"{ENV_DRYRUN} set -- not uploading. File at {check}")
         print(OK_SENTINEL, flush=True)
         return 0
 
-    mods.gcs.ensure_artifact(cnn_name, local_path_for(cnn_name),
-                             produce=produce, bucket=bucket, force=True)
-    say(f"uploaded {cnn_name}, sha256 {sha256_of(local_path_for(cnn_name))[:12]} "
-        f"(was {before_sha[:12]})")
+    # `cnn_production.npz` as a PINNED parent: this object is only meaningful
+    # against the selection recorded there, so the pairing is recorded rather
+    # than left for a reader to infer. No force anywhere -- this is a create.
+    mods.gcs.ensure_artifact(weights_name, local_path_for(weights_name),
+                             produce=produce, bucket=bucket,
+                             parents={cnn_name: before_sha})
+    say(f"uploaded {weights_name}, sha256 "
+        f"{sha256_of(local_path_for(weights_name))[:12]}; parent {cnn_name} "
+        f"pinned at {before_sha[:12]} and NOT modified")
     print(OK_SENTINEL, flush=True)
     return 0
 

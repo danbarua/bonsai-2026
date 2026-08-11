@@ -793,7 +793,7 @@ stage2b-backfill-cnn-weights:  ## Add the trained CNN weights to stage 3's cnn_p
 	fi && \
 	$(MIGHTY_COLAB) reinstall -s $(SESSION_2B_BACKFILL) jax[cuda12]==0.11.0 diffrax==0.7.2 google-cloud-storage equinox optax && \
 	$(MIGHTY_COLAB) upload -s $(SESSION_2B_BACKFILL) $(BONSAI_GCS_CREDENTIALS) $(REMOTE_KEY_PATH) && \
-	rc=0; out=$$($(MIGHTY_COLAB) exec -s $(SESSION_2B_BACKFILL) -f backfill_cnn_weights.py --timeout $(BACKFILL_EXEC_TIMEOUT) $(GCS_EXEC_ENV) --env BONSAI_COMMIT="$$commit" --env BONSAI_DRIVER_SHA256="$$driver_sha" --env JAX_ENABLE_X64=1 $(BACKFILL_EXTRA_ENV) 2>&1) || rc=$$?; \
+	rc=0; out=$$($(MIGHTY_COLAB) exec -s $(SESSION_2B_BACKFILL) -f backfill_cnn_weights.py --timeout $(BACKFILL_EXEC_TIMEOUT) $(GCS_EXEC_ENV) --env BONSAI_COMMIT="$$commit" --env BONSAI_DRIVER_SHA256="$$driver_sha" --env JAX_ENABLE_X64=1 --env BONSAI_GPU="$(LADDER_GPU)" $(BACKFILL_EXTRA_ENV) 2>&1) || rc=$$?; \
 	echo "$$out"; \
 	src=0; $(MIGHTY_COLAB) stop -s $(SESSION_2B_BACKFILL) || src=$$?; \
 	if [ $$rc -ne 0 ] || ! echo "$$out" | grep -q BACKFILL_OK; then \
