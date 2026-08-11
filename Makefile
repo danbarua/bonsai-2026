@@ -819,6 +819,9 @@ CNNARCH_LOCAL_OUT ?= $(STAGE2B_DIR)/results/cnn_forward_x86.npz
 stage2b-cnn-arch-x86:  ## CNN forward pass on Colab x86, downloaded for comparison -- bills while running
 	rc=0; src=0; \
 	cd $(REPO_ROOT) && \
+	if ! $(CLOSURE_CHECK) $(STAGE2B_DIR)/measure_cnn_arch_agreement.py; then \
+		exit 1; \
+	fi; \
 	commit=$$($(GIT) rev-parse HEAD); \
 	if ! $(GIT) branch -r --contains $$commit 2>/dev/null | grep -q .; then \
 		echo "[make] REFUSING: HEAD $$commit is not on any remote. Push before running -- the runtime can only fetch what origin has."; \

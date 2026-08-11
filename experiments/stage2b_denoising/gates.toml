@@ -3200,7 +3200,7 @@ contemporaneous narration rather than standing obligation."""
 # value rows that already carry causal break evidence.
 
 [semantic_review]
-inventory_sha256 = "RECOMPUTE_AFTER_MERGE"
+inventory_sha256 = "a7756cc0e44b53142f59c6a6aeafccc41df37e0d777228dab263ac5af4c2ec8e"
 reviewer = "Dan Barua (2026-08-10, 2026-08-11); earlier rulings by ChatGPT / Stage 2B Reviewer"
 # Separate from `reviewer` on the Reviewer's own instruction: "Claude Code
 # can encode my ruling mechanically; it cannot independently make my
@@ -3296,7 +3296,7 @@ own corrections. PROJECT_MEMORY.md's citation of Protocol 1's run_id
 "authoritative process-closure run_id" statement) was corrected in the
 same pass, outside this inventory but for the same reason.
 
-FOURTH REFRESH, 2026-08-11, hash 43215cc6ff72 -> RECOMPUTE_AFTER_MERGE.
+FOURTH REFRESH, 2026-08-11, hash 43215cc6ff72 -> a7756cc0e44b.
 Concurrent with the third, not after it: two sessions each refreshed this
 attestation the same day for unrelated changes, and both are recorded
 rather than one silently winning the merge. A FRESH
