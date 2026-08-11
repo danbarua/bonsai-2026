@@ -230,4 +230,11 @@ def main():
 
 
 if __name__ == "__main__" or os.environ.get(ENV_COMMIT):
-    raise SystemExit(main())
+    # Exit only on FAILURE. `SystemExit(0)` raised inside an IPython kernel
+    # is reported as an exception and comes back to `mighty-colab exec` as a
+    # non-zero return code, so a successful remote run reads as a failed one
+    # -- which is exactly what happened on the first run that worked. Every
+    # other driver here ends this way for the same reason.
+    _status = main()
+    if _status:
+        sys.exit(_status)
