@@ -214,8 +214,11 @@ mention here, in the same commit that creates it.
   `|M|`. Refits through `stage2b_ridge.fit_final` unmodified at the
   production alphas. Measures the composition rather than multiplying the
   links' separate norms, because that product is an upper bound and the
-  ridge can cancel what the scaler amplifies — it does for
-  `pre_evolution` and does not for the evolved graphs. CPU only, public-read
+  ridge can cancel what the scaler amplifies. Cancellation is substantial
+  everywhere — every evolved composition lands 96.7–99.6% below the product
+  of the two separate norms — but it never drops the result below either
+  factor alone, and only for `pre_evolution` does it bring the composition
+  under both. CPU only, public-read
   inputs, ~460MB per condition streamed one at a time. Run directly:
   `uv run python measure_combined_operator_norm.py`.
 

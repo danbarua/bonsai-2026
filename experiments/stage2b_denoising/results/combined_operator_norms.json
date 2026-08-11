@@ -1,6 +1,8 @@
 {
   "claimed_end_to_end_lipschitz": 2.0,
   "environment": {
+    "jax": "0.11.0",
+    "jax_backend": "cpu",
     "numpy": "2.5.1",
     "platform": "macOS-26.5.2-arm64-arm-64bit-Mach-O"
   },

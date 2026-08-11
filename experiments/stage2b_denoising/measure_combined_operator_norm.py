@@ -93,6 +93,25 @@ def sha256_of(url, cache_dir):
     return digest.hexdigest()
 
 
+def _jax_version():
+    """The SVD ridge fit runs on JAX (stage2b_ridge imports it at module
+    scope), so the fitted W depends on the JAX build and backend. Recorded
+    because the operator norm below is a property of that fit."""
+    try:
+        import jax
+        return jax.__version__
+    except Exception:
+        return None
+
+
+def _jax_backend():
+    try:
+        import jax
+        return jax.default_backend()
+    except Exception:
+        return None
+
+
 def induced_inf_norm(M):
     """max over output coordinates of sum over input coordinates of |M|.
 
@@ -208,6 +227,8 @@ def main(argv=None):
         handle.write(json.dumps({"rows": rows,
                                  "source_sha256": digests,
                                  "environment": {"numpy": np.__version__,
+                                                 "jax": _jax_version(),
+                                                 "jax_backend": _jax_backend(),
                                                  "platform": platform.platform()},
                                  "claimed_end_to_end_lipschitz": CLAIMED_END_TO_END_LIPSCHITZ,
                                  "note": "combined_norm is the induced infinity-norm of "
@@ -225,19 +246,30 @@ may contract it. This file claimed otherwise once; external review, 2026-08-11.
 
 THE COUNTEREXAMPLE IS ELSEWHERE, and already measured. Protocol 1
 (FINDINGS.md:1535-1596) propagated a real ARM-vs-x86 perturbation through
-the entire pipeline. The quotient is STAGE 1 -> STAGE 5: axis 4's
-B(eps) = 2*sin(eps/2) is the IMMEDIATE cos/sin bound from an encoder phase
-residual, so the input is the stage-1 encoding difference, NOT stage 2 --
-stage 2 is post-ODE and an earlier version of this note wrongly called it
-B. At the observed eps = 4.4408921e-16, B(eps) equals eps numerically.
+the entire pipeline. The quotient is STAGE 1 -> STAGE 5: B is the
+IMMEDIATE cos/sin bound from an encoder phase residual, so the input is
+the stage-1 encoding difference, NOT stage 2 -- stage 2 is post-ODE and an
+earlier version of this note wrongly called it B.
 
+THE GAUGE FACTOR, which axis 4 omits and which WEAKENS the case below.
+`stage2a_core.reference_node_features` builds cos/sin of
+(theta_i - theta_ref), so BOTH phases carry the residual and the argument
+moves by up to 2*eps, not eps. The correct feature bound is therefore
+B = 2*sin(eps), exactly TWICE the 2*sin(eps/2) axis 4 computes. Doubling B
+doubles the 2B envelope and halves every violation factor below. It is
+recorded here because a correction that only exists in review prose is
+invisible to the next reader, and two cold forks have already read this
+file and inherited the uncorrected version.
+
+At eps = 4.4408921e-16: B_axis4 = 4.440892e-16, B_gauge = 8.881784e-16.
 Ratios of global maxima are conservative and do not require numerator and
 denominator to fall on the same image:
 
-    T               9.975e-14 / 4.441e-16 =  224.6    112x the claimed 2
-    lattice         4.455e-13 / 4.441e-16 = 1003.1    502x
-    rewired         5.483e-13 / 4.441e-16 = 1234.7    617x
-    curr_random     1.830e-12 / 4.441e-16 = 4120.0   2060x
+    condition      |dDelta_g|   vs 2*B_gauge
+    T               9.975e-14        56.2x
+    lattice         4.455e-13       250.8x
+    rewired         5.483e-13       308.7x
+    curr_random     1.830e-12      1030.2x
 
 There is no pre_evolution row because Delta_g is DEFINED relative to
 pre_evolution; its stage-1 -> stage-2 ratio is 1.0.
