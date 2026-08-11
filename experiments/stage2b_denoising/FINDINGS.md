@@ -1644,17 +1644,20 @@ Recomputation from stored final-Delta; not a new encode. Uses `load_final_deltas
 ### Justification axes (all four)
 1. float64 precision: observed dust 1e-14–1e-16; 1e-12 sits above.
 2. Phase update scale: smallest meaningful measured final-Delta 2.177e-07 (clean, 150 steps, stage 1); 1e-12 is five+ orders below.
-3. Encoder implementation: residual decay 8.370e-07 → 8.062e-13 → 0.0 (300/600/1200); first crosses 1e-12 between 300–600 steps.
-4. Downstream feature sensitivity (analytic L_inf bound on cos/sin under phase residual):
-   - 1e-10: bound=1e-10 (0.0001 × rtol=1e-6; 0.405 × prod max 2.468e-10)
-   - 1e-12: bound=1e-12 (1e-6 × rtol; 0.00405 × prod max)
-   - 1e-13: bound ~1e-13 (monotone decrease; all << rtol and prod max)
-   Method: |cos(θ+ε)-cos(θ)| ≤ 2|sin(ε/2)| ≤ |ε|; no full ODE re-evolve.
+3. Encoder implementation: residual decay 8.370e-07 → 8.062e-13 → 0.0 (300/600/1200); first crosses 1e-12 between 300–600 steps. **This is convergence, not the float64 floor**: the crossing value (8.062e-13) sits 80-800x above the dust band axis 1 measured (1e-14 to 1e-16), and the residual does not settle near that band -- it continues past it to exact 0.0 by 1200 steps. A value stopping at a numerical floor asymptotes near the floor's own magnitude; this one keeps decreasing through it, consistent with the encoder being a contraction toward a fixed point (established elsewhere in this document) that both platforms resolve to the same point, not with `ABS_CONV_EPS` catching floating-point noise.
+4. Downstream feature sensitivity, **gauge-corrected 2026-08-11** (`12d4bf1`): the earlier bound used `|cos(θ+ε)-cos(θ)| ≤ 2|sin(ε/2)|`, which is wrong for these features. `stage2a_core.reference_node_features` builds cos/sin of `(θ_i - θ_ref)`, the locked reference-node gauge -- both phases carry the residual, so the argument moves by up to `2ε`, and the correct bound is `2|sin(ε)|` (twice the previously published value; the old bound understated every feature perturbation by 2x). Two separate questions, answered separately because they no longer share one coefficient:
+   - **Features, bounded (analytic, strict, no ODE re-evolve):**
+     - 1e-10: bound=2e-10 (0.0002 × rtol=1e-6; **0.810 × production max final-Delta 2.468e-10**)
+     - 1e-12: bound=2e-12 (2e-06 × rtol; 0.0081 × production max)
+     - 1e-13: bound=2e-13 (2e-07 × rtol; 0.0008 × production max)
+     Against the solver's own `rtol`, no eps in the swept range is large enough to matter -- the largest ratio is 0.0002. Against the empirically observed production final-Delta, that is only true at the locked `ABS_CONV_EPS=1e-12` and below (ratios 0.0081 and 0.0008): at the top of the swept range, `eps=1e-10`, the bound is 81% of the largest final-Delta actually observed across the 60,000-image corpus -- not negligible, though `1e-10` is not the locked value.
+   - **`Delta_g`, NOT bounded (coefficient withdrawn, `12d4bf1`):** the previously published `conservative_delta_g_bound = 2B` assumed every link between features and `Delta_g` has gain `<= 1`. The composed scaler-ridge submap alone measures gain 1.16e1 to 7.60e5 (`measure_combined_operator_norm.py`), and `Delta_g` is a difference of two independently-fitted arms the coefficient never accounted for -- so it is withdrawn, with **no replacement bound offered**. What replaces it is measurement, not derivation: `protocol1_measured_propagation` (Protocol 1's real ARM-vs-x86 perturbation, `stage1_theta_max_abs_difference=4.4408921e-16` -- far smaller than any swept eps here) carried the whole implemented pipeline end to end and found `max|ΔDelta_g|` of 9.975e-14 (`T`) to 1.83e-12 (`curr_random`), each 0.0002x-0.004x of the frozen contrast threshold `4.604761e-10`. This is an empirical counterexample to the universal `|ΔDelta_g| <= 2B` claim, not a replacement Lipschitz constant: it is one perturbation family at one (very small) eps, and **whether any of the three swept eps values (1e-10, 1e-12, 1e-13) is "large enough to matter" for `Delta_g` specifically is unmeasured and unbounded** -- the honest answer to that half of the axis-4 question is "not established," not "no."
 
 ### Artifacts
 - table: `results/abs_conv_eps_sensitivity_table.json` (also gcs-style under stage3/common)
 - fingerprint present with source/config digests
 - sentinel: `PROTOCOL2_OK` (exit 0); revalidate passed
+- `justification_axes` in the published JSON carries every number cited above, including `protocol1_measured_propagation`'s per-graph breakdown
 
 Driver: `run_abs_conv_eps_sensitivity.py`. Make: `stage2b-protocol2`.
 Tests: `tests/test_stage2b_abs_conv_eps_sensitivity.py` (merge, axis4, publish fingerprint AST, reval sentinel, real-pickle tier-2).

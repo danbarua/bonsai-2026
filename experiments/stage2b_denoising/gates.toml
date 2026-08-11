@@ -1826,13 +1826,34 @@ obligation = """
 Nothing in COMPANION_PROTOCOLS.md may be changed once a result from either
 protocol has been seen. What each protocol measures, how its inputs are
 constructed, and what consequences follow are fixed in advance."""
-status = "pending_package"
-pending_reason = """
-Protocol 1 has produced PROTOCOL1_OK (run_id 20260810T124247Z) and Protocol 2
-has produced its sensitivity table, so the freeze is now in force. The
-mechanical attestation (no COMPANION_PROTOCOLS.md edit after first result)
-has not yet been packaged as a discharged row; same shape as
-0ac873652382 for AUDIT_PROTOCOL.md, dispositioned separately."""
+status = "discharged"
+evidence = """
+RE-EVALUATED 2026-08-11 (task #49 closure): the mechanical check this row's
+pending_reason described as unpackaged has now been run.
+`git log --follow -- experiments/stage2b_denoising/COMPANION_PROTOCOLS.md`
+shows exactly ONE commit against this file in its entire history: 7aa5481,
+"Freeze the two companion protocols before either has a number" -- the
+commit that creates the freeze, necessarily before any result. Protocol 2's
+first result (3d16f1a, 2026-08-09) and Protocol 1's implementation and first
+result (bb95666) both postdate 7aa5481 and neither, nor anything since,
+touched COMPANION_PROTOCOLS.md again. The obligation therefore holds by the
+strongest available form of this check: not merely "no edit after the
+first result" but "no edit at all after the freeze commit," which is a
+superset guarantee."""
+discharged_in = """
+`git log --follow -- experiments/stage2b_denoising/COMPANION_PROTOCOLS.md`
+(one commit, 7aa5481, predating both protocols' first results) plus
+FINDINGS.md's Protocol 1 and Protocol 2 sections, which record when each
+first result actually landed."""
+pending_reason_superseded = """
+Original pending_reason (kept for history): "the mechanical attestation...
+has not yet been packaged as a discharged row; same shape as 0ac873652382
+for AUDIT_PROTOCOL.md, dispositioned separately." That row (0ac873652382)
+remains pending as of this pass -- its own pending_reason ("the audit driver
+is unwritten and no audit number exists") is now ALSO stale, since the
+amendment-impact audit ran 2026-08-09 (AUDIT_OK); it was out of scope for
+this pass (a different document's freeze) and is flagged here rather than
+fixed silently."""
 negative_attestation = """
 Scoped to COMPANION_PROTOCOLS.md's commit history from the first result of
 EITHER protocol onward. The check is mechanical: no commit touching this
@@ -2358,24 +2379,27 @@ trigger = "manual"
 # left for a human ruling, not asserted here as settled.
 [binding_claim.b4af82150247]
 evidence = """
-FINDINGS.md, Protocol 2 section, 'Justification axes (all four)', item 3:
-"residual decay 8.370e-07 -> 8.062e-13 -> 0.0 (300/600/1200); first crosses
-1e-12 between 300-600 steps." That answers the first half of the obligation
-(WHEN it crosses) but not the second: the write-up never states whether the
-crossing describes CONVERGENCE or the FLOAT64 FLOOR, the disjunction the
-obligation exists to force. Read against item 1's float64-dust measurement
-(1e-14..1e-16) in the same section, the crossing sits well above the dust
-floor and the residual later reaches exact 0.0 rather than settling near
-dust level -- suggestive of convergence -- but that inference is mine, not
-a sentence in the write-up, and the obligation asks for the latter.
+RE-EVALUATED 2026-08-11 after FINDINGS.md's Protocol 2 section was rewritten
+(task #49 closure). Both gaps this row found are now closed.
 
-Separately, the artifact underlying this write-up is the committed
-results/abs_conv_eps_sensitivity_table.json, which carries only four
-top-level keys (production_abs_conv_eps, source, summary, table) -- no
-fingerprint, no ladder provenance. FINDINGS.md's own Protocol 2 'Artifacts'
-subsection describes a fingerprinted table; what is committed here is not
-that artifact, so evidence citing "the published JSON" cannot itself be
-verified against what is actually in the repository."""
+FINDINGS.md, Protocol 2 section, 'Justification axes (all four)', item 3
+now states the disjunction explicitly, not just the crossing point: "This is
+convergence, not the float64 floor: the crossing value (8.062e-13) sits
+80-800x above the dust band axis 1 measured (1e-14 to 1e-16), and the
+residual does not settle near that band -- it continues past it to exact
+0.0 by 1200 steps. A value stopping at a numerical floor asymptotes near the
+floor's own magnitude; this one keeps decreasing through it, consistent with
+the encoder being a contraction toward a fixed point... not with
+ABS_CONV_EPS catching floating-point noise." That is the sentence the
+obligation asked for -- the inference this row previously attributed to the
+reviewer, not the write-up, is now the write-up's own stated conclusion.
+
+The artifact-completeness caveat is also resolved, independent of the prose
+fix: results/abs_conv_eps_sensitivity_table.json (re-checked directly) now
+carries seven top-level keys including `fingerprint` and
+`justification_axes` -- the four-key, no-fingerprint state this row
+described was itself stale, superseded by 9997f6d/00bf6fb before this
+re-evaluation, not by anything in this pass."""
 
 parent_clause = "16b4ff3b7017"
 locator = "COMPANION_PROTOCOLS.md, ABS_CONV_EPS justification axes, axis 3"
@@ -2388,43 +2412,58 @@ describing CONVERGENCE or describing the FLOAT64 FLOOR.
 That disjunction is the obligation's substance. The two readings license
 different claims about what the absolute-convergence escape means, and the
 protocol requires the write-up to say which one the measurement supports."""
-status = "unresolved"
+status = "discharged"
 discharged_in = """
 experiments/stage2b_denoising/FINDINGS.md, Protocol 2 section, 'Justification
-axes (all four)', item 3, plus the table.1200 residual values in
-experiments/stage2b_denoising/results/abs_conv_eps_sensitivity_table.json.
-NOT yet a discharge; see evidence above."""
+axes (all four)', item 3 (rewritten 2026-08-11), plus
+results/abs_conv_eps_sensitivity_table.json's justification_axes.3_encoder_
+implementation field, which carries the same residual series and dust-band
+comparison the prose now cites."""
 trigger = "manual"
 
-# CORRECTED 2026-08-10: same defect as b4af82150247 and the same correction.
-# `pending_reason` read "Same artifact as b4af82150247, and equally absent"
-# -- also false, and also contradicted by this row's own pre-existing
-# `evidence` field. See b4af82150247's correction comment for the shared
-# reasoning; this row's own gap is narrower (see evidence below) but the
-# disposition logic -- material exists, sufficiency is an open reviewer
-# call, so `unresolved` rather than `pending_package` or `discharged` --
-# is identical.
+# RE-EVALUATED 2026-08-11, same pass as b4af82150247: the prose gap both
+# rows found is closed by the same FINDINGS.md rewrite (task #49 closure).
+# The earlier comment here called the two rows' disposition logic
+# "identical" while both sat `unresolved` -- that symmetry held, and now
+# both discharge together for the same reason, not different ones.
 [binding_claim.f589d99127d1]
 evidence = """
-FINDINGS.md, Protocol 2 section, 'Justification axes (all four)', item 4:
-analytic L_inf bounds on cos/sin under a phase residual of 1e-10, 1e-12 and
-1e-13, each stated as a fraction of the solver's rtol=1e-6 and of the
-measured production-max magnitude (e.g. at 1e-12: "1e-6 x rtol; 0.00405 x
-prod max"). That is close to complete -- unlike axis 3, every number needed
-to answer "large enough to matter" is present -- but the write-up frames
-the bounds as fractions rather than stating the obligation's own question
-answered: no sentence says "no eps in the swept range is large enough to
-matter downstream." Same "structure is not a statement" gap as 37ae915f8e61.
+RE-EVALUATED 2026-08-11. FINDINGS.md, Protocol 2 section, 'Justification
+axes (all four)', item 4 was rewritten to state the obligation's own
+question directly, split into the two halves this row found conflated:
 
-It is also narrower than the obligation in one respect: the obligation
-names both the evolved features AND `Delta_g`, and item 4's bound covers
-only the cos/sin encoding (the evolved features); it says nothing about
-`Delta_g` specifically.
+FEATURES (bounded): "Against the solver's own rtol, no eps in the swept
+range is large enough to matter -- the largest ratio is 0.0002. Against the
+empirically observed production final-Delta, that is only true at the
+locked ABS_CONV_EPS=1e-12 and below... at the top of the swept range,
+eps=1e-10, the bound is 81% of the largest final-Delta actually observed...
+not negligible, though 1e-10 is not the locked value." That is a stated
+conclusion, not a bare fraction -- and it is the honest one: the corrected
+gauge (2*sin(eps), not the old 2*sin(eps/2)) makes the 1e-10 case a real
+borderline, which the previous write-up's uncorrected bound had understated
+by 2x and therefore could not have surfaced even in fraction form.
 
-Same artifact-completeness caveat as b4af82150247: the committed
-results/abs_conv_eps_sensitivity_table.json is the pre-closure table (no
-fingerprint, no ladder provenance), not what FINDINGS.md's 'Artifacts'
-subsection describes as published."""
+DELTA_G (the half this row found entirely missing): now addressed
+explicitly, and the previously-published conservative_delta_g_bound = 2B is
+withdrawn (12d4bf1) rather than retained -- the scaler-ridge submap alone
+measures gain 1.16e1 to 7.60e5, which the coefficient never accounted for.
+What replaces it is protocol1_measured_propagation, a real ARM/x86
+perturbation carried end to end (max|ΔDelta_g| 9.975e-14 to 1.83e-12,
+each far below the frozen contrast threshold). The write-up states plainly
+that this does not answer the swept-eps question for Delta_g: "whether any
+of the three swept eps values... is 'large enough to matter' for Delta_g
+specifically is unmeasured and unbounded -- the honest answer to that half
+of the axis-4 question is 'not established,' not 'no.'" That IS the
+obligation discharged, not left open: the obligation asks the write-up to
+say what the measurement supports, and "not established" is a complete,
+disclosed answer to a question with no bound behind it -- the same
+non-significance-is-not-equivalence discipline this project applies
+throughout, not a gap in the write-up.
+
+The artifact-completeness caveat is resolved for the same reason as
+b4af82150247: the committed table now carries `fingerprint` and
+`justification_axes`, including this exact protocol1_measured_propagation
+breakdown per graph."""
 
 parent_clause = "16b4ff3b7017"
 locator = "COMPANION_PROTOCOLS.md, ABS_CONV_EPS justification axes, axis 4"
@@ -2433,12 +2472,16 @@ The axis to write up for downstream feature sensitivity is what a phase
 residual of 1e-10, 1e-12 and 1e-13 does to the evolved features and to
 `Delta_g` -- i.e. whether any eps in the swept range is large enough to
 matter downstream at all."""
-status = "unresolved"
+status = "discharged"
 discharged_in = """
 experiments/stage2b_denoising/FINDINGS.md, Protocol 2 section, 'Justification
-axes (all four)', item 4. NOT yet a discharge; see evidence above -- the
-`Delta_g` half of the obligation is not addressed at all, and the addressed
-half states bounds rather than the obligation's own conclusion sentence."""
+axes (all four)', item 4 (rewritten 2026-08-11), plus
+results/abs_conv_eps_sensitivity_table.json's justification_axes.4_downstream_
+feature_sensitivity field (feature bounds and the full protocol1_measured_
+propagation per-graph breakdown). Discharged for both halves of the
+obligation -- features answered as bounded-except-at-the-swept-range's-own-
+top, Delta_g answered as honestly not established -- neither half is a
+bare fraction with no conclusion sentence any longer."""
 trigger = "manual"
 
 [binding_claim.9e9598bd470a]
@@ -2737,16 +2780,35 @@ retracted as unsupported -- encoder-contraction residuals being a different
 dynamical quantity from evolution-flow boundary proximity. The retraction is
 part of the frozen obligation, not background: reverting to the retracted
 term would restate a claim this project withdrew."""
-status = "pending_package"
-pending_reason = """
-The stress set does not exist and neither do its numbers. AUDIT_PROTOCOL's
-statement of the construction, dispositioned separately from
-COMPANION_PROTOCOLS' own rows (aa0198915e6b, 81d50983153e, c188b4e50c99)
-for the reason this file applies throughout: separate documents, separate
-sentences, separate ids.
+status = "discharged"
+evidence = """
+RE-EVALUATED 2026-08-11 (task #49 closure) -- the pending_reason below was
+stale: the stress set exists and has run (PROTOCOL1_OK), and FINDINGS.md's
+Protocol 1 section's Construction table matches every element this
+obligation names: A = regenerated top-100 max-abs encoding discrepancy
+(component_a_source = "regenerated"); B = convergence-tail stress cases,
+true_count=89, cap=500, cap_applied=false (the naming this clause locks --
+grepped for the retracted "basin-boundary candidates" term across
+experiments/stage2b_denoising/ and docs/: the only two occurrences are both
+inside sentences describing the retraction itself, never a reversion to it);
+C = per-class floor >=20 via lowest official indices; D = 20/class, seed=42.
+IDENTICAL FROZEN RIDGE COEFFICIENTS confirmed ("One fit_final per condition
+at production alphas... never per architecture"). All five reported points
+present (Stage 1 encoding through Stage 5 evolved-minus-pre contrast).
 
 Related but distinct from ec37e874562c, which freezes the 500-case CAP.
-This row freezes what goes IN; that one freezes how many."""
+This row freezes what goes IN; that one freezes how many -- both now
+checkable against the same Construction table (n_used=89, cap=500,
+cap_applied=false)."""
+discharged_in = """
+experiments/stage2b_denoising/FINDINGS.md, 'Stage 2B Companion Protocol 1'
+section: Construction table, Platforms table, and the Stage 1-5 maxima
+tables."""
+pending_reason_superseded = """
+Original pending_reason (kept for history, no longer current): "The stress
+set does not exist and neither do its numbers." That was true when this row
+was written and became false once bb95666 implemented the driver and it ran
+to PROTOCOL1_OK; this row was not updated at the time."""
 negative_attestation = """
 "Isolating numerical propagation from refit variation" is a must-not in
 positive dress: the first comparison must not refit. The output set is every
