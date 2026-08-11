@@ -1,15 +1,11 @@
 ---
-name: mighty-colab
-description: >-
-  Operate Google Colab environments via the `mighty-colab` CLI. 
-  Use when asked to create or manage GPU/TPU sessions, run Python/shell on a remote Colab VM, sync files, automate environment setup (packages, auth, Drive), or export session history. 
-  `mighty-colab` was forked by Dan from the upstream official `colab` cli client. 
-  `mighty-colab` commands are available via MCP tool calls.
+name: colab-operator
+description: Operate Google Colab environments via the `mighty-colab` CLI. Use when asked to create or manage GPU/TPU sessions, run Python/shell on a remote Colab VM, sync files, automate environment setup (packages, auth, Drive), or export session history.
 ---
 
 # Skill: Colab Session Operator
 
-Operate Google Colab environments via the `mighty-colab` CLI: provision GPU/TPU sessions, run Python/shell on the VM, sync files, and capture work as notebooks.
+Operate Google Colab environments via the `mighty-colab` CLI: provision GPU/TPU sessions, run Python/shell on the VM, sync files, and capture work as notebooks. `mighty-colab` is a fork of Google's upstream `colab` CLI, published as a distinct binary/package specifically so the two can coexist in the same shell — always invoke `mighty-colab`, not `colab`.
 
 ## Installation
 
@@ -30,7 +26,7 @@ by running `uv tool install mighty-colab` or `pip install mighty-colab`.
 - **`mighty-colab` is fire-and-forget.** Each command authenticates, does one thing, and exits. A detached background daemon (spawned by `mighty-colab new`) handles keep-alive; you don't manage it.
 
 ## Authentication (the #1 thing that blocks agents)
-- The global flag is `--auth={adc,oauth2}` and the **default is `adc`** (Application Default Credentials). It must come *before* the subcommand: `mighty-colab --auth=adc new -s x`.
+- The global flag is `--auth={adc,oauth2}` and the **default is `oauth2`** (interactive browser consent flow) — **always pass `--auth=adc` explicitly for agent/headless use**, since the default is not agent-safe on its own. It must come *before* the subcommand: `mighty-colab --auth=adc new -s x`.
 - **ADC setup** (most reliable for headless/agent use). The Colab backends need a specific scope set, so re-mint ADC with all four scopes:
   ```bash
   gcloud auth application-default login \
@@ -62,6 +58,11 @@ by running `uv tool install mighty-colab` or `pip install mighty-colab`.
 
 ### Execute
 - **Preferred**: `mighty-colab exec -s <name> -f <script.py>` runs a local script on the remote VM (read locally, sent to the kernel — no manual upload needed).
+- **`exec -f` transmits the file's *text* into the existing kernel -- it does not run the file as a script.** No import machinery runs, so `__file__` is never defined, `sys.argv` is unset, and `__name__ != "__main__"`. Nothing from the local filesystem exists on the VM either, until something explicitly puts it there (upload, install, or code that clones/downloads it). Module-scope code that assumes any of this will break — this crashed a real billing run when a driver used `os.path.dirname(__file__)` at import time. Needs `argv`/`__main__` semantics? Use `mighty-colab run` instead (below), which sets both.
+- **`--timeout` (default 30s, on `exec`/`run`/`exec-async`) bounds the gap between *outputs*, not the total run.** A script computing silently — a network download, a training epoch, model compilation — for longer than the timeout raises `TimeoutError` even though it's perfectly healthy. Pass a generous `--timeout` (e.g. `--timeout 3600`) for anything that goes quiet for a while; don't rely on the default just because a hand-run session happened to complete.
+- **Background execution — built specifically for agents**: `mighty-colab exec-async -s <name> -f script.py` runs the same as `exec` but detached, returning almost instantly regardless of how long the script takes, instead of blocking the caller for the whole run. Submit, then check back — don't hold a tool call open for an hour-long job. Follow output with `mighty-colab log -s <name> -f` (below). Only one job at a time per session: a second `exec-async` while one's still running is refused (checked by pid liveness, so a *finished* job never blocks a restart) — target a different session or wait. Piped stdin works the same as `exec`, but requires a real file or piped code; a live TTY can't be forwarded to a detached process.
+- **`exec-async` inherits the `--timeout` gotcha above, and it bites harder here**: this is exactly the command used for long, quiet background jobs (GPU training with sparse logging), so the default 30s is almost always wrong for it — always pass a generous `--timeout` explicitly.
+- **`--output-log <path>`** (on `exec-async` only) redirects the raw log to any writable location instead of the default `~/.config/colab-cli/history/<session>.exec.log` — for an agent sandboxed without write access there. Creates the parent directory if it doesn't exist yet. `mighty-colab status` shows the active path as `Log: <path>`, so a caller polling a pid can find it without re-deriving it.
 - **Piped code**: `echo "print(1)" | mighty-colab exec -s <name>` or `cat script.py | mighty-colab exec -s <name>`.
 - **Notebooks**: `mighty-colab exec -s <name> -f nb.ipynb` runs each code cell and writes results to `<basename>_output.ipynb` next to the input. A `# @title Foo` first line labels the cell in progress output.
 - **Plots/images**: PNG/JPEG outputs are intercepted. Use `--output-image <path>` on `exec`/`repl` to save to a known location (otherwise a temp path is printed). Inline terminal-image escapes are auto-suppressed when stdout isn't a TTY, so piped/captured output stays clean.
@@ -79,13 +80,15 @@ by running `uv tool install mighty-colab` or `pip install mighty-colab`.
 - `mighty-colab auth -s <name>` — VM-side GCP creds, needed before in-VM GCS/BigQuery calls (interactive; not agent-runnable).
 - `mighty-colab drivemount -s <name> [PATH]` — mounts Drive at `/content/drive` by default (interactive; not agent-runnable).
 - `mighty-colab install -s <name> pkg1 pkg2` — installs via `uv pip install --system` if `uv` is on the VM, otherwise `pip`. Also `mighty-colab install -s <name> -r requirements.txt`.
-- **`mighty-colab reinstall`** — same as `install`, but restarts the kernel afterward (only if the install succeeds). Prefer this over `install` whenever the package may already be imported in the session (e.g. upgrading an already-imported `jax`/`torch`): Python caches imports in `sys.modules`, so a plain `install` alone has no visible effect on a package that's already loaded until the kernel restarts. `install` never restarts on its own — it stays a faithful match to upstream `mighty-colab install`.
+- **`mighty-colab reinstall`** — same as `install`, but restarts the kernel afterward (only if the install succeeds). Prefer this over `install` whenever the package may already be imported in the session (e.g. upgrading an already-imported `jax`/`torch`): Python caches imports in `sys.modules`, so a plain `install` alone has no visible effect on a package that's already loaded until the kernel restarts. `install` never restarts on its own — it stays a faithful match to upstream `colab install`.
 
 ### Inspect & report
 - `mighty-colab help` (or `mighty-colab help <cmd>`) lists/explains commands; the listing is alphabetical.
 - `mighty-colab sessions` lists server-side assignments and auto-prunes stale local entries. Orphans with no local record show as `[?]` — claim one with `mighty-colab adopt <ENDPOINT>`, or all of them with `mighty-colab adopt --orphanage`.
 - `mighty-colab status [-s <name>]` shows hardware, IDLE/BUSY, and last execution.
 - `mighty-colab log -s <name> [-n 20] [-t TYPE]` shows recent structured events; invaluable when a task fails (keep-alive errors carry the raw `response_body`).
+- `mighty-colab log -s <name> -f` tails a running `exec-async` job's raw stdout/stderr live, until it finishes — a different, real-time view from the structured event history the same command shows without `-f`. Errors if no `exec-async` job is tracked for that session.
+- `mighty-colab log -s <name> --tail [-n N]` prints that same raw output once and exits immediately — no waiting, whether the job is still running or already done. Prefer this over `-f` when calling through something that can't handle a call blocking for an unbounded time (e.g. an MCP client).
 - `mighty-colab log -s <name> -o summary.ipynb` exports the session as a notebook (also `.md`, `.txt`, `.jsonl` by suffix).
 - `mighty-colab url -s <name>` prints a browser URL that attaches the Colab web UI to your existing CLI session instead of allocating a new VM (add `--open` to launch it).
 - `mighty-colab skill` / `mighty-colab readme` print this skill and the README (handy for self-discovery).
@@ -101,4 +104,6 @@ by running `uv tool install mighty-colab` or `pip install mighty-colab`.
 ## Recovery
 - "Session not found" / 404 / 401 on exec: the backend pruned the VM. `mighty-colab exec`/`repl` detect this and clean up local state automatically — run `mighty-colab sessions` and re-create with `mighty-colab new`.
 - Execution timeout or wedged kernel: `mighty-colab restart-kernel -s <name>` (keeps the VM, resets the kernel), or `mighty-colab stop` then `mighty-colab new`.
+- `mighty-colab exec --timeout N` pegs a local CPU core at ~100% and never exits, even though the remote kernel/VM is fine: known bug in the vendored `jupyter_kernel_client` fork (`googlecolab/jupyter-kernel-client`) — once the deadline passes, `execute_interactive()`'s wait loop clamps to a 0s timeout and spins forever with no deadline-exceeded exit (verified live in the vendored source, not just a report). No fix planned (third-party code, and the fork has issues disabled). Just `kill -9` the local process — the remote session is untouched and can be reattached immediately with `mighty-colab status -s <name>` / `mighty-colab exec`.
 - Keep-alive daemon died (`mighty-colab log` shows `keep_alive_stopped reason=consecutive_4xx_errors`): almost always the missing `colaboratory` scope — re-auth per the Authentication section.
+
