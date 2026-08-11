@@ -1099,18 +1099,33 @@ cloud run's `0.19945944496779283`, relative difference exactly zero. This
 is the one place the repository's self-sufficiency has actually been
 demonstrated end to end rather than assumed.
 
-**NOT obtainable, and this is the part worth knowing before you plan
-around it.** `experiments/stage1b2_structured_transformation/results/
-class0_constructions.pkl` is gitignored and returns 404 from the bucket
-under every prefix tried. It exists only on whichever machine last wrote
-it. `build_and_verify_T()` defaults to `require_historical_verification=
-True` and raises `FileNotFoundError` without it, so three Tier-2 tests
-fail rather than skip once `datasets/` is present — the outer
-missing-dataset skip had been hiding an inner missing-artifact
-dependency. What is lost is a byte-exact VERIFICATION step, not the
-science: T reconstructs from scratch and matches. Pass
-`require_historical_verification=False` to proceed, and know that you are
-skipping a check, not reproducing one.
+**Recoverable from the bucket**, not lost.
+`experiments/stage1b2_structured_transformation/results/
+class0_constructions.pkl` is gitignored, and previously returned 404 from
+the bucket under every prefix tried — that was a genuine gap in what a
+fresh clone could get, not unobtainability in principle. It is now
+published at `historical/experiments/stage1b2_structured_transformation/
+results/class0_constructions.pkl` (`experiments/
+publish_historical_artifacts.py`, index at `experiments/
+historical_artifacts_index.json`). Regeneration is still not the remedy
+and never will be: its `random` construction does not reproduce the
+cached `random` key under any of 10 swept seeds — a structural mismatch
+(`src/bonsai/dynamics/construction_bundle.py:12-25`), not a seed problem
+— and `tests/test_construction_driver.py:145-151` asserts that non-match
+as a pinned regression check, so re-uploading a reconstruction under this
+name would destroy the ability to tell reconstruction from original.
+`build_and_verify_T()` defaults to `require_historical_verification=True`
+and raises `FileNotFoundError` without the artifact present; with it
+present, it passes. Before this was published, that default silently
+took down three tests whose own source never names
+`class0_constructions.pkl`, so a grep for the filename would not have
+found them: `test_stage2a_core.py::
+test_reference_node_constant_columns_on_real_encoded_state` and the two
+`_real_active_indices()`-based tests in `test_stage2b_cnn.py`, all three
+reaching the raise through `stage2a_core.load_T()`.
+`require_historical_verification=False` remains available to reconstruct
+T without the byte-exact check against history, but there is no longer a
+reason to reach for it just because the artifact seemed unobtainable.
 
 Protocol 1's report objects (`protocol1_propagation_report_*.json`) are
 also 404 to an anonymous client; their numbers survive in

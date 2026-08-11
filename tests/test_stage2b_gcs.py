@@ -545,6 +545,34 @@ def test_stage_and_condition_prefixes_are_prefixes_of_the_object_path():
     assert condition.startswith(stage + "/")
 
 
+# ---- the historical object-path scheme (pre-Stage-2B artifacts) ----
+
+def test_historical_object_path_mirrors_the_repo_path_under_a_reserved_root():
+    assert (gcs.historical_object_path(
+        "experiments/stage1b2_structured_transformation/results/class0_constructions.pkl")
+        == "historical/experiments/stage1b2_structured_transformation/results/"
+           "class0_constructions.pkl")
+
+
+def test_historical_object_path_is_pure(tmp_path, monkeypatch):
+    monkeypatch.chdir(tmp_path)
+    before = sorted(os.listdir(tmp_path))
+    gcs.historical_object_path("a/b.pkl")
+    assert sorted(os.listdir(tmp_path)) == before
+
+
+def test_historical_object_path_does_not_share_the_stage2b_root():
+    path = gcs.historical_object_path("a/b.pkl")
+    assert not path.startswith(gcs.ROOT_PREFIX + "/")
+    assert not gcs.is_test_split_path(path)
+
+
+@pytest.mark.parametrize("bad", ["/a/b.pkl", "a/../b.pkl", "../a.pkl", "", "a//b.pkl"])
+def test_historical_object_path_rejects_an_escaping_or_empty_path(bad):
+    with pytest.raises(ValueError):
+        gcs.historical_object_path(bad)
+
+
 @pytest.mark.parametrize("stage", [0, 6, -1, "1", 1.0, True, None])
 def test_object_path_rejects_a_stage_outside_the_ladder(stage):
     """`1.0` and `True` are both `== 1`, so a plain membership test would

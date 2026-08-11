@@ -408,6 +408,27 @@ def object_path(*, stage, condition, kind, ext, split, allow_test_split=False):
     return f"{prefix}/{kind}.{ext}"
 
 
+HISTORICAL_PREFIX = "historical"
+
+
+def historical_object_path(repo_relative_path):
+    """The object name for a pre-Stage-2B artifact, mirroring its repo path
+    under a `historical/` root, e.g. `historical/stage1b2_structured_
+    transformation/results/class0_constructions.pkl`.
+
+    Deliberately not built from `object_path`: these artifacts predate
+    Stage 2B and have no stage/condition/split to encode, so borrowing that
+    scheme would spell a claim about ladder membership that isn't true. A
+    pure function like `object_path`, for the same reason -- no client, no
+    network, testable on its own."""
+    path = str(repo_relative_path).replace(os.sep, "/")
+    if not path or path.startswith("/"):
+        raise ValueError(f"repo_relative_path must be a non-empty relative path, got {path!r}")
+    if any(segment in ("", "..") for segment in path.split("/")):
+        raise ValueError(f"repo_relative_path must not contain empty or '..' segments, got {path!r}")
+    return f"{HISTORICAL_PREFIX}/{path}"
+
+
 # =====================================================================
 # Artifact class: which names are write-once
 # =====================================================================
