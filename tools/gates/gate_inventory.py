@@ -401,6 +401,33 @@ _REQUIRED_ONLY_WHEN_STATUS: dict[str, dict[str, frozenset[str]]] = {
 _RELATIONSHIP_FIELDS = ("canonical_clause", "parent_clause")
 
 
+# ONE definition, shared by every kind that asks for this field.
+#
+# It carried two, with different acceptance criteria: gates wanted "the test
+# flips red under a deliberate local disable", values wanted "the test fails
+# when the PRODUCTION value or its propagation is altered". Both are the same
+# instruction -- break the real thing, not a proxy -- and the schema only ever
+# enforced the field's PRESENCE, so two authors could fill it meaning
+# different things and both pass.
+#
+# The replacement is the discriminator set `docs/TEST_CEREMONY_AUDIT.md` used
+# to audit the blocking suite, which is a sharper statement of what both were
+# reaching for and is backed by a measured precision ledger rather than by
+# assertion. Clause (c) is the addition neither had: a guard that fires
+# constantly and is resolved identically every time is pinning a description.
+_BREAK_DEMONSTRATED = (
+    "(5b) evidence from DELIBERATELY CAUSING the harm this row names and "
+    "watching THIS guard reject it: (a) the harm named concretely, not as a "
+    "category; (b) the guard shown to FIRE when it is introduced, never "
+    "argued; (c) the fix FORKS on the verdict -- a guard whose every firing "
+    "is resolved the same way (bump a number, add a name) pins a description, "
+    "not an outcome; (d) what was broken is the PRODUCTION path, not a proxy "
+    "-- a source grep, a symbol reference, a test that merely names the "
+    "predicate, or an edit to a constant literal proving only that the "
+    "literal equals itself, none qualify"
+)
+
+
 _REQUIRED_DIMENSIONS = {
     "enforcement": "(1) the executable predicate",
     "production_reachability": "(2) the production path(s) that reach it, "
@@ -412,10 +439,7 @@ _REQUIRED_DIMENSIONS = {
                             "continuation is insufficient unless the design "
                             "explicitly defines the gate as advisory",
     "test": "(5a) the test",
-    "break_demonstrated": "(5b) evidence the test flips red under a "
-                          "deliberate local disable -- a source grep, symbol "
-                          "reference, or test that merely names the predicate "
-                          "does not qualify",
+    "break_demonstrated": _BREAK_DEMONSTRATED,
     "trigger": "what schedules the test (separate axis from reachability)",
 }
 
@@ -432,10 +456,7 @@ _REQUIRED_BY_KIND["binding_value"] = {
                             "cited for a value read in four places is a row "
                             "that covers a quarter of what it claims",
     "enforcement": "the pinning/identity test",
-    "break_demonstrated": "causal evidence the test fails when the PRODUCTION "
-                          "value or its propagation is altered -- not merely "
-                          "when the constant literal is edited, which tests "
-                          "that the literal equals itself",
+    "break_demonstrated": _BREAK_DEMONSTRATED,
     "provenance_of_use": "evidence sufficient to establish the artifact or run "
                          "actually USED the frozen value, rather than that the "
                          "value was frozen somewhere",

@@ -47,11 +47,31 @@
 #                            continuation does not qualify unless the design
 #                            defines the gate as advisory.
 #   test                     the test, `path::name`
-#   break_demonstrated       evidence the test flips RED under a deliberate
-#                            local disable. A source grep, a symbol
-#                            reference, or a test that merely names the
-#                            predicate does not qualify -- see VACUOUS_TESTS
-#                            #17 and #20, both of which were exactly that.
+#   break_demonstrated       evidence from DELIBERATELY CAUSING the harm
+#                            this row names and watching THIS guard reject
+#                            it. ONE definition, governing every kind in
+#                            this file -- the criteria do not vary by kind.
+#                            Four things it must establish, which are the
+#                            discriminators `docs/TEST_CEREMONY_AUDIT.md`
+#                            audited the whole blocking suite with:
+#                              (a) the HARM is named concretely, not as a
+#                                  category;
+#                              (b) the guard FIRES when that harm is
+#                                  introduced -- shown, never argued;
+#                              (c) the FIX FORKS on the verdict. A guard
+#                                  whose every firing is resolved the same
+#                                  way -- bump a number, add a name -- is
+#                                  pinning a description rather than an
+#                                  outcome. One was deleted on 2026-08-11
+#                                  after 15 firings and no defects;
+#                              (d) what was broken is the PRODUCTION path,
+#                                  not a proxy for it. A source grep, a
+#                                  symbol reference, a test that merely
+#                                  names the predicate, or an edit to a
+#                                  constant literal that proves only that
+#                                  the literal equals itself -- none
+#                                  qualify. VACUOUS_TESTS #17 and #20 were
+#                                  exactly (d); the deletion above was (c).
 #   trigger                  what SCHEDULES the test (`ci-fast`, `manual`).
 #                            A separate axis from reachability: "somebody
 #                            runs it by hand" is reported, not failed;
@@ -743,10 +763,12 @@ trigger = "manual"
 #                        point. One consumer cited for a value read in four
 #                        places is a row covering a quarter of what it claims.
 #   enforcement          the pinning/identity test
-#   break_demonstrated   causal evidence the test fails when the PRODUCTION
-#                        value or its propagation is altered -- not when the
-#                        literal is edited, which tests that a constant
-#                        equals itself
+#   break_demonstrated   AS DEFINED IN THE binding_gate HEADER ABOVE. One
+#                        definition governs both kinds; the criteria do not
+#                        vary by kind. For a frozen number, clause (d) is
+#                        what bites: alter the PRODUCTION value or its
+#                        propagation, never the constant literal, which
+#                        proves only that a literal equals itself
 #   provenance_of_use    evidence the run actually USED the frozen value,
 #                        rather than that the value was frozen somewhere
 #   trigger              what schedules that test
@@ -3200,7 +3222,7 @@ contemporaneous narration rather than standing obligation."""
 # value rows that already carry causal break evidence.
 
 [semantic_review]
-inventory_sha256 = "a7756cc0e44b53142f59c6a6aeafccc41df37e0d777228dab263ac5af4c2ec8e"
+inventory_sha256 = "1df9a0d656683ba9b3f153df4ee1b7ceb9b351dba85458ca2834589504bb300e"
 reviewer = "Dan Barua (2026-08-10, 2026-08-11); earlier rulings by ChatGPT / Stage 2B Reviewer"
 # Separate from `reviewer` on the Reviewer's own instruction: "Claude Code
 # can encode my ruling mechanically; it cannot independently make my
@@ -3322,7 +3344,24 @@ positional prefix AUDIT_PROTOCOL forbids) failing 5 tests across two
 files, at the consumers and not only at the predicate. No obligation was
 reinterpreted, no threshold moved, and `enforcement`, `kind`, `status` and
 `trigger` are untouched. `production_reachability` changed only to name
-the call sites where they now live."""
+the call sites where they now live.
+
+MECHANICAL REFRESH, 2026-08-11, hash a7756cc0e44b -> 1df9a0d65668. Not a
+ruling: `break_demonstrated` carried two definitions with different
+acceptance criteria (gate kind: the test flips red under deliberate local
+disable; value kind: the test fails when the production value or its
+propagation is altered), and the schema enforced only the field's PRESENCE,
+so two authors could fill it meaning different things and both pass. Both
+are now one definition -- literally one object in `gate_inventory.py`, so
+they cannot diverge again -- built on the discriminators
+`docs/TEST_CEREMONY_AUDIT.md` audited the blocking suite with. Dan's ruling,
+2026-08-11: "it could - do it."
+
+This qualifies for the mechanical route because only COMMENTS moved: the
+parsed rows were diffed against HEAD field by field and are identical, which
+is the condition the protocol above names. No row's evidence was re-judged
+against the new definition; rows are read under it as they come up for
+review."""
 scopes = ["not_binding", "superseded", "canonical_clause", "binding_claim"]
 findings = 12
 findings_resolved = 12

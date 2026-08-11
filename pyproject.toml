@@ -62,7 +62,13 @@ dev = [
     "google-crc32c>=1.5.0",
 ]
 gpu = [
-    "mighty-colab>=0.2.2",
+    # >=0.3.0 for `exec-async` and `log --tail`: a long GPU run no longer has
+    # to be held open by a foreground `exec --timeout`, where a failure
+    # anywhere after the work succeeds loses the result with the session.
+    # The Makefile calls `uv run --group gpu mighty-colab`, so the floor here
+    # is what the targets actually get -- a newer global install does not
+    # reach them.
+    "mighty-colab>=0.3.0",
     "google-cloud-storage>=2.19.0",
 ]
 
