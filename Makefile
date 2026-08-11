@@ -833,7 +833,7 @@ stage2b-cnn-arch-x86:  ## CNN forward pass on Colab x86, downloaded for comparis
 		echo "[make] Reusing existing session $(SESSION_2B_CNNARCH)"; \
 	fi && \
 	$(MIGHTY_COLAB) reinstall -s $(SESSION_2B_CNNARCH) jax[cuda12]==0.11.0 diffrax==0.7.2 equinox optax && \
-	rc=0; out=$$($(MIGHTY_COLAB) exec -s $(SESSION_2B_CNNARCH) -f measure_cnn_arch_agreement.py --timeout $(CNNARCH_EXEC_TIMEOUT) --env BONSAI_COMMIT="$$commit" --env JAX_ENABLE_X64=1 --args "--phase run --out $(CNNARCH_REMOTE_OUT) --cache-dir /content/cnn_arch_cache" 2>&1) || rc=$$?; \
+	rc=0; out=$$($(MIGHTY_COLAB) exec -s $(SESSION_2B_CNNARCH) -f measure_cnn_arch_agreement.py --timeout $(CNNARCH_EXEC_TIMEOUT) --env BONSAI_COMMIT="$$commit" --env JAX_ENABLE_X64=1 --env CNN_ARCH_PHASE=run --env CNN_ARCH_OUT="$(CNNARCH_REMOTE_OUT)" --env CNN_ARCH_CACHE_DIR=/content/cnn_arch_cache 2>&1) || rc=$$?; \
 	echo "$$out"; \
 	if [ $$rc -eq 0 ] && echo "$$out" | grep -q CNN_ARCH_OK; then \
 		$(MIGHTY_COLAB) download -s $(SESSION_2B_CNNARCH) $(CNNARCH_REMOTE_OUT) $(CNNARCH_LOCAL_OUT) || rc=$$?; \

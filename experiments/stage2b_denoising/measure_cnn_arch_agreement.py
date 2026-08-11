@@ -205,17 +205,29 @@ def phase_compare(args):
 
 
 def main():
+    """Flags locally, environment variables remotely.
+
+    `mighty-colab exec` transmits this file's TEXT into a live kernel: it
+    has an `--env` option and no way to pass argv, and the argv that does
+    exist belongs to ipykernel. So every setting takes its default from an
+    environment variable, and unrecognised arguments are tolerated rather
+    than fatal. Both routes reach the same code."""
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("--phase", choices=("run", "compare"), default="run")
-    parser.add_argument("--cache-dir", default="results/_plot_cache")
-    parser.add_argument("--out", default="results/cnn_forward_arm.npz")
-    parser.add_argument("--seed-key", default=None)
-    parser.add_argument("--a", default=None)
-    parser.add_argument("--b", default=None)
-    parser.add_argument("--json-out", default=None)
-    args = parser.parse_args()
+    parser.add_argument("--phase", choices=("run", "compare"),
+                        default=os.environ.get("CNN_ARCH_PHASE", "run"))
+    parser.add_argument("--cache-dir",
+                        default=os.environ.get("CNN_ARCH_CACHE_DIR",
+                                               "results/_plot_cache"))
+    parser.add_argument("--out",
+                        default=os.environ.get("CNN_ARCH_OUT",
+                                               "results/cnn_forward_arm.npz"))
+    parser.add_argument("--seed-key", default=os.environ.get("CNN_ARCH_SEED_KEY"))
+    parser.add_argument("--a", default=os.environ.get("CNN_ARCH_A"))
+    parser.add_argument("--b", default=os.environ.get("CNN_ARCH_B"))
+    parser.add_argument("--json-out", default=os.environ.get("CNN_ARCH_JSON_OUT"))
+    args, _unrecognised = parser.parse_known_args()
     return phase_run(args) if args.phase == "run" else phase_compare(args)
 
 
-if __name__ == "__main__":
+if __name__ == "__main__" or os.environ.get(ENV_COMMIT):
     raise SystemExit(main())
