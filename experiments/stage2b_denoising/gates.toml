@@ -1468,20 +1468,36 @@ Nothing in AUDIT_PROTOCOL.md may be changed once an audit number has been
 seen. Its purpose is to fix, in advance, what will be measured, what the
 numerical resolution limit is, and what consequences follow -- so that none
 of those can be chosen after the fact to suit a result."""
-status = "pending_package"
-pending_reason = """
-The obligation constrains edits AFTER the first audit number exists. The
-audit driver is unwritten and no audit number exists, so the constraint has
-not yet been tested by anything. Filed pending rather than not_applicable on
-purpose: not_applicable would pass silently and would become false the day
-the audit runs, and a disposition that expires quietly is worse than one
-that fails loudly."""
+status = "discharged"
+evidence = """
+RE-EVALUATED 2026-08-11 (same pass as f18749c28dd0's identical check for
+COMPANION_PROTOCOLS.md; both were stale in the same way, discovered while
+fixing the other). pending_reason below was true when written and became
+false once the audit ran -- the row was never updated at the time.
+
+`git log --follow -- experiments/stage2b_denoising/AUDIT_PROTOCOL.md` shows
+exactly two commits: a850d5e (2026-08-06, "Freeze the stage-3 plan and
+amendment-audit protocol before execution") and 7879a4c (2026-08-08 01:25,
+"Freeze the alpha-grid extension before any fitting on it" -- itself a
+pre-registration, not an audit-consequence edit). The first audit number
+did not exist until 3daea87/824fc05 (2026-08-09), the day the audit
+actually ran (AUDIT_OK). Both AUDIT_PROTOCOL.md commits predate that by at
+least a day; nothing has touched the file since. The obligation holds."""
+discharged_in = """
+`git log --follow -- experiments/stage2b_denoising/AUDIT_PROTOCOL.md` (two
+commits, both 2026-08-06/08, both before the first audit result on
+2026-08-09) plus FINDINGS.md's audit section recording when that result
+landed."""
+pending_reason_superseded = """
+Original pending_reason (kept for history): "The audit driver is unwritten
+and no audit number exists, so the constraint has not yet been tested by
+anything." True on 2026-08-06/08 when this row was likely last touched;
+false since 2026-08-09."""
 negative_attestation = """
 Scoped to the commit history of AUDIT_PROTOCOL.md from the first audit
-result onward. That set is currently EMPTY, which is why the attestation is
-cheap now and will not be later -- recording the scope before the audit is
-what stops it being drawn afterwards around whatever edits happened. The
-check at package time is mechanical: no commit touching this file may be
+result onward. That set is now non-empty in principle (the audit has run)
+but still checkable directly: two commits total, both predating the result.
+The check at package time is mechanical: no commit touching this file may be
 dated after the first audit artifact."""
 
 [binding_claim.8bfce59ab9b4]
@@ -3183,8 +3199,8 @@ contemporaneous narration rather than standing obligation."""
 # value rows that already carry causal break evidence.
 
 [semantic_review]
-inventory_sha256 = "b5fb6a8323dbaf59d26a07e037501c5eec6106bc1db363249b7183257c3a6aed"
-reviewer = "Dan Barua (2026-08-10); earlier rulings by ChatGPT / Stage 2B Reviewer"
+inventory_sha256 = "43215cc6ff72eb863d5d21c08ba3d9a501ab65ed025c94e77983964459e75d61"
+reviewer = "Dan Barua (2026-08-10, 2026-08-11); earlier rulings by ChatGPT / Stage 2B Reviewer"
 # Separate from `reviewer` on the Reviewer's own instruction: "Claude Code
 # can encode my ruling mechanically; it cannot independently make my
 # attestation." This row is a transcription, and says so where a reader
@@ -3241,7 +3257,43 @@ The one judgement inside it, flagged rather than buried: `unresolved` was
 chosen over `discharged` for the two rows, on the precedent at 37ae915f8e61
 that structure is not a statement. If a reviewer reads those write-ups as
 already stating their axes' required conclusions, those two rows discharge
-and this attestation should be refreshed again."""
+and this attestation should be refreshed again.
+
+THIRD REFRESH, 2026-08-11, task #49 closure, on Dan's ruling "Just update
+the staleness in all docs" -- the same terse-authorization shape as the
+second refresh's "the document is stale and should be updated to reflect
+the actual status", applied again rather than treated as a one-off. A
+DISPOSITION CHANGE, so a ruling, not a mechanical refresh: exactly the
+condition the second refresh's own SECOND REFRESH paragraph named as
+requiring one.
+
+What changed: the "if a reviewer reads those write-ups as already stating
+their axes' required conclusions" condition just above WAS MET -- but by
+rewriting FINDINGS.md's Protocol 2 axis 3/4 section to state them
+explicitly, not by re-reading the old prose differently. b4af82150247 and
+f589d99127d1 moved `unresolved` -> `discharged` on that new text (axis 3:
+explicit convergence-vs-float64-floor statement; axis 4: the corrected
+2*sin(eps) bound, features and Delta_g answered separately, Delta_g
+honestly "not established" rather than silently omitted). 8296ec49b5fa
+moved `pending_package` -> `discharged`: its pending_reason ("the stress
+set does not exist") had been false since bb95666 implemented Protocol 1
+and it ran to PROTOCOL1_OK, and was never updated at the time.
+f18749c28dd0 moved `pending_package` -> `discharged`: the mechanical
+attestation it deferred (no COMPANION_PROTOCOLS.md edit after either
+protocol's first result) was run -- `git log --follow` shows exactly one
+commit against that file ever, predating both results. 0ac873652382 (a
+different document's identical freeze, AUDIT_PROTOCOL.md) was found stale
+in the same pass and fixed the same way: its pending_reason said the audit
+driver was unwritten, but the audit ran and closed 2026-08-09; two commits
+touch AUDIT_PROTOCOL.md, both before that.
+
+None of these five were re-litigated as scientific judgements -- each
+disposition change is a record catching up to an artifact or a commit
+history that already existed, the same character as the second refresh's
+own corrections. PROJECT_MEMORY.md's citation of Protocol 1's run_id
+(`20260810T124247Z` -> `20260810T151245Z`, matching FINDINGS.md's own
+"authoritative process-closure run_id" statement) was corrected in the
+same pass, outside this inventory but for the same reason."""
 scopes = ["not_binding", "superseded", "canonical_clause", "binding_claim"]
 findings = 12
 findings_resolved = 12

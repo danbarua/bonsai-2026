@@ -687,7 +687,11 @@ of the two companion protocols `AUDIT_PROTOCOL.md` names, the
 full swept eps range at every step count, including the locked
 `ENCODER_STEPS=1200` -- its own halt condition does not fire); the
 ARM/x86 propagation stress set (`COMPANION_PROTOCOLS.md` Protocol 1) has
-also run (`PROTOCOL1_OK`, run_id `20260810T124247Z`, stage-5 max
+also run (`PROTOCOL1_OK`, run_id `20260810T151245Z` -- FINDINGS.md's own
+Protocol 1 section names this the authoritative process-closure run_id;
+an earlier report existed under `20260810T124247Z` without a process
+sentinel or manifest sidecar, and `20260810T151245Z` is the run that
+closed that gap -- stage-5 max
 `|Δ Delta_g|` = `1.830e-12` on `curr_random` vs threshold
 `4.604761e-10`). Disclosed as post-hoc relative to Stage 4's locked
 ordering (same sequencing-deviation class as the amendment-impact
