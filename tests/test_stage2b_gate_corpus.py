@@ -181,8 +181,16 @@ def test_each_exemption_still_contributes_the_candidate_count_it_did():
     # ("locked", "HALT"). Saying a frozen gate did not fire is a result,
     # not a new obligation stated in FINDINGS.md's own voice. Same genre as
     # every FINDINGS.md bump above it.
+    # FINDINGS.md moved 60 -> 61 extending the CNN reproduction section
+    # across GPU classes. Re-read: the new candidate is "still not a proven
+    # guarantee, and the drift growing with hardware distance is the
+    # direction that would eventually break it" -- a statement of what two
+    # further measurements do and do not license, in the same hedging voice
+    # the paragraph already used before this edit. It weakens a claim rather
+    # than imposing anything; a sentence saying evidence is not proof cannot
+    # bind the system. Same genre as every FINDINGS.md bump above it.
     at_exemption_time = {
-        "FINDINGS.md": 60,
+        "FINDINGS.md": 61,
         "NEGATIVE_PATH_EVIDENCE.md": 19,
         "PHASE_B_PLAN.md": 38,
         # README.md moved 24 -> 25 adding the measure_scaler_lipschitz.py

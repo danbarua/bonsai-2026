@@ -1207,6 +1207,29 @@ training procedure reproduces its seed/epoch selection reliably in
 practice, though the module deliberately does not claim this as a proven
 guarantee.
 
+**Extended across GPU classes, 2026-08-11.** Every retrain above ran on
+an A100, so "cross-session" was the only axis the evidence covered. Two
+further retrains on an **L4** -- same locked 54,000/6,000 split, same
+three seeds, via `backfill_cnn_weights.py` -- selected seed 1 at epoch 99
+again, with all three seeds' stopping epochs `[98, 99, 77]` matching
+stage 3 exactly. `best_clipped_val_mse` differed from stage 3's by
+**2.290e-06** and **3.442e-05**, an order to two orders larger than the
+same-hardware 9.328e-07 and 2.385e-07, and still far too small to move
+the selection. This matters because early stopping runs at
+`MIN_DELTA=0.0` with a strict `<` and so has no tolerance band to absorb
+a moved metric: a drifting validation curve could reorder the argmin or
+shift the stopping epoch, and across two GPU classes it did not. Still
+not a proven guarantee, and the drift growing with hardware distance is
+the direction that would eventually break it.
+
+The trained weights are also no longer discarded. `cnn_weights.npz`
+(stage 3, `common`) now carries all three seeds with `cnn_production.npz`
+as a pinned parent, so the retrain-to-obtain-a-model cost this section
+describes is a one-off rather than the standing price of touching the
+CNN. That companion file is unmodified and could not have been: it is
+LINEAGE-class and create-once. Nothing in the numbers above changes --
+the weights were written only after the reproduction check above passed.
+
 CNN test-corpus mean clipped MSE: **0.063069**. Reported descriptively
 throughout this file and this driver, per DESIGN.md's own framing -- the
 CNN is in neither statistics family and is not part of the inference this
