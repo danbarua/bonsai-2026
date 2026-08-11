@@ -260,6 +260,23 @@ mention here, in the same commit that creates it.
   whose phases have collapsed together and carry no spatial information.
   `uv run python animate_graph_dynamics.py`.
 
+- **`measure_cnn_arch_agreement.py`** — ARM vs x86 for the CNN forward
+  pass, the half Protocol 1 left open because no weights were persisted to
+  measure. Both machines read the SAME stored bytes — a fixed 512-row
+  slice of stage 3's `corruption.npz`, plus `cnn_weights.npz` — and the
+  compare phase refuses to report if the two runs disagree on either
+  digest, so what is measured cannot be an input difference. There is no
+  RNG in the file. Measured: max absolute difference **9.537e-07**, mean
+  8.618e-08, 11.7% of outputs bit-identical, over an output range of
+  [-0.1005, 1.1725]. The absolute error is flat across every magnitude
+  band, which is float32 accumulation order — about 8 ULP on O(1) outputs.
+  The raw max RELATIVE difference is 1.333 and is meaningless (principle
+  23): the pair producing it is -5.960e-08 against 1.788e-07, both
+  numerically zero; conditioned on magnitude it falls to 5.929e-04 above
+  0.001 and 5.354e-06 above 0.1. No threshold is applied — there is no
+  measured basis for one. `make stage2b-cnn-arch-x86` (bills while
+  running), then `make stage2b-cnn-arch-compare` (free).
+
 - **`run_arm_x86_propagation_stress.py`** — `COMPANION_PROTOCOLS.md` Protocol
   1: ARM/x86 propagation stress set. Three resumable phases
   (`arm-construct` local, `x86-encode` Colab x86, `propagate` local):

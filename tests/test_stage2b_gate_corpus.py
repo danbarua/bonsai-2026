@@ -189,8 +189,15 @@ def test_each_exemption_still_contributes_the_candidate_count_it_did():
     # the paragraph already used before this edit. It weakens a claim rather
     # than imposing anything; a sentence saying evidence is not proof cannot
     # bind the system. Same genre as every FINDINGS.md bump above it.
+    # FINDINGS.md moved 61 -> 63 adding the ARM/x86 forward-pass section.
+    # Re-read, both: "the absolute error is FLAT ... rather than a defect"
+    # and "Near a floor the ratio is the wrong statistic" are readings of a
+    # measurement and a restatement of principle 23, which CLAUDE.md already
+    # owns. Neither states an obligation in FINDINGS.md's own voice, and the
+    # section explicitly declines to set a threshold rather than setting
+    # one. Same genre as every FINDINGS.md bump above it.
     at_exemption_time = {
-        "FINDINGS.md": 61,
+        "FINDINGS.md": 63,
         "NEGATIVE_PATH_EVIDENCE.md": 19,
         "PHASE_B_PLAN.md": 38,
         # README.md moved 24 -> 25 adding the measure_scaler_lipschitz.py
@@ -220,7 +227,12 @@ def test_each_exemption_still_contributes_the_candidate_count_it_did():
         # obligation. Both are module-map entries in the same genre as every
         # one above; a script that renders pixels and computes no metric has
         # nothing to bind.
-        "README.md": 28,
+        # README.md moved 28 -> 29 adding the measure_cnn_arch_agreement.py
+        # module-map entry. Re-read: the new candidate is "No threshold is
+        # applied -- there is no measured basis for one", which is a refusal
+        # to impose a gate, not a gate. Same module-map genre as every entry
+        # above it.
+        "README.md": 29,
     }
     assert set(at_exemption_time) == set(gate_corpus.EXEMPT), (
         "an exemption was added or removed without a candidate count")

@@ -1222,6 +1222,37 @@ shift the stopping epoch, and across two GPU classes it did not. Still
 not a proven guarantee, and the drift growing with hardware distance is
 the direction that would eventually break it.
 
+**ARM vs x86, the forward pass.** Companion Protocol 1 measured the
+propagation chain across architectures and left the CNN's forward pass
+unmeasured, because no weights were persisted and measuring meant
+retraining first. Measured 2026-08-11 with both machines reading the same
+stored bytes — a fixed 512-row slice of `corruption.npz` and
+`cnn_weights.npz`, digests compared before the comparison is permitted to
+report, so what is measured cannot be an input difference:
+
+| statistic | value |
+| --- | --- |
+| max absolute difference | 9.537e-07 |
+| mean absolute difference | 8.618e-08 |
+| bit-identical outputs | 46,932 of 401,408 (11.7%) |
+| output range | [-0.1005, 1.1725] |
+
+The absolute error is FLAT at ~9.5e-07 across every magnitude band, which
+is the signature of float32 accumulation order rather than a defect: two
+BLAS/SIMD paths summing 32 channels × 9 taps in different orders, roughly
+8 ULP on O(1) outputs. The raw maximum RELATIVE difference is 1.333 and
+carries no information — principle 23 exactly, since the pair producing it
+is -5.960e-08 against 1.788e-07, both numerically zero. Conditioned on
+magnitude it collapses: 5.929e-04 above |out| > 0.001, 5.354e-06 above
+0.1. Near a floor the ratio is the wrong statistic.
+
+Consequence for anything reported here: none. The CNN's test-corpus mean
+clipped MSE is 0.063069, seven orders above this perturbation. No
+threshold is applied, because there is no measured basis for one and
+choosing a tolerance after seeing a number is what Freeze 1 rejected;
+`results/cnn_arch_agreement.json` holds the full record for whoever writes
+one.
+
 The trained weights are also no longer discarded. `cnn_weights.npz`
 (stage 3, `common`) now carries all three seeds with `cnn_production.npz`
 as a pinned parent, so the retrain-to-obtain-a-model cost this section
