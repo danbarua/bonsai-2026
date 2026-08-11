@@ -236,11 +236,27 @@ def test_each_exemption_still_contributes_the_candidate_count_it_did():
     }
     assert set(at_exemption_time) == set(gate_corpus.EXEMPT), (
         "an exemption was added or removed without a candidate count")
-    for name, expected in at_exemption_time.items():
+
+    # EVERY drifted document in one report, not the first one found.
+    # Asserting inside the loop meant a session that edited two exempt
+    # documents learned about the second only after fixing the first and
+    # re-running the whole suite -- measured at ~3.5 minutes a cycle, paid
+    # twice in one evening for a two-file edit, with neither bump finding a
+    # defect. The check is unchanged; only how much of the answer it gives
+    # per run.
+    drifted = []
+    for name, expected in sorted(at_exemption_time.items()):
         actual = len(derive_clauses([STAGE2B_DIR / name]))
-        assert actual == expected, (
-            f"{name} now derives {actual} candidates, not {expected}: its "
-            f"exemption reason was written about different text")
+        if actual != expected:
+            drifted.append((name, expected, actual))
+    assert not drifted, (
+        "these documents no longer derive the candidate count their exemption "
+        "reason was written about:\n"
+        + "\n".join(f"  {name}: {expected} -> {actual} "
+                    f"({actual - expected:+d})" for name, expected, actual in drifted)
+        + "\n\nThis is not a defect report. Re-read the new or removed "
+          "candidates, satisfy yourself the exemption's reason still holds, "
+          "and only then update the number -- never ahead of the re-reading.")
 
 
 def test_every_binds_at_pointer_names_a_clause_in_a_binding_kind():
