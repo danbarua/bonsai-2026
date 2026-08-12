@@ -64,7 +64,34 @@ into twelve 20MB `.npy` files and reassembles on the VM.
 - `reinstall` of `jax[cuda12] diffrax equinox optax`: **~10s** via uv.
 - GPU evolution of 60,000 images x 4 topologies: **117.7s**, reproducing a
   months-old run to within 3.3% across three separate A100 allocations.
-- CV arm on A100 vs the same arm on local CPU: **125.3s vs 10,162s (81x)**.
+- The whole ten-arm job: **1,321.8s (22 minutes), 10/10 converged**, against
+  **34.5 core-hours** for the same arms on local CPU -- **96x**. Per-arm
+  speedups ranged 69x to 183x.
+- One `exec-async` submission, one clean teardown, `status=ok` with the
+  driver's sentinel present, results downloaded.
+
+The job that motivated all of this therefore ran in less time than the four
+failed launches spent uploading.
+
+### 1.3 A three-way factorial the CLI made cheap
+
+An external reviewer asked whether a GPU/CPU numerical difference (A100 TF32)
+could explain a divergence we had attributed to a convergence criterion. The
+question is answerable only by running the same code on a different backend,
+which is one environment variable here:
+
+    JAX_PLATFORMS=cpu python disambiguate_jax_sklearn_divergence.py
+
+| fit | accuracy | iterations |
+|---|---|---|
+| sklearn CPU | 0.882250 | 5,309 |
+| JAX GPU | 0.871083 | 1,955 |
+| JAX CPU | 0.871000 | 2,003 |
+
+JAX-on-CPU is **135x closer to JAX-on-GPU than to sklearn**, ruling out the
+platform. Worth recording as a usage pattern: keeping the remote driver and
+the local one importing the *same* module made this a one-line experiment
+rather than a port.
 
 ---
 
