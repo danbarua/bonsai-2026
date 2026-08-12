@@ -321,7 +321,7 @@ if [ -s "$(1)" ]; then \
 	mkdir -p "$$adir"; \
 	mv "$(1)" "$$adir/$$abase.$$ats"; \
 	if [ -f "$(1).json" ]; then mv "$(1).json" "$$adir/$$abase.$$ats.json"; fi; \
-	echo "[make] archived previous run to previous_runs/$$abase.$$ats"; \
+	echo "[make] archived previous run: $$adir/$$abase.$$ats (+ .json)"; \
 fi
 endef
 
@@ -383,6 +383,8 @@ elif [ "$$jstat" != "ok" ]; then \
 	jmsg=$$(printf '%s' "$$tout" | $(JQ) -r '.message // empty'); \
 	if [ -n "$$jmsg" ]; then echo "[make]   message: $$jmsg"; fi; \
 	if [ -n "$$jhint" ]; then echo "[make]   hint: $$jhint"; fi; \
+	echo "[make]   log:     $(5)"; \
+	echo "[make]   sidecar: $(5).json"; \
 	tail -40 $(5) 2>/dev/null; rc=1; \
 elif ! grep -q '$(4)' $(5) 2>/dev/null; then \
 	echo "[make] FAILED: job exited cleanly but never printed its sentinel $(4)."; \

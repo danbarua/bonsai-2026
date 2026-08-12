@@ -209,6 +209,14 @@ def test_a_previous_run_is_archived_rather_than_destroyed():
         "says when it was archived rather than when that run happened")
 
 
+def test_a_failure_prints_where_the_evidence_is():
+    """A failure report that describes the log without naming it makes the
+    reader go find it. Print the absolute paths to the log and its sidecar."""
+    body = _template("await_async")
+    assert 'log:     $(5)' in body and 'sidecar: $(5).json' in body, (
+        "await_async does not print the log and sidecar paths on failure")
+
+
 def test_the_async_await_template_surfaces_the_envelope_hint():
     """The envelope carries `message` and `hint` alongside `reason`. Printing
     the reason code alone discards the CLI's own remediation advice, which is
