@@ -65,8 +65,11 @@ into twelve 20MB `.npy` files and reassembles on the VM.
 - GPU evolution of 60,000 images x 4 topologies: **117.7s**, reproducing a
   months-old run to within 3.3% across three separate A100 allocations.
 - The whole ten-arm job: **1,321.8s (22 minutes), 10/10 converged**, against
-  **34.5 core-hours** for the same arms on local CPU -- **96x**. Per-arm
-  speedups ranged 69x to 183x.
+  **124,253.2s = 34.51 core-hours** for the same arms on local CPU. Stated on
+  both bases, because they differ by 2% and the document should say which:
+  **95.9x** comparing summed arm time to summed arm time (1,296.1s), and
+  **94.0x** comparing it to total job time (1,321.8s, which includes feature
+  building between arms). Per-arm speedups ranged 69x to 183x.
 - One `exec-async` submission, one clean teardown, `status=ok` with the
   driver's sentinel present, results downloaded.
 
@@ -332,6 +335,15 @@ will make, so they may be worth designing against:
 
 ## 4. Requests, ordered by measured cost
 
+**Prior art in this repo, found after the fact.** Stage 2B's `DESIGN.md:507`
+already locks the rule these measurements argue for: artifacts are "pushed to
+Google Cloud Storage from within [the cloud environment] -- never
+round-tripped through local upload (Stage 2A's 242MB-vs-~6-15MB Colab upload
+limit, already hit once)." That rule binds Stage 2B; this was Stage 2A work,
+which is where the limit was hit and the lesson learned. So this document is
+not a rule violation -- it is the same conclusion re-derived independently on
+the other side of the boundary, with the number the original never had: 52x.
+
 1. **Let the VM fetch from object storage instead of from the caller.**
    This is the whole ballgame, and it is measured: 205s from here versus 4.1s
    from GCS for the same bytes, a 52x difference that no amount of tuning the
@@ -339,21 +351,33 @@ will make, so they may be worth designing against:
    a documented VM-side helper, removes the slowest step in every
    repeated-job workflow. We are doing it by hand today with
    `google-cloud-storage` in the driver.
+   *Traces to: §1.1 (205s vs 4.1s, measured three ways); §3.6 (the VM has
+   no service account, so the fetch path needs an anonymous or key-based
+   client); Stage 2B `DESIGN.md:507`, which locked this rule already.*
 2. **Cross-session reuse of identical bytes.** Even without object storage,
    the same 242MB is re-uploaded per session with no caching. Content-
    addressed reuse would pay for itself on the second launch. Raw throughput
    is NOT the ask -- at 1.18 vs 2.03 MB/s the endpoint is close enough to
    the uplink that tuning it buys little.
+   *Traces to: §1.1 -- four launches of one job re-uploaded identical bytes,
+   ~14 minutes against 2.3 minutes staged once.*
 3. **Don't clobber a previous run's log/sidecar.** Either timestamp by
    default, or refuse to overwrite a non-empty `--output-log` without a
    `--force`. The sidecar especially: it is the durable failure record and it
    is one relaunch from being lost.
+   *Traces to: §3.2 (one false diagnosis, 13:42 against a 13:35 log) and
+   §3.3 (a deleted log recovered from its sidecar, which the next run would
+   have overwritten).*
 4. **An import pre-flight for `exec -f`.** Something like
    `mighty-colab exec --check-imports -f driver.py` that reports which
    top-level imports would not resolve on a bare VM. This is our most
    expensive recurring failure and it is statically detectable.
+   *Traces to: §3.1 -- two A100s and ~40 minutes, twice, before a
+   one-second local import check would have caught it.*
 5. **Raise or document the upload size limit** that forces 250MB into twelve
    chunks. The workaround is in three drivers here.
+   *Traces to: §1.1 and Stage 2B `DESIGN.md:507`, which cites the same
+   limit as its reason for going GCS-native.*
 
 ---
 
