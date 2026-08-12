@@ -125,6 +125,45 @@ It was deliberately NOT added to the gauge comparison mid-flight. That run
 was already launched against a committed pre-registration, and adding a
 companion after the fact would have made the registration mean less.
 
+## 7. sklearn's own achieved gradient norms, re-derived by GPU sweep
+
+**Recorded:** `JAX_CLASSIFIER_PORT_FINDINGS.md`, "Follow-up:
+convergence-criterion recalibration (evolved_T)", reproducible from
+`diagnose_classifier_jax_grad_norm_calibration.py`.
+
+**What it says:** a nine-row table of `||grad||` at sklearn's own converged
+solution for every C in the locked grid, and the normalised
+`||grad||/(C*n_train)`, which is tight over **[1.338e-3, 2.771e-3]**.
+`GRAD_NORM_REL = 6e-3` was set at ~2.2x the top of that range. The same
+document logs the consequence as an open item: *the large-C validation-loss
+curve still diverges substantially from sklearn's -- the sole remaining open
+item for this port.*
+
+**The question that needed it (2026-08-12):** the GPU gauge replication found
+JAX and sklearn apart by up to 1.2e-02 at high C, and a tolerance sweep was
+designed to find the `GRAD_NORM_REL` at which they agree.
+
+**What reading it first would have changed:** the sweep grid. It was set to
+`6e-3, 1e-3, 1e-4, 1e-5, 1e-6` on the guess that matching sklearn needed a
+much tighter threshold. The table gives the answer directly -- sklearn sits at
+~2e-3 relative, so the crossing is between the first two grid points and
+everything below 1e-3 is measuring convergence DEEPER than sklearn ever
+reaches, not JAX catching up. The divergence itself was already logged as a
+known open item, not a discovery.
+
+**What the sweep still adds, and why it was not wasted:** the platform
+disambiguation (JAX-CPU vs JAX-GPU vs sklearn, ruling out TF32 and GPU
+numerics entirely), the dose-response of the gap against selected C across
+ten arms, and the consequence for a published verdict -- the class C call in
+`GAUGE_COMPARISON_2A_RESULT.md` does not survive the optimiser change. None of
+that is in the record.
+
+**The specific miss:** this document's own closing line is "before measuring
+something, grep for it." The measurement was designed, a GPU was provisioned
+and the job submitted before anyone grepped. The table surfaced only because
+a code-intelligence tool volunteered the neighbouring diagnostic's name in an
+unrelated notification.
+
 ## What this is not
 
 Not a proposal to build anything. A detector for "this record answers that
