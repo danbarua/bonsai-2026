@@ -27,9 +27,18 @@ Measured from one machine, minutes apart, on identical bytes:
 | 1 | local -> VM, `upload` x12 chunks | 242.4 MB | **205s** | **1.18 MB/s** |
 | 2 | **GCS -> VM** | 250.6 MB | **4.1s** | **61.5 MB/s** |
 
-**`upload` runs about 1.7x slower than the same box reaches GCS** -- a real
-gap but a modest one, and both are near this uplink's ceiling. The story is
-not that `upload` is slow.
+**`upload` runs about 1.7x slower than the same box reaches GCS.** An earlier
+draft attributed that to both being near the uplink's ceiling. The maintainer
+supplied the actual mechanism, which is better than the guess: `upload`
+**base64-encodes each chunk and POSTs it as a JSON payload to the IPython
+kernel, unpacked server-side.** base64 alone inflates 242MB to ~323MB on the
+wire -- 1.33x -- and JSON escaping plus per-chunk kernel decode accounts for
+most of the remaining gap to the measured 1.72x.
+
+That makes the gap **architectural rather than tunable**, and it sharpens the
+request below: a planned `upload-async` fixes BLOCKING, not throughput. A
+notebook kernel is the wrong transport for a 250MB file at any level of
+optimisation.
 
 **The story is leg 2: in-cloud transfer is 52x faster than anything from the
 caller's building.** Which makes the cost model arithmetic:
@@ -374,7 +383,16 @@ the other side of the boundary, with the number the original never had: 52x.
    expensive recurring failure and it is statically detectable.
    *Traces to: §3.1 -- two A100s and ~40 minutes, twice, before a
    one-second local import check would have caught it.*
-6. **Give `new`'s assign failure something an agent can decide on.** Six
+6. **Document that the assign 503 carries no diagnostic.** The original
+   version of this request asked for the response body to be surfaced. Per
+   the maintainer, Google returns a vanilla HTML page with no reason, so
+   there is nothing to surface -- which makes this a docs fix, and a
+   valuable one. The skill should say plainly: *a 503 on `new --gpu` carries
+   no diagnostic; treat it as transient, back off, do not retry tightly.*
+   Three provisioning attempts and ten minutes went into rediscovering that
+   there was nothing to learn.
+
+   The original ask, kept for context: Six
    concurrent A100 provisions drew 503s; a single retry minutes later
    succeeded; two further singles failed again. All we get is:
 
