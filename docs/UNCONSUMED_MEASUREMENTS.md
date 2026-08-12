@@ -78,6 +78,53 @@ p-underflow. Every key of that file was walked at every depth TWICE, hunting
 for absolute-path strings, without a single value being read. Reading it took
 90 seconds and withdrew a published claim (2026-08-11).
 
+## The adjacent failure: measurements that never reached the repository
+
+The entries above were all recorded HERE and then not read. This one is the
+neighbouring case, and it is worth separating: a measurement that was
+computed and verified, but whose only home is a chat transcript and a
+workspace file that was never landed. Everything above can be re-read by
+anyone with the repo. This cannot be read at all.
+
+### Accessible target energy (ρ=−1 against the Stage 4 ordering)
+
+**Status: DEFINITION durable, VALUES not. Do not cite the values.**
+
+Surfaced 2026-08-12, when it was proposed as a companion to the gauge
+comparison and described as "the strongest mechanism clue in the record."
+It is not in the record. A repo-wide search across every `FINDINGS.md` and
+every `.py` returns nothing; the only `rho` in Stage 2B is the encoder
+gate's ratio. It originates in an external mechanism report whose own
+closing line stated that the Bonsai repository remained unchanged — so the
+numbers were verified at the time, but custody was never tracked.
+
+The definition, recorded here so the quantity can be recomputed rather than
+guessed at:
+
+> Take the standardized (scaled, centred) full feature matrix `X`, decompose
+> `X = U S V^T`, project the centred clean targets `Z = U^T Y_centred`. Then
+>
+>     accessible target energy = ||Z||^2 / ||Y_centred||^2
+>
+> — the fraction of centred clean-target energy lying in the feature span.
+
+A derivation is its own provenance (principle 24 says so explicitly), which
+is why the definition can be written down here and trusted. The reported
+VALUES cannot: they were produced by a generator that does not exist in this
+repository, which is the exact shape of `class0_constructions.pkl` and of
+every other entry principle 24 was written for. They are therefore **not**
+reproduced here, not as a table and not in passing, because a number quoted
+once acquires the authority of the document quoting it.
+
+The remedy is the one principle 24 names — promotion to committed code, not
+citation of the capture. It is a minutes-scale CPU recompute from the cached
+features whenever anyone wants it in-repo. Until then the honest statement
+is: this quantity is defined, plausibly informative, and unmeasured HERE.
+
+It was deliberately NOT added to the gauge comparison mid-flight. That run
+was already launched against a committed pre-registration, and adding a
+companion after the fact would have made the registration mean less.
+
 ## What this is not
 
 Not a proposal to build anything. A detector for "this record answers that
