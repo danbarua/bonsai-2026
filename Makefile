@@ -293,7 +293,7 @@ endef
 # difference between "the job is running" and "the CLI declined and I am
 # about to poll an empty log for six hours".
 #
-# The log is TRUNCATED before submitting. --output-log points at a fixed
+# The previous run's log is ARCHIVED before submitting, never deleted. --output-log points at a fixed
 # path, so a previous run's content is still there -- and await_async proves
 # success partly by grepping that file for the driver's sentinel. A stale log
 # from an earlier SUCCESSFUL run would satisfy that grep even if this run
@@ -301,9 +301,33 @@ endef
 # once worked. Found when a relaunch's monitor replayed a 7-minute-old
 # traceback as if it were live.
 #
+# The first fix truncated, which fixed staleness by destroying evidence --
+# and a failed run's log is the most valuable artifact it produces. Archiving
+# gets both. The `.json` sidecar moves with it: the CLI writes it beside the
+# log and it survives teardown, so it is the durable record of WHY a run
+# failed (status, exit_code, reason, and the executed blocks), and the next
+# run would otherwise overwrite it at the same path.
+#
+# Moves a previous run's log and its `.json` sidecar aside, timestamped by
+# the log's own mtime so the name says when that run happened, not when it
+# was archived. Silent when there is nothing to keep.
+#
+# $(1) = log path
+define archive_previous_run
+if [ -s "$(1)" ]; then \
+	ats=$$(date -r "$(1)" +%Y%m%dT%H%M%S 2>/dev/null || date +%Y%m%dT%H%M%S); \
+	adir=$$(dirname "$(1)")/previous_runs; \
+	abase=$$(basename "$(1)"); \
+	mkdir -p "$$adir"; \
+	mv "$(1)" "$$adir/$$abase.$$ats"; \
+	if [ -f "$(1).json" ]; then mv "$(1).json" "$$adir/$$abase.$$ats.json"; fi; \
+	echo "[make] archived previous run to previous_runs/$$abase.$$ats"; \
+fi
+endef
+
 # $(1) = driver file, $(2) = session, $(3) = --timeout, $(4) = --output-log
 define submit_async
-: > $(4); \
+$(call archive_previous_run,$(4)); \
 aout=$$($(MIGHTY_COLAB_JSON) exec-async -s $(2) -f $(1) --timeout $(3) --output-log $(4)) || rc=$$?; \
 astat=$$(printf '%s' "$$aout" | $(JQ) -r '.status // "malformed"'); \
 apid=$$(printf '%s' "$$aout" | $(JQ) -r '.pid // "?"'); \
@@ -355,6 +379,10 @@ if [ "$$jstat" = "running" ]; then \
 	echo "[make] FAILED: job still running after $(2)s -- tearing down anyway."; rc=1; \
 elif [ "$$jstat" != "ok" ]; then \
 	echo "[make] FAILED: remote job status=$$jstat exit_code=$$jrc reason=$$jrsn"; \
+	jhint=$$(printf '%s' "$$tout" | $(JQ) -r '.hint // empty'); \
+	jmsg=$$(printf '%s' "$$tout" | $(JQ) -r '.message // empty'); \
+	if [ -n "$$jmsg" ]; then echo "[make]   message: $$jmsg"; fi; \
+	if [ -n "$$jhint" ]; then echo "[make]   hint: $$jhint"; fi; \
 	tail -40 $(5) 2>/dev/null; rc=1; \
 elif ! grep -q '$(4)' $(5) 2>/dev/null; then \
 	echo "[make] FAILED: job exited cleanly but never printed its sentinel $(4)."; \

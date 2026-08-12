@@ -81,6 +81,12 @@ mighty-colab --json log -s <session> --tail
 | `job_raised` | finished, raised — with `exit_code` and `reason` |
 | `error` + `worker_terminated` | pid gone, no sidecar: killed, not crashed |
 
+**Read `message` and `hint`, not just `reason`.** The envelope carries all
+three. `reason` is a code (`job_raised`, `no_job_found`,
+`accelerator_rejected`); `hint` is where the CLI tells you what to do about
+it. Printing the code alone discards the remediation and sends you off to
+rediscover it.
+
 That last row is the one grep cannot see. **An OOM kill or a backend
 teardown prints no traceback**, so a loop that decides completion by
 searching the log for a sentinel or `Traceback` waits until its timeout while
@@ -90,18 +96,36 @@ check that a clean exit actually reached its verdict.
 Poll incrementally with `--since-offset <next_offset>` so following a long
 job costs the log's length once, not once per poll.
 
-## 5. Check the log is THIS run's
+## 5. Check the log is THIS run's — then archive it, never delete it
 
-`--output-log` is a fixed path and is not truncated for you. A relaunch that
+`--output-log` is a fixed path and is not cleared for you. A relaunch that
 fails early leaves the previous run's bytes in place, and:
 
 - a monitor tailing from byte zero replays an old traceback as if it were
-  live (this cost a false diagnosis at 13:42 against a log written at 13:35);
+  live (a false diagnosis at 13:42 against a log written at 13:35);
 - worse, a success check that greps for a sentinel matches the **previous**
   run's success and reports a job that wrote nothing as passing.
 
-Truncate at submit (`: > "$LOG"`), or compare `stat -f %Sm` against now
-before believing a line.
+The obvious fix — truncate at submit — trades one bug for a worse one. **A
+failed run's log is the most valuable artifact it produces.** Move it aside
+instead, stamped with its own mtime so the name says when that run happened:
+
+```bash
+[ -s "$LOG" ] && mv "$LOG" "previous_runs/$(basename $LOG).$(date -r "$LOG" +%Y%m%dT%H%M%S)"
+```
+
+**Take the `.json` sidecar with it.** `exec-async` writes `<log>.json`
+alongside, it survives `stop`, and it is the durable record of why a run
+failed: `status`, `exit_code`, `reason`, and the executed `blocks` — the
+prelude and every output. The next run overwrites it at the same path.
+
+The sidecar is also a recovery path. A log deleted by hand was reconstructed
+in full from it:
+
+```bash
+jq -r '.blocks[]?.outputs[]? | (.text // .traceback // empty)
+       | if type=="array" then join("") else . end' "$LOG.json"
+```
 
 ## 6. Gate on runtime output, never on recipe text
 

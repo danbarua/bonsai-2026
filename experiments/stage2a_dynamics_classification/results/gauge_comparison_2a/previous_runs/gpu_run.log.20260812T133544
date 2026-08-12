@@ -1,0 +1,20 @@
+---------------------------------------------------------------------------ModuleNotFoundError                       Traceback (most recent call last)<mighty-colab-exec:run_gauge_comparison_2a_gpu.py> in <cell line: 0>()
+     39 from sklearn.preprocessing import StandardScaler
+     40 
+---> 41 import stage2a_core as s2a
+     42 import stage2a_classifier_jax as clf_jax
+     43 from evolve_on_graph_jax import batched_evolve_on_graph_jax
+/content/stage2a_core.py in <module>
+     28 sys.path.insert(0, os.path.join(_THIS_DIR, "..", "stage1b2_structured_transformation"))
+     29 
+---> 30 from build_stage1d_constructions import build_and_verify_T  # noqa: E402
+     31 from stage1b2_core import get_degree_stratified_nodes  # noqa: E402
+     32 from bonsai.dynamics.learned_topology_construction import _local_converged_phases  # noqa: E402
+ModuleNotFoundError: No module named 'build_stage1d_constructions'---------------------------------------------------------------------------
+NOTE: If your import is failing due to a missing package, you can
+manually install dependencies using either !pip or !apt.
+
+To view examples of installing some common dependencies, click the
+"Open Examples" button below.
+---------------------------------------------------------------------------
+

@@ -180,15 +180,43 @@ def test_the_async_submit_template_passes_a_timeout():
         "inherits the 30-second default it was least suited to")
 
 
-def test_the_async_submit_template_truncates_a_stale_log():
+def test_the_async_submit_template_clears_a_stale_log():
     """--output-log is a fixed path, and await_async proves success partly by
-    grepping that file for the driver's sentinel. Without truncation, a log
-    left by an earlier successful run satisfies the grep whatever this run
-    does -- the sentinel check silently becomes "it worked once"."""
+    grepping that file for the driver's sentinel. Left in place, a log from an
+    earlier successful run satisfies the grep whatever this run does -- the
+    sentinel check silently becomes "it worked once"."""
     body = _template("submit_async")
-    assert ": > $(4);" in body, (
-        "submit_async does not truncate the output log before submitting, so "
-        "a previous run's sentinel can be mistaken for this run's")
+    assert "$(call archive_previous_run,$(4))" in body, (
+        "submit_async does not clear the output log before submitting, so a "
+        "previous run's sentinel can be mistaken for this run's")
+
+
+def test_a_previous_run_is_archived_rather_than_destroyed():
+    """A failed run's log is the most valuable thing it produces, and its
+    `.json` sidecar is the durable record of WHY it failed -- the CLI writes
+    the sidecar beside the log and it survives teardown, so an unarchived
+    relaunch overwrites the evidence at the same path.
+
+    Fixing staleness by deletion trades one bug for a worse one."""
+    body = _template("archive_previous_run")
+    assert "mv " in body and "rm " not in body, (
+        "archive_previous_run must MOVE the previous log aside, not delete it")
+    assert '$(1).json' in body, (
+        "the .json sidecar is not archived with its log, so the next run "
+        "overwrites the record of why the previous one failed")
+    assert "date -r" in body, (
+        "the archive is not stamped with the log's own mtime, so its name "
+        "says when it was archived rather than when that run happened")
+
+
+def test_the_async_await_template_surfaces_the_envelope_hint():
+    """The envelope carries `message` and `hint` alongside `reason`. Printing
+    the reason code alone discards the CLI's own remediation advice, which is
+    the field most likely to say what to do next."""
+    body = _template("await_async")
+    assert ".hint" in body and ".message" in body, (
+        "await_async reads status/exit_code/reason but drops hint and "
+        "message, so a failure reports a code without the advice attached")
 
 
 def test_the_async_submit_template_refuses_a_job_that_did_not_start():
