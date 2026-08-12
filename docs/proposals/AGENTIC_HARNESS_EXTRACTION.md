@@ -1093,3 +1093,111 @@ batch unexamined, and whatever it did not get to is carried forward in writing
 so it cannot quietly vanish. The first of those was tested by breaking it on
 purpose in both directions, which is the standard this project sets and does
 not always meet.
+
+## 11. The three-aspect model, and the five places it broke
+
+The DAG + Rules + Lines of Enquiry model was tested against `DESIGN.md` and
+`gates.toml`. It failed in five specific places. They are recorded here so
+the model is not re-derived in its broken form.
+
+**1. Definition versus evaluation — the root error.** `gates.toml` rows are
+gate DEFINITIONS; the five-field model (subject / predicate / verdict /
+evidence / falsifier) describes gate EVALUATIONS. The `binding_gate` kind has
+no verdict field and no observed-value field at all. `status = "enforced"`
+means the machinery exists and its break flipped a test red in CI — NOT that
+the predicate returned true on a run. Reading status as verdict is exactly
+the laundering the model was built to prevent. The fix is two objects and two
+tables, not a richer row.
+
+**2. Reachability is not implied by an edge.** "A correct predicate
+production never invokes is not a gate" (the `gates.toml` divider). An edge
+implies reachability only if the DAG is the real execution graph, and row
+`9d4b9ec0ba99`'s break evidence records a shipped run in which the gate was a
+no-op. Reachability needs its own field.
+
+**3. Verdict arity is unspecified.** One row (`ccd85c56816e`) covers roughly
+260 evaluations — 13 alpha x 5 folds x 4 topologies. The model does not say
+whether a verdict is per-edge-instance or a vector, nor how a per-fold
+failure aggregates.
+
+**4. History-dependent gates have no home.** `916955ebbcf7` — "exactly ONE
+locked evaluation on the test corpus" — cannot be expressed by a stateless
+per-edge predicate, which cannot see how many times an edge was traversed.
+This is the rung-4 one-shot protection. It is not a placement problem: the
+model has no notion of history at all.
+
+**5. Artefact class is a property of the EDGE, not the artefact.** This broke
+on two counts. `data` was defined as regenerable, but the encoded array is
+~1 ULP cross-architecture rather than bit-exact, and `DESIGN.md` names the
+GCS copy "the artifact of record". And three artefacts
+(`encoded_*_s1200`, `ridge_cv.json`, `ridge_final.npz`) are simultaneously
+consumed by steps and cited by verdicts. An artefact is data on the edge
+where a step consumes it and evidence on the edge where a verdict cites it;
+retention is the max over its edges. The real determinant is
+(bit-reproducible?) x (cited?), not consumer class.
+
+### Where the repository is ahead of the model
+
+- **Skip-versus-pass is already implemented, and finer**
+  (`pending_package` / `pending_consumer`). `not_applicable` is explicitly
+  refused because it "passes silently".
+- **`amend` as a non-verdict is half-implemented.** `4e0f03367b9f` was
+  "discharged AS AMENDED" until a reviewer forced `superseded`. Supersession
+  is recorded; INVALIDATION is not — nothing enumerates what the original
+  clause licensed in the interim, and Phase A ran under the amendment.
+- **`WriteOnceViolation` is already the evidence-class enforcement**, built
+  empirically before any model named it. It is also the only thing converting
+  the DAG's two real cycles (the encoder gate; the alpha grid) into chains.
+
+### The `not_binding` rows are not gates
+
+The 25 of them are a coverage ledger, distinguishing "considered and
+rejected" from "never looked at" at the extraction level — the same
+distinction skip-versus-pass makes for edges, one layer up. They want their
+own table, keyed by document locator. One row moved OUT of `not_binding`
+after a reviewer ruling, so the boundary is contested and needs an audit
+surface.
+
+**Nothing should be built from this yet.** A model justified by principle
+rather than by a caught defect is precisely the category that scored zero
+above.
+
+## 12. Two Stage 2A observations not covered by §8a
+
+§8a records the silent lines of enquiry and the lapsed approval gate. Two
+further findings from the same control-arm analysis are not covered there,
+and are recorded here rather than left in session state. Stage 2A is COMPLETE
+and LOCKED; these are observations about a closed record, not a request to
+reopen it, and whether either warrants a `FINDINGS` amendment or a
+"known gaps" note is the science track's call.
+
+**Misattribution.** `FINDINGS.md:1162-1164` attributes a cost condition to
+`DESIGN.md`, which imposes no such condition. The correct provenance — "this
+stage's own instructions" — appears 12 lines later.
+
+**A contradicted prediction, half-revisited.** `FINDINGS.md:321-334`
+predicted that the top of the C grid would stay uninformative for evolved
+conditions at any sample size. At stage 3 both `evolved_T` and
+`evolved_lattice` selected C=1000 (`:1087-1089`), and only the
+non-convergence half of the prediction was revisited.
+
+### The gauge comparison: measured, and not a formality
+
+§8a names the pre-registered gauge-sensitivity comparison
+(`DESIGN.md:198-206`) as never run — `circular_mean_features` exists at
+`stage2a_core.py:124`, is unit-tested for its dimension only, and no pipeline
+calls it. Whether that omission could have mattered has since been measured,
+by `experiments/stage2a_dynamics_classification/measure_gauge_offset.py`
+(committed, reproducible, train split only). It is NOT a formality:
+
+- No FIXED linear map relates the two feature sets — relative residual
+  8.854e-01. Both gauges rotate each (cos, sin) pair by one angle, but that
+  angle is `theta_ref` in one and the circular mean in the other, and their
+  difference is per image. A linear readout cannot absorb it.
+- The offset does not collapse under synchronisation. On 200 real corrupted
+  TRAIN images evolved through T at R(T)=0.9650, `theta_ref - mu` has mean
+  +0.0473 rad, std 0.2659 rad, range [-0.4869, +0.8103].
+
+The comparison ITSELF remains unrun. It needs Stage 2A's confirmatory
+classification apparatus, and running it against a locked stage is Dan's
+call.

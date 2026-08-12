@@ -35,6 +35,12 @@ where a shared, hardened library actually earns its cost.
   are the rules distilled from it; that document is the evidence they
   came from and the place to add the next incident. Local preflight before
   a checkpoint PR: `make vacuous-review PR=N` (Haiku; see the github skill).
+- **`docs/UNCONSUMED_MEASUREMENTS.md`** -- the sibling catalogue, for a
+  different failure: measurements this project made, recorded correctly,
+  and never read back when a later question needed exactly them. Nothing
+  in it is wrong; it is all unconsumed. Worth a look before you measure
+  something -- one entry cost two review rounds and a 2.3GB refit to
+  rediscover a number already committed the day before.
 - **`docs/MULTI_AGENT_PRACTICE.md`** -- the OPERATIONAL counterpart to
   the methodological principles below: how to run this work across
   several agents that cannot see each other, on localhost and on
