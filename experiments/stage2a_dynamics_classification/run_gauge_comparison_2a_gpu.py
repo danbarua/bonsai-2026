@@ -10,10 +10,15 @@ sklearn CPU. Two things come out of it:
      would have justified (or refuted) taking the GPU path in the first
      place, which this project has never measured at full scale.
 
-Runs ON the remote session, not locally: `exec -f` transmits this file's
-text into a live IPython kernel, so `__file__` is undefined and nothing from
-the repository is on disk. Every path here is an explicit /content path and
-every dependency is uploaded alongside.
+Runs ON the remote session, not locally. Nothing from the repository is on
+disk there, so every path here is an explicit /content path and every import
+must be either a package installed on the VM or a file uploaded alongside.
+
+Gauges come from `stage2a_core_colab`, not `stage2a_core`: the latter inserts
+sibling experiment directories onto sys.path relative to the repo layout and
+imports three repo-local modules at module scope, none of which the gauges
+need. Importing it here fails before any function runs. The fork is pinned to
+the original by tests/test_stage2a_core_colab.py.
 
 Long enough to need `exec-async` -- the local equivalent took 5.5 hours of
 wall time. Prints a heartbeat from every fit so `--timeout` (which bounds
@@ -34,7 +39,7 @@ from sklearn.metrics import log_loss
 from sklearn.model_selection import StratifiedKFold
 from sklearn.preprocessing import StandardScaler
 
-import stage2a_core as s2a
+import stage2a_core_colab as s2a
 import stage2a_classifier_jax as clf_jax
 from evolve_on_graph_jax import batched_evolve_on_graph_jax
 
@@ -91,9 +96,10 @@ for name in TOPOLOGY_NAMES:
 
 # -------------------------------------------------------------------- gauges
 def gauge_features(theta_batch, gauge):
-    """Both gauges come from stage2a_core. Not reimplemented here, and in
-    particular the inlined jnp gauge in analyze_stage3_results_jax.py is not
-    ported -- that is the caller-side glue this project has been bitten by."""
+    """Both gauges come from stage2a_core_colab, the deployable fork pinned
+    bit-for-bit to stage2a_core. Not reimplemented here, and in particular the
+    inlined jnp gauge in analyze_stage3_results_jax.py is not ported -- that
+    is the caller-side glue this project has been bitten by."""
     if gauge == "reference":
         return np.stack([s2a.reference_node_features(t, ref_idx) for t in theta_batch])
     if gauge == "circular_mean":

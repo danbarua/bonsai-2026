@@ -1285,8 +1285,8 @@ stage2a-gauge-comparison-gpu:  ## Run the 10-arm gauge comparison on GPU via exe
 	mkdir -p $(dir $(GAUGE2A_LOG)) && \
 	$(MIGHTY_COLAB) sessions && \
 	$(call ensure_session,$(GAUGE2A_SESSION),--gpu $(GAUGE2A_GPU)) && \
-	$(MIGHTY_COLAB) reinstall -s $(GAUGE2A_SESSION) jax[cuda12]==0.11.0 diffrax==0.7.2 equinox==0.13.8 && \
-	for f in evolve_on_graph_jax.py stage2a_core.py stage2a_classifier_jax.py; do \
+	$(MIGHTY_COLAB) reinstall -s $(GAUGE2A_SESSION) jax[cuda12]==0.11.0 diffrax==0.7.2 equinox==0.13.8 optax && \
+	for f in evolve_on_graph_jax.py stage2a_core_colab.py stage2a_classifier_jax.py; do \
 		$(MIGHTY_COLAB) upload -s $(GAUGE2A_SESSION) $$f /content/$$f || exit 1; \
 	done && \
 	for f in stage3_topologies.pkl stage3_labels.npy stage3_ref_idx.npy; do \
@@ -1305,4 +1305,43 @@ stage2a-gauge-comparison-gpu:  ## Run the 10-arm gauge comparison on GPU via exe
 	fi; \
 	$(call stop_session,$(GAUGE2A_SESSION)); \
 	$(call check_teardown,$(GAUGE2A_SESSION)); \
+	exit $$rc
+
+##@ Transfer benchmark: CLI chunked upload vs GCS (bills while running)
+
+XFER_SESSION ?= xfer-bench
+XFER_GPU ?= A100
+XFER_EXEC_TIMEOUT ?= 1800
+XFER_OBJECT ?= benchmark/transfer/stage3-gpu-upload-nimble-otter-2f7c.pkl
+
+.PHONY: stage2a-stage-transfer-input
+stage2a-stage-transfer-input:  ## Upload the 250MB Stage-3 input to GCS (local, free apart from egress)
+	uv run --group gpu python $(STAGE2A_DIR)/bench_transfer_upload.py
+
+.PHONY: stage2a-transfer-benchmark
+stage2a-transfer-benchmark:  ## Time chunked `upload` vs GCS download on one fresh VM -- bills while running
+	rc=0; src=0; \
+	cd $(STAGE2A_DIR) && \
+	$(MIGHTY_COLAB) sessions && \
+	$(call ensure_session,$(XFER_SESSION),--gpu $(XFER_GPU)) && \
+	$(MIGHTY_COLAB) install -s $(XFER_SESSION) google-cloud-storage && \
+	echo "[bench] leg 1: twelve 20MB chunks through mighty-colab upload" && \
+	t0=$$(date +%s); \
+	for i in 00 01 02 03 04 05 06 07 08 09 10 11; do \
+		$(MIGHTY_COLAB) upload -s $(XFER_SESSION) scratch/stage3_train/theta0_chunk_$$i.npy /content/bench_chunk_$$i.npy || exit 1; \
+	done; \
+	t1=$$(date +%s); cli_s=$$((t1 - t0)); \
+	echo "[bench] CLI chunked upload: $${cli_s}s for 242.4 MB"; \
+	$(MIGHTY_COLAB) upload -s $(XFER_SESSION) bench_transfer_gcs_download.py /content/bench_transfer_gcs_download.py && \
+	rc=0; \
+	out=$$($(MIGHTY_COLAB_JSON) exec -s $(XFER_SESSION) -f bench_transfer_gcs_download.py --timeout $(XFER_EXEC_TIMEOUT) $(GCS_EXEC_ENV) --env BENCH_OBJECT="$(XFER_OBJECT)") || rc=$$?; \
+	$(call show_run_output); \
+	$(call check_run_verdict,bench_transfer_gcs_download.py did not complete,BENCH_DOWNLOAD_OK); \
+	echo ""; \
+	echo "[bench] ============ RESULT ============"; \
+	echo "[bench] leg 1  local -> VM via mighty-colab upload (12 x 20MB): $${cli_s}s"; \
+	echo "[bench] leg 2  GCS -> VM: see transfer_seconds above"; \
+	echo "[bench] (leg 0 local -> GCS is timed by stage2a-stage-transfer-input)"; \
+	$(call stop_session,$(XFER_SESSION)); \
+	$(call check_teardown,$(XFER_SESSION)); \
 	exit $$rc
