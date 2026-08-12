@@ -1,0 +1,9 @@
+[make] launching lat-r -> evolved_lattice__reference
+[make] launching lat-c -> evolved_lattice__circular_mean
+[make] launching rew-r -> evolved_rewired__reference
+[make] launching rew-c -> evolved_rewired__circular_mean
+[make] launching crn-r -> evolved_curr_random__reference
+[make] launching crn-c -> evolved_curr_random__circular_mean
+[make] all six finished (fail=1)
+[colab] No active sessions found on server.
+make: *** [stage2a-grad-sweep-parallel] Error 1

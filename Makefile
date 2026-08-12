@@ -1407,6 +1407,9 @@ GRADSWEEP_ARMS_TOL ?= 1e-5
 # The 242MB upload is the slow step and the data does not change between
 # phases; set to 1 to reuse what is already on a live session.
 GRADSWEEP_SKIP_UPLOAD ?= 0
+# Gap between provisioning requests. Six at 3s apart drew 503 Service
+# Unavailable from the A100 assign endpoint; spacing them is politer.
+GRADSWEEP_STAGGER ?= 20
 GRADSWEEP_LOG ?= $(STAGE2A_DIR)/results/gauge_comparison_2a/gradsweep_$(GRADSWEEP_PHASE).log
 GRADSWEEP_OUT ?= $(STAGE2A_DIR)/results/gauge_comparison_2a/gradsweep_$(GRADSWEEP_PHASE).json
 GRADSWEEP_SENTINEL ?= GRADSWEEP_OK
@@ -1447,3 +1450,45 @@ stage2a-grad-sweep:  ## Sweep the JAX convergence tolerance on GPU -- bills whil
 		$(call check_teardown,$(GRADSWEEP_SESSION)); \
 	fi; \
 	exit $$rc
+
+.PHONY: stage2a-grad-sweep-one
+stage2a-grad-sweep-one:  ## One session, one arm, GCS input (internal: use stage2a-grad-sweep-parallel)
+	rc=0; src=0; \
+	cd $(STAGE2A_DIR) && \
+	$(call ensure_session,$(ARM_SESSION),--gpu A100) && \
+	$(MIGHTY_COLAB) reinstall -s $(ARM_SESSION) jax[cuda12]==0.11.0 diffrax==0.7.2 equinox==0.13.8 optax google-cloud-storage && \
+	for f in evolve_on_graph_jax.py stage2a_core_colab.py stage2a_classifier_jax.py; do \
+		$(MIGHTY_COLAB) upload -s $(ARM_SESSION) $$f /content/$$f || exit 1; \
+	done && \
+	for f in stage3_labels.npy stage3_ref_idx.npy; do \
+		$(MIGHTY_COLAB) upload -s $(ARM_SESSION) scratch/stage3_train/$$f /content/$$f || exit 1; \
+	done && \
+	rc=0; \
+	$(call submit_async,sweep_grad_norm_tolerance_gpu.py,$(ARM_SESSION),7200,$(dir $(GRADSWEEP_LOG))arm_$(ARM_SESSION).log,--env PHASE=arms --env ARMS=$(ARM_KEY) --env ARMS_TOL=1e-3 --env OUT_SUFFIX=_$(ARM_SESSION) $(GCS_EXEC_ENV) --env BENCH_OBJECT=$(XFER_OBJECT)); \
+	if [ $$rc -eq 0 ]; then \
+		$(call await_async,$(ARM_SESSION),7200,30,$(GRADSWEEP_SENTINEL),$(dir $(GRADSWEEP_LOG))arm_$(ARM_SESSION).log); \
+	fi; \
+	if [ $$rc -eq 0 ]; then \
+		$(MIGHTY_COLAB) download -s $(ARM_SESSION) /content/grad_sweep_arms_$(ARM_SESSION).json $(dir $(GRADSWEEP_LOG))arm_$(ARM_SESSION).json || rc=$$?; \
+	fi; \
+	$(call stop_session,$(ARM_SESSION)); \
+	$(call check_teardown,$(ARM_SESSION)); \
+	exit $$rc
+
+.PHONY: stage2a-grad-sweep-parallel
+stage2a-grad-sweep-parallel:  ## The six remaining arms, one A100 each, in parallel -- bills while running
+	@set -e; pids=""; \
+	for spec in "lat-r:evolved_lattice__reference" "lat-c:evolved_lattice__circular_mean" \
+	            "rew-r:evolved_rewired__reference" "rew-c:evolved_rewired__circular_mean" \
+	            "crn-r:evolved_curr_random__reference" "crn-c:evolved_curr_random__circular_mean"; do \
+		s=$${spec%%:*}; k=$${spec#*:}; \
+		echo "[make] launching $$s -> $$k"; \
+		$(MAKE) --no-print-directory stage2a-grad-sweep-one ARM_SESSION=gs-$$s ARM_KEY=$$k \
+			> $(dir $(GRADSWEEP_LOG))launch_$$s.out 2>&1 & \
+		pids="$$pids $$!"; \
+		sleep $(GRADSWEEP_STAGGER); \
+	done; \
+	fail=0; for p in $$pids; do wait $$p || fail=1; done; \
+	echo "[make] all six finished (fail=$$fail)"; \
+	$(MIGHTY_COLAB) sessions; \
+	exit $$fail

@@ -374,6 +374,26 @@ the other side of the boundary, with the number the original never had: 52x.
    expensive recurring failure and it is statically detectable.
    *Traces to: §3.1 -- two A100s and ~40 minutes, twice, before a
    one-second local import check would have caught it.*
+6. **Give `new`'s assign failure something an agent can decide on.** Six
+   concurrent A100 provisions drew 503s; a single retry minutes later
+   succeeded; two further singles failed again. All we get is:
+
+   ```
+   Failed to issue request POST .../tun/m/assign?...&accelerator=A100:
+   Service Unavailable
+   ```
+
+   No body, no `Retry-After`, no distinction between transient capacity,
+   a burst-triggered backoff, and an exhausted daily quota — which are three
+   different decisions (retry soon / back off / stop for the day). Google
+   serves HTML on these, so a body very likely exists and is discarded.
+   Note the asymmetry: keep-alive errors DO carry the raw `response_body`
+   (per the skill docs), while the one error that gates every run does not.
+   Capturing it, and populating the envelope's `hint` with a
+   capacity-vs-quota reason, would turn a dead end into a retry policy.
+   *Traces to: §5 -- three failed provisioning attempts, no diagnostic
+   signal, and a partial experiment abandoned as a result.*
+
 5. **Raise or document the upload size limit** that forces 250MB into twelve
    chunks. The workaround is in three drivers here.
    *Traces to: §1.1 and Stage 2B `DESIGN.md:507`, which cites the same
