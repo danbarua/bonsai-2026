@@ -17,24 +17,30 @@ log and `.json` sidecar per run, timestamped by the log's own mtime.
 
 ## 1. Headline measurements
 
-### 1.1 `upload` throughput is the dominant cost, by an order of magnitude
+### 1.1 `upload` is slower than GCS, but by less than we first claimed
 
 Measured from one machine, minutes apart, on identical bytes:
 
-| path | bytes | time | rate |
-|---|---|---|---|
-| `mighty-colab upload`, 12 x 20MB chunks | 242.4 MB | 1,266s | **0.18 MB/s** |
-| `mighty-colab upload`, second session | 202.0 MB | 731s | **0.28 MB/s** |
-| local -> GCS (`google-cloud-storage`) | 250.6 MB | 123.2s | **2.0 MB/s** |
+| path | bytes | time | rate | how measured |
+|---|---|---|---|---|
+| `mighty-colab upload`, 12 x 20MB chunks | 242.4 MB | **205s** | **1.18 MB/s** | wall clock around the loop |
+| local -> GCS (`google-cloud-storage`) | 250.6 MB | 123.2s | **2.03 MB/s** | wall clock around the call |
 
-**`upload` runs 7-10x slower than the same box reaches GCS.** This is not the
-uplink: the GCS leg saturates at 2.0 MB/s from the same connection in the same
-period. Per-chunk gaps for identical 20MB files ranged 60s to 145s, which
-reads as per-call overhead rather than steady streaming.
+**`upload` runs about 1.7x slower than the same box reaches GCS** on identical
+bytes, minutes apart. That is a real gap but a modest one, and it is close
+enough to the uplink that the endpoint is not obviously the bottleneck.
 
-Cost in practice: **~20 minutes of upload per session**, paid again on every
-relaunch. Four launches of one job spent roughly an hour pushing the same
-242MB. The compute it guards is 118s of evolution and ~2 minutes per CV arm.
+**A correction, recorded because the first version of this document got it
+wrong.** An earlier draft claimed 0.18-0.28 MB/s and a 7-10x gap. Those
+figures came from differencing `mighty-colab log` session timestamps, whose
+semantics we had assumed rather than checked, across sessions where other
+work may have been in flight. The direct measurement above supersedes them.
+Inferring throughput from event timestamps in a log not designed to measure
+it produced a number off by a factor of five.
+
+Cost in practice: **~3.5 minutes of upload per session**, paid again on every
+relaunch, guarding 118s of evolution and ~2 minutes per CV arm. Four launches
+of the same job spent roughly fifteen minutes pushing identical bytes.
 
 The chunking itself is a workaround already in this repo's history: a single
 250MB pickle exceeded the transfer endpoint's size limit, so the driver splits
@@ -238,7 +244,33 @@ Worth stating because it is invisible when it works. The traceback reads:
 Exact file and line at both levels. Without the prelude the top frame is
 `<ipython-input-3-...>` against nothing. Please keep it.
 
-### 3.6 Our own bugs, recorded because they are agent-shaped
+### 3.6 A Colab VM has no service account — **cost: one A100, one leg**
+
+`storage.Client()` on the VM falls through to the GCE metadata service and
+raises, which is easy to miss when the same line works locally under ADC:
+
+```
+RefreshError: ("Failed to retrieve
+http://metadata.google.internal/computeMetadata/v1/instance/service-accounts/default/
+... Status: 404", ...)
+```
+
+Two working shapes, depending on the object:
+
+```python
+# public-read object: no credentials needed, none shipped
+client = storage.Client.create_anonymous_client()
+
+# private object: upload the key, point BONSAI_GCS_CREDENTIALS at its
+# REMOTE path, and pass it with --env
+client = storage.Client.from_service_account_json(os.environ["BONSAI_GCS_CREDENTIALS"])
+```
+
+The trap is that `--env BONSAI_GCS_CREDENTIALS=/some/path` names a path on
+the **VM**, so setting it without also uploading the key produces a confusing
+"file not found" one layer further in than the real mistake.
+
+### 3.7 Our own bugs, recorded because they are agent-shaped
 
 Not tool defects — but they are the kind of mistake an agent driving this CLI
 will make, so they may be worth designing against:
@@ -252,15 +284,21 @@ will make, so they may be worth designing against:
   (`[colab] Started background exec (pid=`), or on the envelope.
 - Backticks inside a `git commit -m "..."` message executed as command
   substitution, because the message quoted `log --tail --json`.
+- **Deriving a throughput number from session-log timestamps.** We reported
+  0.18-0.28 MB/s from differencing `FILE: upload` events, and a direct
+  wall-clock measurement of the same operation gave 1.18 MB/s. The log is an
+  event record, not an instrument; timing something means timing it.
 
 ---
 
 ## 4. Requests, ordered by measured cost
 
-1. **Upload throughput.** At 0.18-0.28 MB/s this dominates every run we do,
-   and it is 7-10x below what the same connection achieves to GCS. Even
-   parallelising the per-chunk calls would help; a bulk/multi-file upload
-   would help more.
+1. **Upload ergonomics more than raw throughput.** At 1.18 MB/s vs 2.03 MB/s
+   to GCS the gap is ~1.7x, not the order of magnitude we first thought. The
+   sharper cost is that the same bytes are re-uploaded per session with no
+   caching, and that a 250MB file must be hand-split into twelve pieces. A
+   bulk/multi-file upload, or content-addressed reuse across sessions, would
+   beat a throughput fix.
 2. **A GCS (or any object-store) fetch path.** The natural shape for a
    repeated job: stage the input once, have each VM pull it in-cloud. We are
    doing this by hand with `google-cloud-storage` inside the driver plus

@@ -24,7 +24,11 @@ SENTINEL = "BENCH_DOWNLOAD_OK"
 
 print(f"bucket={BUCKET}\nobject={OBJECT_NAME}", flush=True)
 
-client = storage.Client()
+# Anonymous: the bucket grants public read, and the VM has no service
+# account -- storage.Client() falls through to the GCE metadata service and
+# raises RefreshError (404) on a Colab box. Downloading a public object needs
+# no credentials, so none are shipped.
+client = storage.Client.create_anonymous_client()
 blob = client.bucket(BUCKET).blob(OBJECT_NAME)
 blob.reload()
 n_bytes = blob.size
