@@ -127,3 +127,85 @@ endpoint.
   regenerated rather than consumed, so exact reproduction is not expected
   and the comparison is against the recorded values with the difference
   reported.
+
+---
+
+## Review History
+
+### Amendment 1 — 2026-08-12, before any classifier was fitted
+
+Four corrections, all made after reading the locked record and the
+classifier source but **before any fit under either gauge**. The first is a
+defect in this document; the rest sharpen it.
+
+**1. The metric row above was wrong, and so was halt condition 3.**
+
+This document's table registered "validation accuracy" as the comparison
+metric. The locked Stage 2A train-side procedure
+(`stage2a_classifier.select_C_via_cv`) computes **mean validation
+log-loss** and nothing else. Validation accuracy is never computed at any
+point in the locked pipeline; the accuracy in the locked record is
+**test-set** accuracy, which the TRAIN-SPLIT-ONLY constraint forbids this
+run from touching. Halt condition 3, which proposed comparing "regenerated
+reference-node accuracy" against the locked record, therefore named a
+quantity that does not exist in that record.
+
+Resolved by keeping the registered metric and adding it as a readout,
+rather than by re-choosing a metric after the fact:
+
+- **C selection stays exactly the locked rule** — mean validation
+  log-loss over `C_GRID`, smaller-C tie-break. Untouched, per arm.
+- **The comparison statistic is the mean of the five per-fold validation
+  accuracies at each arm's own selected C.** Mean-over-folds, matching how
+  `mean_val_loss` is already aggregated — not pooled correct/60000. Both
+  are computable and they are not equal; this fixes which one counts.
+- **theta = 0.002 stands as registered.** It was derived from the binomial
+  sampling geometry of a 12,000-image validation fold, which is unchanged.
+
+Both arms select their own C independently. `M_g` compares accuracies each
+at its own selected C.
+
+**Halt condition 3 is restated** in terms the locked record can answer:
+
+> The reference-node arm must reproduce the locked record's `selected_C`
+> **exactly** for every condition. A mismatch halts and is investigated
+> before anything else is read. `mean_val_loss_per_C` is compared
+> descriptively and reported in full — the states are regenerated, not
+> consumed, so exact agreement is not expected there.
+
+**2. Additionally reported, free: a frozen-C arm.** The CV sweep fits every
+(fold, C) pair regardless, so validation accuracy at the *locked run's*
+selected C costs nothing extra and is recorded alongside. This mirrors the
+Stage 2B run's two alpha arms. The re-selected arm remains primary.
+
+**3. The dimensionality caveat is smaller than stated.** The section above
+says circular-mean's 1010 columns give it a two-column edge over
+reference-node's 1008. Measured: the circular-mean feature matrix is **rank
+deficient by exactly one**, because `sum_i sin(theta_i - mu) = 0`
+identically by the definition of the circular mean — confirmed both
+analytically and numerically (residual ~1e-14; rank 119 of 120 columns on a
+synthetic stack, against full rank for reference-node). The real edge is
+**+1 independent direction, not +2**, and the caveat attaches with that
+correction.
+
+This also names where a stop-gate would most plausibly fire: an exact
+linear dependency is precisely what the collinearity-sensitive large-C fits
+struggle with. If `NonConvergenceError` is raised on the circular-mean arm,
+that is a **registered halt and a reportable result**, not a defect to
+patch around. The locked `max_iter` is not raised to make it go away.
+
+**4. Implementation constraint, registered so it can be checked.** The
+locked sklearn classifier is used for BOTH arms. The JAX classifier
+(`stage2a_classifier_jax.py`) is a verified port, but the locked record was
+produced by sklearn — running it would introduce a second difference
+alongside the gauge and make any reproduction mismatch ambiguous in cause.
+Feature extraction calls `stage2a_core.reference_node_features` and
+`circular_mean_features` directly; the inlined JAX gauge in
+`analyze_stage3_results_jax.py:50-51` is NOT ported (principle 16).
+
+**Pre-fit gate, added.** Reference-gauge features recomputed from the
+`theta0` chunks must equal the cached `feat_pre` in
+`stage3_encode_local.pkl` **exactly**. Same function, same inputs, so any
+difference is a chunk-ordering or indexing error, caught before a fit runs.
+The evolved side has no cached features (only `theta_T`), so its check is
+the `selected_C` reproduction gate above.
