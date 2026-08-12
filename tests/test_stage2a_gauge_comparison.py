@@ -56,7 +56,7 @@ def test_cv_mirror_reproduces_the_locked_selection_exactly():
     X = np.stack([s2a.reference_node_features(t, 3) for t in theta])
     grid = (1e-2, 1e0, 1e2)
 
-    best_C, mean_loss, mean_acc, per_fold = drv.cv_with_accuracy(
+    best_C, mean_loss, mean_acc, per_fold, fits = drv.cv_with_accuracy(
         X, y, "test", c_grid=grid)
     real_C, real_loss, _ = s2a_clf.select_C_via_cv(X, y, "test", )
 
@@ -76,6 +76,13 @@ def test_cv_mirror_reproduces_the_locked_selection_exactly():
     assert all(0.0 <= a <= 1.0 for a in mean_acc.values())
     assert all(len(v) == s2a_clf.N_FOLDS for v in per_fold.values())
 
+    # Per-fit diagnostics are recorded, not merely printed: the conditioning
+    # and cost claims in the write-up rest on them, and a number that lives
+    # only in a console log is not reproducible from committed code.
+    assert len(fits) == len(grid) * s2a_clf.N_FOLDS
+    assert all(f["n_iter"] > 0 and f["seconds"] >= 0 for f in fits)
+    assert {f["C"] for f in fits} == set(grid)
+
 
 def test_the_mirror_would_notice_a_changed_fold_split():
     """The guard above only means something if a divergence breaks it."""
@@ -83,8 +90,8 @@ def test_the_mirror_would_notice_a_changed_fold_split():
     X = np.stack([s2a.reference_node_features(t, 3) for t in theta])
     grid = (1e0,)
 
-    _, honest, _, _ = drv.cv_with_accuracy(X, y, "test", c_grid=grid)
-    _, drifted, _, _ = drv.cv_with_accuracy(X, y, "test", c_grid=grid, seed=1)
+    _, honest, _, _, _ = drv.cv_with_accuracy(X, y, "test", c_grid=grid)
+    _, drifted, _, _, _ = drv.cv_with_accuracy(X, y, "test", c_grid=grid, seed=1)
     assert honest[1e0] != drifted[1e0], (
         "changing the fold seed left mean_val_loss identical -- this test "
         "cannot detect a split divergence")

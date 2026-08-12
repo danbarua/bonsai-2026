@@ -192,6 +192,11 @@ def cv_with_accuracy(X, y, label, c_grid=None, n_folds=None, seed=None):
     skf = StratifiedKFold(n_splits=n_folds, shuffle=True, random_state=seed)
     per_C_loss = {C: [] for C in c_grid}
     per_C_acc = {C: [] for C in c_grid}
+    # Iteration counts and wall times per (fold, C). Recorded rather than only
+    # printed: they are the evidence for conditioning and cost claims, and a
+    # number that lives only in a console log is not reproducible from
+    # committed code (principle 24).
+    fits = []
     labels_sorted = sorted(set(y))
 
     for fold_idx, (tr, va) in enumerate(skf.split(X, y)):
@@ -214,16 +219,19 @@ def cv_with_accuracy(X, y, label, c_grid=None, n_folds=None, seed=None):
             proba = clf.predict_proba(X_va_s)
             per_C_loss[C].append(log_loss(y_va, proba, labels=labels_sorted))
             per_C_acc[C].append(float(np.mean(clf.predict(X_va_s) == y_va)))
+            fits.append({"fold": fold_idx, "C": float(C),
+                         "loss": per_C_loss[C][-1], "acc": per_C_acc[C][-1],
+                         "n_iter": int(n_iter), "seconds": time.time() - t0})
             print(f"    fold={fold_idx} C={C:<8g} loss={per_C_loss[C][-1]:.6f} "
                   f"acc={per_C_acc[C][-1]:.6f} iter={n_iter} "
-                  f"({time.time() - t0:.1f}s)", flush=True)
+                  f"({fits[-1]['seconds']:.1f}s)", flush=True)
 
     mean_loss = {C: float(np.mean(v)) for C, v in per_C_loss.items()}
     mean_acc = {C: float(np.mean(v)) for C, v in per_C_acc.items()}
     lo = min(mean_loss.values())
     tied = [C for C, v in mean_loss.items() if abs(v - lo) < 1e-12]
     best_C = min(tied)                                # locked tie-break
-    return best_C, mean_loss, mean_acc, per_C_acc
+    return best_C, mean_loss, mean_acc, per_C_acc, fits
 
 
 def run_verify_cv(n_sub=2000):
@@ -239,7 +247,7 @@ def run_verify_cv(n_sub=2000):
     print(f"verifying the CV mirror against stage2a_classifier.select_C_via_cv "
           f"on n={n_sub}")
     t0 = time.time()
-    mine_C, mine_loss, mine_acc, _ = cv_with_accuracy(X, y, "verify")
+    mine_C, mine_loss, mine_acc, _, _ = cv_with_accuracy(X, y, "verify")
     t_mine = time.time() - t0
     t0 = time.time()
     real_C, real_loss, _ = s2a_clf.select_C_via_cv(X, y, "verify")
@@ -296,7 +304,7 @@ def run_arm(condition, gauge):
 
     t0 = time.time()
     try:
-        best_C, mean_loss, mean_acc, per_C_acc = cv_with_accuracy(
+        best_C, mean_loss, mean_acc, per_C_acc, fits = cv_with_accuracy(
             X, y, f"{condition}:{gauge}")
     except s2a_clf.NonConvergenceError as exc:
         # Registered outcome, recorded as a result rather than worked around.
@@ -319,6 +327,7 @@ def run_arm(condition, gauge):
         "mean_val_acc_per_C": {str(C): v for C, v in mean_acc.items()},
         "per_fold_acc_per_C": {str(C): v for C, v in per_C_acc.items()},
         "accuracy_at_selected_C": mean_acc[best_C],
+        "fits": fits,
         "elapsed_seconds": time.time() - t0,
         "feature_seconds": t_feat,
         "non_convergence": None,
@@ -428,7 +437,35 @@ def run_combine():
     print(f"\n  CLASS {cls}: {why}")
     print(f"  direction flag: {direction}")
 
-    summary = {"class": cls, "why": why, "direction": direction,
+    # -- the companion frozen-C arm, registered as reported-alongside --------
+    # Accuracy at the LOCKED run's selected C for both gauges, so the two arms
+    # differ only in the gauge and not also in which C each one chose.
+    print("\n" + "=" * 72)
+    print("COMPANION ARM (accuracy at the LOCKED run's selected C)")
+    print("=" * 72)
+    facc = {g: {} for g in GAUGES}
+    for c in GAUGED_CONDITIONS:
+        C_locked = locked[c]["selected_C"]
+        for g in GAUGES:
+            facc[g][c] = arms[(c, g)]["mean_val_acc_per_C"][str(C_locked)]
+    fcls, fwhy, fdirection, frank, fM, fmax = classify(facc)
+
+    print(f"  {'condition':<24} {'C':>7} {'ref':>10} {'circ':>10} {'M_g':>11}")
+    for c in GAUGED_CONDITIONS:
+        print(f"  {c:<24} {locked[c]['selected_C']:>7g} {facc['reference'][c]:>10.6f} "
+              f"{facc['circular_mean'][c]:>10.6f} {fM[c]:>+11.6f}")
+    print(f"\n  CLASS {fcls}: {fwhy}")
+    print(f"  direction flag: {fdirection}")
+    if fdirection != direction:
+        print(f"\n  NOTE: the two arms disagree on direction ('{direction}' vs "
+              f"'{fdirection}'). C is selected by log-loss while the comparison "
+              f"is accuracy, so re-selection can move accuracy either way.")
+
+    summary = {"companion_frozen_C": {
+                   "class": fcls, "why": fwhy, "direction": fdirection,
+                   "accuracy": facc, "M_g": fM, "ranking": frank,
+                   "max_abs_M": fmax},
+               "class": cls, "why": why, "direction": direction,
                "theta": THETA, "max_abs_M": max_M,
                "accuracy": acc, "M_g": M,
                "ranking": rank, "reproduction_gate_passed": bool(gate_ok)}

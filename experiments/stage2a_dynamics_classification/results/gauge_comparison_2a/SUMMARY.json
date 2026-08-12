@@ -1,0 +1,92 @@
+{
+  "companion_frozen_C": {
+    "class": "C",
+    "why": "ranking changed -- at least one pairwise inversion",
+    "direction": "uniform direction favouring circular_mean",
+    "accuracy": {
+      "reference": {
+        "encoded_pre_evolution": 0.8359166666666666,
+        "evolved_T": 0.9051666666666666,
+        "evolved_lattice": 0.8828999999999999,
+        "evolved_rewired": 0.9057833333333333,
+        "evolved_curr_random": 0.9106666666666667
+      },
+      "circular_mean": {
+        "encoded_pre_evolution": 0.8576999999999998,
+        "evolved_T": 0.9113666666666665,
+        "evolved_lattice": 0.8877166666666667,
+        "evolved_rewired": 0.9067333333333334,
+        "evolved_curr_random": 0.9119333333333334
+      }
+    },
+    "M_g": {
+      "encoded_pre_evolution": 0.021783333333333155,
+      "evolved_T": 0.006199999999999983,
+      "evolved_lattice": 0.004816666666666802,
+      "evolved_rewired": 0.0009500000000001174,
+      "evolved_curr_random": 0.0012666666666666382
+    },
+    "ranking": {
+      "reference": [
+        "evolved_curr_random",
+        "evolved_rewired",
+        "evolved_T",
+        "evolved_lattice",
+        "encoded_pre_evolution"
+      ],
+      "circular_mean": [
+        "evolved_curr_random",
+        "evolved_T",
+        "evolved_rewired",
+        "evolved_lattice",
+        "encoded_pre_evolution"
+      ]
+    },
+    "max_abs_M": 0.021783333333333155
+  },
+  "class": "C",
+  "why": "ranking changed -- at least one pairwise inversion",
+  "direction": "mixed direction",
+  "theta": 0.002,
+  "max_abs_M": 0.021783333333333155,
+  "accuracy": {
+    "reference": {
+      "encoded_pre_evolution": 0.8359166666666666,
+      "evolved_T": 0.9051666666666666,
+      "evolved_lattice": 0.8828999999999999,
+      "evolved_rewired": 0.9057833333333333,
+      "evolved_curr_random": 0.9106666666666667
+    },
+    "circular_mean": {
+      "encoded_pre_evolution": 0.8576999999999998,
+      "evolved_T": 0.9084333333333333,
+      "evolved_lattice": 0.8877166666666667,
+      "evolved_rewired": 0.9067333333333334,
+      "evolved_curr_random": 0.9095166666666665
+    }
+  },
+  "M_g": {
+    "encoded_pre_evolution": 0.021783333333333155,
+    "evolved_T": 0.003266666666666751,
+    "evolved_lattice": 0.004816666666666802,
+    "evolved_rewired": 0.0009500000000001174,
+    "evolved_curr_random": -0.0011500000000002064
+  },
+  "ranking": {
+    "reference": [
+      "evolved_curr_random",
+      "evolved_rewired",
+      "evolved_T",
+      "evolved_lattice",
+      "encoded_pre_evolution"
+    ],
+    "circular_mean": [
+      "evolved_curr_random",
+      "evolved_T",
+      "evolved_rewired",
+      "evolved_lattice",
+      "encoded_pre_evolution"
+    ]
+  },
+  "reproduction_gate_passed": true
+}
