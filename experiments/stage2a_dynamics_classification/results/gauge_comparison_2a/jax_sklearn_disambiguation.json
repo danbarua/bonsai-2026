@@ -1,0 +1,17 @@
+{
+ "condition": "evolved_lattice",
+ "gauge": "reference",
+ "fold": 0,
+ "C": 1000.0,
+ "backend": "cpu",
+ "sklearn_cpu_acc": 0.88225,
+ "sklearn_cpu_n_iter": 5309,
+ "jax_gpu_acc": 0.8710833333333333,
+ "jax_gpu_n_iter": 1955,
+ "jax_cpu_acc": 0.871,
+ "jax_cpu_n_iter": 2003,
+ "jax_cpu_grad_norm": 281355.0350051047,
+ "jax_cpu_grad_tol": 288000.0,
+ "jax_cpu_seconds": 171.75099375005811,
+ "verdict": "stopping rule (JAX CPU matches JAX GPU)"
+}

@@ -182,3 +182,87 @@ alternative gauge on the training split; it does not substitute one, and a
 train-side ranking is not a test-side claim. Descriptive and nominal
 throughout — no new confirmatory statistic, no member of any corrected
 family.
+
+---
+
+## Amendment 1 — 2026-08-12, after a GPU replication
+
+The whole ten-arm comparison was re-run on an A100 with the JAX classifier
+(`run_gauge_comparison_2a_gpu.py`, 21.6 minutes against 34.5 core-hours).
+Everything else was held fixed: same states, same gauges, same folds, same
+seed, same C grid, same registered rule.
+
+**It returns class B, not class C.**
+
+| | sklearn (this record) | JAX |
+|---|---|---|
+| reference ranking | curr_random > **rewired > T** > lattice > pre_evolution | same |
+| circular-mean ranking | curr_random > **T > rewired** > lattice > pre_evolution | curr_random > **rewired > T** > lattice > pre_evolution |
+| class | **C** (inversion) | **B** (preserved) |
+
+The `rewired`/`T` inversion that produces class C does not occur under the
+other optimiser.
+
+**This does not overturn the verdict above, and the record does not change.**
+The reproduction gate requires the reference arm to reproduce the locked
+`selected_C` for every condition. sklearn does, five for five; JAX misses on
+two (`evolved_T` 1000 -> 100, `evolved_rewired` 10 -> 1), so it cannot serve
+as the record. The gate is doing exactly what it was registered to do.
+
+What the replication does establish is the strength of the class C call. The
+section above already said the margin was not comfortable -- an inversion of
+0.000616, below theta -- and defended it on the grounds that it reproduced in
+both the re-selected and frozen-C arms. That defence was weaker than it read:
+**both arms shared a classifier.** Varying the one factor they held fixed
+removes the inversion. The honest statement is the one this document already
+made a paragraph later, now with direct evidence: *second place is not a
+well-resolved quantity in this design*, and the C-versus-B distinction rests
+on a margin thin enough that a legitimate change of optimiser moves it.
+
+Unchanged by the replication: `pre_evolution` last under both gauges by a
+wide margin, `curr_random` first under both, `lattice` fourth under both, and
+the large uniform `pre_evolution` gain (M_g = +0.021783 sklearn, +0.021784
+JAX -- agreeing to 1e-06). The finding that survives is the mechanism, not
+the ordering of the three leading topologies.
+
+### Why the two classifiers differ, measured rather than argued
+
+Agreement tracks the selected C:
+
+| selected C | arms | \|delta accuracy\| |
+|---|---|---|
+| 0.01 | pre_evolution x2 | 1.7e-05 |
+| 0.1 | rewired:circ, curr_random:circ | 6.2e-04, 8.2e-04 |
+| 1 | curr_random:ref, rewired:ref | 1.7e-03, 8.0e-03 |
+| 100-1000 | T x2, lattice x2 | 7.0e-03 to 1.16e-02 |
+
+Five of ten arms agree within theta; the five that do not are the high-C
+ones. C is not the whole story -- two arms at C=1 differ by 4.7x -- so
+conditioning modulates it, but the trend is three orders of magnitude.
+
+A three-way factorial on the most divergent cell (`evolved_lattice`,
+reference, C=1000, fold 0) separates the two candidate causes:
+
+| fit | accuracy | iterations |
+|---|---|---|
+| sklearn CPU | 0.882250 | 5,309 |
+| JAX GPU | 0.871083 | 1,955 |
+| JAX CPU | 0.871000 | 2,003 |
+
+JAX-on-CPU is 135x closer to JAX-on-GPU than to sklearn, so **GPU numerics
+are not the cause and the platform is irrelevant** (x64 was enabled and every
+operand is float64, so TF32 never applied). The cause is the convergence
+criterion. `stage2a_classifier_jax` stops on `GRAD_NORM_REL * C * n_train`,
+which at C=1000 and n_train=48,000 is **2.88e+05**; the fit halted at
+`grad_norm = 2.814e+05`. It converged by its own rule, while sklearn's fixed
+`tol=1e-4` ran 2.6x longer.
+
+That scaling is deliberate and correct for its purpose -- the objective is an
+unweighted sum scaled by C, and this project removed a fixed absolute
+threshold for exactly that reason (principle 22). The consequence is simply
+that the two classifiers are not interchangeable at high C, and the JAX one
+is systematically the pessimistic side.
+
+**Operating rule, now measured rather than assumed: JAX for exploration
+(69-183x faster), sklearn for anything that must reconcile with the locked
+record.**
