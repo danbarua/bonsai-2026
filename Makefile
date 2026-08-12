@@ -913,6 +913,53 @@ CNNARCH_EXEC_TIMEOUT ?= 1800
 CNNARCH_REMOTE_OUT ?= /content/cnn_forward_x86.npz
 CNNARCH_LOCAL_OUT ?= $(STAGE2B_DIR)/results/cnn_forward_x86.npz
 
+# The gauge-sensitivity comparison Stage 2A pre-registered and never ran,
+# executed against Stage 2B. Interpretations are fixed in advance in
+# GAUGE_COMPARISON_PREREGISTRATION.md; read that before reading a result.
+#
+# No GPU EVOLUTION happens here -- the evolved states are already persisted
+# as `stage3/*/theta_T.npz` and are consumed read-only over public HTTPS.
+# What justifies a remote run is the ridge cross-validation: 13 alphas x 5
+# folds x 5 conditions x 2 gauges at n=60,000, which is the stage this
+# project has already measured to dominate runtime (principle 18 -- the
+# stage that was "a few seconds" at n=1,000 and 79x at full scale).
+#
+# The driver writes its own JSON summary; the target downloads it. Outputs
+# are RUN_SCOPED under a name of this experiment's own, never near the
+# lineage stage3/common paths.
+GAUGE_SESSION ?= stage2b-gauge
+GAUGE_EXEC_TIMEOUT ?= 5400
+GAUGE_REMOTE_OUT ?= /content/gauge_comparison.json
+GAUGE_LOCAL_OUT ?= $(STAGE2B_DIR)/results/gauge_comparison.json
+GAUGE_STAGE ?= 3
+
+.PHONY: stage2b-gauge-comparison
+stage2b-gauge-comparison:  ## Run the pre-registered gauge comparison on Colab -- bills while running
+	rc=0; src=0; \
+	cd $(REPO_ROOT) && \
+	if ! $(CLOSURE_CHECK) $(STAGE2B_DIR)/run_gauge_comparison.py; then \
+		exit 1; \
+	fi; \
+	commit=$$($(GIT) rev-parse HEAD); \
+	if ! $(GIT) branch -r --contains $$commit 2>/dev/null | grep -q .; then \
+		echo "[make] REFUSING: HEAD $$commit is not on any remote. Push before running -- the runtime can only fetch what origin has."; \
+		exit 1; \
+	fi; \
+	echo "[make] commit $$commit, stage $(GAUGE_STAGE)"; \
+	cd $(STAGE2B_DIR) && \
+	$(MIGHTY_COLAB) sessions && \
+	$(call ensure_session,$(GAUGE_SESSION),--gpu $(LADDER_GPU)) && \
+	$(MIGHTY_COLAB) reinstall -s $(GAUGE_SESSION) jax[cuda12]==0.11.0 scikit-learn && \
+	rc=0; out=$$($(MIGHTY_COLAB_JSON) exec -s $(GAUGE_SESSION) -f run_gauge_comparison.py --timeout $(GAUGE_EXEC_TIMEOUT) --env BONSAI_COMMIT="$$commit" --env JAX_ENABLE_X64=1 --env GAUGE_STAGE=$(GAUGE_STAGE) --env GAUGE_OUT="$(GAUGE_REMOTE_OUT)" --env GAUGE_CACHE_DIR=/content/gauge_cache) || rc=$$?; \
+	$(call show_run_output); \
+	$(call check_run_verdict,the gauge comparison did not report success,GAUGE_OK); \
+	if [ $$rc -eq 0 ]; then \
+		$(MIGHTY_COLAB) download -s $(GAUGE_SESSION) $(GAUGE_REMOTE_OUT) $(GAUGE_LOCAL_OUT) || rc=$$?; \
+	fi; \
+	$(call stop_session,$(GAUGE_SESSION)); \
+	$(call check_teardown,$(GAUGE_SESSION)); \
+	exit $$rc
+
 .PHONY: stage2b-cnn-arch-x86
 stage2b-cnn-arch-x86:  ## CNN forward pass on Colab x86, downloaded for comparison -- bills while running
 	rc=0; src=0; \
