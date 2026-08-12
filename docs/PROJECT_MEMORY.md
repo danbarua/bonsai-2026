@@ -827,15 +827,19 @@ one that worked. All five now capture it: a failed teardown fails the
 target and prints a leak warning naming the session, but never overwrites
 a scientific verdict that had already failed. The two outcomes mean
 opposite things -- absent is the goal (nothing is billing), unable-to-stop
-is the one case where money keeps accruing unwatched -- which is why
-making "session not found" an error would be a regression rather than
-strictness: it fires on exactly the paths where provisioning failed and
-nothing was ever created, turning the safest outcome into a false alarm
-and making the leak check unadoptable. `STOP_ABSENT_RC` names whichever
-code means absent, so a future CLI that separates them needs a variable
-changed, not five recipes rewritten. All four paths (healthy, leak-only,
-leak-plus-failure, distinct-absent-code) are exercised against a stub CLI
-in `tests/test_mighty_colab_contract.py` -- no session, no billing.
+is the one case where money keeps accruing unwatched -- so `stop` on an
+absent session must stay a success: erroring there would fire on exactly
+the paths where provisioning failed and nothing was ever created, turning
+the safest outcome into a false alarm and making the leak check
+unadoptable. Since the `mighty-colab` 0.4.1 migration the recipes read
+that distinction as DATA (`status=ok reason=already_stopped`) rather than
+as an exit-code convention, which retired the `STOP_ABSENT_RC` variable
+that used to declare which code meant absent. The teardown check now reads
+BOTH signals, and the second is new: a `stop` that exits 0 while reporting
+that the teardown itself failed was previously indistinguishable from a
+clean one. All paths (healthy, leak-only, leak-plus-failure,
+already-stopped, exit-zero-but-failed) are exercised against a stub CLI in
+`tests/test_mighty_colab_contract.py` -- no session, no billing.
 
 **`mighty-colab exec --timeout` defaults to 30 SECONDS, and it bounds the
 gap between outputs rather than the run.** A remote script that is

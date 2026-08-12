@@ -20,6 +20,15 @@ for a derivable set, which is principle 21 and this project's most-repeated
 bug. So the set is DERIVED: every `command -v X` in a script CI runs must be
 installed, or carry a named exemption with a reason, and the exemption is
 itself checked to still refer to something real.
+
+TWO sources, because there are two ways this repository reaches for a system
+command. The CI shell scripts guard with `command -v`; the `Makefile`
+declares its tools as overridable variables (`JQ ?= jq`) and invokes them at
+command position. The second was added when the GPU recipes moved onto
+`mighty-colab --json` and began parsing envelopes with `jq`. CI never runs a
+GPU target, but `tests/test_mighty_colab_contract.py` drives those recipes
+against a stub CLI inside the suite's own container -- so the requirement is
+real, and scanning only `tools/ci/*.sh` would have missed it entirely.
 """
 
 from __future__ import annotations
@@ -63,12 +72,54 @@ COMMAND_TO_PACKAGE = {
 }
 
 
-def required_commands(scripts: list[Path] | None = None) -> dict[str, list[str]]:
-    """{command: [scripts that guard on it]}, read from the scripts."""
+MAKEFILE = REPO_ROOT / "Makefile"
+
+# The Makefile declares the external tools its recipes call as overridable
+# variables (`JQ ?= jq`) rather than guarding on them with `command -v`, so
+# the scan above cannot see them -- and it needs to. CI does not run the GPU
+# targets, but `tests/test_mighty_colab_contract.py` DRIVES those recipes
+# end to end against a stub CLI, in CI, in the suite's own container. A
+# recipe that shells out to `jq` fails there if the image lacks it.
+#
+# Two conditions, and BOTH are needed -- either alone is wrong here:
+#
+#   1. The variable is EXPANDED AT A COMMAND POSITION in a recipe: at the
+#      start of a recipe line, or straight after `&&`, `||`, `;`, `|`, `(`,
+#      or a shell keyword. This is what separates a tool from a value.
+#      Requiring only a bare-token definition matched `SESSION_CLASS0 ?=
+#      class0-audit-gpu`, `HAIKU_MODEL ?= haiku` and the GCS bucket name --
+#      fifteen "packages" that are nothing of the sort.
+#   2. Its definition is a BARE SINGLE TOKEN. This excludes
+#      `PYTHON ?= uv run python`, `MIGHTY_COLAB ?= uv run --group gpu
+#      mighty-colab` and `CLOSURE_CHECK ?= uv run python ...` -- all invoked
+#      at command position, all provided by the uv-managed environment
+#      rather than by apt, so demanding them as system packages would fail
+#      this file for something the image is right not to install.
+_MAKE_TOOL_DEF = re.compile(r"^([A-Z][A-Z0-9_]*)\s*\?=\s*([a-z][\w.-]*)\s*$", re.M)
+# A `$(VAR)` whose preceding character begins a new command.
+_COMMAND_POSITION = r"(?:^\t|&&\s*|\|\|\s*|[;|(]\s*|\bthen\s+|\belse\s+|\bdo\s+)\$\({var}\)"
+
+
+def makefile_required_commands(makefile: Path | None = None) -> dict[str, list[str]]:
+    """{command: [Makefile]} for external tools its recipes actually invoke."""
+    text = (MAKEFILE if makefile is None else makefile).read_text()
+    found: dict[str, list[str]] = {}
+    for var, command in _MAKE_TOOL_DEF.findall(text):
+        pattern = _COMMAND_POSITION.format(var=re.escape(var))
+        if re.search(pattern, text, re.M):
+            found.setdefault(command, []).append("Makefile")
+    return found
+
+
+def required_commands(scripts: list[Path] | None = None,
+                      makefile: Path | None = None) -> dict[str, list[str]]:
+    """{command: [sources that need it]}, read from the scripts and Makefile."""
     found: dict[str, list[str]] = {}
     for script in (CI_SCRIPTS if scripts is None else scripts):
         for match in re.finditer(r"command -v (\w[\w.-]*)", script.read_text()):
             found.setdefault(match.group(1), []).append(script.name)
+    for command, sources in makefile_required_commands(makefile).items():
+        found.setdefault(command, []).extend(sources)
     return found
 
 
@@ -137,8 +188,67 @@ def test_the_scan_finds_the_guards_it_is_supposed_to_find():
     )
 
 
+def test_the_makefile_scan_finds_the_tool_variables_it_is_supposed_to_find():
+    """Anti-vacuity for the Makefile half, which has its own failure mode.
+
+    The `command -v` scan and this one look at different files for different
+    syntax, so the assertion above says nothing about whether the Makefile
+    contributed anything. If `_MAKE_TOOL_VAR` stopped matching, the Makefile
+    would contribute an empty set and this file would go green while the
+    image was missing a command its GPU recipes shell out to.
+    """
+    found = makefile_required_commands()
+    print(f"\n[ci-deps] Makefile tool variables: {sorted(found)}")
+    assert "jq" in found, (
+        "the Makefile's `JQ ?= jq` is no longer detected. Every GPU recipe "
+        "parses `--json` envelopes with it, and the contract tests drive "
+        "those recipes in CI -- so this is a real requirement, not decoration."
+    )
+    assert "git" in found, (
+        "`GIT ?= git` is no longer detected, so the scan's shape has drifted"
+    )
+
+
+def test_the_makefile_scan_excludes_environment_provided_wrappers():
+    """The other direction, and the reason the rule is 'bare single token'.
+
+    `PYTHON ?= uv run python` and `MIGHTY_COLAB ?= uv run --group gpu
+    mighty-colab` are not system packages -- demanding them from apt would
+    make this file fail for something the image is right not to install.
+    """
+    found = makefile_required_commands()
+    for wrapper in ("uv", "python", "python3", "mighty-colab"):
+        assert wrapper not in found, (
+            f"{wrapper!r} was picked up as a system package requirement. It is "
+            f"provided by the uv-managed environment, not by apt."
+        )
+
+
+def test_a_makefile_tool_that_the_image_lacks_is_reported(tmp_path):
+    """Break-confirmation, committed rather than performed by hand.
+
+    A synthetic Makefile declaring a tool the image does not install must be
+    reported as missing. Without this, the Makefile half of the derivation
+    could silently never contribute to `missing_commands` and nothing would
+    say so -- the exact shape of the `STAGE2B_TEST_FILES` incident that
+    principle 21 is drawn from.
+    """
+    fake = tmp_path / "Makefile"
+    fake.write_text("SOMETOOL ?= ripgrep\n\ntarget:\n\t$(SOMETOOL) --version\n")
+    assert makefile_required_commands(fake) == {"ripgrep": ["Makefile"]}
+
+    missing = missing_commands(scripts=[], makefile=fake)
+    assert "ripgrep" in missing, (
+        "a Makefile tool absent from the CI image was NOT reported missing, so "
+        "the Makefile half of this guard does not actually gate anything"
+    )
+    print(f"\n[ci-deps] break-confirmation: synthetic tool reported as {missing}")
+
+
 def missing_commands(
-    scripts: list[Path] | None = None, cloudbuild_text: str | None = None
+    scripts: list[Path] | None = None,
+    cloudbuild_text: str | None = None,
+    makefile: Path | None = None,
 ) -> dict[str, tuple[str, list[str]]]:
     """The composition: which required commands the suite's image lacks.
 
@@ -154,7 +264,7 @@ def missing_commands(
     installed = installed_packages(cloudbuild_text)
     missing: dict[str, tuple[str, list[str]]] = {}
 
-    for command, using in sorted(required_commands(scripts).items()):
+    for command, using in sorted(required_commands(scripts, makefile).items()):
         if command in EXEMPT:
             continue
         package = COMMAND_TO_PACKAGE.get(command, command)
@@ -197,6 +307,20 @@ def _synthetic_script(tmp_path: Path, name: str, body: str) -> Path:
     return path
 
 
+def _empty_makefile(tmp_path: Path) -> Path:
+    """A Makefile contributing no requirements.
+
+    The synthetic-input tests below assert on a script and an image they
+    construct themselves. Once the derivation grew a SECOND source, letting
+    them read the real Makefile meant its genuine `jq` requirement leaked
+    into assertions about a synthetic world -- the test then failing for a
+    fact that has nothing to do with what it is checking.
+    """
+    path = tmp_path / "EmptyMakefile"
+    path.write_text("# no tool variables\n")
+    return path
+
+
 def test_a_required_command_missing_from_the_image_is_caught(tmp_path: Path):
     """Break-confirmation, committed rather than performed by hand.
 
@@ -211,7 +335,7 @@ def test_a_required_command_missing_from_the_image_is_caught(tmp_path: Path):
     script = _synthetic_script(
         tmp_path, "needs_things.sh", "#!/bin/bash\ncommand -v yq || exit 1\n"
     )
-    missing = missing_commands([script], _SYNTHETIC_CLOUDBUILD)
+    missing = missing_commands([script], _SYNTHETIC_CLOUDBUILD, _empty_makefile(tmp_path))
 
     assert "yq" in missing, (
         "a command required by a CI script and absent from the suite step's "
@@ -230,7 +354,7 @@ def test_a_required_command_present_in_the_image_is_not_caught(tmp_path: Path):
     script = _synthetic_script(
         tmp_path, "needs_git.sh", "#!/bin/bash\ncommand -v git || exit 1\n"
     )
-    assert missing_commands([script], _SYNTHETIC_CLOUDBUILD) == {}
+    assert missing_commands([script], _SYNTHETIC_CLOUDBUILD, _empty_makefile(tmp_path)) == {}
 
 
 def test_the_exemption_still_spares_its_command_under_synthetic_input(
@@ -240,7 +364,7 @@ def test_the_exemption_still_spares_its_command_under_synthetic_input(
     script = _synthetic_script(
         tmp_path, "needs_gh.sh", "#!/bin/bash\ncommand -v gh || exit 1\n"
     )
-    assert missing_commands([script], _SYNTHETIC_CLOUDBUILD) == {}
+    assert missing_commands([script], _SYNTHETIC_CLOUDBUILD, _empty_makefile(tmp_path)) == {}
     assert "gh" in EXEMPT
 
 

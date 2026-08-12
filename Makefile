@@ -47,6 +47,43 @@ PYTHON ?= uv run python
 # version reported afterwards is the check, not the command's output.
 MIGHTY_COLAB ?= uv run --group gpu mighty-colab
 
+# Global flags must precede the subcommand (`mighty-colab --json exec`, not
+# `mighty-colab exec --json`), so the JSON form is a separate variable rather
+# than a flag appended at each call site. Used only where a recipe INSPECTS
+# the result; `sessions`/`upload`/`install`/`reinstall`/`download` stay plain,
+# because `--json` implies `--logtostderr` and nothing here parses them.
+#
+# What `--json` buys, concretely -- each of these was a real defect in the
+# text-parsing form it replaces:
+#
+#   1. The CLI's exit code now answers only "did the client complete its
+#      transaction", and the remote job's own outcome moved into the
+#      envelope's `status` (`ok` / `job_raised` / `error`). A script ending
+#      in `SystemExit(0)` -- which IPython reports as an exception -- used to
+#      come back rc=1 and be treated as a failed run. That cost this project
+#      a completed 13-minute A100 result, discarded with the session.
+#   2. `status -s <name>` on a missing session exits 1 with
+#      `reason=session_not_found` instead of exiting 0 and printing "not
+#      found." to stdout. The old guard grepped that prose, so an auth or
+#      network failure ALSO read as "not found" and provisioned a second
+#      session. The reason code distinguishes them; $(ensure_session) refuses
+#      rather than guessing.
+#   3. `stop` on an absent session returns `status=ok reason=already_stopped`,
+#      which is what STOP_ABSENT_RC previously encoded as a bare exit code.
+#
+# Verified against 0.4.1 directly, no session provisioned:
+#   status -s <missing> -> rc=1 status=error  reason=session_not_found
+#   stop   -s <missing> -> rc=0 status=ok     reason=already_stopped
+#   exec   -s <missing> -> rc=1 status=error  reason=session_not_found
+# Pinned by tests/test_mighty_colab_contract.py.
+MIGHTY_COLAB_JSON ?= $(MIGHTY_COLAB) --json
+
+# Every envelope-inspecting recipe needs this. It is already installed in the
+# CI image; tests/test_ci_image_dependencies.py derives that requirement from
+# the Makefile as well as tools/ci/*.sh, so removing it from either fails
+# there rather than at the point a GPU target is next driven.
+JQ ?= jq
+
 # Overridable for the same reason MIGHTY_COLAB is. The ladder target's
 # pre-flight refusals (dirty tree, unpushed HEAD) are behaviour worth
 # testing, and testing them needs a git that can be made to report either
@@ -119,33 +156,136 @@ EXEC_TIMEOUT ?= 3600
 #     it is the one outcome worth failing an otherwise-successful target
 #     for, because the cost keeps accruing while nobody is looking.
 #
-# STOP_ABSENT_RC is what "already absent" exits with. It is 0 today, which
-# collapses the two cases into one check; if a future release gives absent
-# its own code, set this to that code and the recipes keep their meaning
-# without being rewritten. Pinned by tests/test_mighty_colab_contract.py.
-STOP_ABSENT_RC ?= 0
+# `already_stopped` is the reason code 0.4.1 returns for the absent case,
+# and it arrives as DATA rather than as an exit-code convention -- which is
+# what STOP_ABSENT_RC used to encode, and why that variable is gone. A
+# release that changed absent's exit code used to require re-pointing a
+# Makefile variable; now the envelope says which case it is regardless.
+#
+# $(1) = session name. Sets $$src (stop's own CLI exit status) and
+# $$sreason, both read by $(check_teardown) immediately below. Deliberately
+# two steps rather than one: teardown must run unconditionally, and its
+# verdict must be evaluated AFTER the run's own verdict is already in $$rc.
+define stop_session
+src=0; \
+sout=$$($(MIGHTY_COLAB_JSON) stop -s $(1)) || src=$$?; \
+sreason=$$(printf '%s' "$$sout" | $(JQ) -r '.status // "malformed"')
+endef
 
-# Evaluated after teardown, with $$src holding stop's status and $$rc the
-# run's own verdict so far. A leak fails the target, but never overwrites
-# a verdict that already failed -- the science's failure is the more
-# useful headline, and the leak is reported on its own line regardless.
+# Evaluated after teardown, with $$src holding stop's CLI status, $$sreason
+# the envelope's own verdict, and $$rc the run's verdict so far. A leak
+# fails the target, but never overwrites a verdict that already failed --
+# the science's failure is the more useful headline, and the leak is
+# reported on its own line regardless.
+#
+# BOTH conditions are checked, and neither is redundant: a non-zero exit
+# catches the CLI failing to complete its transaction at all (network drop,
+# crash) where there is no envelope to read, and a non-`ok` status catches a
+# transaction that completed while reporting the teardown itself failed.
+# Treating either alone as sufficient is how a billing A100 goes unnoticed.
 define check_teardown
-if [ $$src -ne 0 ] && [ $$src -ne $(STOP_ABSENT_RC) ]; then echo "[make] LEAK WARNING: teardown of session '$(1)' exited $$src -- it may still be running and billing."; echo "[make]   check with: $(MIGHTY_COLAB) sessions"; echo "[make]   stop it with: $(MIGHTY_COLAB) stop -s $(1)"; if [ $$rc -eq 0 ]; then rc=$$src; fi; fi
+if [ $$src -ne 0 ] || [ "$$sreason" != "ok" ]; then \
+	echo "[make] LEAK WARNING: teardown of session '$(1)' exited $$src (status=$$sreason) -- it may still be running and billing."; \
+	echo "[make]   check with: $(MIGHTY_COLAB) sessions"; \
+	echo "[make]   stop it with: $(MIGHTY_COLAB) stop -s $(1)"; \
+	if [ $$rc -eq 0 ]; then if [ $$src -ne 0 ]; then rc=$$src; else rc=1; fi; fi; \
+fi
 endef
 
 # GPU-target idempotency: `mighty-colab new -s <name>` provisions a fresh
 # session unconditionally, so re-running a GPU target after a partial
 # failure (a dropped upload, a flaky exec) would try to allocate a second
-# session under the same name instead of resuming the one already up --
-# and `mighty-colab status -s <name>` returns exit code 0 even when the
-# session doesn't exist (prints "Session '<name>' not found." to stdout but
-# does not fail) -- verified directly, not assumed, and re-verified against
-# 0.2.1 after that release moved several other commands' error text to
-# stderr. So the GPU targets below grep that message rather than trusting
-# the exit status, redirect stderr into the grep so a future move of this
-# message does not silently break the guard, and only call `new` when a
-# session by that name genuinely isn't there yet.
-# Pinned by tests/test_mighty_colab_contract.py.
+# session under the same name instead of resuming the one already up. So
+# `new` is called only when a session by that name genuinely isn't there.
+#
+# The THREE-way branch is the point, and it is what the prose-grepping
+# version it replaces could not express. That guard asked whether "not
+# found" appeared in `status`'s combined output, which conflates two
+# opposite situations: the session is genuinely absent (provision one), and
+# the question could not be answered at all -- expired credentials, a
+# network failure, a backend 5xx (provisioning here is exactly wrong, and
+# would allocate a second billable VM while the first is still up). The
+# envelope separates them: `reason=session_not_found` is the absent case
+# specifically, and anything else that isn't `ok` is refused loudly rather
+# than guessed at.
+#
+# $(1) = session name, $(2) = flags passed to `new` (e.g. `--gpu A100`).
+define ensure_session
+st=$$($(MIGHTY_COLAB_JSON) status -s $(1) 2>/dev/null); \
+sst=$$(printf '%s' "$$st" | $(JQ) -r '.status // "malformed"'); \
+srsn=$$(printf '%s' "$$st" | $(JQ) -r '.reason // ""'); \
+if [ "$$sst" = "ok" ]; then \
+	echo "[make] Reusing existing session $(1)"; \
+elif [ "$$srsn" = "session_not_found" ]; then \
+	$(MIGHTY_COLAB) new -s $(1) $(2); \
+else \
+	echo "[make] REFUSING: cannot determine whether session '$(1)' exists (status=$$sst reason=$$srsn)."; \
+	echo "[make]   Provisioning now could allocate a SECOND billable VM alongside one already running."; \
+	echo "[make]   Check credentials and connectivity, then: $(MIGHTY_COLAB) sessions"; \
+	exit 1; \
+fi
+endef
+
+# The run's own verdict, from the envelope captured in $$out. Sets $$rc.
+#
+# $(1) = human-readable description, $(2) = the driver's success sentinel, or
+# EMPTY for a driver that prints none (the three Stage 2A evolution targets).
+# An empty sentinel checks the envelope status only, which is strictly more
+# than those targets checked before -- they trusted `exec`'s exit code alone,
+# and that is precisely the signal `--json` moves into the body. Migrating
+# them WITHOUT this check would have made them worse, not better: under
+# `--json` the CLI exits 0 whenever it completed its transaction, so a raised
+# remote job would have read as success. Stage 2A is closed and locked, so
+# its drivers are not being edited to add sentinels; the status check is the
+# part obtainable without touching them.
+#
+# The sentinel is NOT made redundant by `--json`, and keeping both is
+# deliberate. `status=ok` means the remote code did not raise; it cannot
+# distinguish "ran to completion and passed its gate" from "exited cleanly
+# without ever reaching its verdict" -- a truncated or short-circuited
+# script satisfies `status=ok` either way. What `--json` retires is the
+# EXIT-CODE half of the old check, which conflated a raising job with a CLI
+# that never ran one, and which read a successful script ending in
+# `SystemExit(0)` as a failure.
+#
+# The sentinel is looked for inside `.blocks[].outputs[]` rather than in raw
+# stdout. Those are the remote cell's own outputs, so a sentinel-shaped
+# string appearing in the CLI's chatter, in a log line, or in the submitted
+# source cannot satisfy the check -- which grepping merged stdout+stderr
+# could not rule out.
+define check_run_verdict
+if [ $$rc -ne 0 ]; then \
+	echo "[make] FAILED: $(1) -- the mighty-colab CLI itself exited $$rc (no envelope to read)."; \
+else \
+	jstat=$$(printf '%s' "$$out" | $(JQ) -r '.status // "malformed"'); \
+	jrsn=$$(printf '%s' "$$out" | $(JQ) -r '.reason // ""'); \
+	if [ "$$jstat" != "ok" ]; then \
+		echo "[make] FAILED: $(1) -- remote job status=$$jstat reason=$$jrsn."; \
+		printf '%s' "$$out" | $(JQ) -r '.blocks[]?.outputs[]?.traceback // empty | if type=="array" then join("\n") else . end'; \
+		rc=1; \
+	elif [ -n "$(2)" ] && ! printf '%s' "$$out" | $(JQ) -e -r '.blocks[]?.outputs[]? | tostring' 2>/dev/null | grep -q '$(2)'; then \
+		echo "[make] FAILED: $(1) -- the job completed without raising, but never printed its success sentinel $(2)."; \
+		echo "[make]   That is the signature of a script that exited early or was truncated before reaching its verdict."; \
+		rc=1; \
+	fi; \
+fi
+endef
+
+# Prints the remote job's own stdout/stderr for a human. Under `--json` the
+# captured $$out is an envelope, so the readable text has to be extracted
+# rather than echoed -- `echo "$$out"` would print a one-line blob. Both
+# nbformat text shapes are handled: `text` is a string in some outputs and a
+# list of lines in others, and joining only the list form silently drops the
+# other. Falls back to printing the raw envelope if it cannot be parsed at
+# all, so a malformed response is never swallowed.
+define show_run_output
+if printf '%s' "$$out" | $(JQ) -e . >/dev/null 2>&1; then \
+	printf '%s' "$$out" | $(JQ) -r '.blocks[]?.outputs[]? | (.text // .traceback // empty) | if type=="array" then join("") else . end'; \
+else \
+	echo "[make] (unparseable envelope, printing raw)"; \
+	echo "$$out"; \
+fi
+endef
 
 .PHONY: stage2a-help
 stage2a-help:  ## List every stage2a-* target, grouped by pipeline stage
@@ -179,11 +319,7 @@ stage2a-evolve-train-gpu:  ## Upload + run Stage-3 (training set) GPU evolution 
 	rc=0; src=0; \
 	cd $(STAGE2A_DIR) && \
 	$(MIGHTY_COLAB) sessions && \
-	if $(MIGHTY_COLAB) status -s $(SESSION_TRAIN) 2>&1 | grep -q "not found"; then \
-		$(MIGHTY_COLAB) new -s $(SESSION_TRAIN) --gpu A100; \
-	else \
-		echo "[make] Reusing existing session $(SESSION_TRAIN) (resuming after a partial run, or you re-ran this target with a session still up)"; \
-	fi && \
+	$(call ensure_session,$(SESSION_TRAIN),--gpu A100) && \
 	$(MIGHTY_COLAB) reinstall -s $(SESSION_TRAIN) jax[cuda12]==0.11.0 diffrax==0.7.2 equinox==0.13.8 && \
 	$(MIGHTY_COLAB) upload -s $(SESSION_TRAIN) evolve_on_graph_jax.py /content/evolve_on_graph_jax.py && \
 	$(MIGHTY_COLAB) upload -s $(SESSION_TRAIN) scratch/stage3_train/stage3_topologies.pkl /content/stage3_topologies.pkl && \
@@ -191,11 +327,13 @@ stage2a-evolve-train-gpu:  ## Upload + run Stage-3 (training set) GPU evolution 
 		$(MIGHTY_COLAB) upload -s $(SESSION_TRAIN) scratch/stage3_train/theta0_chunk_$$i.npy /content/theta0_chunk_$$i.npy || exit 1; \
 	done && \
 	rc=0; \
-	$(MIGHTY_COLAB) exec -s $(SESSION_TRAIN) -f stage3_gpu_evolve.py --timeout $(EXEC_TIMEOUT) || rc=$$?; \
+	out=$$($(MIGHTY_COLAB_JSON) exec -s $(SESSION_TRAIN) -f stage3_gpu_evolve.py --timeout $(EXEC_TIMEOUT)) || rc=$$?; \
+	$(call show_run_output); \
+	$(call check_run_verdict,stage3_gpu_evolve.py did not complete,); \
 	if [ $$rc -eq 0 ]; then \
 		$(MIGHTY_COLAB) download -s $(SESSION_TRAIN) /content/stage3_gpu_results.pkl scratch/stage3_train/stage3_gpu_results.pkl || rc=$$?; \
 	fi; \
-	src=0; $(MIGHTY_COLAB) stop -s $(SESSION_TRAIN) || src=$$?; \
+	$(call stop_session,$(SESSION_TRAIN)); \
 	$(call check_teardown,$(SESSION_TRAIN)); \
 	exit $$rc
 
@@ -204,21 +342,19 @@ stage2a-evolve-test-gpu:  ## Upload + run Stage-4 (official test set) GPU evolut
 	rc=0; src=0; \
 	cd $(STAGE2A_DIR) && \
 	$(MIGHTY_COLAB) sessions && \
-	if $(MIGHTY_COLAB) status -s $(SESSION_TEST) 2>&1 | grep -q "not found"; then \
-		$(MIGHTY_COLAB) new -s $(SESSION_TEST) --gpu A100; \
-	else \
-		echo "[make] Reusing existing session $(SESSION_TEST) (resuming after a partial run, or you re-ran this target with a session still up)"; \
-	fi && \
+	$(call ensure_session,$(SESSION_TEST),--gpu A100) && \
 	$(MIGHTY_COLAB) reinstall -s $(SESSION_TEST) jax[cuda12]==0.11.0 diffrax==0.7.2 equinox==0.13.8 && \
 	$(MIGHTY_COLAB) upload -s $(SESSION_TEST) evolve_on_graph_jax.py /content/evolve_on_graph_jax.py && \
 	$(MIGHTY_COLAB) upload -s $(SESSION_TEST) scratch/stage4_test/stage4_gpu_upload_topologies.pkl /content/stage4_gpu_upload_topologies.pkl && \
 	$(MIGHTY_COLAB) upload -s $(SESSION_TEST) scratch/stage4_test/stage4_theta0_test.npy /content/stage4_theta0_test.npy && \
 	rc=0; \
-	$(MIGHTY_COLAB) exec -s $(SESSION_TEST) -f stage4_gpu_evolve.py --timeout $(EXEC_TIMEOUT) || rc=$$?; \
+	out=$$($(MIGHTY_COLAB_JSON) exec -s $(SESSION_TEST) -f stage4_gpu_evolve.py --timeout $(EXEC_TIMEOUT)) || rc=$$?; \
+	$(call show_run_output); \
+	$(call check_run_verdict,stage4_gpu_evolve.py did not complete,); \
 	if [ $$rc -eq 0 ]; then \
 		$(MIGHTY_COLAB) download -s $(SESSION_TEST) /content/stage4_gpu_results.pkl scratch/stage4_test/stage4_gpu_results.pkl || rc=$$?; \
 	fi; \
-	src=0; $(MIGHTY_COLAB) stop -s $(SESSION_TEST) || src=$$?; \
+	$(call stop_session,$(SESSION_TEST)); \
 	$(call check_teardown,$(SESSION_TEST)); \
 	exit $$rc
 
@@ -274,20 +410,18 @@ stage2a-class0-classify-gpu:  ## Part 2's cuml.accel GPU variant via mighty-cola
 	rc=0; src=0; \
 	cd $(STAGE2A_DIR) && \
 	$(MIGHTY_COLAB) sessions && \
-	if $(MIGHTY_COLAB) status -s $(SESSION_CLASS0) 2>&1 | grep -q "not found"; then \
-		$(MIGHTY_COLAB) new -s $(SESSION_CLASS0) --gpu A100; \
-	else \
-		echo "[make] Reusing existing session $(SESSION_CLASS0) (resuming after a partial run, or you re-ran this target with a session still up)"; \
-	fi && \
+	$(call ensure_session,$(SESSION_CLASS0),--gpu A100) && \
 	$(MIGHTY_COLAB) reinstall -s $(SESSION_CLASS0) --requirement cuml_requirements.txt && \
 	$(MIGHTY_COLAB) upload -s $(SESSION_CLASS0) stage2a_classifier.py /content/stage2a_classifier.py && \
 	$(MIGHTY_COLAB) upload -s $(SESSION_CLASS0) stage2a_stats.py /content/stage2a_stats.py && \
 	rc=0; \
-	$(MIGHTY_COLAB) exec -s $(SESSION_CLASS0) -f class0_support_audit_classify_gpu.py --timeout $(EXEC_TIMEOUT) || rc=$$?; \
+	out=$$($(MIGHTY_COLAB_JSON) exec -s $(SESSION_CLASS0) -f class0_support_audit_classify_gpu.py --timeout $(EXEC_TIMEOUT)) || rc=$$?; \
+	$(call show_run_output); \
+	$(call check_run_verdict,class0_support_audit_classify_gpu.py did not complete,); \
 	if [ $$rc -eq 0 ]; then \
 		$(MIGHTY_COLAB) download -s $(SESSION_CLASS0) /content/class0_support_audit_classify_results.pkl results/class0_support_audit_classify_results.pkl || rc=$$?; \
 	fi; \
-	src=0; $(MIGHTY_COLAB) stop -s $(SESSION_CLASS0) || src=$$?; \
+	$(call stop_session,$(SESSION_CLASS0)); \
 	$(call check_teardown,$(SESSION_CLASS0)); \
 	exit $$rc
 
@@ -460,35 +594,34 @@ VERIFY_GPU ?= A100
 # Whether JAX's float64 SVD on a GPU meets the same gate is a separate
 # question from whether the code is right, and it is the question that
 # matters before a ladder rung is ever driven on one.
-# NOTE, load-bearing: the verdict comes from the script's own success
-# sentinel, not from the exec exit status alone. Since 0.2.0 `mighty-colab
-# exec` does propagate an uncaught remote exception as a non-zero exit (it
-# always exited 0 before that, which is why the sentinel was introduced),
-# but an exit code still cannot distinguish "ran and passed" from "exited
-# cleanly without ever reaching its verdict" -- a truncated or short-
-# circuited script exits 0 either way. So both GPU targets below capture
-# the output, tear the session down unconditionally, and require BOTH a
-# zero exit and the sentinel. Chaining `&& stop` on the exec's exit status
-# is the trap that made `stage2a-verify` a no-op gate and, once exec could
-# fail, would have left a billing A100 running on every failure.
+# NOTE, load-bearing: the verdict comes from BOTH the envelope's `status`
+# and the script's own success sentinel, and neither is redundant.
+#
+# `status` covers what the exit code no longer can. Under `--json` the CLI
+# exits 0 whenever it completed its transaction, so a remote job that
+# RAISED still returns 0 at the process level -- the failure lives in
+# `status=job_raised`. A recipe branching on the exit code alone would read
+# a crashed run as a pass.
+#
+# The sentinel covers what `status` cannot: "exited cleanly without ever
+# reaching its verdict". A truncated or short-circuited script satisfies
+# `status=ok` exactly as a passing one does.
+#
+# So every GPU target below captures the envelope, tears the session down
+# unconditionally, and requires both. Chaining `&& stop` on the exec's exit
+# status is the trap that made `stage2a-verify` a no-op gate and would have
+# left a billing A100 running on every failure.
 .PHONY: stage2b-verify-gpu
 stage2b-verify-gpu:  ## Run the ridge equivalence gate on a real GPU -- bills while running
 	rc=0; src=0; \
 	cd $(STAGE2B_DIR) && \
 	$(MIGHTY_COLAB) sessions && \
-	if $(MIGHTY_COLAB) status -s $(SESSION_2B_VERIFY) 2>&1 | grep -q "not found"; then \
-		$(MIGHTY_COLAB) new -s $(SESSION_2B_VERIFY) --gpu $(VERIFY_GPU); \
-	else \
-		echo "[make] Reusing existing session $(SESSION_2B_VERIFY)"; \
-	fi && \
+	$(call ensure_session,$(SESSION_2B_VERIFY),--gpu $(VERIFY_GPU)) && \
 	$(MIGHTY_COLAB) upload -s $(SESSION_2B_VERIFY) stage2b_ridge.py /content/stage2b_ridge.py && \
-	rc=0; out=$$($(MIGHTY_COLAB) exec -s $(SESSION_2B_VERIFY) -f stage2b_verify_gpu.py --timeout $(EXEC_TIMEOUT) 2>&1) || rc=$$?; \
-	echo "$$out"; \
-	src=0; $(MIGHTY_COLAB) stop -s $(SESSION_2B_VERIFY) || src=$$?; \
-	if [ $$rc -ne 0 ] || ! echo "$$out" | grep -q GPU_VERIFY_OK; then \
-		echo "[make] FAILED: the GPU ridge gate did not report success (exec rc=$$rc)."; \
-		if [ $$rc -eq 0 ]; then rc=1; fi; \
-	fi; \
+	rc=0; out=$$($(MIGHTY_COLAB_JSON) exec -s $(SESSION_2B_VERIFY) -f stage2b_verify_gpu.py --timeout $(EXEC_TIMEOUT)) || rc=$$?; \
+	$(call show_run_output); \
+	$(call stop_session,$(SESSION_2B_VERIFY)); \
+	$(call check_run_verdict,the GPU ridge gate did not report success,GPU_VERIFY_OK); \
 	$(call check_teardown,$(SESSION_2B_VERIFY)); \
 	exit $$rc
 
@@ -503,20 +636,13 @@ stage2b-verify-cnn-gpu:  ## Compare the CNN float32 forward pass CPU vs GPU -- b
 	rc=0; src=0; \
 	cd $(STAGE2B_DIR) && \
 	$(MIGHTY_COLAB) sessions && \
-	if $(MIGHTY_COLAB) status -s $(SESSION_2B_VERIFY) 2>&1 | grep -q "not found"; then \
-		$(MIGHTY_COLAB) new -s $(SESSION_2B_VERIFY) --gpu $(VERIFY_GPU); \
-	else \
-		echo "[make] Reusing existing session $(SESSION_2B_VERIFY)"; \
-	fi && \
+	$(call ensure_session,$(SESSION_2B_VERIFY),--gpu $(VERIFY_GPU)) && \
 	$(MIGHTY_COLAB) install -s $(SESSION_2B_VERIFY) equinox optax && \
 	$(MIGHTY_COLAB) upload -s $(SESSION_2B_VERIFY) stage2b_cnn.py /content/stage2b_cnn.py && \
-	rc=0; out=$$($(MIGHTY_COLAB) exec -s $(SESSION_2B_VERIFY) -f stage2b_verify_cnn_gpu.py --timeout $(EXEC_TIMEOUT) 2>&1) || rc=$$?; \
-	echo "$$out"; \
-	src=0; $(MIGHTY_COLAB) stop -s $(SESSION_2B_VERIFY) || src=$$?; \
-	if [ $$rc -ne 0 ] || ! echo "$$out" | grep -q CNN_GPU_VERIFY_OK; then \
-		echo "[make] FAILED: the CNN GPU check did not report success (exec rc=$$rc)."; \
-		if [ $$rc -eq 0 ]; then rc=1; fi; \
-	fi; \
+	rc=0; out=$$($(MIGHTY_COLAB_JSON) exec -s $(SESSION_2B_VERIFY) -f stage2b_verify_cnn_gpu.py --timeout $(EXEC_TIMEOUT)) || rc=$$?; \
+	$(call show_run_output); \
+	$(call stop_session,$(SESSION_2B_VERIFY)); \
+	$(call check_run_verdict,the CNN GPU check did not report success,CNN_GPU_VERIFY_OK); \
 	$(call check_teardown,$(SESSION_2B_VERIFY)); \
 	exit $$rc
 
@@ -588,20 +714,13 @@ stage2b-ladder-stage1:  ## Run Stage 2B ladder stage 1 (n=1,000) on a Colab GPU 
 	echo "[make] commit $$commit, driver sha256 $$driver_sha"; \
 	cd $(STAGE2B_DIR) && \
 	$(MIGHTY_COLAB) sessions && \
-	if $(MIGHTY_COLAB) status -s $(SESSION_2B_LADDER) 2>&1 | grep -q "not found"; then \
-		$(MIGHTY_COLAB) new -s $(SESSION_2B_LADDER) --gpu $(LADDER_GPU); \
-	else \
-		echo "[make] Reusing existing session $(SESSION_2B_LADDER)"; \
-	fi && \
+	$(call ensure_session,$(SESSION_2B_LADDER),--gpu $(LADDER_GPU)) && \
 	$(MIGHTY_COLAB) reinstall -s $(SESSION_2B_LADDER) jax[cuda12]==0.11.0 diffrax==0.7.2 google-cloud-storage && \
 	$(MIGHTY_COLAB) upload -s $(SESSION_2B_LADDER) $(BONSAI_GCS_CREDENTIALS) $(REMOTE_KEY_PATH) && \
-	rc=0; out=$$($(MIGHTY_COLAB) exec -s $(SESSION_2B_LADDER) -f run_ladder_stage1.py --timeout $(EXEC_TIMEOUT) $(GCS_EXEC_ENV) --env BONSAI_COMMIT="$$commit" --env BONSAI_DRIVER_SHA256="$$driver_sha" --env JAX_ENABLE_X64=1 2>&1) || rc=$$?; \
-	echo "$$out"; \
-	src=0; $(MIGHTY_COLAB) stop -s $(SESSION_2B_LADDER) || src=$$?; \
-	if [ $$rc -ne 0 ] || ! echo "$$out" | grep -q STAGE1_OK; then \
-		echo "[make] FAILED: ladder stage 1 did not report success (exec rc=$$rc)."; \
-		if [ $$rc -eq 0 ]; then rc=1; fi; \
-	fi; \
+	rc=0; out=$$($(MIGHTY_COLAB_JSON) exec -s $(SESSION_2B_LADDER) -f run_ladder_stage1.py --timeout $(EXEC_TIMEOUT) $(GCS_EXEC_ENV) --env BONSAI_COMMIT="$$commit" --env BONSAI_DRIVER_SHA256="$$driver_sha" --env JAX_ENABLE_X64=1) || rc=$$?; \
+	$(call show_run_output); \
+	$(call stop_session,$(SESSION_2B_LADDER)); \
+	$(call check_run_verdict,ladder stage 1 did not report success,STAGE1_OK); \
 	$(call check_teardown,$(SESSION_2B_LADDER)); \
 	exit $$rc
 
@@ -695,20 +814,13 @@ stage2b-ladder-stage2:  ## Run Stage 2B ladder stage 2 (n=5,000, CNN development
 	echo "[make] commit $$commit, driver sha256 $$driver_sha"; \
 	cd $(STAGE2B_DIR) && \
 	$(MIGHTY_COLAB) sessions && \
-	if $(MIGHTY_COLAB) status -s $(SESSION_2B_LADDER2) 2>&1 | grep -q "not found"; then \
-		$(MIGHTY_COLAB) new -s $(SESSION_2B_LADDER2) --gpu $(LADDER_GPU); \
-	else \
-		echo "[make] Reusing existing session $(SESSION_2B_LADDER2)"; \
-	fi && \
+	$(call ensure_session,$(SESSION_2B_LADDER2),--gpu $(LADDER_GPU)) && \
 	$(MIGHTY_COLAB) reinstall -s $(SESSION_2B_LADDER2) jax[cuda12]==0.11.0 diffrax==0.7.2 google-cloud-storage equinox optax && \
 	$(MIGHTY_COLAB) upload -s $(SESSION_2B_LADDER2) $(BONSAI_GCS_CREDENTIALS) $(REMOTE_KEY_PATH) && \
-	rc=0; out=$$($(MIGHTY_COLAB) exec -s $(SESSION_2B_LADDER2) -f run_ladder_stage2.py --timeout $(EXEC_TIMEOUT) $(GCS_EXEC_ENV) --env BONSAI_COMMIT="$$commit" --env BONSAI_DRIVER_SHA256="$$driver_sha" --env JAX_ENABLE_X64=1 2>&1) || rc=$$?; \
-	echo "$$out"; \
-	src=0; $(MIGHTY_COLAB) stop -s $(SESSION_2B_LADDER2) || src=$$?; \
-	if [ $$rc -ne 0 ] || ! echo "$$out" | grep -q STAGE2_OK; then \
-		echo "[make] FAILED: ladder stage 2 did not report success (exec rc=$$rc)."; \
-		if [ $$rc -eq 0 ]; then rc=1; fi; \
-	fi; \
+	rc=0; out=$$($(MIGHTY_COLAB_JSON) exec -s $(SESSION_2B_LADDER2) -f run_ladder_stage2.py --timeout $(EXEC_TIMEOUT) $(GCS_EXEC_ENV) --env BONSAI_COMMIT="$$commit" --env BONSAI_DRIVER_SHA256="$$driver_sha" --env JAX_ENABLE_X64=1) || rc=$$?; \
+	$(call show_run_output); \
+	$(call stop_session,$(SESSION_2B_LADDER2)); \
+	$(call check_run_verdict,ladder stage 2 did not report success,STAGE2_OK); \
 	$(call check_teardown,$(SESSION_2B_LADDER2)); \
 	exit $$rc
 
@@ -745,20 +857,13 @@ stage2b-ladder-stage3:  ## Run Stage 2B ladder stage 3 Phase B (n=60,000) on a C
 	echo "[make] commit $$commit, driver sha256 $$driver_sha"; \
 	cd $(STAGE2B_DIR) && \
 	$(MIGHTY_COLAB) sessions && \
-	if $(MIGHTY_COLAB) status -s $(SESSION_2B_LADDER3) 2>&1 | grep -q "not found"; then \
-		$(MIGHTY_COLAB) new -s $(SESSION_2B_LADDER3) --gpu $(LADDER_GPU); \
-	else \
-		echo "[make] Reusing existing session $(SESSION_2B_LADDER3)"; \
-	fi && \
+	$(call ensure_session,$(SESSION_2B_LADDER3),--gpu $(LADDER_GPU)) && \
 	$(MIGHTY_COLAB) reinstall -s $(SESSION_2B_LADDER3) jax[cuda12]==0.11.0 diffrax==0.7.2 google-cloud-storage equinox optax && \
 	$(MIGHTY_COLAB) upload -s $(SESSION_2B_LADDER3) $(BONSAI_GCS_CREDENTIALS) $(REMOTE_KEY_PATH) && \
-	rc=0; out=$$($(MIGHTY_COLAB) exec -s $(SESSION_2B_LADDER3) -f run_ladder_stage3.py --timeout $(STAGE3_EXEC_TIMEOUT) $(GCS_EXEC_ENV) --env BONSAI_COMMIT="$$commit" --env BONSAI_DRIVER_SHA256="$$driver_sha" --env JAX_ENABLE_X64=1 2>&1) || rc=$$?; \
-	echo "$$out"; \
-	src=0; $(MIGHTY_COLAB) stop -s $(SESSION_2B_LADDER3) || src=$$?; \
-	if [ $$rc -ne 0 ] || ! echo "$$out" | grep -q STAGE3_OK; then \
-		echo "[make] FAILED: ladder stage 3 did not report success (exec rc=$$rc)."; \
-		if [ $$rc -eq 0 ]; then rc=1; fi; \
-	fi; \
+	rc=0; out=$$($(MIGHTY_COLAB_JSON) exec -s $(SESSION_2B_LADDER3) -f run_ladder_stage3.py --timeout $(STAGE3_EXEC_TIMEOUT) $(GCS_EXEC_ENV) --env BONSAI_COMMIT="$$commit" --env BONSAI_DRIVER_SHA256="$$driver_sha" --env JAX_ENABLE_X64=1) || rc=$$?; \
+	$(call show_run_output); \
+	$(call stop_session,$(SESSION_2B_LADDER3)); \
+	$(call check_run_verdict,ladder stage 3 did not report success,STAGE3_OK); \
 	$(call check_teardown,$(SESSION_2B_LADDER3)); \
 	exit $$rc
 
@@ -786,20 +891,13 @@ stage2b-backfill-cnn-weights:  ## Add the trained CNN weights to stage 3's cnn_p
 	echo "[make] commit $$commit, driver sha256 $$driver_sha"; \
 	cd $(STAGE2B_DIR) && \
 	$(MIGHTY_COLAB) sessions && \
-	if $(MIGHTY_COLAB) status -s $(SESSION_2B_BACKFILL) 2>&1 | grep -q "not found"; then \
-		$(MIGHTY_COLAB) new -s $(SESSION_2B_BACKFILL) --gpu $(LADDER_GPU); \
-	else \
-		echo "[make] Reusing existing session $(SESSION_2B_BACKFILL)"; \
-	fi && \
+	$(call ensure_session,$(SESSION_2B_BACKFILL),--gpu $(LADDER_GPU)) && \
 	$(MIGHTY_COLAB) reinstall -s $(SESSION_2B_BACKFILL) jax[cuda12]==0.11.0 diffrax==0.7.2 google-cloud-storage equinox optax && \
 	$(MIGHTY_COLAB) upload -s $(SESSION_2B_BACKFILL) $(BONSAI_GCS_CREDENTIALS) $(REMOTE_KEY_PATH) && \
-	rc=0; out=$$($(MIGHTY_COLAB) exec -s $(SESSION_2B_BACKFILL) -f backfill_cnn_weights.py --timeout $(BACKFILL_EXEC_TIMEOUT) $(GCS_EXEC_ENV) --env BONSAI_COMMIT="$$commit" --env BONSAI_DRIVER_SHA256="$$driver_sha" --env JAX_ENABLE_X64=1 --env BONSAI_GPU="$(LADDER_GPU)" $(BACKFILL_EXTRA_ENV) 2>&1) || rc=$$?; \
-	echo "$$out"; \
-	src=0; $(MIGHTY_COLAB) stop -s $(SESSION_2B_BACKFILL) || src=$$?; \
-	if [ $$rc -ne 0 ] || ! echo "$$out" | grep -q BACKFILL_OK; then \
-		echo "[make] FAILED: the CNN weights backfill did not report success (exec rc=$$rc)."; \
-		if [ $$rc -eq 0 ]; then rc=1; fi; \
-	fi; \
+	rc=0; out=$$($(MIGHTY_COLAB_JSON) exec -s $(SESSION_2B_BACKFILL) -f backfill_cnn_weights.py --timeout $(BACKFILL_EXEC_TIMEOUT) $(GCS_EXEC_ENV) --env BONSAI_COMMIT="$$commit" --env BONSAI_DRIVER_SHA256="$$driver_sha" --env JAX_ENABLE_X64=1 --env BONSAI_GPU="$(LADDER_GPU)" $(BACKFILL_EXTRA_ENV)) || rc=$$?; \
+	$(call show_run_output); \
+	$(call stop_session,$(SESSION_2B_BACKFILL)); \
+	$(call check_run_verdict,the CNN weights backfill did not report success,BACKFILL_OK); \
 	$(call check_teardown,$(SESSION_2B_BACKFILL)); \
 	exit $$rc
 
@@ -830,21 +928,15 @@ stage2b-cnn-arch-x86:  ## CNN forward pass on Colab x86, downloaded for comparis
 	echo "[make] commit $$commit"; \
 	cd $(STAGE2B_DIR) && \
 	$(MIGHTY_COLAB) sessions && \
-	if $(MIGHTY_COLAB) status -s $(SESSION_2B_CNNARCH) 2>&1 | grep -q "not found"; then \
-		$(MIGHTY_COLAB) new -s $(SESSION_2B_CNNARCH) --gpu $(LADDER_GPU); \
-	else \
-		echo "[make] Reusing existing session $(SESSION_2B_CNNARCH)"; \
-	fi && \
+	$(call ensure_session,$(SESSION_2B_CNNARCH),--gpu $(LADDER_GPU)) && \
 	$(MIGHTY_COLAB) reinstall -s $(SESSION_2B_CNNARCH) jax[cuda12]==0.11.0 diffrax==0.7.2 equinox optax && \
-	rc=0; out=$$($(MIGHTY_COLAB) exec -s $(SESSION_2B_CNNARCH) -f measure_cnn_arch_agreement.py --timeout $(CNNARCH_EXEC_TIMEOUT) --env BONSAI_COMMIT="$$commit" --env JAX_ENABLE_X64=1 --env CNN_ARCH_PHASE=run --env CNN_ARCH_OUT="$(CNNARCH_REMOTE_OUT)" --env CNN_ARCH_CACHE_DIR=/content/cnn_arch_cache 2>&1) || rc=$$?; \
-	echo "$$out"; \
-	if [ $$rc -eq 0 ] && echo "$$out" | grep -q CNN_ARCH_OK; then \
+	rc=0; out=$$($(MIGHTY_COLAB_JSON) exec -s $(SESSION_2B_CNNARCH) -f measure_cnn_arch_agreement.py --timeout $(CNNARCH_EXEC_TIMEOUT) --env BONSAI_COMMIT="$$commit" --env JAX_ENABLE_X64=1 --env CNN_ARCH_PHASE=run --env CNN_ARCH_OUT="$(CNNARCH_REMOTE_OUT)" --env CNN_ARCH_CACHE_DIR=/content/cnn_arch_cache) || rc=$$?; \
+	$(call show_run_output); \
+	$(call check_run_verdict,the x86 forward pass did not report success,CNN_ARCH_OK); \
+	if [ $$rc -eq 0 ]; then \
 		$(MIGHTY_COLAB) download -s $(SESSION_2B_CNNARCH) $(CNNARCH_REMOTE_OUT) $(CNNARCH_LOCAL_OUT) || rc=$$?; \
-	else \
-		echo "[make] FAILED: the x86 forward pass did not report success (exec rc=$$rc)."; \
-		if [ $$rc -eq 0 ]; then rc=1; fi; \
 	fi; \
-	src=0; $(MIGHTY_COLAB) stop -s $(SESSION_2B_CNNARCH) || src=$$?; \
+	$(call stop_session,$(SESSION_2B_CNNARCH)); \
 	$(call check_teardown,$(SESSION_2B_CNNARCH)); \
 	exit $$rc
 
@@ -915,20 +1007,13 @@ stage2b-ladder-stage4:  ## Run Stage 2B ladder stage 4, the ONE locked evaluatio
 	echo "[make] commit $$commit, driver sha256 $$driver_sha"; \
 	cd $(STAGE2B_DIR) && \
 	$(MIGHTY_COLAB) sessions && \
-	if $(MIGHTY_COLAB) status -s $(SESSION_2B_LADDER4) 2>&1 | grep -q "not found"; then \
-		$(MIGHTY_COLAB) new -s $(SESSION_2B_LADDER4) --gpu $(LADDER_GPU); \
-	else \
-		echo "[make] Reusing existing session $(SESSION_2B_LADDER4)"; \
-	fi && \
+	$(call ensure_session,$(SESSION_2B_LADDER4),--gpu $(LADDER_GPU)) && \
 	$(MIGHTY_COLAB) reinstall -s $(SESSION_2B_LADDER4) jax[cuda12]==0.11.0 diffrax==0.7.2 google-cloud-storage equinox optax && \
 	$(MIGHTY_COLAB) upload -s $(SESSION_2B_LADDER4) $(BONSAI_GCS_CREDENTIALS) $(REMOTE_KEY_PATH) && \
-	rc=0; out=$$($(MIGHTY_COLAB) exec -s $(SESSION_2B_LADDER4) -f run_ladder_stage4.py --timeout $(STAGE4_EXEC_TIMEOUT) $(GCS_EXEC_ENV) --env BONSAI_COMMIT="$$commit" --env BONSAI_DRIVER_SHA256="$$driver_sha" --env JAX_ENABLE_X64=1 2>&1) || rc=$$?; \
-	echo "$$out"; \
-	src=0; $(MIGHTY_COLAB) stop -s $(SESSION_2B_LADDER4) || src=$$?; \
-	if [ $$rc -ne 0 ] || ! echo "$$out" | grep -q STAGE4_OK; then \
-		echo "[make] FAILED: ladder stage 4 did not report success (exec rc=$$rc)."; \
-		if [ $$rc -eq 0 ]; then rc=1; fi; \
-	fi; \
+	rc=0; out=$$($(MIGHTY_COLAB_JSON) exec -s $(SESSION_2B_LADDER4) -f run_ladder_stage4.py --timeout $(STAGE4_EXEC_TIMEOUT) $(GCS_EXEC_ENV) --env BONSAI_COMMIT="$$commit" --env BONSAI_DRIVER_SHA256="$$driver_sha" --env JAX_ENABLE_X64=1) || rc=$$?; \
+	$(call show_run_output); \
+	$(call stop_session,$(SESSION_2B_LADDER4)); \
+	$(call check_run_verdict,ladder stage 4 did not report success,STAGE4_OK); \
 	$(call check_teardown,$(SESSION_2B_LADDER4)); \
 	exit $$rc
 
@@ -972,20 +1057,13 @@ stage2b-audit:  ## Run the Stage 2B amendment-impact audit -- bills while runnin
 	echo "[make] commit $$commit, driver sha256 $$driver_sha"; \
 	cd $(STAGE2B_DIR) && \
 	$(MIGHTY_COLAB) sessions && \
-	if $(MIGHTY_COLAB) status -s $(SESSION_2B_AUDIT) 2>&1 | grep -q "not found"; then \
-		$(MIGHTY_COLAB) new -s $(SESSION_2B_AUDIT) --gpu $(LADDER_GPU); \
-	else \
-		echo "[make] Reusing existing session $(SESSION_2B_AUDIT)"; \
-	fi && \
+	$(call ensure_session,$(SESSION_2B_AUDIT),--gpu $(LADDER_GPU)) && \
 	$(MIGHTY_COLAB) reinstall -s $(SESSION_2B_AUDIT) jax[cuda12]==0.11.0 diffrax==0.7.2 google-cloud-storage equinox optax && \
 	$(MIGHTY_COLAB) upload -s $(SESSION_2B_AUDIT) $(BONSAI_GCS_CREDENTIALS) $(REMOTE_KEY_PATH) && \
-	rc=0; out=$$($(MIGHTY_COLAB) exec -s $(SESSION_2B_AUDIT) -f run_audit.py --timeout $(STAGE2B_AUDIT_EXEC_TIMEOUT) $(GCS_EXEC_ENV) --env BONSAI_COMMIT="$$commit" --env BONSAI_DRIVER_SHA256="$$driver_sha" --env JAX_ENABLE_X64=1 2>&1) || rc=$$?; \
-	echo "$$out"; \
-	src=0; $(MIGHTY_COLAB) stop -s $(SESSION_2B_AUDIT) || src=$$?; \
-	if [ $$rc -ne 0 ] || ! echo "$$out" | grep -q AUDIT_OK; then \
-		echo "[make] FAILED: the amendment audit did not report success (exec rc=$$rc)."; \
-		if [ $$rc -eq 0 ]; then rc=1; fi; \
-	fi; \
+	rc=0; out=$$($(MIGHTY_COLAB_JSON) exec -s $(SESSION_2B_AUDIT) -f run_audit.py --timeout $(STAGE2B_AUDIT_EXEC_TIMEOUT) $(GCS_EXEC_ENV) --env BONSAI_COMMIT="$$commit" --env BONSAI_DRIVER_SHA256="$$driver_sha" --env JAX_ENABLE_X64=1) || rc=$$?; \
+	$(call show_run_output); \
+	$(call stop_session,$(SESSION_2B_AUDIT)); \
+	$(call check_run_verdict,the amendment audit did not report success,AUDIT_OK); \
 	$(call check_teardown,$(SESSION_2B_AUDIT)); \
 	exit $$rc
 
@@ -1015,20 +1093,13 @@ stage2b-protocol1-x86-encode:  ## Protocol 1: encode stress set on Colab x86 (bi
 	echo "[make] commit $$commit, driver sha256 $$driver_sha"; \
 	cd $(STAGE2B_DIR) && \
 	$(MIGHTY_COLAB) sessions && \
-	if $(MIGHTY_COLAB) status -s $(SESSION_2B_PROTOCOL1) 2>&1 | grep -q "not found"; then \
-		$(MIGHTY_COLAB) new -s $(SESSION_2B_PROTOCOL1) --gpu $(LADDER_GPU); \
-	else \
-		echo "[make] Reusing existing session $(SESSION_2B_PROTOCOL1)"; \
-	fi && \
+	$(call ensure_session,$(SESSION_2B_PROTOCOL1),--gpu $(LADDER_GPU)) && \
 	$(MIGHTY_COLAB) reinstall -s $(SESSION_2B_PROTOCOL1) jax[cuda12]==0.11.0 diffrax==0.7.2 google-cloud-storage && \
 	$(MIGHTY_COLAB) upload -s $(SESSION_2B_PROTOCOL1) $(BONSAI_GCS_CREDENTIALS) $(REMOTE_KEY_PATH) && \
-	rc=0; out=$$($(MIGHTY_COLAB) exec -s $(SESSION_2B_PROTOCOL1) -f run_arm_x86_propagation_stress.py --timeout $(EXEC_TIMEOUT) $(GCS_EXEC_ENV) --env BONSAI_COMMIT="$$commit" --env BONSAI_DRIVER_SHA256="$$driver_sha" --env JAX_ENABLE_X64=1 --env PROTOCOL1_PHASE=x86-encode 2>&1) || rc=$$?; \
-	echo "$$out"; \
-	src=0; $(MIGHTY_COLAB) stop -s $(SESSION_2B_PROTOCOL1) || src=$$?; \
-	if [ $$rc -ne 0 ] || ! echo "$$out" | grep -q PROTOCOL1_X86_ENCODE_OK; then \
-		echo "[make] FAILED: protocol1 x86-encode did not report success (exec rc=$$rc)."; \
-		if [ $$rc -eq 0 ]; then rc=1; fi; \
-	fi; \
+	rc=0; out=$$($(MIGHTY_COLAB_JSON) exec -s $(SESSION_2B_PROTOCOL1) -f run_arm_x86_propagation_stress.py --timeout $(EXEC_TIMEOUT) $(GCS_EXEC_ENV) --env BONSAI_COMMIT="$$commit" --env BONSAI_DRIVER_SHA256="$$driver_sha" --env JAX_ENABLE_X64=1 --env PROTOCOL1_PHASE=x86-encode) || rc=$$?; \
+	$(call show_run_output); \
+	$(call stop_session,$(SESSION_2B_PROTOCOL1)); \
+	$(call check_run_verdict,protocol1 x86-encode did not report success,PROTOCOL1_X86_ENCODE_OK); \
 	$(call check_teardown,$(SESSION_2B_PROTOCOL1)); \
 	exit $$rc
 

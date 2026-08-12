@@ -198,11 +198,13 @@ written). Both were confirmed by breaking what they watch: restoring a
 porcelain gate in stage 2's recipe fails both and names stage 2.
 
 **Supporting — a teardown signal must not fabricate a verdict either.**
-`test_ladder_absent_session_is_not_treated_as_a_leak` (:268) and
-`test_a_distinct_absent_code_can_be_declared_without_rewriting_recipes`
-(:296) both give `stop` a nonzero code that `STOP_ABSENT_RC` declares to
-mean "already absent", and assert exit 0 with no `LEAK WARNING`. "Already
-gone" is the goal; only "could not stop" costs money.
+`test_ladder_absent_session_is_not_treated_as_a_leak` and
+`test_already_stopped_is_a_success_not_a_leak` both give `stop` the
+`already_stopped` reason code and assert exit 0 with no `LEAK WARNING`.
+"Already gone" is the goal; only "could not stop" costs money. Its
+converse, `test_a_stop_that_reports_failure_is_a_leak_even_when_it_exits_zero`,
+covers what a bare exit code could not express at all: a teardown that
+completed its transaction while reporting that it did not succeed.
 
 **Deliberate breakage (demands 1, 3 and 4).** Commit `e6398e09` ("Add the
 Stage 2B ladder stage-1 driver and the targets that run it", 2026-08-05)

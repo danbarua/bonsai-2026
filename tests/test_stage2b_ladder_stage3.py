@@ -417,7 +417,7 @@ def test_target_refuses_a_commit_not_on_a_remote():
 
 def test_target_tears_down_unconditionally_and_checks_the_status():
     body = _recipes()[TARGET]
-    assert "stop -s" in body
+    assert "$(call stop_session," in body
     assert "check_teardown" in body
 
 

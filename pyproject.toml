@@ -62,13 +62,25 @@ dev = [
     "google-crc32c>=1.5.0",
 ]
 gpu = [
-    # >=0.3.0 for `exec-async` and `log --tail`: a long GPU run no longer has
-    # to be held open by a foreground `exec --timeout`, where a failure
-    # anywhere after the work succeeds loses the result with the session.
+    # >=0.4.1 for the `--json` envelope contract every GPU recipe now branches
+    # on: the CLI's exit code answers "did the client complete its
+    # transaction" and the remote job's own outcome moves into the envelope's
+    # `status`, with stable `reason` codes for the session-absent and
+    # teardown-already-done cases. 0.4.1 specifically, not 0.4.0: the earlier
+    # release could still leak its update-check banner onto stdout alongside
+    # the envelope, which corrupts the parse for every recipe here.
+    #
+    # This is a FLOOR WITH TEETH, not a preference. Under 0.3.0 the recipes
+    # would still run and would be WRONG in the expensive direction: no
+    # `--json` flag means no envelope on stdout, so the status check reads a
+    # malformed value and every run fails closed -- and the older exit-code
+    # semantics that the recipes no longer implement are exactly what a
+    # partial upgrade would silently reinstate.
+    #
     # The Makefile calls `uv run --group gpu mighty-colab`, so the floor here
     # is what the targets actually get -- a newer global install does not
     # reach them.
-    "mighty-colab>=0.3.0",
+    "mighty-colab>=0.4.1",
     "google-cloud-storage>=2.19.0",
 ]
 

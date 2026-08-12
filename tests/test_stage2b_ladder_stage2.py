@@ -255,7 +255,7 @@ def test_the_make_target_sets_every_environment_variable_the_driver_reads(driver
 def test_the_make_target_refuses_before_it_provisions():
     body = _recipes()[TARGET]
     first_refusal = min(body.index("REFUSING"), body.rindex("REFUSING"))
-    assert first_refusal < body.index(") new -s"), (
+    assert first_refusal < body.index("$(call ensure_session,"), (
         "a pre-flight refusal appears after session provisioning; it would fire "
         "only once a GPU is already billing")
 
