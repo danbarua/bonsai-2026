@@ -325,10 +325,11 @@ if [ -s "$(1)" ]; then \
 fi
 endef
 
-# $(1) = driver file, $(2) = session, $(3) = --timeout, $(4) = --output-log
+# $(1) = driver file, $(2) = session, $(3) = --timeout, $(4) = --output-log,
+# $(5) = extra flags (e.g. --env KEY=VAL), may be empty
 define submit_async
 $(call archive_previous_run,$(4)); \
-aout=$$($(MIGHTY_COLAB_JSON) exec-async -s $(2) -f $(1) --timeout $(3) --output-log $(4)) || rc=$$?; \
+aout=$$($(MIGHTY_COLAB_JSON) exec-async -s $(2) -f $(1) --timeout $(3) --output-log $(4) $(5)) || rc=$$?; \
 astat=$$(printf '%s' "$$aout" | $(JQ) -r '.status // "malformed"'); \
 apid=$$(printf '%s' "$$aout" | $(JQ) -r '.pid // "?"'); \
 if [ $$rc -ne 0 ] || [ "$$astat" != "started" ]; then \
@@ -1391,4 +1392,58 @@ stage2a-transfer-benchmark:  ## Time chunked `upload` vs GCS download on one fre
 	echo "[bench] (leg 0 local -> GCS is timed by stage2a-stage-transfer-input)"; \
 	$(call stop_session,$(XFER_SESSION)); \
 	$(call check_teardown,$(XFER_SESSION)); \
+	exit $$rc
+
+##@ Gradient-tolerance sweep (mighty-colab, bills while running)
+
+GRADSWEEP_SESSION ?= gradsweep
+GRADSWEEP_GPU ?= A100
+GRADSWEEP_EXEC_TIMEOUT ?= 3600
+GRADSWEEP_POLL ?= 30
+GRADSWEEP_MAX_WAIT ?= 21600
+GRADSWEEP_PHASE ?= sweep
+GRADSWEEP_TOL_GRID ?= 6e-3,1e-3,1e-4,1e-5,1e-6
+GRADSWEEP_ARMS_TOL ?= 1e-5
+# The 242MB upload is the slow step and the data does not change between
+# phases; set to 1 to reuse what is already on a live session.
+GRADSWEEP_SKIP_UPLOAD ?= 0
+GRADSWEEP_LOG ?= $(STAGE2A_DIR)/results/gauge_comparison_2a/gradsweep_$(GRADSWEEP_PHASE).log
+GRADSWEEP_OUT ?= $(STAGE2A_DIR)/results/gauge_comparison_2a/gradsweep_$(GRADSWEEP_PHASE).json
+GRADSWEEP_SENTINEL ?= GRADSWEEP_OK
+
+.PHONY: stage2a-grad-sweep
+stage2a-grad-sweep:  ## Sweep the JAX convergence tolerance on GPU -- bills while running
+	rc=0; src=0; \
+	cd $(STAGE2A_DIR) && \
+	mkdir -p $(dir $(GRADSWEEP_LOG)) && \
+	$(MIGHTY_COLAB) sessions && \
+	$(call ensure_session,$(GRADSWEEP_SESSION),--gpu $(GRADSWEEP_GPU)) && \
+	if [ "$(GRADSWEEP_SKIP_UPLOAD)" = "0" ]; then \
+		$(MIGHTY_COLAB) reinstall -s $(GRADSWEEP_SESSION) jax[cuda12]==0.11.0 diffrax==0.7.2 equinox==0.13.8 optax || exit 1; \
+		for f in evolve_on_graph_jax.py stage2a_core_colab.py stage2a_classifier_jax.py; do \
+			$(MIGHTY_COLAB) upload -s $(GRADSWEEP_SESSION) $$f /content/$$f || exit 1; \
+		done; \
+		for f in stage3_topologies.pkl stage3_labels.npy stage3_ref_idx.npy; do \
+			$(MIGHTY_COLAB) upload -s $(GRADSWEEP_SESSION) scratch/stage3_train/$$f /content/$$f || exit 1; \
+		done; \
+		for i in 00 01 02 03 04 05 06 07 08 09 10 11; do \
+			$(MIGHTY_COLAB) upload -s $(GRADSWEEP_SESSION) scratch/stage3_train/theta0_chunk_$$i.npy /content/theta0_chunk_$$i.npy || exit 1; \
+		done; \
+	else \
+		echo "[make] reusing data already on $(GRADSWEEP_SESSION)"; \
+	fi && \
+	rc=0; \
+	$(call submit_async,sweep_grad_norm_tolerance_gpu.py,$(GRADSWEEP_SESSION),$(GRADSWEEP_EXEC_TIMEOUT),$(GRADSWEEP_LOG),--env PHASE=$(GRADSWEEP_PHASE) --env TOL_GRID=$(GRADSWEEP_TOL_GRID) --env ARMS_TOL=$(GRADSWEEP_ARMS_TOL)); \
+	if [ $$rc -eq 0 ]; then \
+		$(call await_async,$(GRADSWEEP_SESSION),$(GRADSWEEP_MAX_WAIT),$(GRADSWEEP_POLL),$(GRADSWEEP_SENTINEL),$(GRADSWEEP_LOG)); \
+	fi; \
+	if [ $$rc -eq 0 ]; then \
+		$(MIGHTY_COLAB) download -s $(GRADSWEEP_SESSION) /content/grad_sweep_$(GRADSWEEP_PHASE).json $(GRADSWEEP_OUT) || rc=$$?; \
+	fi; \
+	if [ "$(GRADSWEEP_KEEP)" = "1" ]; then \
+		echo "[make] GRADSWEEP_KEEP=1 -- leaving $(GRADSWEEP_SESSION) UP and BILLING"; \
+	else \
+		$(call stop_session,$(GRADSWEEP_SESSION)); \
+		$(call check_teardown,$(GRADSWEEP_SESSION)); \
+	fi; \
 	exit $$rc
