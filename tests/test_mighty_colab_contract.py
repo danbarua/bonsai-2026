@@ -58,7 +58,13 @@ MAX_TRUSTWORTHY_DEFAULT_TIMEOUT_S = 60.0
 # `test_makefile_has_gpu_recipes_to_check` caught, exactly the failure it was
 # written for, before the timeout and teardown checks below could pass
 # vacuously on an empty set.
-_EXEC_CALL = re.compile(r"(?:\$\(MIGHTY_COLAB(?:_JSON)?\)|mighty-colab\)?) exec ")
+# Matches `exec` AND `exec-async`. The trailing-space-after-`exec` version of
+# this pattern silently excluded every async recipe from the contract checks
+# below -- a narrowing that would have passed vacuously the day an async
+# target was added, which is exactly principle 21's failure. Widened here, in
+# the commit that adds the first such target rather than speculatively.
+_EXEC_CALL = re.compile(
+    r"(?:\$\(MIGHTY_COLAB(?:_JSON)?\)|mighty-colab\)?) exec(?:-async)? ")
 
 
 def _exec_recipes():
@@ -100,6 +106,59 @@ def test_every_exec_passes_an_explicit_timeout():
 _REQUIRED_TEMPLATE_CALLS = ("ensure_session", "check_run_verdict",
                             "stop_session", "check_teardown")
 
+# A detached recipe cannot use check_run_verdict: that template reads the
+# envelope a SYNCHRONOUS exec returns in `$$out`, and exec-async returns
+# immediately with no such envelope -- the job's outcome arrives later, in the
+# log. So the session and teardown halves of the contract still apply
+# unchanged, and the verdict half is replaced by an equally strict set: the
+# job's own success sentinel, a detection path for a raised job, and a
+# wall-clock ceiling so a wedged job cannot poll forever against a billing VM.
+#
+# This is a different contract, not a weaker one. Dropping the requirement
+# instead would have let an async recipe declare success on nothing but
+# "exec-async accepted my file", which is the async analogue of trusting an
+# exit code.
+_ASYNC_REQUIRED_TEMPLATE_CALLS = ("ensure_session", "stop_session",
+                                  "check_teardown")
+_ASYNC_REQUIRED_TOKENS = (
+    ("SENTINEL", "a success sentinel grepped from the job's log"),
+    ("Traceback", "a detection path for a remote job that raised"),
+)
+
+# The ceiling is checked by SHAPE, not by token presence. Break-confirmation
+# caught the token version passing vacuously: replacing the bounded loop with
+# `while true` left the string "MAX_WAIT" in the recipe's own failure message,
+# so the check stayed green while the loop became unbounded -- a guard that
+# proved a word existed, not that a loop terminated.
+_BOUNDED_POLL_LOOP = re.compile(r"while\s+\[\s+\$\$\w+\s+-lt\s+\$\(\w*MAX_WAIT\)\s+\]")
+
+
+def _is_async(body):
+    return "exec-async " in body
+
+
+def test_every_async_recipe_carries_the_async_verdict_contract():
+    """exec-async recipes are exempt from check_run_verdict and from nothing
+    else. Derived from the Makefile, so the next detached target is covered
+    on the day it is written."""
+    async_recipes = {n: b for n, b in _exec_recipes().items() if _is_async(b)}
+    print(f"\n[contract] async recipes: {sorted(async_recipes)}")
+    offenders = {}
+    for name, body in async_recipes.items():
+        missing = [c for c in _ASYNC_REQUIRED_TEMPLATE_CALLS
+                   if f"$(call {c}," not in body]
+        missing += [why for tok, why in _ASYNC_REQUIRED_TOKENS if tok not in body]
+        if not _BOUNDED_POLL_LOOP.search(body):
+            missing.append("a poll loop bounded by a wall-clock ceiling "
+                           "(`while [ $$waited -lt $(..._MAX_WAIT) ]`)")
+        print(f"[contract] {name}: {'complete' if not missing else 'MISSING ' + '; '.join(missing)}")
+        if missing:
+            offenders[name] = missing
+    assert not offenders, (
+        "these detached GPU recipes cannot tell success from a wedged or "
+        "crashed job:\n"
+        + "\n".join(f"  {n}: missing {'; '.join(m)}" for n, m in offenders.items()))
+
 
 def test_every_exec_recipe_uses_the_whole_json_contract():
     """Derived, so a GPU target added later is covered on the day it is
@@ -110,7 +169,10 @@ def test_every_exec_recipe_uses_the_whole_json_contract():
     session guard and the teardown but not the verdict check would pass every
     other test here while reading a raised remote job as success."""
     offenders = {}
-    for name, body in _exec_recipes().items():
+    sync = {n: b for n, b in _exec_recipes().items() if not _is_async(b)}
+    assert sync, ("no synchronous exec recipes parsed -- this test has gone "
+                  "vacuous, or every recipe became detached")
+    for name, body in sync.items():
         missing = [c for c in _REQUIRED_TEMPLATE_CALLS
                    if f"$(call {c}," not in body]
         print(f"[contract] {name}: {'complete' if not missing else 'MISSING ' + ','.join(missing)}")

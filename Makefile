@@ -1194,3 +1194,67 @@ vacuous-review-delta:  ## Print review_delta only (no model). Usage: make vacuou
 .PHONY: help
 help:  ## List every target in this file, grouped by section
 	@awk 'BEGIN {FS = ":.*##"} /^##@/ {printf "\n%s\n", substr($$0, 5)} /^[a-zA-Z0-9_-]+:.*##/ {printf "  %-28s %s\n", $$1, $$2}' $(MAKEFILE_LIST)
+
+##@ Stage 2A gauge comparison on GPU (mighty-colab, bills while running)
+
+GAUGE2A_SESSION ?= gauge2a-gpu
+GAUGE2A_GPU ?= A100
+# --timeout bounds the gap between OUTPUTS, not the run. The driver prints a
+# heartbeat from every evolve chunk and every CV fold, so this is the ceiling
+# on one silent stretch, not on the job.
+GAUGE2A_EXEC_TIMEOUT ?= 3600
+GAUGE2A_POLL ?= 60
+# Ceiling on the whole job. The local sklearn equivalent took 5.5h wall; if
+# the GPU path exceeds this the point is already made and the VM comes down.
+GAUGE2A_MAX_WAIT ?= 21600
+GAUGE2A_LOG ?= $(STAGE2A_DIR)/results/gauge_comparison_2a/gpu_run.log
+GAUGE2A_OUT ?= $(STAGE2A_DIR)/results/gauge_comparison_2a/gpu_run.json
+GAUGE2A_SENTINEL ?= GAUGE2A_GPU_OK
+
+.PHONY: stage2a-gauge-comparison-gpu
+stage2a-gauge-comparison-gpu:  ## Run the 10-arm gauge comparison on GPU via exec-async -- bills while running
+	rc=0; src=0; \
+	cd $(STAGE2A_DIR) && \
+	mkdir -p $(dir $(GAUGE2A_LOG)) && \
+	$(MIGHTY_COLAB) sessions && \
+	$(call ensure_session,$(GAUGE2A_SESSION),--gpu $(GAUGE2A_GPU)) && \
+	$(MIGHTY_COLAB) reinstall -s $(GAUGE2A_SESSION) jax[cuda12]==0.11.0 diffrax==0.7.2 equinox==0.13.8 && \
+	for f in evolve_on_graph_jax.py stage2a_core.py stage2a_classifier_jax.py; do \
+		$(MIGHTY_COLAB) upload -s $(GAUGE2A_SESSION) $$f /content/$$f || exit 1; \
+	done && \
+	for f in stage3_topologies.pkl stage3_labels.npy stage3_ref_idx.npy; do \
+		$(MIGHTY_COLAB) upload -s $(GAUGE2A_SESSION) scratch/stage3_train/$$f /content/$$f || exit 1; \
+	done && \
+	for i in 00 01 02 03 04 05 06 07 08 09 10 11; do \
+		$(MIGHTY_COLAB) upload -s $(GAUGE2A_SESSION) scratch/stage3_train/theta0_chunk_$$i.npy /content/theta0_chunk_$$i.npy || exit 1; \
+	done && \
+	rc=0; \
+	$(MIGHTY_COLAB) exec-async -s $(GAUGE2A_SESSION) -f run_gauge_comparison_2a_gpu.py \
+		--timeout $(GAUGE2A_EXEC_TIMEOUT) --output-log $(GAUGE2A_LOG) || rc=$$?; \
+	if [ $$rc -ne 0 ]; then \
+		echo "[make] FAILED: exec-async did not launch (exit $$rc)."; \
+	else \
+		echo "[make] launched; polling every $(GAUGE2A_POLL)s (ceiling $(GAUGE2A_MAX_WAIT)s)"; \
+		off=0; waited=0; done_=0; \
+		while [ $$waited -lt $(GAUGE2A_MAX_WAIT) ]; do \
+			tail=$$($(MIGHTY_COLAB_JSON) log -s $(GAUGE2A_SESSION) --tail --since-offset $$off 2>/dev/null) || true; \
+			txt=$$(printf '%s' "$$tail" | $(JQ) -r '.text // .log // ""' 2>/dev/null); \
+			nxt=$$(printf '%s' "$$tail" | $(JQ) -r '.next_offset // empty' 2>/dev/null); \
+			if [ -n "$$txt" ]; then printf '%s' "$$txt"; fi; \
+			if [ -n "$$nxt" ]; then off=$$nxt; fi; \
+			if [ -f $(GAUGE2A_LOG) ] && grep -q '$(GAUGE2A_SENTINEL)' $(GAUGE2A_LOG) 2>/dev/null; then done_=1; break; fi; \
+			if [ -f $(GAUGE2A_LOG) ] && grep -qE 'Traceback \(most recent call last\)' $(GAUGE2A_LOG) 2>/dev/null; then \
+				echo "[make] remote job raised -- see $(GAUGE2A_LOG)"; rc=1; done_=1; break; \
+			fi; \
+			sleep $(GAUGE2A_POLL); waited=$$((waited + $(GAUGE2A_POLL))); \
+		done; \
+		if [ $$done_ -eq 0 ]; then \
+			echo "[make] FAILED: job did not finish within $(GAUGE2A_MAX_WAIT)s -- tearing down anyway."; rc=1; \
+		fi; \
+	fi; \
+	if [ $$rc -eq 0 ]; then \
+		$(MIGHTY_COLAB) download -s $(GAUGE2A_SESSION) /content/gauge_comparison_2a_gpu.json $(GAUGE2A_OUT) || rc=$$?; \
+	fi; \
+	$(call stop_session,$(GAUGE2A_SESSION)); \
+	$(call check_teardown,$(GAUGE2A_SESSION)); \
+	exit $$rc
