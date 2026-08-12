@@ -287,6 +287,74 @@ else \
 fi
 endef
 
+# Submits a detached job and refuses to proceed unless the CLI says it
+# actually started. `exec-async --json` returns
+# {"status":"started","pid":...,"log_path":...} -- reading that is the
+# difference between "the job is running" and "the CLI declined and I am
+# about to poll an empty log for six hours".
+#
+# $(1) = driver file, $(2) = session, $(3) = --timeout, $(4) = --output-log
+define submit_async
+aout=$$($(MIGHTY_COLAB_JSON) exec-async -s $(2) -f $(1) --timeout $(3) --output-log $(4)) || rc=$$?; \
+astat=$$(printf '%s' "$$aout" | $(JQ) -r '.status // "malformed"'); \
+apid=$$(printf '%s' "$$aout" | $(JQ) -r '.pid // "?"'); \
+if [ $$rc -ne 0 ] || [ "$$astat" != "started" ]; then \
+	echo "[make] FAILED: exec-async did not start $(1) (cli exit $$rc, status=$$astat)"; \
+	printf '%s' "$$aout" | $(JQ) -r '.message // .hint // empty'; \
+	rc=1; \
+else \
+	echo "[make] $(1) started as pid $$apid, log $(4)"; \
+fi
+endef
+
+# Follows a detached job to completion using the CLI's own machine-readable
+# status, not by grepping for hopeful strings.
+#
+# `log --tail --json` IS the completion oracle: it reads the `.json` sidecar
+# when the job has finished (terminal `ok`/`job_raised`/`error` plus
+# exit_code), reports `running` while the pid is alive, and reports
+# `worker_terminated` when the pid is gone with no sidecar. That last case is
+# the one a sentinel grep cannot see at all -- a worker killed by OOM or the
+# backend prints no traceback, so a grep-driven loop polls happily until its
+# ceiling while nothing is running.
+#
+# `--since-offset` makes each poll return only bytes written since the last
+# one, so following a long job costs the log's length once rather than once
+# per poll.
+#
+# The sentinel is still checked, and is still not redundant: `status=ok` means
+# the job did not raise, which cannot distinguish "ran to completion and
+# passed its own gate" from "exited cleanly before reaching it".
+#
+# $(1) = session, $(2) = max wait, $(3) = poll interval, $(4) = sentinel,
+# $(5) = log path
+define await_async
+off=0; waited=0; jstat=running; \
+while [ $$waited -lt $(2) ]; do \
+	tout=$$($(MIGHTY_COLAB_JSON) log -s $(1) --tail --since-offset $$off 2>/dev/null) || true; \
+	jstat=$$(printf '%s' "$$tout" | $(JQ) -r '.status // "malformed"'); \
+	txt=$$(printf '%s' "$$tout" | $(JQ) -r '.text // .log // empty'); \
+	nxt=$$(printf '%s' "$$tout" | $(JQ) -r '.next_offset // empty'); \
+	if [ -n "$$txt" ]; then printf '%s' "$$txt"; fi; \
+	if [ -n "$$nxt" ]; then off=$$nxt; fi; \
+	if [ "$$jstat" != "running" ]; then break; fi; \
+	sleep $(3); waited=$$((waited + $(3))); \
+done; \
+jrc=$$(printf '%s' "$$tout" | $(JQ) -r '.exit_code // "?"'); \
+jrsn=$$(printf '%s' "$$tout" | $(JQ) -r '.reason // empty'); \
+if [ "$$jstat" = "running" ]; then \
+	echo "[make] FAILED: job still running after $(2)s -- tearing down anyway."; rc=1; \
+elif [ "$$jstat" != "ok" ]; then \
+	echo "[make] FAILED: remote job status=$$jstat exit_code=$$jrc reason=$$jrsn"; \
+	tail -40 $(5) 2>/dev/null; rc=1; \
+elif ! grep -q '$(4)' $(5) 2>/dev/null; then \
+	echo "[make] FAILED: job exited cleanly but never printed its sentinel $(4)."; \
+	echo "[make]   That is the signature of a script truncated before its verdict."; rc=1; \
+else \
+	echo "[make] job completed: status=$$jstat sentinel $(4) present"; \
+fi
+endef
+
 .PHONY: stage2a-help
 stage2a-help:  ## List every stage2a-* target, grouped by pipeline stage
 	@awk 'BEGIN {FS = ":.*##"} /^##@/ {printf "\n%s\n", substr($$0, 5)} /^stage2a-[a-zA-Z0-9_-]+:.*##/ {printf "  %-28s %s\n", $$1, $$2}' $(MAKEFILE_LIST)
@@ -1199,13 +1267,12 @@ help:  ## List every target in this file, grouped by section
 
 GAUGE2A_SESSION ?= gauge2a-gpu
 GAUGE2A_GPU ?= A100
-# --timeout bounds the gap between OUTPUTS, not the run. The driver prints a
-# heartbeat from every evolve chunk and every CV fold, so this is the ceiling
-# on one silent stretch, not on the job.
+# --timeout bounds the gap between OUTPUTS, not the run, and is forwarded
+# unchanged to the detached child. The driver heartbeats every evolve chunk
+# and every CV fold, so this is the ceiling on one silent stretch.
 GAUGE2A_EXEC_TIMEOUT ?= 3600
-GAUGE2A_POLL ?= 60
-# Ceiling on the whole job. The local sklearn equivalent took 5.5h wall; if
-# the GPU path exceeds this the point is already made and the VM comes down.
+GAUGE2A_POLL ?= 30
+# Ceiling on the whole job. The local sklearn equivalent took 5.5h wall.
 GAUGE2A_MAX_WAIT ?= 21600
 GAUGE2A_LOG ?= $(STAGE2A_DIR)/results/gauge_comparison_2a/gpu_run.log
 GAUGE2A_OUT ?= $(STAGE2A_DIR)/results/gauge_comparison_2a/gpu_run.json
@@ -1229,28 +1296,9 @@ stage2a-gauge-comparison-gpu:  ## Run the 10-arm gauge comparison on GPU via exe
 		$(MIGHTY_COLAB) upload -s $(GAUGE2A_SESSION) scratch/stage3_train/theta0_chunk_$$i.npy /content/theta0_chunk_$$i.npy || exit 1; \
 	done && \
 	rc=0; \
-	$(MIGHTY_COLAB) exec-async -s $(GAUGE2A_SESSION) -f run_gauge_comparison_2a_gpu.py \
-		--timeout $(GAUGE2A_EXEC_TIMEOUT) --output-log $(GAUGE2A_LOG) || rc=$$?; \
-	if [ $$rc -ne 0 ]; then \
-		echo "[make] FAILED: exec-async did not launch (exit $$rc)."; \
-	else \
-		echo "[make] launched; polling every $(GAUGE2A_POLL)s (ceiling $(GAUGE2A_MAX_WAIT)s)"; \
-		off=0; waited=0; done_=0; \
-		while [ $$waited -lt $(GAUGE2A_MAX_WAIT) ]; do \
-			tail=$$($(MIGHTY_COLAB_JSON) log -s $(GAUGE2A_SESSION) --tail --since-offset $$off 2>/dev/null) || true; \
-			txt=$$(printf '%s' "$$tail" | $(JQ) -r '.text // .log // ""' 2>/dev/null); \
-			nxt=$$(printf '%s' "$$tail" | $(JQ) -r '.next_offset // empty' 2>/dev/null); \
-			if [ -n "$$txt" ]; then printf '%s' "$$txt"; fi; \
-			if [ -n "$$nxt" ]; then off=$$nxt; fi; \
-			if [ -f $(GAUGE2A_LOG) ] && grep -q '$(GAUGE2A_SENTINEL)' $(GAUGE2A_LOG) 2>/dev/null; then done_=1; break; fi; \
-			if [ -f $(GAUGE2A_LOG) ] && grep -qE 'Traceback \(most recent call last\)' $(GAUGE2A_LOG) 2>/dev/null; then \
-				echo "[make] remote job raised -- see $(GAUGE2A_LOG)"; rc=1; done_=1; break; \
-			fi; \
-			sleep $(GAUGE2A_POLL); waited=$$((waited + $(GAUGE2A_POLL))); \
-		done; \
-		if [ $$done_ -eq 0 ]; then \
-			echo "[make] FAILED: job did not finish within $(GAUGE2A_MAX_WAIT)s -- tearing down anyway."; rc=1; \
-		fi; \
+	$(call submit_async,run_gauge_comparison_2a_gpu.py,$(GAUGE2A_SESSION),$(GAUGE2A_EXEC_TIMEOUT),$(GAUGE2A_LOG)); \
+	if [ $$rc -eq 0 ]; then \
+		$(call await_async,$(GAUGE2A_SESSION),$(GAUGE2A_MAX_WAIT),$(GAUGE2A_POLL),$(GAUGE2A_SENTINEL),$(GAUGE2A_LOG)); \
 	fi; \
 	if [ $$rc -eq 0 ]; then \
 		$(MIGHTY_COLAB) download -s $(GAUGE2A_SESSION) /content/gauge_comparison_2a_gpu.json $(GAUGE2A_OUT) || rc=$$?; \

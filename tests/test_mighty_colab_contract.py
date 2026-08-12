@@ -66,10 +66,16 @@ MAX_TRUSTWORTHY_DEFAULT_TIMEOUT_S = 60.0
 _EXEC_CALL = re.compile(
     r"(?:\$\(MIGHTY_COLAB(?:_JSON)?\)|mighty-colab\)?) exec(?:-async)? ")
 
+# A detached recipe reaches the CLI through the submit_async template rather
+# than naming `exec-async` itself, so matching only the literal missed it
+# entirely -- caught by this file's own anti-vacuity assert, which reported
+# zero async recipes the moment the call moved into a template.
+_ASYNC_CALL = re.compile(r"\$\(call submit_async,")
+
 
 def _exec_recipes():
     return {name: body for name, body in _recipes().items()
-            if _EXEC_CALL.search(body)}
+            if _EXEC_CALL.search(body) or _ASYNC_CALL.search(body)}
 
 
 def test_makefile_has_gpu_recipes_to_check():
@@ -86,6 +92,8 @@ def test_every_exec_passes_an_explicit_timeout():
     """The 30-second default is far below what any driver here needs."""
     offenders = []
     for name, body in _exec_recipes().items():
+        if _is_async(body):
+            continue   # covered by test_the_async_submit_template_passes_a_timeout
         for line in body.splitlines():
             if ") exec " not in line:
                 continue
@@ -108,55 +116,97 @@ _REQUIRED_TEMPLATE_CALLS = ("ensure_session", "check_run_verdict",
 
 # A detached recipe cannot use check_run_verdict: that template reads the
 # envelope a SYNCHRONOUS exec returns in `$$out`, and exec-async returns
-# immediately with no such envelope -- the job's outcome arrives later, in the
-# log. So the session and teardown halves of the contract still apply
-# unchanged, and the verdict half is replaced by an equally strict set: the
-# job's own success sentinel, a detection path for a raised job, and a
-# wall-clock ceiling so a wedged job cannot poll forever against a billing VM.
-#
-# This is a different contract, not a weaker one. Dropping the requirement
-# instead would have let an async recipe declare success on nothing but
-# "exec-async accepted my file", which is the async analogue of trusting an
-# exit code.
-_ASYNC_REQUIRED_TEMPLATE_CALLS = ("ensure_session", "stop_session",
+# immediately with {"status":"started","pid":...}. The job's outcome arrives
+# later, so the verdict half of the contract is replaced -- not dropped -- by
+# submit_async (refuses to proceed unless the CLI says it started) and
+# await_async (follows to a terminal envelope status).
+_ASYNC_REQUIRED_TEMPLATE_CALLS = ("ensure_session", "submit_async",
+                                  "await_async", "stop_session",
                                   "check_teardown")
-_ASYNC_REQUIRED_TOKENS = (
-    ("SENTINEL", "a success sentinel grepped from the job's log"),
-    ("Traceback", "a detection path for a remote job that raised"),
-)
 
-# The ceiling is checked by SHAPE, not by token presence. Break-confirmation
-# caught the token version passing vacuously: replacing the bounded loop with
-# `while true` left the string "MAX_WAIT" in the recipe's own failure message,
-# so the check stayed green while the loop became unbounded -- a guard that
-# proved a word existed, not that a loop terminated.
-_BOUNDED_POLL_LOOP = re.compile(r"while\s+\[\s+\$\$\w+\s+-lt\s+\$\(\w*MAX_WAIT\)\s+\]")
+# What await_async itself must do. The CLI publishes a machine-readable
+# completion oracle -- `log --tail --json` returns the sidecar's terminal
+# status when the job is done, `running` while its pid lives, and
+# `worker_terminated` when the pid is gone with no sidecar -- so the template
+# must READ it. Grepping the log for a sentinel is not a substitute: a worker
+# killed by OOM or by the backend prints no traceback, so a grep-driven loop
+# sees nothing and polls until its ceiling while nothing is running.
+_AWAIT_REQUIREMENTS = (
+    (re.compile(r"log -s \$\(1\) --tail"), "polls `log --tail`"),
+    (re.compile(r"jstat=.*\.status"), "reads the envelope's status"),
+    (re.compile(r'if \[ "\$\$jstat" != "running" \]; then break'),
+     "stops on any terminal status, not just success"),
+    (re.compile(r'\[ "\$\$jstat" != "ok" \]'), "fails on a non-ok terminal status"),
+    (re.compile(r"--since-offset"), "polls incrementally by byte offset"),
+    (re.compile(r"grep -q '\$\(4\)'"), "still checks the driver's own sentinel"),
+    (re.compile(r"while \[ \$\$waited -lt \$\(2\) \]"), "bounds its poll loop"),
+)
 
 
 def _is_async(body):
-    return "exec-async " in body
+    return bool(_ASYNC_CALL.search(body)) or "exec-async " in body
+
+
+def _template(name):
+    """The body of a `define <name> ... endef` block in the Makefile."""
+    text = (REPO_ROOT / "Makefile").read_text()
+    m = re.search(rf"^define {re.escape(name)}$(.*?)^endef$", text,
+                  re.M | re.S)
+    assert m, f"no `define {name}` block in the Makefile"
+    return m.group(1)
+
+
+def test_the_async_await_template_reads_the_cli_completion_oracle():
+    """await_async must derive completion from the CLI's own envelope.
+
+    Checked against the template body rather than the recipe, because that is
+    where the logic lives -- and by SHAPE rather than by token presence, after
+    break-confirmation caught a token check passing vacuously (the word
+    MAX_WAIT survived in a failure message when the loop became unbounded)."""
+    body = _template("await_async")
+    missing = [why for pat, why in _AWAIT_REQUIREMENTS if not pat.search(body)]
+    print(f"\n[contract] await_async: {'complete' if not missing else 'MISSING ' + '; '.join(missing)}")
+    assert not missing, ("await_async cannot reliably tell a finished job from "
+                         "a dead one:\n  " + "\n  ".join(missing))
+
+
+def test_the_async_submit_template_passes_a_timeout():
+    """The 30s default bites hardest on exec-async -- it is exactly the
+    command used for long, quiet jobs, and the value is forwarded unchanged
+    to the detached child."""
+    body = _template("submit_async")
+    assert "--timeout $(3)" in body, (
+        "submit_async does not forward a timeout, so every detached job "
+        "inherits the 30-second default it was least suited to")
+
+
+def test_the_async_submit_template_refuses_a_job_that_did_not_start():
+    body = _template("submit_async")
+    assert 'astat=' in body and '.status' in body, (
+        "submit_async ignores exec-async's envelope, so a refused submission "
+        "would be followed by polling an empty log until the ceiling")
+    assert '"$$astat" != "started"' in body, (
+        "submit_async does not require status=started")
 
 
 def test_every_async_recipe_carries_the_async_verdict_contract():
-    """exec-async recipes are exempt from check_run_verdict and from nothing
-    else. Derived from the Makefile, so the next detached target is covered
-    on the day it is written."""
+    """exec-async recipes are exempt from check_run_verdict and nothing else.
+    Derived from the Makefile, so the next detached target is covered on the
+    day it is written."""
     async_recipes = {n: b for n, b in _exec_recipes().items() if _is_async(b)}
     print(f"\n[contract] async recipes: {sorted(async_recipes)}")
+    assert async_recipes, ("no async recipes parsed -- if the Makefile still "
+                           "has one, _EXEC_CALL has gone stale and this test "
+                           "is vacuous")
     offenders = {}
     for name, body in async_recipes.items():
         missing = [c for c in _ASYNC_REQUIRED_TEMPLATE_CALLS
                    if f"$(call {c}," not in body]
-        missing += [why for tok, why in _ASYNC_REQUIRED_TOKENS if tok not in body]
-        if not _BOUNDED_POLL_LOOP.search(body):
-            missing.append("a poll loop bounded by a wall-clock ceiling "
-                           "(`while [ $$waited -lt $(..._MAX_WAIT) ]`)")
         print(f"[contract] {name}: {'complete' if not missing else 'MISSING ' + '; '.join(missing)}")
         if missing:
             offenders[name] = missing
     assert not offenders, (
-        "these detached GPU recipes cannot tell success from a wedged or "
-        "crashed job:\n"
+        "these detached GPU recipes are only partly on the async contract:\n"
         + "\n".join(f"  {n}: missing {'; '.join(m)}" for n, m in offenders.items()))
 
 
