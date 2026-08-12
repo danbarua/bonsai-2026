@@ -21,14 +21,26 @@ log and `.json` sidecar per run, timestamped by the log's own mtime.
 
 Measured from one machine, minutes apart, on identical bytes:
 
-| path | bytes | time | rate | how measured |
+| leg | path | bytes | time | rate |
 |---|---|---|---|---|
-| `mighty-colab upload`, 12 x 20MB chunks | 242.4 MB | **205s** | **1.18 MB/s** | wall clock around the loop |
-| local -> GCS (`google-cloud-storage`) | 250.6 MB | 123.2s | **2.03 MB/s** | wall clock around the call |
+| 0 | local -> GCS | 250.6 MB | 123.2s | 2.03 MB/s |
+| 1 | local -> VM, `upload` x12 chunks | 242.4 MB | **205s** | **1.18 MB/s** |
+| 2 | **GCS -> VM** | 250.6 MB | **4.1s** | **61.5 MB/s** |
 
-**`upload` runs about 1.7x slower than the same box reaches GCS** on identical
-bytes, minutes apart. That is a real gap but a modest one, and it is close
-enough to the uplink that the endpoint is not obviously the bottleneck.
+**`upload` runs about 1.7x slower than the same box reaches GCS** -- a real
+gap but a modest one, and both are near this uplink's ceiling. The story is
+not that `upload` is slow.
+
+**The story is leg 2: in-cloud transfer is 52x faster than anything from the
+caller's building.** Which makes the cost model arithmetic:
+
+    direct:    205s x N sessions
+    via GCS:   123s once, then 4.1s x N
+
+GCS wins at N=1 (127s vs 205s) and the gap widens with every session. Four
+launches of one job today cost ~14 minutes of uploading; staged once it is
+2.3 minutes. Leg 2 was verified on arrival, not merely timed: exact byte
+count, and the payload unpickles to the expected array shape.
 
 **A correction, recorded because the first version of this document got it
 wrong.** An earlier draft claimed 0.18-0.28 MB/s and a 7-10x gap. Those
@@ -293,17 +305,18 @@ will make, so they may be worth designing against:
 
 ## 4. Requests, ordered by measured cost
 
-1. **Upload ergonomics more than raw throughput.** At 1.18 MB/s vs 2.03 MB/s
-   to GCS the gap is ~1.7x, not the order of magnitude we first thought. The
-   sharper cost is that the same bytes are re-uploaded per session with no
-   caching, and that a 250MB file must be hand-split into twelve pieces. A
-   bulk/multi-file upload, or content-addressed reuse across sessions, would
-   beat a throughput fix.
-2. **A GCS (or any object-store) fetch path.** The natural shape for a
-   repeated job: stage the input once, have each VM pull it in-cloud. We are
-   doing this by hand with `google-cloud-storage` inside the driver plus
-   `--env` credentials. `mighty-colab upload --from-gcs gs://...` (or a
-   documented VM-side helper) would remove the slowest step entirely.
+1. **Let the VM fetch from object storage instead of from the caller.**
+   This is the whole ballgame, and it is measured: 205s from here versus 4.1s
+   from GCS for the same bytes, a 52x difference that no amount of tuning the
+   caller-side path can close. `mighty-colab upload --from-gcs gs://...`, or
+   a documented VM-side helper, removes the slowest step in every
+   repeated-job workflow. We are doing it by hand today with
+   `google-cloud-storage` in the driver.
+2. **Cross-session reuse of identical bytes.** Even without object storage,
+   the same 242MB is re-uploaded per session with no caching. Content-
+   addressed reuse would pay for itself on the second launch. Raw throughput
+   is NOT the ask -- at 1.18 vs 2.03 MB/s the endpoint is close enough to
+   the uplink that tuning it buys little.
 3. **Don't clobber a previous run's log/sidecar.** Either timestamp by
    default, or refuse to overwrite a non-empty `--output-log` without a
    `--force`. The sidecar especially: it is the durable failure record and it

@@ -1351,6 +1351,9 @@ stage2a-gauge-comparison-gpu:  ## Run the 10-arm gauge comparison on GPU via exe
 XFER_SESSION ?= xfer-bench
 XFER_GPU ?= A100
 XFER_EXEC_TIMEOUT ?= 1800
+# Set to a previously measured leg-1 time to skip re-uploading 242MB just
+# to re-measure a number already in hand. 0 = measure it.
+XFER_SKIP_LEG1 ?= 0
 XFER_OBJECT ?= benchmark/transfer/stage3-gpu-upload-nimble-otter-2f7c.pkl
 
 .PHONY: stage2a-stage-transfer-input
@@ -1364,13 +1367,18 @@ stage2a-transfer-benchmark:  ## Time chunked `upload` vs GCS download on one fre
 	$(MIGHTY_COLAB) sessions && \
 	$(call ensure_session,$(XFER_SESSION),--gpu $(XFER_GPU)) && \
 	$(MIGHTY_COLAB) install -s $(XFER_SESSION) google-cloud-storage && \
-	echo "[bench] leg 1: twelve 20MB chunks through mighty-colab upload" && \
-	t0=$$(date +%s); \
-	for i in 00 01 02 03 04 05 06 07 08 09 10 11; do \
-		$(MIGHTY_COLAB) upload -s $(XFER_SESSION) scratch/stage3_train/theta0_chunk_$$i.npy /content/bench_chunk_$$i.npy || exit 1; \
-	done; \
-	t1=$$(date +%s); cli_s=$$((t1 - t0)); \
-	echo "[bench] CLI chunked upload: $${cli_s}s for 242.4 MB"; \
+	cli_s=$(XFER_SKIP_LEG1); \
+	if [ "$$cli_s" = "0" ]; then \
+		echo "[bench] leg 1: twelve 20MB chunks through mighty-colab upload"; \
+		t0=$$(date +%s); \
+		for i in 00 01 02 03 04 05 06 07 08 09 10 11; do \
+			$(MIGHTY_COLAB) upload -s $(XFER_SESSION) scratch/stage3_train/theta0_chunk_$$i.npy /content/bench_chunk_$$i.npy || exit 1; \
+		done; \
+		t1=$$(date +%s); cli_s=$$((t1 - t0)); \
+		echo "[bench] CLI chunked upload: $${cli_s}s for 242.4 MB"; \
+	else \
+		echo "[bench] leg 1 skipped; using previously measured $${cli_s}s for 242.4 MB"; \
+	fi; \
 	$(MIGHTY_COLAB) upload -s $(XFER_SESSION) bench_transfer_gcs_download.py /content/bench_transfer_gcs_download.py && \
 	rc=0; \
 	out=$$($(MIGHTY_COLAB_JSON) exec -s $(XFER_SESSION) -f bench_transfer_gcs_download.py --timeout $(XFER_EXEC_TIMEOUT) $(GCS_EXEC_ENV) --env BENCH_OBJECT="$(XFER_OBJECT)") || rc=$$?; \
