@@ -291,3 +291,9 @@ terraform.rc
 # oh-my-openagent
 /.omo/**
 /.opencode/**
+# Plot artifacts and fetch caches under results/ are regenerable.
+# Swept into a commit by a careless `git add -A` on 2026-08-12; the blobs
+# stay in history, but nothing tracks them going forward.
+experiments/stage2b_denoising/results/*.gif
+experiments/stage2b_denoising/results/*.png
+experiments/stage2b_denoising/results/_gauge_cache/
