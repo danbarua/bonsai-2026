@@ -81,12 +81,6 @@ mighty-colab --json log -s <session> --tail
 | `job_raised` | finished, raised — with `exit_code` and `reason` |
 | `error` + `worker_terminated` | pid gone, no sidecar: killed, not crashed |
 
-**Read `message` and `hint`, not just `reason`.** The envelope carries all
-three. `reason` is a code (`job_raised`, `no_job_found`,
-`accelerator_rejected`); `hint` is where the CLI tells you what to do about
-it. Printing the code alone discards the remediation and sends you off to
-rediscover it.
-
 That last row is the one grep cannot see. **An OOM kill or a backend
 teardown prints no traceback**, so a loop that decides completion by
 searching the log for a sentinel or `Traceback` waits until its timeout while
@@ -95,6 +89,12 @@ check that a clean exit actually reached its verdict.
 
 Poll incrementally with `--since-offset <next_offset>` so following a long
 job costs the log's length once, not once per poll.
+
+**Read `message` and `hint`, not just `reason`.** The envelope carries all
+three. `reason` is a code (`job_raised`, `no_job_found`,
+`accelerator_rejected`); `hint` is where the CLI tells you what to do about
+it. Printing the code alone discards the remediation and sends you off to
+rediscover it.
 
 ## 5. Check the log is THIS run's — then archive it, never delete it
 
