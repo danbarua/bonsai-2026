@@ -1,0 +1,83 @@
+{
+ "note": "phase 2 partial: 4 of 10 arms at GRAD_NORM_REL=1e-3 (deep). The run died on an output-gap timeout during evolved_lattice__reference; retries were blocked by Colab 503 on the A100 assign endpoint. Values recovered from the job log, which is archived alongside.",
+ "grad_norm_rel": 0.001,
+ "arms": {
+  "encoded_pre_evolution__reference": {
+   "selected_C": 0.01,
+   "acc": 0.836017,
+   "seconds": 323.0
+  },
+  "encoded_pre_evolution__circular_mean": {
+   "selected_C": 0.01,
+   "acc": 0.857833,
+   "seconds": 204.0
+  },
+  "evolved_T__reference": {
+   "selected_C": 100.0,
+   "acc": 0.906667,
+   "seconds": 1152.0
+  },
+  "evolved_T__circular_mean": {
+   "selected_C": 100.0,
+   "acc": 0.91295,
+   "seconds": 1016.0
+  }
+ },
+ "phase1_sweep": [
+  {
+   "grad_norm_rel": 0.006,
+   "acc": 0.8699166666666667,
+   "n_iter": 1758,
+   "grad_norm": 280809.881491331,
+   "grad_tol": 288000.0,
+   "converged": true,
+   "seconds": 10.208504967999943,
+   "delta_vs_sklearn": -0.012333333333333307,
+   "hit_max_iter": false
+  },
+  {
+   "grad_norm_rel": 0.001,
+   "acc": 0.8873333333333333,
+   "n_iter": 10000,
+   "grad_norm": 92389.05078449177,
+   "grad_tol": 48000.0,
+   "converged": false,
+   "seconds": 33.552477859999954,
+   "delta_vs_sklearn": 0.005083333333333329,
+   "hit_max_iter": true
+  },
+  {
+   "grad_norm_rel": 0.0001,
+   "acc": 0.8873333333333333,
+   "n_iter": 10000,
+   "grad_norm": 92389.05078449177,
+   "grad_tol": 4800.0,
+   "converged": false,
+   "seconds": 33.52900884100018,
+   "delta_vs_sklearn": 0.005083333333333329,
+   "hit_max_iter": true
+  },
+  {
+   "grad_norm_rel": 1e-05,
+   "acc": 0.8873333333333333,
+   "n_iter": 10000,
+   "grad_norm": 92389.05078449177,
+   "grad_tol": 480.0,
+   "converged": false,
+   "seconds": 33.54029648300002,
+   "delta_vs_sklearn": 0.005083333333333329,
+   "hit_max_iter": true
+  },
+  {
+   "grad_norm_rel": 1e-06,
+   "acc": 0.8873333333333333,
+   "n_iter": 10000,
+   "grad_norm": 92389.05078449177,
+   "grad_tol": 48.0,
+   "converged": false,
+   "seconds": 33.530211065,
+   "delta_vs_sklearn": 0.005083333333333329,
+   "hit_max_iter": true
+  }
+ ]
+}

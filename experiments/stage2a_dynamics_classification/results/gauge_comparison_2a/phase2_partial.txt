@@ -1,0 +1,4 @@
+[encoded_pre_evolution__reference] selected_C=0.01 acc=0.836017 in 323s
+[encoded_pre_evolution__circular_mean] selected_C=0.01 acc=0.857833 in 204s
+[evolved_T__reference] selected_C=100.0 acc=0.906667 in 1152s  NOTE: fold=4 C=10000.0 did not reach 4.800e+05 in 10000 iterations (grad=1.792e+06)
+[evolved_T__circular_mean] selected_C=100.0 acc=0.912950 in 1016s  NOTE: fold=2 C=10000.0 did not reach 4.800e+05 in 10000 iterations (grad=8.601e+05)

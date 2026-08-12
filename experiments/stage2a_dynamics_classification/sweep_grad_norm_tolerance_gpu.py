@@ -54,6 +54,13 @@ PHASE = os.environ.get("PHASE", "sweep")
 TOL_GRID = [float(x) for x in os.environ.get(
     "TOL_GRID", "6e-3,1e-3,1e-4,1e-5,1e-6").split(",")]
 ARMS_TOL = float(os.environ.get("ARMS_TOL", "1e-5"))
+# Which arms this session runs. Empty = all ten. Arms are independent, so
+# splitting them across sessions is pure wall-clock win at identical cost.
+ARMS_SUBSET = [a for a in os.environ.get("ARMS", "").split(",") if a]
+# When set, pull the 250MB input from GCS (4.1s in-cloud) instead of
+# reassembling twelve uploaded chunks (205s from the caller).
+GCS_OBJECT = os.environ.get("BENCH_OBJECT", "")
+GCS_BUCKET = os.environ.get("BONSAI_GCS_BUCKET", "")
 
 TOPOLOGY_NAMES = ["T", "lattice", "rewired", "curr_random"]
 GAUGED_CONDITIONS = ["encoded_pre_evolution", "evolved_T", "evolved_lattice",
@@ -71,11 +78,24 @@ print("JAX backend:", jax.default_backend(), "| x64:", jax.config.jax_enable_x64
 print(f"PHASE={PHASE}", flush=True)
 
 # -------------------------------------------------------------------- inputs
-with open('/content/stage3_topologies.pkl', 'rb') as f:
-    topologies = pickle.load(f)
-theta0 = np.concatenate(
-    [np.load(f'/content/theta0_chunk_{i:02d}.npy') for i in range(N_UPLOAD_CHUNKS)],
-    axis=0)
+if GCS_OBJECT:
+    from google.cloud import storage
+    t0 = time.perf_counter()
+    blob = storage.Client.create_anonymous_client().bucket(GCS_BUCKET).blob(GCS_OBJECT)
+    blob.download_to_filename('/content/stage3_gpu_upload.pkl')
+    n_bytes = os.path.getsize('/content/stage3_gpu_upload.pkl')
+    with open('/content/stage3_gpu_upload.pkl', 'rb') as f:
+        payload = pickle.load(f)
+    theta0 = np.asarray(payload["theta0_batch"])
+    topologies = payload["topologies"]
+    print(f"pulled {n_bytes:,} bytes from GCS in "
+          f"{time.perf_counter() - t0:.1f}s", flush=True)
+else:
+    with open('/content/stage3_topologies.pkl', 'rb') as f:
+        topologies = pickle.load(f)
+    theta0 = np.concatenate(
+        [np.load(f'/content/theta0_chunk_{i:02d}.npy') for i in range(N_UPLOAD_CHUNKS)],
+        axis=0)
 labels = np.load('/content/stage3_labels.npy')
 ref_idx = int(np.load('/content/stage3_ref_idx.npy'))
 n_images = theta0.shape[0]
@@ -87,7 +107,12 @@ warm, _ = batched_evolve_on_graph_jax(jnp.asarray(theta0[:2]),
 jax.block_until_ready(warm)
 print("warm-up compile done", flush=True)
 
-needed = TOPOLOGY_NAMES if PHASE == "arms" else [SWEEP_TOPOLOGY]
+if PHASE == "arms":
+    wanted = ARMS_SUBSET or [f"{c}__{g}" for c in GAUGED_CONDITIONS for g in GAUGES]
+    needed = sorted({k.split("__")[0][len("evolved_"):] for k in wanted
+                     if k.startswith("evolved_")})
+else:
+    needed = [SWEEP_TOPOLOGY]
 theta_T, success = {}, {}
 for name in needed:
     W = jnp.asarray(topologies[name])
@@ -172,6 +197,8 @@ else:
     for cond in GAUGED_CONDITIONS:
         for gauge in GAUGES:
             key = f"{cond}__{gauge}"
+            if ARMS_SUBSET and key not in ARMS_SUBSET:
+                continue
             if cond == "encoded_pre_evolution":
                 X, y = gauge_features(theta0, gauge), labels
             else:
@@ -228,7 +255,7 @@ else:
     out["grad_norm_rel"] = ARMS_TOL
     out["arms"] = arms
 
-dest = f"/content/grad_sweep_{PHASE}.json"
+dest = f"/content/grad_sweep_{PHASE}{os.environ.get('OUT_SUFFIX', '')}.json"
 with open(dest, "w") as fh:
     json.dump(out, fh, indent=1)
 print(f"\nwrote {dest}", flush=True)
