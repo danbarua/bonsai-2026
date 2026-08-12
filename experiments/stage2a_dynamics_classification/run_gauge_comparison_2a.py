@@ -307,6 +307,34 @@ def run_arm(condition, gauge):
 # Combine, and the registered rule
 # --------------------------------------------------------------------------
 
+def classify(acc, conditions=GAUGED_CONDITIONS, theta=THETA):
+    """The registered rule, as a pure function so it can be tested directly.
+
+    `acc` maps gauge -> condition -> accuracy. Returns
+    (class, why, direction, ranking, M_g, max_abs_M). Precedence is
+    C (ranking changed) > B (preserved, margins material) > A.
+    """
+    M = {c: acc["circular_mean"][c] - acc["reference"][c] for c in conditions}
+    rank = {g: sorted(conditions, key=lambda c: -round(acc[g][c], TIE_DECIMALS))
+            for g in GAUGES}
+    max_M = max(abs(v) for v in M.values())
+
+    if rank["reference"] != rank["circular_mean"]:
+        cls, why = "C", "ranking changed -- at least one pairwise inversion"
+    elif max_M >= theta:
+        cls, why = "B", f"ranking preserved, max|M_g|={max_M:.6f} >= theta={theta}"
+    else:
+        cls, why = "A", f"ranking preserved, max|M_g|={max_M:.6f} < theta={theta}"
+
+    signs = {np.sign(round(v, TIE_DECIMALS)) for v in M.values()} - {0.0}
+    if len(signs) == 1:
+        direction = ("uniform direction favouring "
+                     + ("circular_mean" if signs == {1.0} else "reference"))
+    else:
+        direction = "mixed direction"
+    return cls, why, direction, rank, M, max_M
+
+
 def _load_arms():
     arms = {}
     for cond in GAUGED_CONDITIONS:
@@ -355,7 +383,7 @@ def run_combine():
     print("=" * 72)
     acc = {g: {c: arms[(c, g)]["accuracy_at_selected_C"] for c in GAUGED_CONDITIONS}
            for g in GAUGES}
-    M = {c: acc["circular_mean"][c] - acc["reference"][c] for c in GAUGED_CONDITIONS}
+    cls, why, direction, rank, M, max_M = classify(acc)
 
     print(f"  {'condition':<24} {'ref':>10} {'circ':>10} {'M_g':>11}  C_ref/C_cm")
     for c in GAUGED_CONDITIONS:
@@ -364,24 +392,8 @@ def run_combine():
               f"{arms[(c,'reference')]['selected_C']:g}/"
               f"{arms[(c,'circular_mean')]['selected_C']:g}")
 
-    rank = {g: sorted(GAUGED_CONDITIONS, key=lambda c: -round(acc[g][c], TIE_DECIMALS))
-            for g in GAUGES}
     print(f"\n  ranking under reference    : {' > '.join(rank['reference'])}")
     print(f"  ranking under circular_mean: {' > '.join(rank['circular_mean'])}")
-
-    inverted = rank["reference"] != rank["circular_mean"]
-    max_M = max(abs(v) for v in M.values())
-    if inverted:
-        cls, why = "C", "ranking changed -- at least one pairwise inversion"
-    elif max_M >= THETA:
-        cls, why = "B", f"ranking preserved, max|M_g|={max_M:.6f} >= theta={THETA}"
-    else:
-        cls, why = "A", f"ranking preserved, max|M_g|={max_M:.6f} < theta={THETA}"
-
-    signs = {np.sign(round(v, TIE_DECIMALS)) for v in M.values()} - {0.0}
-    direction = ("uniform direction favouring "
-                 + ("circular_mean" if signs == {1.0} else "reference")
-                 if len(signs) == 1 else "mixed direction")
 
     print(f"\n  CLASS {cls}: {why}")
     print(f"  direction flag: {direction}")
