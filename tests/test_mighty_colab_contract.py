@@ -180,6 +180,17 @@ def test_the_async_submit_template_passes_a_timeout():
         "inherits the 30-second default it was least suited to")
 
 
+def test_the_async_submit_template_truncates_a_stale_log():
+    """--output-log is a fixed path, and await_async proves success partly by
+    grepping that file for the driver's sentinel. Without truncation, a log
+    left by an earlier successful run satisfies the grep whatever this run
+    does -- the sentinel check silently becomes "it worked once"."""
+    body = _template("submit_async")
+    assert ": > $(4);" in body, (
+        "submit_async does not truncate the output log before submitting, so "
+        "a previous run's sentinel can be mistaken for this run's")
+
+
 def test_the_async_submit_template_refuses_a_job_that_did_not_start():
     body = _template("submit_async")
     assert 'astat=' in body and '.status' in body, (

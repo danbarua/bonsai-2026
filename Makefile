@@ -293,8 +293,17 @@ endef
 # difference between "the job is running" and "the CLI declined and I am
 # about to poll an empty log for six hours".
 #
+# The log is TRUNCATED before submitting. --output-log points at a fixed
+# path, so a previous run's content is still there -- and await_async proves
+# success partly by grepping that file for the driver's sentinel. A stale log
+# from an earlier SUCCESSFUL run would satisfy that grep even if this run
+# wrote nothing at all, turning the sentinel check into a check that the job
+# once worked. Found when a relaunch's monitor replayed a 7-minute-old
+# traceback as if it were live.
+#
 # $(1) = driver file, $(2) = session, $(3) = --timeout, $(4) = --output-log
 define submit_async
+: > $(4); \
 aout=$$($(MIGHTY_COLAB_JSON) exec-async -s $(2) -f $(1) --timeout $(3) --output-log $(4)) || rc=$$?; \
 astat=$$(printf '%s' "$$aout" | $(JQ) -r '.status // "malformed"'); \
 apid=$$(printf '%s' "$$aout" | $(JQ) -r '.pid // "?"'); \
