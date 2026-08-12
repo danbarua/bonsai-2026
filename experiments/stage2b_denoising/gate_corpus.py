@@ -34,7 +34,10 @@ sys.path.insert(0, str(REPO_ROOT / "tools" / "gates"))
 import gate_inventory  # noqa: E402
 
 # The frozen protocol corpus. These four documents, and only these, state
-# what Stage 2B has committed to; together they derive the 89 candidates.
+# what Stage 2B has committed to, and the candidate clauses are derived
+# from them. The count that used to be quoted here was deleted with the
+# pin that asserted it -- a number in a comment is the same brittle
+# coupling one layer down.
 PROTOCOL_DOCS = (
     "DESIGN.md",
     "AUDIT_PROTOCOL.md",
@@ -71,6 +74,19 @@ EXEMPT = {
         "orientation for a reader arriving cold -- a module map and a "
         "test table. It points at the protocol documents and restates "
         "none of their obligations bindingly.",
+    "GAUGE_COMPARISON_PREREGISTRATION.md":
+        "binds ONE experiment, not the Stage 2B pipeline. It fixes the "
+        "readings of a descriptive, nominal, train-split-only measurement "
+        "that alters no locked verdict and gates no edge -- so its clauses "
+        "are obligations of that run on itself, discharged by "
+        "GAUGE_COMPARISON_RESULT.md, and not candidates for gates.toml. "
+        "Flagged for the science track: if a pre-registration is instead "
+        "wanted IN the corpus, that is a deliberate widening of what the "
+        "corpus is for, and the clause dispositions come with it.",
+    "GAUGE_COMPARISON_RESULT.md":
+        "reports what that run measured, and discharges the "
+        "pre-registration's clauses. Same role as NEGATIVE_PATH_EVIDENCE.md "
+        "-- a `discharged_in` target, the opposite of a source.",
 }
 
 

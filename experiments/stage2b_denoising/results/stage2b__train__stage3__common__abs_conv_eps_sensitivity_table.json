@@ -1,0 +1,541 @@
+{
+  "fingerprint": {
+    "config_digest": "ddc0f2baa39b8478eeb9b4497aa6dac5f029bae953fd64f99b9274875068607f",
+    "source_manifest_digest": "2c7d7f2318a072ef575508ec37bcb4de538fcd2c02039aa0df26967c5cfc339a"
+  },
+  "justification_axes": {
+    "1_float64_precision": {
+      "dust_band": "1e-14 to 1e-16",
+      "position_of_1e-12": "above dust; distinguishable"
+    },
+    "2_phase_update_scale": {
+      "min_meaningful_delta_clean": 2.177e-07,
+      "orders_below": ">=5"
+    },
+    "3_encoder_implementation": {
+      "first_cross_1e-12": "300-600 steps",
+      "residual_series": [
+        8.37e-07,
+        8.062e-13,
+        0.0
+      ]
+    },
+    "4_downstream_feature_sensitivity": {
+      "contrast_threshold": 4.604761e-10,
+      "method": "Analytic L_inf bound B on the cos/sin FEATURES under a uniform phase residual, gauge-corrected: the reference-node gauge means both theta_i and theta_ref carry the residual, so B = 2*sin(eps), twice the previously published 2*sin(eps/2). No full ODE re-evolve; this half is analytic and strict. The Delta_g half asserts NO BOUND. The previously published conservative_delta_g_bound = 2B is WITHDRAWN and not replaced -- see protocol1_measured_propagation for what a real perturbation actually did end to end, and its `scope` for the limits of that.",
+      "production_max_delta_g": 1.83e-12,
+      "production_max_final_delta": 2.468e-10,
+      "protocol1_measured_propagation": {
+        "gauge_corrected_B_at_that_eps": 8.8817842e-16,
+        "per_condition": {
+          "T": {
+            "below_contrast_threshold": true,
+            "observed_max_abs_delta_g_difference": 9.975e-14,
+            "times_contrast_threshold": 0.00021662362063959456,
+            "times_withdrawn_2B_envelope": 56.15425783481657
+          },
+          "curr_random": {
+            "below_contrast_threshold": true,
+            "observed_max_abs_delta_g_difference": 1.83e-12,
+            "times_contrast_threshold": 0.003974147626771509,
+            "times_withdrawn_2B_envelope": 1030.1984144131761
+          },
+          "lattice": {
+            "below_contrast_threshold": true,
+            "observed_max_abs_delta_g_difference": 4.455e-13,
+            "times_contrast_threshold": 0.0009674769222550313,
+            "times_withdrawn_2B_envelope": 250.7942041645191
+          },
+          "rewired": {
+            "below_contrast_threshold": true,
+            "observed_max_abs_delta_g_difference": 5.483e-13,
+            "times_contrast_threshold": 0.0011907241222725783,
+            "times_withdrawn_2B_envelope": 308.665459356691
+          }
+        },
+        "perturbation": "real ARM vs x86 floating-point difference",
+        "scope": "Empirical counterexample to the universal claim |dDelta_g| <= 2B for the implemented pipeline. NO REPLACEMENT BOUND IS ESTABLISHED: these are observed maxima on one perturbation family at one eps, not a Lipschitz constant, and extrapolation across the swept eps range is unmeasured. Every observed |dDelta_g| remains far below the frozen contrast threshold, so the withdrawal changes no verdict -- it removes an unsupported derivation, not a result.",
+        "source": "Protocol 1, FINDINGS.md:1535-1596; 287-image stress set",
+        "stage1_theta_max_abs_difference": 4.4408921e-16,
+        "withdrawn_2B_envelope_at_that_eps": 1.77635684e-15
+      },
+      "rows": [
+        {
+          "below_solver_rtol": true,
+          "bound_over_production_max_final_delta": 0.8103727714748784,
+          "bound_over_solver_rtol": 0.0002,
+          "feature_linf_bound": 2e-10,
+          "phase_residual": 1e-10
+        },
+        {
+          "below_solver_rtol": true,
+          "bound_over_production_max_final_delta": 0.008103727714748784,
+          "bound_over_solver_rtol": 2e-06,
+          "feature_linf_bound": 2e-12,
+          "phase_residual": 1e-12
+        },
+        {
+          "below_solver_rtol": true,
+          "bound_over_production_max_final_delta": 0.0008103727714748784,
+          "bound_over_solver_rtol": 2.0000000000000002e-07,
+          "feature_linf_bound": 2e-13,
+          "phase_residual": 1e-13
+        }
+      ],
+      "solver_rtol": 1e-06
+    }
+  },
+  "production_abs_conv_eps": 1e-12,
+  "source": {
+    "diagnostic_pickle": "results/encoder_gate_failure_diagnostic.pkl",
+    "ladder_objects": {
+      "1200": "stage2b/train/stage1/common/encoder_gate_s1200.npz"
+    },
+    "n_used_diagnostic": 1000,
+    "step_sources": {
+      "1200": "diagnostic+ladder",
+      "150": "diagnostic",
+      "300": "diagnostic",
+      "600": "diagnostic",
+      "75": "diagnostic"
+    }
+  },
+  "summary": {
+    "consequence_rule": "COMPANION_PROTOCOLS.md Protocol 2: if the verdict at the locked ENCODER_STEPS differs across the swept eps range, that triggers renewed interpretation review before Stage 4. ABS_CONV_EPS itself does not change as a result of this table, regardless of outcome.",
+    "halt_triggered": false,
+    "invariant_at_locked_steps": true,
+    "locked_encoder_steps": 1200,
+    "per_step_count_invariance": {
+      "1200": true,
+      "150": true,
+      "300": true,
+      "600": true,
+      "75": true
+    },
+    "per_step_flip": {},
+    "step_sources": {
+      "1200": "diagnostic+ladder",
+      "150": "diagnostic",
+      "300": "diagnostic",
+      "600": "diagnostic",
+      "75": "diagnostic"
+    }
+  },
+  "table": {
+    "1200": {
+      "1e-10": {
+        "abs_conv_eps": 1e-10,
+        "absolute_convergence": true,
+        "automatic_failure": false,
+        "failure_reasons": [],
+        "floor": 1e-15,
+        "median_delta_clean": 0.0,
+        "median_delta_noisy": 0.0,
+        "n_images": 1000,
+        "n_nonfinite_delta_clean": 0,
+        "n_nonfinite_delta_noisy": 0,
+        "n_nonfinite_phase_clean": 0,
+        "n_nonfinite_phase_noisy": 0,
+        "p95_delta_clean": 0.0,
+        "p95_delta_noisy": 0.0,
+        "passed": true,
+        "rho": 0.0,
+        "threshold": 10.0
+      },
+      "1e-11": {
+        "abs_conv_eps": 1e-11,
+        "absolute_convergence": true,
+        "automatic_failure": false,
+        "failure_reasons": [],
+        "floor": 1e-15,
+        "median_delta_clean": 0.0,
+        "median_delta_noisy": 0.0,
+        "n_images": 1000,
+        "n_nonfinite_delta_clean": 0,
+        "n_nonfinite_delta_noisy": 0,
+        "n_nonfinite_phase_clean": 0,
+        "n_nonfinite_phase_noisy": 0,
+        "p95_delta_clean": 0.0,
+        "p95_delta_noisy": 0.0,
+        "passed": true,
+        "rho": 0.0,
+        "threshold": 10.0
+      },
+      "1e-12": {
+        "abs_conv_eps": 1e-12,
+        "absolute_convergence": true,
+        "automatic_failure": false,
+        "failure_reasons": [],
+        "floor": 1e-15,
+        "median_delta_clean": 0.0,
+        "median_delta_noisy": 0.0,
+        "n_images": 1000,
+        "n_nonfinite_delta_clean": 0,
+        "n_nonfinite_delta_noisy": 0,
+        "n_nonfinite_phase_clean": 0,
+        "n_nonfinite_phase_noisy": 0,
+        "p95_delta_clean": 0.0,
+        "p95_delta_noisy": 0.0,
+        "passed": true,
+        "rho": 0.0,
+        "threshold": 10.0
+      },
+      "1e-13": {
+        "abs_conv_eps": 1e-13,
+        "absolute_convergence": true,
+        "automatic_failure": false,
+        "failure_reasons": [],
+        "floor": 1e-15,
+        "median_delta_clean": 0.0,
+        "median_delta_noisy": 0.0,
+        "n_images": 1000,
+        "n_nonfinite_delta_clean": 0,
+        "n_nonfinite_delta_noisy": 0,
+        "n_nonfinite_phase_clean": 0,
+        "n_nonfinite_phase_noisy": 0,
+        "p95_delta_clean": 0.0,
+        "p95_delta_noisy": 0.0,
+        "passed": true,
+        "rho": 0.0,
+        "threshold": 10.0
+      }
+    },
+    "150": {
+      "1e-10": {
+        "abs_conv_eps": 1e-10,
+        "absolute_convergence": false,
+        "automatic_failure": false,
+        "failure_reasons": [
+          "rho = 169.851 exceeds the pre-registered threshold 10 (median_clean=2.17748e-07, median_noisy=3.69848e-05, neither below the absolute-convergence floor 1.0e-10)"
+        ],
+        "floor": 1e-15,
+        "median_delta_clean": 2.1774847924760365e-07,
+        "median_delta_noisy": 3.6984797918693246e-05,
+        "n_images": 1000,
+        "n_nonfinite_delta_clean": 0,
+        "n_nonfinite_delta_noisy": 0,
+        "n_nonfinite_phase_clean": 0,
+        "n_nonfinite_phase_noisy": 0,
+        "p95_delta_clean": 9.971726330881832e-07,
+        "p95_delta_noisy": 0.00017840176097581027,
+        "passed": false,
+        "rho": 169.85100445472006,
+        "threshold": 10.0
+      },
+      "1e-11": {
+        "abs_conv_eps": 1e-11,
+        "absolute_convergence": false,
+        "automatic_failure": false,
+        "failure_reasons": [
+          "rho = 169.851 exceeds the pre-registered threshold 10 (median_clean=2.17748e-07, median_noisy=3.69848e-05, neither below the absolute-convergence floor 1.0e-11)"
+        ],
+        "floor": 1e-15,
+        "median_delta_clean": 2.1774847924760365e-07,
+        "median_delta_noisy": 3.6984797918693246e-05,
+        "n_images": 1000,
+        "n_nonfinite_delta_clean": 0,
+        "n_nonfinite_delta_noisy": 0,
+        "n_nonfinite_phase_clean": 0,
+        "n_nonfinite_phase_noisy": 0,
+        "p95_delta_clean": 9.971726330881832e-07,
+        "p95_delta_noisy": 0.00017840176097581027,
+        "passed": false,
+        "rho": 169.85100445472006,
+        "threshold": 10.0
+      },
+      "1e-12": {
+        "abs_conv_eps": 1e-12,
+        "absolute_convergence": false,
+        "automatic_failure": false,
+        "failure_reasons": [
+          "rho = 169.851 exceeds the pre-registered threshold 10 (median_clean=2.17748e-07, median_noisy=3.69848e-05, neither below the absolute-convergence floor 1.0e-12)"
+        ],
+        "floor": 1e-15,
+        "median_delta_clean": 2.1774847924760365e-07,
+        "median_delta_noisy": 3.6984797918693246e-05,
+        "n_images": 1000,
+        "n_nonfinite_delta_clean": 0,
+        "n_nonfinite_delta_noisy": 0,
+        "n_nonfinite_phase_clean": 0,
+        "n_nonfinite_phase_noisy": 0,
+        "p95_delta_clean": 9.971726330881832e-07,
+        "p95_delta_noisy": 0.00017840176097581027,
+        "passed": false,
+        "rho": 169.85100445472006,
+        "threshold": 10.0
+      },
+      "1e-13": {
+        "abs_conv_eps": 1e-13,
+        "absolute_convergence": false,
+        "automatic_failure": false,
+        "failure_reasons": [
+          "rho = 169.851 exceeds the pre-registered threshold 10 (median_clean=2.17748e-07, median_noisy=3.69848e-05, neither below the absolute-convergence floor 1.0e-13)"
+        ],
+        "floor": 1e-15,
+        "median_delta_clean": 2.1774847924760365e-07,
+        "median_delta_noisy": 3.6984797918693246e-05,
+        "n_images": 1000,
+        "n_nonfinite_delta_clean": 0,
+        "n_nonfinite_delta_noisy": 0,
+        "n_nonfinite_phase_clean": 0,
+        "n_nonfinite_phase_noisy": 0,
+        "p95_delta_clean": 9.971726330881832e-07,
+        "p95_delta_noisy": 0.00017840176097581027,
+        "passed": false,
+        "rho": 169.85100445472006,
+        "threshold": 10.0
+      }
+    },
+    "300": {
+      "1e-10": {
+        "abs_conv_eps": 1e-10,
+        "absolute_convergence": false,
+        "automatic_failure": false,
+        "failure_reasons": [
+          "rho = 19154.5 exceeds the pre-registered threshold 10 (median_clean=1.53766e-12, median_noisy=2.94531e-08, neither below the absolute-convergence floor 1.0e-10)"
+        ],
+        "floor": 1e-15,
+        "median_delta_clean": 1.5376588891058418e-12,
+        "median_delta_noisy": 2.9453069538831755e-08,
+        "n_images": 1000,
+        "n_nonfinite_delta_clean": 0,
+        "n_nonfinite_delta_noisy": 0,
+        "n_nonfinite_phase_clean": 0,
+        "n_nonfinite_phase_noisy": 0,
+        "p95_delta_clean": 2.029834078598469e-11,
+        "p95_delta_noisy": 6.812057672833658e-07,
+        "passed": false,
+        "rho": 19154.488519855597,
+        "threshold": 10.0
+      },
+      "1e-11": {
+        "abs_conv_eps": 1e-11,
+        "absolute_convergence": false,
+        "automatic_failure": false,
+        "failure_reasons": [
+          "rho = 19154.5 exceeds the pre-registered threshold 10 (median_clean=1.53766e-12, median_noisy=2.94531e-08, neither below the absolute-convergence floor 1.0e-11)"
+        ],
+        "floor": 1e-15,
+        "median_delta_clean": 1.5376588891058418e-12,
+        "median_delta_noisy": 2.9453069538831755e-08,
+        "n_images": 1000,
+        "n_nonfinite_delta_clean": 0,
+        "n_nonfinite_delta_noisy": 0,
+        "n_nonfinite_phase_clean": 0,
+        "n_nonfinite_phase_noisy": 0,
+        "p95_delta_clean": 2.029834078598469e-11,
+        "p95_delta_noisy": 6.812057672833658e-07,
+        "passed": false,
+        "rho": 19154.488519855597,
+        "threshold": 10.0
+      },
+      "1e-12": {
+        "abs_conv_eps": 1e-12,
+        "absolute_convergence": false,
+        "automatic_failure": false,
+        "failure_reasons": [
+          "rho = 19154.5 exceeds the pre-registered threshold 10 (median_clean=1.53766e-12, median_noisy=2.94531e-08, neither below the absolute-convergence floor 1.0e-12)"
+        ],
+        "floor": 1e-15,
+        "median_delta_clean": 1.5376588891058418e-12,
+        "median_delta_noisy": 2.9453069538831755e-08,
+        "n_images": 1000,
+        "n_nonfinite_delta_clean": 0,
+        "n_nonfinite_delta_noisy": 0,
+        "n_nonfinite_phase_clean": 0,
+        "n_nonfinite_phase_noisy": 0,
+        "p95_delta_clean": 2.029834078598469e-11,
+        "p95_delta_noisy": 6.812057672833658e-07,
+        "passed": false,
+        "rho": 19154.488519855597,
+        "threshold": 10.0
+      },
+      "1e-13": {
+        "abs_conv_eps": 1e-13,
+        "absolute_convergence": false,
+        "automatic_failure": false,
+        "failure_reasons": [
+          "rho = 19154.5 exceeds the pre-registered threshold 10 (median_clean=1.53766e-12, median_noisy=2.94531e-08, neither below the absolute-convergence floor 1.0e-13)"
+        ],
+        "floor": 1e-15,
+        "median_delta_clean": 1.5376588891058418e-12,
+        "median_delta_noisy": 2.9453069538831755e-08,
+        "n_images": 1000,
+        "n_nonfinite_delta_clean": 0,
+        "n_nonfinite_delta_noisy": 0,
+        "n_nonfinite_phase_clean": 0,
+        "n_nonfinite_phase_noisy": 0,
+        "p95_delta_clean": 2.029834078598469e-11,
+        "p95_delta_noisy": 6.812057672833658e-07,
+        "passed": false,
+        "rho": 19154.488519855597,
+        "threshold": 10.0
+      }
+    },
+    "600": {
+      "1e-10": {
+        "abs_conv_eps": 1e-10,
+        "absolute_convergence": true,
+        "automatic_failure": false,
+        "failure_reasons": [],
+        "floor": 1e-15,
+        "median_delta_clean": 0.0,
+        "median_delta_noisy": 1.7763568394002505e-14,
+        "n_images": 1000,
+        "n_nonfinite_delta_clean": 0,
+        "n_nonfinite_delta_noisy": 0,
+        "n_nonfinite_phase_clean": 0,
+        "n_nonfinite_phase_noisy": 0,
+        "p95_delta_clean": 0.0,
+        "p95_delta_noisy": 1.043225505981122e-11,
+        "passed": true,
+        "rho": 17.763568394002505,
+        "threshold": 10.0
+      },
+      "1e-11": {
+        "abs_conv_eps": 1e-11,
+        "absolute_convergence": true,
+        "automatic_failure": false,
+        "failure_reasons": [],
+        "floor": 1e-15,
+        "median_delta_clean": 0.0,
+        "median_delta_noisy": 1.7763568394002505e-14,
+        "n_images": 1000,
+        "n_nonfinite_delta_clean": 0,
+        "n_nonfinite_delta_noisy": 0,
+        "n_nonfinite_phase_clean": 0,
+        "n_nonfinite_phase_noisy": 0,
+        "p95_delta_clean": 0.0,
+        "p95_delta_noisy": 1.043225505981122e-11,
+        "passed": true,
+        "rho": 17.763568394002505,
+        "threshold": 10.0
+      },
+      "1e-12": {
+        "abs_conv_eps": 1e-12,
+        "absolute_convergence": true,
+        "automatic_failure": false,
+        "failure_reasons": [],
+        "floor": 1e-15,
+        "median_delta_clean": 0.0,
+        "median_delta_noisy": 1.7763568394002505e-14,
+        "n_images": 1000,
+        "n_nonfinite_delta_clean": 0,
+        "n_nonfinite_delta_noisy": 0,
+        "n_nonfinite_phase_clean": 0,
+        "n_nonfinite_phase_noisy": 0,
+        "p95_delta_clean": 0.0,
+        "p95_delta_noisy": 1.043225505981122e-11,
+        "passed": true,
+        "rho": 17.763568394002505,
+        "threshold": 10.0
+      },
+      "1e-13": {
+        "abs_conv_eps": 1e-13,
+        "absolute_convergence": true,
+        "automatic_failure": false,
+        "failure_reasons": [],
+        "floor": 1e-15,
+        "median_delta_clean": 0.0,
+        "median_delta_noisy": 1.7763568394002505e-14,
+        "n_images": 1000,
+        "n_nonfinite_delta_clean": 0,
+        "n_nonfinite_delta_noisy": 0,
+        "n_nonfinite_phase_clean": 0,
+        "n_nonfinite_phase_noisy": 0,
+        "p95_delta_clean": 0.0,
+        "p95_delta_noisy": 1.043225505981122e-11,
+        "passed": true,
+        "rho": 17.763568394002505,
+        "threshold": 10.0
+      }
+    },
+    "75": {
+      "1e-10": {
+        "abs_conv_eps": 1e-10,
+        "absolute_convergence": false,
+        "automatic_failure": false,
+        "failure_reasons": [
+          "rho = 14.9849 exceeds the pre-registered threshold 10 (median_clean=8.66285e-05, median_noisy=0.00129812, neither below the absolute-convergence floor 1.0e-10)"
+        ],
+        "floor": 1e-15,
+        "median_delta_clean": 8.662851405438765e-05,
+        "median_delta_noisy": 0.0012981191150709392,
+        "n_images": 1000,
+        "n_nonfinite_delta_clean": 0,
+        "n_nonfinite_delta_noisy": 0,
+        "n_nonfinite_phase_clean": 0,
+        "n_nonfinite_phase_noisy": 0,
+        "p95_delta_clean": 0.0002267344893912115,
+        "p95_delta_noisy": 0.0029772515770905444,
+        "passed": false,
+        "rho": 14.984894168402173,
+        "threshold": 10.0
+      },
+      "1e-11": {
+        "abs_conv_eps": 1e-11,
+        "absolute_convergence": false,
+        "automatic_failure": false,
+        "failure_reasons": [
+          "rho = 14.9849 exceeds the pre-registered threshold 10 (median_clean=8.66285e-05, median_noisy=0.00129812, neither below the absolute-convergence floor 1.0e-11)"
+        ],
+        "floor": 1e-15,
+        "median_delta_clean": 8.662851405438765e-05,
+        "median_delta_noisy": 0.0012981191150709392,
+        "n_images": 1000,
+        "n_nonfinite_delta_clean": 0,
+        "n_nonfinite_delta_noisy": 0,
+        "n_nonfinite_phase_clean": 0,
+        "n_nonfinite_phase_noisy": 0,
+        "p95_delta_clean": 0.0002267344893912115,
+        "p95_delta_noisy": 0.0029772515770905444,
+        "passed": false,
+        "rho": 14.984894168402173,
+        "threshold": 10.0
+      },
+      "1e-12": {
+        "abs_conv_eps": 1e-12,
+        "absolute_convergence": false,
+        "automatic_failure": false,
+        "failure_reasons": [
+          "rho = 14.9849 exceeds the pre-registered threshold 10 (median_clean=8.66285e-05, median_noisy=0.00129812, neither below the absolute-convergence floor 1.0e-12)"
+        ],
+        "floor": 1e-15,
+        "median_delta_clean": 8.662851405438765e-05,
+        "median_delta_noisy": 0.0012981191150709392,
+        "n_images": 1000,
+        "n_nonfinite_delta_clean": 0,
+        "n_nonfinite_delta_noisy": 0,
+        "n_nonfinite_phase_clean": 0,
+        "n_nonfinite_phase_noisy": 0,
+        "p95_delta_clean": 0.0002267344893912115,
+        "p95_delta_noisy": 0.0029772515770905444,
+        "passed": false,
+        "rho": 14.984894168402173,
+        "threshold": 10.0
+      },
+      "1e-13": {
+        "abs_conv_eps": 1e-13,
+        "absolute_convergence": false,
+        "automatic_failure": false,
+        "failure_reasons": [
+          "rho = 14.9849 exceeds the pre-registered threshold 10 (median_clean=8.66285e-05, median_noisy=0.00129812, neither below the absolute-convergence floor 1.0e-13)"
+        ],
+        "floor": 1e-15,
+        "median_delta_clean": 8.662851405438765e-05,
+        "median_delta_noisy": 0.0012981191150709392,
+        "n_images": 1000,
+        "n_nonfinite_delta_clean": 0,
+        "n_nonfinite_delta_noisy": 0,
+        "n_nonfinite_phase_clean": 0,
+        "n_nonfinite_phase_noisy": 0,
+        "p95_delta_clean": 0.0002267344893912115,
+        "p95_delta_noisy": 0.0029772515770905444,
+        "passed": false,
+        "rho": 14.984894168402173,
+        "threshold": 10.0
+      }
+    }
+  },
+  "verdict": "PROTOCOL2_OK"
+}

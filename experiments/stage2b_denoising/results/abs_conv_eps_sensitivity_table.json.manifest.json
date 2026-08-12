@@ -1,0 +1,10 @@
+{
+  "fingerprint": {
+    "config_digest": "ddc0f2baa39b8478eeb9b4497aa6dac5f029bae953fd64f99b9274875068607f",
+    "source_manifest_digest": "2c7d7f2318a072ef575508ec37bcb4de538fcd2c02039aa0df26967c5cfc339a"
+  },
+  "format": "stage2b_local_manifest_v1",
+  "local_path": "/Users/dan/Code/pycharm/bonsai-2026/.claude/worktrees/infra-tooling/experiments/stage2b_denoising/results/abs_conv_eps_sensitivity_table.json",
+  "object_path": "/Users/dan/Code/pycharm/bonsai-2026/.claude/worktrees/infra-tooling/experiments/stage2b_denoising/results/abs_conv_eps_sensitivity_table.json",
+  "payload_sha256": "a75de5e5cd3405000fd00ddda702a044d395e124295e1a40f185101813a91b75"
+}

@@ -137,6 +137,15 @@ def test_the_exempt_set_is_exactly_these_documents():
     assert set(gate_corpus.EXEMPT) == {
         "FINDINGS.md", "NEGATIVE_PATH_EVIDENCE.md", "PHASE_B_PLAN.md",
         "README.md",
+        # Added 2026-08-12 with the gauge comparison. The pre-registration
+        # binds ONE run rather than the pipeline, and the result document
+        # discharges it -- the same source/target split FINDINGS.md and
+        # NEGATIVE_PATH_EVIDENCE.md already occupy. Flagged in
+        # `gate_corpus.EXEMPT`'s own reason as a science-track call: if a
+        # pre-registration belongs IN the corpus, that widens what the
+        # corpus is for and brings clause dispositions with it.
+        "GAUGE_COMPARISON_PREREGISTRATION.md",
+        "GAUGE_COMPARISON_RESULT.md",
     }, ("the exempt set changed; a document was exempted or un-exempted, "
         "which is a judgement needing a written reason, not a drift")
 

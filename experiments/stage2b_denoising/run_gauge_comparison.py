@@ -40,6 +40,7 @@ statistic, no member of any corrected family, nothing that alters the locked
 Stage 4 verdict, and no path that reads the test split.
 """
 import argparse
+import hashlib
 import json
 import os
 import sys
@@ -69,6 +70,28 @@ EXPECTED_N_ACTIVE = 505
 # The locked encoder step count; names the published encoded object.
 ENCODER_STEPS = 1200
 
+# The production CV artifact, pinned by its CONFIG DIGEST.
+#
+# Run 1 of this comparison consumed `ridge_cv.json` -- the un-digested
+# sibling -- and that was wrong in a way worth naming, because it is exactly
+# what the digest-in-the-name convention exists to prevent. That file records
+# a SUPERSEDED 9-value grid whose floor was 0.01, at which six of seven
+# conditions pinned; the live 13-value grid (1e-6 .. 1e6) selects T/lattice
+# at 1e-6 and rewired/curr_random at 1e-5. Consuming the undigested name
+# silently bought the dead experiment's alphas.
+#
+# Pinned as a constant with its digest so the next reader sees which grid
+# they are getting, and asserted below against the grid the code actually
+# uses.
+RIDGE_CV_OBJECT = "ridge_cv_g13_88edf9ac.json"
+
+# Margin threshold, fixed before run 2 and NOT derived from run 1's numbers:
+# the locked T-vs-lattice margin, the smallest gap this line of enquiry has
+# ever adjudicated. A difference below it is smaller than anything the
+# project has previously treated as meaningful.
+MARGIN_THETA = 3.78e-4
+TIE_SIGFIGS = 6
+
 # The five conditions that HAVE a phase, and therefore a gauge. raw_505 and
 # raw_784 are pixel baselines and are deliberately absent.
 GAUGED_CONDITIONS = ("pre_evolution", "T", "lattice", "rewired", "curr_random")
@@ -86,12 +109,29 @@ def say(line):
     print(line, flush=True)
 
 
+CONSUMED = {}
+
+
 def fetch(object_name, cache_dir):
+    """Fetch, and RECORD THE BYTES CONSUMED.
+
+    The pre-registration claimed inputs were pinned; recording the source
+    commit is not that. Every payload this run reads is hashed here, so the
+    result can name exactly which bytes produced it and a later reader can
+    check rather than trust. The objects are immutable, so a hash taken at
+    consume time identifies the input for good."""
     local = os.path.join(cache_dir, object_name.replace("/", "__"))
     if not os.path.exists(local):
         os.makedirs(cache_dir, exist_ok=True)
         say(f"fetching {object_name}")
         urllib.request.urlretrieve(f"{BUCKET_URL}/{object_name}", local)
+    if object_name not in CONSUMED:
+        digest = hashlib.sha256()
+        with open(local, "rb") as handle:
+            for block in iter(lambda: handle.read(1 << 20), b""):
+                digest.update(block)
+        CONSUMED[object_name] = {"sha256": digest.hexdigest(),
+                                 "bytes": os.path.getsize(local)}
     return local
 
 
@@ -227,6 +267,65 @@ def ridge_for(ridge, X, Y, y_strat, frozen_alpha):
     }
 
 
+
+def classify(results, measured, arm):
+    """The decidable outcome rule. Fixed before run 2; see the amendment in
+    GAUGE_COMPARISON_PREREGISTRATION.md.
+
+    The original four outcomes were not a partition -- "margins similar" had
+    no threshold, and "circular-mean better across the board" could co-occur
+    with either ranking verdict. Run 1 duly landed on two of them at once.
+    So: one CLASS by precedence, plus an orthogonal DIRECTION flag.
+
+        M_g = MSE_cm(g) - MSE_ref(g)         per condition
+        C  ranking changed          any pairwise inversion
+        B  preserved, material      else max|M_g| >= theta
+        A  preserved, similar       else
+
+    Ties (MSE equal to TIE_SIGFIGS significant figures) count as preserved,
+    so float noise cannot manufacture an inversion."""
+    margins = {c: (results[c]["circular_mean"][f"mse_{arm}"]
+                   - results[c]["reference_node"][f"mse_{arm}"])
+               for c in measured}
+
+    def order(gauge):
+        return sorted(measured, key=lambda c: results[c][gauge][f"mse_{arm}"])
+
+    def rounded(gauge, c):
+        return float(f"{results[c][gauge][f'mse_{arm}']:.{TIE_SIGFIGS}g}")
+
+    ref_order, cm_order = order("reference_node"), order("circular_mean")
+    inversions = []
+    for i, a in enumerate(measured):
+        for b in measured[i + 1:]:
+            ref_ab = rounded("reference_node", a) - rounded("reference_node", b)
+            cm_ab = rounded("circular_mean", a) - rounded("circular_mean", b)
+            if ref_ab == 0.0 or cm_ab == 0.0:
+                continue                      # tie: counts as preserved
+            if (ref_ab > 0) != (cm_ab > 0):
+                inversions.append(f"{a}|{b}")
+
+    largest = max(abs(v) for v in margins.values())
+    if inversions:
+        cls, why = "C", "ranking changed"
+    elif largest >= MARGIN_THETA:
+        cls, why = "B", "preserved, margins material"
+    else:
+        cls, why = "A", "preserved, margins similar"
+
+    signs = {v > 0 for v in margins.values() if v != 0.0}
+    uniform = (len(signs) == 1)
+    favours = None
+    if uniform:
+        favours = "reference_node" if signs == {True} else "circular_mean"
+
+    return {"arm": arm, "class": cls, "reading": why,
+            "margins": margins, "largest_abs_margin": largest,
+            "theta": MARGIN_THETA, "inversions": inversions,
+            "ranking_reference_node": ref_order, "ranking_circular_mean": cm_order,
+            "uniform_direction": uniform, "direction_favours": favours}
+
+
 def main_run(args):
     commit = ensure_importable()
     import stage2a_core as core
@@ -250,7 +349,7 @@ def main_run(args):
     labels = np.asarray(corpus["labels"])
     Y = np.asarray(corpus["images_01"]).reshape(labels.shape[0], 784)[:, active]
 
-    frozen = fetch_json(f"{ROOT}/stage3/common/ridge_cv.json", args.cache_dir)
+    frozen = fetch_json(f"{ROOT}/stage3/common/{RIDGE_CV_OBJECT}", args.cache_dir)
     frozen_alphas = {c: float(v["cv"]["alpha"])
                      for c, v in frozen["conditions"].items()}
 
@@ -325,6 +424,9 @@ def main_run(args):
         "scope": ("TRAIN split only; descriptive and nominal; no confirmatory "
                   "statistic; consumes cached states read-only"),
         "preregistration": "GAUGE_COMPARISON_PREREGISTRATION.md",
+        "consumed_inputs": CONSUMED,
+        "ridge_cv_object": RIDGE_CV_OBJECT,
+        "alpha_grid": [float(a) for a in ridge.ALPHA_GRID],
     }
     measured = [c for c in GAUGED_CONDITIONS if c in results]
     summary["skipped_conditions"] = skipped
@@ -339,6 +441,15 @@ def main_run(args):
         say(f"ranking [{arm}] reference_node : {' < '.join(ranking)}")
         say(f"ranking [{arm}] circular_mean  : {' < '.join(ranking_cm)}")
         say(f"ranking [{arm}] PRESERVED: {ranking == ranking_cm}")
+
+    summary["classification"] = {arm: classify(results, measured, arm)
+                                 for arm in ("reselected", "frozen")}
+    for arm, verdict in summary["classification"].items():
+        say(f"CLASS [{arm}] {verdict['class']} -- {verdict['reading']}; "
+            f"largest |margin| {verdict['largest_abs_margin']:.3e} vs theta "
+            f"{MARGIN_THETA:.3e}"
+            + (f"; uniform direction favouring {verdict['direction_favours']}"
+               if verdict["uniform_direction"] else ""))
 
     observed = sorted([c for c in measured if c != "pre_evolution"],
                       key=lambda c: -companions[c]["offset_std"])

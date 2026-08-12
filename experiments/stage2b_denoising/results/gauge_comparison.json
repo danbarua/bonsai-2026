@@ -1,0 +1,368 @@
+{
+  "commit": "f2d043d771f093227830e229b8d1337f43a45260",
+  "companion_offset_ordering": {
+    "observed": [
+      "T",
+      "lattice",
+      "rewired",
+      "curr_random"
+    ],
+    "predicted": [
+      "T",
+      "lattice",
+      "curr_random",
+      "rewired"
+    ]
+  },
+  "gauge_offset": {
+    "T": {
+      "R_mean": 0.9659796548974469,
+      "offset_max": 1.0599564464933882,
+      "offset_mean": 0.030193901654699738,
+      "offset_min": -0.7344974394151781,
+      "offset_std": 0.2629195735373994
+    },
+    "curr_random": {
+      "R_mean": 0.9971287061749669,
+      "offset_max": 0.0607274140591233,
+      "offset_mean": -0.0006857245601216577,
+      "offset_min": -0.05678850746156416,
+      "offset_std": 0.013589752346696826
+    },
+    "lattice": {
+      "R_mean": 0.9678411714301655,
+      "offset_max": 0.9465537335555274,
+      "offset_mean": -0.016878011278865925,
+      "offset_min": -0.728139550159276,
+      "offset_std": 0.23105130703004373
+    },
+    "pre_evolution": {
+      "R_mean": 0.9115748192629249,
+      "offset_max": 1.6858093938571082,
+      "offset_mean": 0.011884184949625743,
+      "offset_min": -0.9894698992465283,
+      "offset_std": 0.43139632275494366
+    },
+    "rewired": {
+      "R_mean": 0.9991593401941655,
+      "offset_max": 0.15614610589241407,
+      "offset_mean": 0.011332884258729064,
+      "offset_min": -0.10078444306027624,
+      "offset_std": 0.03133488222654687
+    }
+  },
+  "n_limit": null,
+  "preregistration": "GAUGE_COMPARISON_PREREGISTRATION.md",
+  "ranking_frozen": {
+    "circular_mean": [
+      "T",
+      "lattice",
+      "pre_evolution",
+      "curr_random",
+      "rewired"
+    ],
+    "preserved": false,
+    "reference_node": [
+      "T",
+      "lattice",
+      "curr_random",
+      "rewired",
+      "pre_evolution"
+    ]
+  },
+  "ranking_reselected": {
+    "circular_mean": [
+      "T",
+      "lattice",
+      "pre_evolution",
+      "curr_random",
+      "rewired"
+    ],
+    "preserved": false,
+    "reference_node": [
+      "T",
+      "lattice",
+      "curr_random",
+      "rewired",
+      "pre_evolution"
+    ]
+  },
+  "reference_node": 363,
+  "reproduction_gate": {
+    "T": {
+      "byte_exact": true,
+      "max_abs_diff": 0.0
+    },
+    "curr_random": {
+      "byte_exact": true,
+      "max_abs_diff": 0.0
+    },
+    "lattice": {
+      "byte_exact": true,
+      "max_abs_diff": 0.0
+    },
+    "pre_evolution": {
+      "byte_exact": true,
+      "max_abs_diff": 0.0
+    },
+    "rewired": {
+      "byte_exact": true,
+      "max_abs_diff": 0.0
+    }
+  },
+  "ridge": {
+    "T": {
+      "circular_mean": {
+        "alpha_frozen": 0.01,
+        "alpha_reselected": 1e-05,
+        "at_grid_endpoint": false,
+        "feature_dim": 1010,
+        "mean_clipped_val_mse_by_alpha": [
+          0.06291238624322507,
+          0.06290823567246823,
+          0.06293644658736673,
+          0.06303383731665199,
+          0.0632857524126084,
+          0.06373786188999159,
+          0.06441272523603657,
+          0.0653122218747945,
+          0.06656816399976963,
+          0.06848439419842087,
+          0.07192314032350756,
+          0.07860848905965306,
+          0.09160413980666718
+        ],
+        "min_col_std": 0.01912388344284565,
+        "mse_frozen": 0.0632857524126084,
+        "mse_reselected": 0.06290823567246823
+      },
+      "reference_node": {
+        "alpha_frozen": 0.01,
+        "alpha_reselected": 1e-06,
+        "at_grid_endpoint": true,
+        "feature_dim": 1008,
+        "mean_clipped_val_mse_by_alpha": [
+          0.06385452414501447,
+          0.06385790362341301,
+          0.06391940588140674,
+          0.06410572819778353,
+          0.06446037094465198,
+          0.06500385586797681,
+          0.06577747326990899,
+          0.06680083761033136,
+          0.06829490544108344,
+          0.07082742787100686,
+          0.07535010972144521,
+          0.08346947514957877,
+          0.0982441080376644
+        ],
+        "min_col_std": 0.0009582943700647064,
+        "mse_frozen": 0.06446037094465198,
+        "mse_reselected": 0.06385452414501447
+      }
+    },
+    "curr_random": {
+      "circular_mean": {
+        "alpha_frozen": 0.01,
+        "alpha_reselected": 0.0001,
+        "at_grid_endpoint": false,
+        "feature_dim": 1010,
+        "mean_clipped_val_mse_by_alpha": [
+          0.0658094145459672,
+          0.06578932630230332,
+          0.06578860131583128,
+          0.06594445646990188,
+          0.06624915237919374,
+          0.06665265471673745,
+          0.06711351117405508,
+          0.06772413960396444,
+          0.06857328671258435,
+          0.06995201767220838,
+          0.0728220973622444,
+          0.07998195435494249,
+          0.096949165616747
+        ],
+        "min_col_std": 2.4846805242888444e-05,
+        "mse_frozen": 0.06624915237919374,
+        "mse_reselected": 0.06578860131583128
+      },
+      "reference_node": {
+        "alpha_frozen": 0.01,
+        "alpha_reselected": 1e-05,
+        "at_grid_endpoint": false,
+        "feature_dim": 1008,
+        "mean_clipped_val_mse_by_alpha": [
+          0.06602946830114557,
+          0.06600435389919601,
+          0.06601074892220764,
+          0.06617488911271965,
+          0.06647636753811155,
+          0.06688821570893,
+          0.06737464335161467,
+          0.06803548858705512,
+          0.06898164282870782,
+          0.07067296165435591,
+          0.07411972010668691,
+          0.08255087114966206,
+          0.10213971942443201
+        ],
+        "min_col_std": 6.783863378172796e-05,
+        "mse_frozen": 0.06647636753811155,
+        "mse_reselected": 0.06600435389919601
+      }
+    },
+    "lattice": {
+      "circular_mean": {
+        "alpha_frozen": 0.01,
+        "alpha_reselected": 1e-05,
+        "at_grid_endpoint": false,
+        "feature_dim": 1010,
+        "mean_clipped_val_mse_by_alpha": [
+          0.06369162747810182,
+          0.06368915433117142,
+          0.06371570600809431,
+          0.06380172266394823,
+          0.06397827647581789,
+          0.06426613602378935,
+          0.064658303510807,
+          0.06530707558915179,
+          0.06645590345196331,
+          0.06844793585736228,
+          0.07209501705584793,
+          0.07883703363457198,
+          0.09168399823930928
+        ],
+        "min_col_std": 0.027296956615552818,
+        "mse_frozen": 0.06397827647581789,
+        "mse_reselected": 0.06368915433117142
+      },
+      "reference_node": {
+        "alpha_frozen": 0.01,
+        "alpha_reselected": 1e-06,
+        "at_grid_endpoint": true,
+        "feature_dim": 1008,
+        "mean_clipped_val_mse_by_alpha": [
+          0.06453306902067692,
+          0.06454917135420428,
+          0.06459700329998558,
+          0.0647008223398643,
+          0.06486619774544027,
+          0.06513544497459932,
+          0.06560902693628137,
+          0.066440550630239,
+          0.06790777796284282,
+          0.07036878696547642,
+          0.07472587892557928,
+          0.08250251519990416,
+          0.09665402758576064
+        ],
+        "min_col_std": 0.0024257054738822895,
+        "mse_frozen": 0.06486619774544027,
+        "mse_reselected": 0.06453306902067692
+      }
+    },
+    "pre_evolution": {
+      "circular_mean": {
+        "alpha_frozen": 1000.0,
+        "alpha_reselected": 10000.0,
+        "at_grid_endpoint": false,
+        "feature_dim": 1010,
+        "mean_clipped_val_mse_by_alpha": [
+          0.06592729730257424,
+          0.06592729730015563,
+          0.06592729727596955,
+          0.0659272970341088,
+          0.06592729461551264,
+          0.06592727043063804,
+          0.06592702869488261,
+          0.06592462248392944,
+          0.06590161746121503,
+          0.06574312995728648,
+          0.0656583246088148,
+          0.06963124671297061,
+          0.08838110426135726
+        ],
+        "min_col_std": 0.07564281895697038,
+        "mse_frozen": 0.06574312995728648,
+        "mse_reselected": 0.0656583246088148
+      },
+      "reference_node": {
+        "alpha_frozen": 1000.0,
+        "alpha_reselected": 1000.0,
+        "at_grid_endpoint": false,
+        "feature_dim": 1008,
+        "mean_clipped_val_mse_by_alpha": [
+          0.06931680823964086,
+          0.06931680823532424,
+          0.06931680819215805,
+          0.06931680776049645,
+          0.06931680344391582,
+          0.0693167602815949,
+          0.0693163290000536,
+          0.06931205035804779,
+          0.06927244465556619,
+          0.0690618973508632,
+          0.06962888902586921,
+          0.07748280028174756,
+          0.10045237776822624
+        ],
+        "min_col_std": 0.05217537699756229,
+        "mse_frozen": 0.0690618973508632,
+        "mse_reselected": 0.0690618973508632
+      }
+    },
+    "rewired": {
+      "circular_mean": {
+        "alpha_frozen": 0.01,
+        "alpha_reselected": 0.0001,
+        "at_grid_endpoint": false,
+        "feature_dim": 1010,
+        "mean_clipped_val_mse_by_alpha": [
+          0.06642727679292945,
+          0.06641592114880966,
+          0.06640756219416447,
+          0.06654972171926785,
+          0.06690764541415117,
+          0.06739280711284243,
+          0.06797347007448251,
+          0.06871550794529739,
+          0.06972375908187076,
+          0.07135316361825889,
+          0.07454840647049063,
+          0.08150260191763868,
+          0.0970734022110958
+        ],
+        "min_col_std": 2.3940410430117733e-05,
+        "mse_frozen": 0.06690764541415117,
+        "mse_reselected": 0.06640756219416447
+      },
+      "reference_node": {
+        "alpha_frozen": 0.01,
+        "alpha_reselected": 1e-05,
+        "at_grid_endpoint": false,
+        "feature_dim": 1008,
+        "mean_clipped_val_mse_by_alpha": [
+          0.06678770787318453,
+          0.06676978251600676,
+          0.06678712715219479,
+          0.0669899277629897,
+          0.06737302198185982,
+          0.06788929878014807,
+          0.06855162068952655,
+          0.06945523956624239,
+          0.07090772329357183,
+          0.07348004528579966,
+          0.07815112286678642,
+          0.08800400679582919,
+          0.10759216469596802
+        ],
+        "min_col_std": 0.0002096115394528037,
+        "mse_frozen": 0.06737302198185982,
+        "mse_reselected": 0.06676978251600676
+      }
+    }
+  },
+  "scope": "TRAIN split only; descriptive and nominal; no confirmatory statistic; consumes cached states read-only",
+  "skipped_conditions": [],
+  "stage": 3
+}

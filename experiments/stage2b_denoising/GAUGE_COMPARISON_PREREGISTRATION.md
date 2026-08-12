@@ -76,9 +76,14 @@ and therefore no gauge.
 1. **Re-selected** — `cross_validate_alpha` unchanged. The honest
    pipeline-versus-pipeline comparison: each gauge gets the alpha its own CV
    would choose.
-2. **Frozen at production values** — T/lattice/rewired/curr_random at 0.01,
-   `pre_evolution` at 1000.0, read from the frozen `stage3/common/ridge_cv.json`.
-   This isolates feature geometry from selection effects.
+2. **Frozen at production values** — read from
+   `stage3/common/ridge_cv_g13_88edf9ac.json`, the CV artifact carrying the
+   live 13-value grid: **T and lattice at 1e-6, rewired and curr_random at
+   1e-5, `pre_evolution` at 1000.0**. This isolates feature geometry from
+   selection effects.
+
+   *Corrected in amendment 1 (below). This paragraph originally said 0.01
+   for every evolved arm, read from `ridge_cv.json`.*
 
 ## The metric
 
@@ -186,3 +191,110 @@ The driver halts, loudly, on any of:
   floor surprise surfaces there rather than mid-run;
 - any fold's alpha selection landing on a grid endpoint under the re-selected
   arm without that being reported.
+
+
+---
+
+# Review History
+
+## Amendment 1 — 2026-08-12, after run 1, BEFORE run 1 was interpreted
+
+External review (ChatGPT, reviewed in turn by Claude Desktop) raised five
+findings against this document and its driver. The amendments are recorded
+here rather than silently folded in, because a pre-registration that can be
+edited invisibly is not one.
+
+**Disclosure, stated first because it is the thing that weakens this
+document.** Run 1 completed before the review arrived, and **I read its
+numbers before these amendments landed.** That is a real breach of the
+amendments-before-reading discipline and no subsequent care undoes it. What
+partially mitigates it, offered as fact and not as excuse:
+
+- The margin threshold below (θ = 3.78e-4) was specified by a reviewer who
+  had NOT seen run 1's numbers — it is the locked T-vs-lattice margin,
+  chosen as "the smallest gap this enquiry ever adjudicated", blind to the
+  result it would be applied to.
+- It is applied by someone who had. So the rule is blind-specified and
+  sighted-applied: stronger than a threshold invented after the fact,
+  weaker than one registered before the run.
+- Run 1's write-up is retained and labelled as run 1, not silently replaced.
+
+**Run 2 is therefore being run**, against the corrected driver, and both
+runs are reported. Run 2's classification IS registered-before-read.
+
+### 1. The frozen alphas named the superseded experiment
+
+The document said every evolved arm froze at 0.01, and the driver consumed
+`stage3/common/ridge_cv.json`. That file records a **9-value grid whose
+floor was 0.01**, at which six of seven conditions pinned. The live artifact
+is `ridge_cv_g13_88edf9ac.json` — 13 values, 1e-6 to 1e6 — selecting T and
+lattice at 1e-6, rewired and curr_random at 1e-5.
+
+So this is not a transcription slip: the document faithfully described a
+**dead experiment**, because it cited the un-digested filename. That is
+precisely the failure the config-digest-in-names convention exists to
+prevent, resurfacing through a *document* consuming the stale name while the
+convention protected everything else. The driver now pins the digested
+object as a named constant.
+
+Run 1's re-selected arm is unaffected — it computes its own alphas, and
+independently reproduced production's selections exactly (T 1e-6, lattice
+1e-6, rewired 1e-5, curr_random 1e-5, pre_evolution 1000). Run 1's *frozen*
+arm compared both gauges at 0.01, which is a valid common-alpha check but is
+**not** the "frozen at production" arm it was labelled as.
+
+### 2. The four outcomes were not a partition
+
+"Margins similar" versus "move materially" had no threshold, and
+"circular-mean better across the board" could co-occur with either ranking
+verdict. Run 1 landed on two outcomes at once, which is how the defect
+surfaced. Replaced with one class by precedence plus an orthogonal flag:
+
+> **Margin**: `M_g = MSE_cm(g) − MSE_ref(g)` per condition. **Ranking**: the
+> exact five-condition order per gauge; the re-selected-alpha arm is
+> primary. **Threshold**: θ = **3.78e-4**, the locked T-vs-lattice margin.
+> **Class, in precedence order**: **(C)** ranking changed — any pairwise
+> inversion; else **(B)** preserved, margins material — max|M_g| ≥ θ; else
+> **(A)** preserved, margins similar. **Direction flag, orthogonal to the
+> class**: if all five `M_g` share a sign, report "uniform direction
+> favouring X" *alongside* the class, never instead of it. **Ties**: MSE
+> equal to 6 significant figures counts as preserved, so float noise cannot
+> manufacture an inversion.
+
+The 1008-vs-1010 asymmetry caveat attaches to the direction flag: a uniform
+circular-mean win smaller than θ carries that caveat.
+
+The driver now computes and emits this classification rather than leaving it
+to prose.
+
+### 3. The result could not identify its inputs
+
+"Pinned parents" was claimed and not implemented — the summary recorded the
+source commit and no payload identities. The driver now hashes every
+consumed object at fetch time and records `{sha256, bytes}` per object, plus
+the CV artifact name and the alpha grid, in the summary.
+
+Weaker than capture-at-consume-with-manifest, and accepted once on the
+grounds that every consumed object is immutable, so a hash taken now
+identifies the input permanently. Stated rather than glossed.
+
+### 4. Scaler diagnostics — DISCLOSED LIMITATION, not fixed
+
+`cross_validate_alpha` returns per-fold centring norms, tolerances and
+minimum column spreads. The driver discards them and substitutes a single
+full-corpus `min_col_std`, which is a weaker quantity than the fitted
+fold-scaler diagnostic this document promised. Both runs carry this
+limitation; it is recorded rather than triggering a third run.
+
+### 5. Corpus registration
+
+`GAUGE_COMPARISON_PREREGISTRATION.md` was invisible to `gate_corpus.py`,
+which failed `test_every_document_on_disk_is_corpus_or_named_exemption` —
+a real regression, caught by a guard the ceremony audit had just voted to
+KEEP. Both this document and the result document are now declared as named
+exemptions, with the reason recorded there: they bind ONE run rather than
+the pipeline, and the result discharges the registration.
+
+Flagged for the science track rather than decided unilaterally: if a
+pre-registration should instead live IN the corpus, that widens what the
+corpus is for and brings clause dispositions with it.
