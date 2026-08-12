@@ -198,6 +198,26 @@ _HAVE_STATES = bool(_SCRATCH) and os.path.exists(_ENCODE) and any(
     f.startswith("theta0_chunk_") for f in os.listdir(_SCRATCH))
 
 
+def test_locked_record_is_resolved_or_refused_legibly():
+    """The locked record is gitignored, so a worktree has the code but not the
+    pickle -- it lives only in the checkout that produced it. Resolution must
+    therefore reach across worktrees, and when it genuinely cannot find the
+    record it must name where it looked rather than raise a bare
+    FileNotFoundError from deep inside the combine step.
+
+    CI-safe by construction: either outcome is acceptable, only an unhelpful
+    failure is not."""
+    try:
+        path = drv.locked_record_path()
+    except SystemExit as exc:
+        msg = str(exc)
+        assert "gitignored" in msg and "Looked in" in msg
+        assert "stage3_classifier_conditions.pkl" in msg
+    else:
+        assert os.path.exists(path)
+        assert path.endswith("stage3_classifier_conditions.pkl")
+
+
 @pytest.mark.skipif(not _HAVE_STATES,
                     reason="regenerated Stage 2A train states not present locally")
 def test_cached_feat_pre_reproduces_from_the_theta0_chunks():

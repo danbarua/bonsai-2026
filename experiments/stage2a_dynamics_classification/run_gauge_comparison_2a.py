@@ -59,8 +59,36 @@ GAUGES = ("reference", "circular_mean")
 THETA = 0.002
 TIE_DECIMALS = 5
 
-# The locked record this run's reference arm must reproduce.
-LOCKED_RECORD = os.path.join(_THIS_DIR, "results", "stage3_classifier_conditions.pkl")
+
+def locked_record_path():
+    """Where stage3_classifier_conditions.pkl actually is.
+
+    The locked record is a gitignored artifact, so a git worktree checked
+    out from this repo has the tracked code but not the pickle -- it lives
+    only in whichever checkout produced it. Resolve the main checkout via
+    git's common dir rather than assuming the record sits next to this file,
+    and name both candidates if neither exists.
+    """
+    candidates = [os.path.join(_THIS_DIR, "results",
+                               "stage3_classifier_conditions.pkl")]
+    try:
+        import subprocess
+        common = subprocess.run(
+            ["git", "rev-parse", "--path-format=absolute", "--git-common-dir"],
+            cwd=_THIS_DIR, capture_output=True, text=True, check=True).stdout.strip()
+        main_root = os.path.dirname(common)          # strip the trailing /.git
+        candidates.append(os.path.join(
+            main_root, "experiments", "stage2a_dynamics_classification",
+            "results", "stage3_classifier_conditions.pkl"))
+    except Exception:
+        pass
+
+    for path in candidates:
+        if os.path.exists(path):
+            return path
+    raise SystemExit("the locked Stage 2A record was not found. It is gitignored, "
+                     "so a fresh worktree will not have it. Looked in:\n  "
+                     + "\n  ".join(candidates))
 
 
 # --------------------------------------------------------------------------
@@ -353,7 +381,9 @@ def run_combine():
     if missing:
         raise SystemExit(f"cannot combine, {len(missing)} arm(s) missing: {missing}")
 
-    with open(LOCKED_RECORD, "rb") as fh:
+    record_path = locked_record_path()
+    print(f"locked record: {record_path}\n")
+    with open(record_path, "rb") as fh:
         locked = pickle.load(fh)["conditions"]
 
     # -- Halt condition 3, as restated in amendment 1 -----------------------
