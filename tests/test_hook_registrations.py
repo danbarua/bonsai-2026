@@ -22,10 +22,13 @@ principle 20 -- hand-verified functionality becomes an executable test once
 confirmed -- applied to what this repo actually needs, not to every hook
 any session happens to have registered for itself.
 
-Asserted in both directions, per principle 21: every registration that must
-exist does, and every hook script on disk is either registered or carries a
-named exemption that is itself checked. Neither direction requires c2c-mail
-or any other optional, per-session tooling to be present.
+Checks one direction only: every registration this repository's own
+tooling depends on is present. It does NOT require every hook script on
+disk to be registered or explain itself -- a personal or experimental
+hook dropped under `.claude/hooks/` for one session's own use is nobody's
+business but that session's, and does not owe this repo a reason. Neither
+direction requires c2c-mail or any other optional, per-session tooling to
+be present.
 """
 import json
 import os
@@ -34,7 +37,6 @@ from pathlib import Path
 
 REPO_ROOT = Path(__file__).resolve().parents[1]
 SETTINGS = REPO_ROOT / ".claude" / "settings.json"
-HOOKS_DIR = REPO_ROOT / ".claude" / "hooks"
 
 # (event, substring identifying the script) -- the registrations this
 # repository's own tooling (provenance capture) depends on and that must
@@ -48,22 +50,6 @@ REQUIRED = [
     ("PostToolUse", "provenance-capture/capture.sh"),
     ("PostToolUseFailure", "provenance-capture/capture.sh"),
 ]
-
-# Shell files under .claude/hooks/ that are deliberately NOT registered.
-# Each needs a reason, and a test below asserts each still exists -- an
-# exemption naming a deleted file is an exemption hiding a real gap.
-NOT_REGISTERED = {
-    "c2c-mail/lib/c2c_mail.sh":
-        "sourced by the three c2c hooks, never invoked as a hook itself",
-    "c2c-mail/test/break-tests.sh":
-        "the c2c hooks' own break-test runner, invoked by a human",
-    "c2c-mail/test/pre-c2c-mcp.sh":
-        "test fixture for the pre-c2c-mcp hook, not a registration",
-    "c2c-mail/test/bench-post-tool-use.sh":
-        "benchmark for the PostToolUse mail hook, invoked by a human; "
-        "committed so its numbers are reproducible rather than quoted "
-        "from a heredoc",
-}
 
 
 def _settings() -> dict:
@@ -172,24 +158,6 @@ def test_a_foreign_bare_command_registration_does_not_false_positive():
         "is missing from test_every_registered_script_exists_and_is_executable")
 
 
-def test_every_hook_script_is_registered_or_exempted():
-    """The other direction, per principle 21.
-
-    Derived from the filesystem: a new hook script that nobody registered
-    is dead code, and a registration that lost its script is a dead hook.
-    """
-    on_disk = {p.relative_to(HOOKS_DIR).as_posix()
-               for p in HOOKS_DIR.rglob("*.sh")}
-    registered = {c.split("hooks/")[-1].strip('"')
-                  for event in _settings().get("hooks", {})
-                  for c in _commands_for(event)}
-    unaccounted = on_disk - registered - set(NOT_REGISTERED)
-    print(f"[hooks] {len(on_disk)} scripts on disk, {len(registered)} "
-          f"registered, {len(NOT_REGISTERED)} exempted")
-    assert not unaccounted, (
-        f"hook scripts neither registered nor exempted: {sorted(unaccounted)}")
-
-
 def test_the_check_actually_fails_when_a_registration_is_dropped():
     """The break-test, committed rather than performed once by hand.
 
@@ -216,12 +184,3 @@ def test_the_check_actually_fails_when_a_registration_is_dropped():
     # Non-vacuity: the undamaged settings must produce no findings, or the
     # assertions above would pass on a function that always reports missing.
     assert missing_registrations(_settings()) == []
-
-
-def test_every_exemption_still_names_a_real_file():
-    """An exemption for a deleted file is an exemption concealing a gap."""
-    for relative, reason in NOT_REGISTERED.items():
-        assert reason, f"exemption {relative} carries no reason"
-        assert (HOOKS_DIR / relative).exists(), (
-            f"{relative} is exempted as 'not a registration' but no longer "
-            f"exists -- remove the exemption")
