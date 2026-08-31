@@ -297,3 +297,6 @@ terraform.rc
 experiments/stage2b_denoising/results/*.gif
 experiments/stage2b_denoising/results/*.png
 experiments/stage2b_denoising/results/_gauge_cache/
+
+# LabKit record (embedded PostgreSQL, ~42MB). Backed up out of band, not committed.
+.labkit/

@@ -21,6 +21,16 @@
         "serve",
         "--mcp"
       ]
+    },
+    "labkit": {
+      "type": "stdio",
+      "command": "/Users/dan/Code/science/labkit/bin/labkit",
+      "args": [
+        "mcp"
+      ],
+      "env": {
+        "LABKIT_HOME": "/Users/dan/Code/pycharm/bonsai-2026"
+      }
     }
   }
 }
